@@ -1,5 +1,9 @@
 # Active Directory — Rosenweg
 
+Stand: 17.11.2026 (Sicherheitsteile). Sicherheitsregeln im Überblick:
+[`sicherheit.md`](sicherheit.md). Zweiter DC, SYSVOL-Abgleich und Start-Drop-in:
+[`../ad-dc/README.md`](../ad-dc/README.md).
+
 ## Übersicht
 
 Samba AD Domain Controller mit 2-Wege-Sync zu Authentik. Ermöglicht Windows-Domain-Join, SMB-Dateizugriff und zentrales Benutzermanagement.
@@ -52,7 +56,13 @@ Samba AD DC (CT 108)
 
 ### Password API (`/opt/ad-sync/password-api.py`)
 
-HTTP-Service auf Port 8446, setzt AD-Passwörter.
+HTTP-Service auf Port 8446, setzt AD-Passwörter. Der Bearer-Wert steht auf dem
+DC in der Umgebung des Dienstes und in der API als `AD_PASSWORD_API_SECRET`
+(`/opt/rosenweg-core/.env`); im Repo und in der Doku steht er nie. Der frühere
+Wert stand im öffentlichen Repo und gilt als kompromittiert – rotieren
+(`sicherheit.md` Abschnitt 7.1, Punkt 6). Dabei auf dem DC zusätzlich
+einschränken: Passwort nur für frisch angelegte, nicht privilegierte Konten
+setzen (offener Punkt; `password-api.py` liegt nicht im Repo).
 
 ```
 POST http://100.64.2.30:8446/
@@ -62,9 +72,16 @@ Content-Type: application/json
 ```
 
 Wird aufgerufen von:
-- API Server (`/api/change-password`) — Passwort-Änderung durch User
-- API Server (User-Erstellung) — Initiales Passwort setzen
-- Fileserver Webhook — SMB Passwort-Weiterleitung (alt)
+- API (`POST /api/change-password`) — Passwortwechsel durch die Person selbst,
+  nur aus einer höchstens 15 Minuten alten Authentik-Anmeldung, 5 Versuche pro
+  Stunde.
+- API (`POST /api/admin/users`) — Anfangspasswort, **nur** für das eben neu
+  angelegte Konto und nur, wenn Technik/Präsident es anlegt. Konten, die
+  Ausschuss/Verwaltung anlegen, bekommen kein Passwort und keinen AD-Abgleich.
+- Fileserver-Webhook — SMB-Passwort-Weiterleitung (alt, Stand unbekannt)
+
+Fehlt `AD_PASSWORD_API_SECRET` in der API, wird nur Authentik gesetzt; im Log
+steht `AD_PASSWORD_API_SECRET fehlt — AD-Passwort nicht gesetzt`.
 
 ## Fileserver (CT 106 — fileserver)
 
@@ -85,7 +102,7 @@ Wird aufgerufen von:
 - **Port**: 21
 - **Auth**: Nur lokal (kein Winbind) — eigene PAM-Config `/etc/pam.d/vsftpd`
 - **User**: `scanner` (lokaler User)
-- **Passwort**: `****** (siehe .env)`
+- **Passwort**: `<im Passwortmanager>`
 - **Chroot**: `/srv/documents`
 - **PASV Ports**: 30000-30100
 
@@ -119,6 +136,10 @@ Wird aufgerufen von:
 4. API setzt neues Passwort in AD (Password API auf DC)
 
 ### Einschränkungen
+- **Frische Anmeldung nötig**: Passwort ändern geht nur innerhalb von 15 Minuten
+  nach einer Anmeldung mit Passwortabfrage („Jetzt neu anmelden“ im Profil);
+  ein altes Passwort wird nicht verlangt (Passkey-Konten haben keins). Danach
+  werden alle anderen Sitzungen des Kontos beendet.
 - **Kein Reverse-Sync**: Windows-Passwort-Änderung wird NICHT nach Authentik synchronisiert
 - **Initiale Sync**: Bestehende User müssen einmalig ihr Passwort über die Website ändern
 - `grant_type=password` ist in Authentik NICHT aktiviert — altes Passwort wird nicht geprüft
@@ -184,3 +205,18 @@ Nach dem Start hat sich die Replikation von selbst aufgeholt
 failures). Ein AD haelt drei Tage Trennung problemlos aus; die Tombstone-
 Lifetime liegt bei 180 Tagen.
 
+
+## SSH-Zugang und sudo auf den AD-Hosts
+
+Auf den Domänen-Mitgliedern (CT 102, 106, 108, 111, 136, 206) kommen die
+Benutzerkonten aus dem AD. Damit sie Portal-Schlüssel bekommen, stehen ihre
+Logins in `/etc/rosenweg-ssh.conf` unter `SCHLUESSEL_AUCH_FUER`, und dort läuft
+noch die alte `rw-konten-sync`, damit AD-Konten ihr sudo behalten. Einzelheiten:
+[`ssh-zugang.md`](ssh-zugang.md#ad-hosts-ausnahme-mit-schluessel_auch_fuer).
+
+## Profilbilder (Avatar-Sync)
+
+`scripts/sync-avatars-to-ad.py` läuft per Cron auf dc1 und schreibt die
+Profilbilder aus Authentik ins AD-Attribut `thumbnailPhoto`. Seit 17.11.2026
+holt es fremde Bilder nur noch von Hosts aus `AVATAR_HOSTS` (Standard
+Gravatar). Ausrollen und Prüfen: [`../scripts/README.md`](../scripts/README.md#sync-avatars-to-adpy-ct-108).

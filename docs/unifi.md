@@ -10,6 +10,19 @@ UniFi Dream Machine Pro als zentraler Gateway/Controller für die Rosenweg-Koope
 - **Aktive Clients**: ~60
 - **API Key**: `<im Passwortmanager>`
 
+> **Sicherheitshinweis (17.11.2026):** Auf den Frontends lagen bis zum
+> 17.11.2026 öffentlich abrufbare Exporte (`networks_full.json`,
+> `devices_full.json`, `network-data.json`) mit zwei WireGuard-Private-Keys der
+> UDM und den Geräteschlüsseln aller UniFi-Geräte (authkey, inform, mesh,
+> syslog). Ausserdem standen beide UniFi-API-Keys in der Historie des
+> öffentlichen Repos. Alle gelten als kompromittiert. Zu tun (`sicherheit.md`
+> Abschnitt 7.1, Punkte 4 und 5): beide API-Keys neu erzeugen und in
+> `/opt/rosenweg-core/.env` (CT 128) nachführen, die Geräte neu adoptieren,
+> die WireGuard-Schlüsselpaare der UDM (VPN-Server, Tunnel WG-HEL1) neu
+> erzeugen. **Nie wieder Exporte aus dem Controller ins Repo oder in einen
+> Docroot legen**; die Frontends liefern seit dem 17.11.2026 nur noch drei
+> bestimmte `.json`-Dateien aus.
+
 ```
 Internet (Init7) ─── WAN1
                      │

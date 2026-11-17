@@ -1,33 +1,153 @@
 # Z-Push ActiveSync — Rosenweg-Kontaktverzeichnis
 
-Bewohner fügen **ein** Exchange/ActiveSync-Konto hinzu (Authentik-Login) → das gemeinsame
-Rosenweg-Verzeichnis erscheint **nativ im Telefonbuch**, ohne Zusatz-App, ohne Postfach.
-Gratis, für alle mit Authentik-Konto.
+Stand: 17.11.2026. Sicherheitsregeln im Überblick:
+[`../docs/sicherheit.md`](../docs/sicherheit.md) (Grenzwerte Abschnitt 5,
+Variablen Abschnitt 6.3).
 
-## Host: CT 115 (`zpush`, 100.64.2.38, Debian 13, PHP 8.4)
-- **Z-Push** (Z-Hub-Fork) in `/usr/share/z-push/src`.
-- **Custom-Backend** `backend/rosenweg/rosenweg.php` (= `backend-rosenweg.php` hier):
-  erbt `BackendVCardDir`, überschreibt `Logon()` mit **LDAP-Bind gegen Authentik**
-  (`ldap://100.64.2.37:389`, DN `cn=<user>,ou=users,dc=rosenweg4303,dc=ch`, bind_mode direct)
-  und `GetSupportedASVersion()` → `ASV_141`.
-- `config.php`: `BACKEND_PROVIDER='BackendRosenweg'`, `STATE_DIR=/var/lib/z-push/`.
-- `backend/vcarddir/config.php`: `VCARDDIR_DIR='/var/lib/zpush-contacts'` (gemeinsam, kein `%u`).
-- **nginx** (`nginx-zpush.conf`): 443 mit eigenem LE-Cert → fastcgi `php8.4-fpm`.
-- vCards (vom täglichen Sync, siehe `../contacts-sync/`) in `/var/lib/zpush-contacts/`.
+Bewohner fügen auf dem Telefon **ein** Exchange/ActiveSync-Konto hinzu
+(Authentik-Login) → das gemeinsame Rosenweg-Verzeichnis erscheint im
+Telefonbuch, ohne Zusatz-App und ohne Postfach. Für alle mit Authentik-Konto.
 
-## Routing (kein edge-ACME!)
-- DNS `contacts.rosenweg4303.ch` → A `37.17.232.133` (DNS-only).
-- **edge-traefik** (CT 245) TCP-SNI-Passthrough `HostSNI(contacts.rosenweg4303.ch)` → CT 115:443
-  (siehe `../edge-traefik/extra-routes.yml`).
-- CT 115 hat **eigenes** Cert via `certbot certonly --dns-cloudflare -d contacts.rosenweg4303.ch`.
-  (Der edge-traefik-ACME für contacts war LE-rate-limited + flaky → darum Passthrough + eigenes Cert.)
+## Host
+
+| | |
+|---|---|
+| Container | **CT 115 `zpush`**, Knoten **pve3** (`100.64.2.22`) |
+| Adresse | `100.64.2.38` |
+| System | Debian 13, PHP 8.4, nginx, `php8.4-fpm` |
+| Z-Push | Z-Hub-Fork in `/usr/share/z-push/src` |
+| Backend | `backend/rosenweg/rosenweg.php` (= `backend-rosenweg.php` hier im Repo) |
+| nginx | `/etc/nginx/sites-enabled/` (= `nginx-zpush.conf` hier im Repo) |
+| Kontakte | `/var/lib/zpush-contacts/` (vCards, täglich von `contacts-sync`, siehe `../contacts-sync/`) |
+| Zustand | `STATE_DIR=/var/lib/z-push/`, Fehlversuchs-Zähler in `/var/lib/z-push/rw-logon/` |
+| Logs | `LOGFILEDIR=/var/log/z-push/` |
+
+Das Backend erbt `BackendVCardDir`, überschreibt `Logon()` mit einem
+**LDAP-Bind gegen den Authentik-Outpost** (Standard `ldap://100.64.2.37:389`,
+DN `cn=<user>,ou=users,dc=rosenweg4303,dc=ch`) und `GetSupportedASVersion()` →
+`ASV_141`. Konfiguration: `config.php` mit `BACKEND_PROVIDER='BackendRosenweg'`,
+`backend/vcarddir/config.php` mit `VCARDDIR_DIR='/var/lib/zpush-contacts'`
+(gemeinsam für alle, kein `%u`).
+
+## Anmeldung und Schutz gegen Passwortraten (seit 17.11.2026)
+
+Jede ActiveSync-Anfrage ist ein LDAP-Bind gegen ein Authentik-Konto. Ohne
+Grenze liesse sich darüber beliebig Passwörter raten. Zwei Stufen:
+
+**1. Je Benutzername (Backend).**
+
+- Benutzernamen werden getrimmt und müssen `^[A-Za-z0-9._@-]{1,64}$`
+  entsprechen; sonst wird ohne LDAP-Versuch abgelehnt.
+- Jeder Anmeldeversuch wird **vor** dem LDAP-Bind gezählt (Datei je Benutzer
+  unter `STATE_DIR/rw-logon/`, Name = SHA-256 des kleingeschriebenen
+  Benutzernamens, Zugriff unter Dateisperre). Ein erfolgreicher Bind gibt nur
+  den eigenen Zählerschritt zurück; frühere Fehlversuche bleiben stehen.
+- **5 Versuche in 15 Minuten** (ab dem ersten Versuch des Fensters) – danach ist
+  der Benutzername bis zum Ende des Fensters gesperrt, **auch mit richtigem
+  Passwort**. Im Z-Push-Log steht dann
+  `BackendRosenweg: abgelehnt (zu viele Fehlversuche oder Sperrdatei-Fehler) <name>`.
+- Kann die Zählerdatei nicht angelegt, gesperrt oder geschrieben werden (Platte
+  voll, Rechte), wird die Anmeldung **abgelehnt** (fail closed):
+  `BackendRosenweg: Sperrdatei nicht beschreibbar - Anmeldung abgelehnt`.
+- Abgelaufene Zählerdateien werden gelegentlich (bei etwa jedem 20. neuen
+  Benutzernamen, höchstens 500 je Durchgang) gelöscht.
+
+**2. Gesamtdeckel (nginx).** `limit_req_zone … zone=zpush_as rate=10r/s`,
+Burst 60, Antwort **429**. Weil edge-traefik die Verbindung per TCP ohne
+PROXY-Protokoll durchreicht, sieht nginx für alle Clients die Edge-IP – das
+Limit gilt also für alle zusammen, nicht je Client.
+
+Was Bewohner bei einer Sperre tun: 15 Minuten warten, Passwort im Telefon
+prüfen. Ein Telefon mit falsch gespeichertem Passwort versucht es selbständig
+immer wieder und hält die Sperre aufrecht – dann das Konto im Telefon
+korrigieren oder vorübergehend deaktivieren.
+
+Technik: Sperre vorzeitig aufheben (im Container):
+
+```bash
+f=/var/lib/z-push/rw-logon/$(printf '%s' 'vorname.nachname' | tr 'A-Z' 'a-z' | sha256sum | cut -d' ' -f1)
+cat "$f"; rm -f "$f"
+```
+
+**LDAPS (optional):** Mit `env[RW_LDAP_URI] = ldaps://100.64.2.37:636` im
+php-fpm-Pool (`/etc/php/8.4/fpm/pool.d/www.conf`, danach
+`systemctl reload php8.4-fpm`) spricht das Backend verschlüsselt mit dem
+Outpost. Dann muss dessen Zertifikat gültig und in `/etc/ldap/ldap.conf`
+(`TLS_CACERT`) bekannt sein. Ohne Variable: `ldap://100.64.2.37:389`.
+
+## Routing (kein ACME am Edge)
+
+- DNS `contacts.rosenweg4303.ch` → A `37.17.232.133` (DNS-only, nicht über
+  Cloudflare-Proxy).
+- **edge-traefik** (CT 245): TCP-SNI-Passthrough `HostSNI(contacts.rosenweg4303.ch)`
+  → `100.64.2.38:443` (siehe `../edge-traefik/extra-routes.yml`, Router
+  `contacts-rw4303-passthrough`).
+- CT 115 hat ein **eigenes** Zertifikat:
+  `certbot certonly --dns-cloudflare -d contacts.rosenweg4303.ch`
+  (der Edge-ACME für diesen Namen war früher rate-limitiert).
+
+> **Offener Punkt (17.11.2026): Das Zertifikat `contacts.rosenweg4303.ch` ist
+> abgelaufen.** Telefone verweigern dann die Synchronisation oder zeigen eine
+> Zertifikatswarnung. Ursache (z. B. abgelaufener oder rotierter
+> Cloudflare-Token in der certbot-Konfiguration, fehlender `certbot.timer`) ist
+> noch nicht geklärt. Prüfen und erneuern:
+>
+> ```bash
+> ssh root@100.64.2.22 'pct exec 115 -- sh -c "certbot certificates; systemctl status certbot.timer --no-pager; certbot renew --dry-run"'
+> ssh root@100.64.2.22 'pct exec 115 -- sh -c "certbot renew && systemctl reload nginx"'
+> ```
+>
+> Nach dem Rotieren des Cloudflare-Tokens (`sicherheit.md` Abschnitt 7.1) muss
+> auch die certbot-Zugangsdatei in CT 115 den neuen Token bekommen.
+
+## Ausrollen
+
+```bash
+scp zpush/backend-rosenweg.php zpush/nginx-zpush.conf root@100.64.2.22:/tmp/
+ssh root@100.64.2.22 '
+  pct push 115 /tmp/backend-rosenweg.php /usr/share/z-push/src/backend/rosenweg/rosenweg.php
+  pct push 115 /tmp/nginx-zpush.conf /etc/nginx/sites-enabled/zpush.conf
+  pct exec 115 -- sh -c "php -l /usr/share/z-push/src/backend/rosenweg/rosenweg.php && nginx -t && systemctl reload nginx php8.4-fpm"
+  pct exec 115 -- sh -c "install -d -o www-data -g www-data -m 0700 /var/lib/z-push/rw-logon"'
+```
+
+Den Dateinamen in `sites-enabled/` vorher mit `ls /etc/nginx/sites-enabled/`
+prüfen und den vorhandenen überschreiben (nicht eine zweite Datei daneben
+legen – zwei `default_server` auf 443 lassen `nginx -t` scheitern).
+
+## Prüfen
+
+```bash
+curl -s https://contacts.rosenweg4303.ch/                                    # "Rosenweg Kontakte-Sync (ActiveSync)"
+echo | openssl s_client -connect contacts.rosenweg4303.ch:443 -servername contacts.rosenweg4303.ch 2>/dev/null | openssl x509 -noout -enddate
+ssh root@100.64.2.22 'pct exec 115 -- sh -c "ls -ld /var/lib/z-push/rw-logon; grep -h BackendRosenweg /var/log/z-push/*.log | tail -n 20"'
+```
+
+Sperre testen (mit einem Testkonto, nie mit einem echten): sechsmal mit falschem
+Passwort anmelden, dann mit richtigem – die sechste und die richtige Anmeldung
+müssen abgelehnt werden.
+
+## Zurückbauen
+
+Die beim Rollout am 17.11.2026 ersetzten Dateien liegen als
+`<datei>.vor-sicherheit-2026-11-17` daneben (bzw. in `/root/` des Containers).
+Zurückkopieren, `php -l`, `nginx -t`, `systemctl reload nginx php8.4-fpm`. Ohne
+das neue Backend gibt es wieder unbegrenzte LDAP-Versuche.
 
 ## Patches / Fallen (PHP 8.4)
-- `vcarddir.php`: **`sed -i 's/w2ui(/(/g'`** — vcarddir nimmt CP1252 an und doppel-encodet
-  UTF-8 → Umlaute garbled. `w2ui` (windows1252→utf8) raus, da Daten schon UTF-8 sind.
-- `STATE_DIR` `/var/lib/z-push` + `LOGFILEDIR` `/var/log/z-push` müssen existieren + `www-data` gehören (sonst HTTP 500).
-- Backend MUSS `GetSupportedASVersion()` überschreiben (≥12.1), sonst „AS version 2.5 not supported".
+
+- `vcarddir.php`: **`sed -i 's/w2ui(/(/g'`** — vcarddir nimmt CP1252 an und
+  kodiert UTF-8 doppelt → Umlaute kaputt. `w2ui` (windows1252→utf8) raus, da die
+  Daten schon UTF-8 sind.
+- `STATE_DIR` `/var/lib/z-push` und `LOGFILEDIR` `/var/log/z-push` müssen
+  existieren und `www-data` gehören (sonst HTTP 500). Gilt auch für
+  `/var/lib/z-push/rw-logon` – fehlen dort die Rechte, wird **jede** Anmeldung
+  abgelehnt.
+- Das Backend muss `GetSupportedASVersion()` überschreiben (≥ 12.1), sonst
+  „AS version 2.5 not supported“.
 
 ## Client-Einstellungen
-Server `contacts.rosenweg4303.ch`, Port `443`, SSL/TLS, Benutzer = **Authentik-Username ohne @**,
-Passwort = Authentik-Passwort, nur **Kontakte** synchronisieren. Anleitung: `hilfe.html` #kontakte-sync.
+
+Server `contacts.rosenweg4303.ch`, Port `443`, SSL/TLS, Benutzer =
+**Authentik-Benutzername ohne @**, Passwort = Authentik-Passwort, nur
+**Kontakte** synchronisieren. Anleitung für Bewohner: `hilfe.html` #kontakte-sync.

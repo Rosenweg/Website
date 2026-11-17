@@ -1,144 +1,220 @@
 # Rosenweg PBX (Asterisk)
 
-Telefonanlage fuer die +41 61 551 01 52 (peoplefone-SIP-Trunk). Laeuft NICHT in Docker, sondern in einem dedizierten LXC (CT 220). Begruendung: SIP/RTP-NAT in Docker = Aerger, LXC hat klassische Netzwerk-Semantik + native apt-Verwaltung.
+Stand: 17.11.2026. Sicherheitsregeln im Überblick:
+[`../docs/sicherheit.md`](../docs/sicherheit.md) Abschnitt 4.8. Deploy der
+PBX-API Schritt für Schritt: [DEPLOY-PBX-API.md](DEPLOY-PBX-API.md).
 
-> **Stand 2026-06-16 — eigenstaendige PBX-API.** Die komplette PBX-Steuerung lebt
-> jetzt als **Standalone-Python-Service in CT 220** (`pbx/api/`, eigene SQLite) —
-> nicht mehr in der Haupt-API:
-> - Ring-Group + **Zeitsperre pro Mitglied** (`bypass_hours`, „klingelt immer")
-> - **SIP-Telefone (LAN/VPN)** — Verwaltung im UI, generiert `pjsip_phones.conf`
-> - **Technik-Konferenz**: `100` am SIP-Telefon, **`*100`** als Mid-Call-Eskalation
-> - **Voicemail-KI autark**: Whisper (Groq) → Claude-Analyse → **WhatsApp direkt
->   via Gateway** (`/gateway/send`) → Call-Log. Auto-Reklamation optional per Webhook.
-> - Trunk-Status (lokales AMI), Test-Call, Call-Log
->
-> Admin-UI vom selben Container serviert: **`pbx.rosenweg4303.ch`**. Die Haupt-API
-> ist nur noch optionaler Webhook-Empfaenger (Auto-Reklamation). **Deploy +
-> Migration: [DEPLOY-PBX-API.md](DEPLOY-PBX-API.md).** CT 220 laeuft aktuell auf
-> **pve1 (100.64.2.20)**, CT-IP **100.64.2.29**.
+Telefonanlage für die +41 61 551 01 52 (SIP-Trunk von peoplefone). Läuft nicht in
+Docker, sondern in einem eigenen LXC, weil SIP/RTP hinter Docker-NAT unnötig
+schwierig ist.
 
-**Phase 1 (heutiger Stand):**
-- Mo-So 06-20h → Ring-Group an Technik-Mobiles (Stefan + Andreas), parallel klingelnd
-- Sonst → Voicemail-Aufnahme → AGI-Script → Rosenweg-API
-- API transkribiert via OpenRouter Whisper, fasst zusammen via Claude Haiku, mailt Audio+Transkript+Summary an Technik+Praesident, pusht Kurzfassung via WhatsApp
+| | |
+|---|---|
+| Container | **CT 220 `asterisk-pbx`** |
+| Knoten | **pve3** (`100.64.2.22`) |
+| Adresse | **100.64.2.55** (bis 27.06.2026 `.29`, Konflikt mit der Fileserver-Adresse; ältere Angaben „pve2/100.64.2.30“ und „pve1/100.64.2.29“ sind überholt) |
+| Dienste | `asterisk`, `pbx-api` (Flask/waitress, Port 8095), `certbot.timer` |
+| Admin-Oberfläche | `https://pbx.rosenweg4303.ch` (Technik/Präsident) |
+| SIP intern | `sip.rosenweg4303.ch` → `100.64.2.55` (nur internes DNS) |
 
-**Phase 2 (Roadmap):** AudioSocket-Bridge → Echtzeit-AI-Konversation mit STT/LLM/TTS-Pipeline.
+`pct`-Befehle gehen nur auf dem Knoten, auf dem CT 220 gerade läuft
+(`ha-manager status | grep ct:220` bzw. `pct list` auf pve3).
 
-## Architektur
+## Was die Anlage tut
+
+Die ganze PBX-Steuerung lebt seit 16.06.2026 als eigener Python-Dienst in
+CT 220 (`pbx/api/`, eigene SQLite-Datenbank), nicht mehr in der Haupt-API:
+
+- **Ring-Group** mit Geschäftszeiten; je Mitglied eine **Zeitsperre**
+  (`bypass_hours` = „klingelt immer“).
+- **SIP-Telefone** (nur LAN/VPN) – Verwaltung in der Oberfläche, daraus erzeugt
+  die API `/etc/asterisk/pjsip_phones.conf`.
+- **Technik-Konferenz:** `100` am SIP-Telefon, **`*100`** als Eskalation während
+  eines angenommenen Anrufs.
+- **Voicemail-KI:** Whisper (Groq, sonst OpenRouter) → Zusammenfassung →
+  **WhatsApp direkt über den Gateway** (`/gateway/send`, Schlüssel `mg_…`) →
+  Anrufliste. Optional Weitergabe an die Haupt-API für eine automatische
+  Reklamation (`FORWARD_VOICEMAIL_URL`); dort gilt: höchstens **3 automatische
+  Reklamationen je Anrufernummer und 20 pro Tag** insgesamt (Anrufernummern sind
+  fälschbar).
+- Trunk-Status, Testanruf, Anrufliste.
 
 ```
-PSTN ─→ peoplefone SIP-Trunk ──┐
-                                │ SIP/RTP via Internet
-                                ▼
-                          CT 220 (pve2, 100.64.2.X)
-                          Asterisk + chan_pjsip
-                                │
-        ┌───────────────────────┼──────────────────────┐
-        │ 06-20h                                       │ ausserhalb
-        ▼                                              ▼
-   Dial(PJSIP/...@peoplefone)                  Record(wav) → AGI
-   → Stefan & Andreas                          → POST /api/pbx/voicemail
-                                                  → OpenRouter Whisper
-                                                  → Claude Summary
-                                                  → Email + WA-Push
+PSTN ─▶ peoplefone SIP-Trunk ─(udp/5060, nur 95.128.80.0/25)─▶ UDM ─▶ CT 220 (100.64.2.55)
+                                                                     Asterisk + chan_pjsip
+            Geschäftszeit: Dial → Ring-Group (Mobile über peoplefone, SIP-Telefone)
+            sonst:         Record → AGI transcribe_voicemail.py → pbx-api :8095
+                                     → Whisper → Zusammenfassung → WhatsApp-Gateway
+                                     → optional Haupt-API /api/pbx/voicemail (Auto-Reklamation)
 ```
 
-## Configs
+## Sicherheitsregeln (Stand 17.11.2026)
 
-Alle Configs unter `pbx/asterisk-config/` und `pbx/agi/` sind **Source-of-Truth** im Repo. Deployment in den LXC via dem mitgelieferten Install-Skript.
+**AMI (Asterisk Manager Interface, Port 5038).** AMI kann Anrufe auslösen
+(`originate`) und CLI-Befehle ausführen (`command`). In
+`asterisk-config/manager.conf` sind darum nur zwei Aufrufer zugelassen:
 
-- `asterisk-config/pjsip.conf` — peoplefone SIP-Trunk
-- `asterisk-config/extensions.conf` — Dialplan mit GotoIfTime + Ring-Group + Voicemail
-- `asterisk-config/modules.conf` — explizite Modulauswahl
-- `asterisk-config/{asterisk,logger,rtp}.conf` — Basis-Konfig
-- `agi/transcribe_voicemail.py` — Voicemail-Upload an Rosenweg-API
+```
+deny   = 0.0.0.0/0.0.0.0
+permit = 127.0.0.1/255.255.255.255      ; PBX-API in CT 220 (pbx/api/ami.py)
+permit = 100.64.2.52/255.255.255.255    ; Haupt-API (CT 128, amiCommand)
+```
 
-## Setup
+`bindaddr` bleibt `0.0.0.0` (beide Wege werden gebraucht, Asterisk kennt nur
+eine Bindeadresse); die ACL sperrt alle anderen. Fehlt die Zeile für
+`127.0.0.1`, meldet Asterisk für die PBX-API fälschlich `Authentication failed`.
+Empfohlen zusätzlich: in der Proxmox-Firewall von CT 220 Port 5038 nur für
+`100.64.2.52` öffnen.
 
-### 1. LXC erstellen (auf pve2)
+Das `secret` in der Repo-Datei ist der **Platzhalter**
+`ROSENWEG_AMI_PLACEHOLDER`. Der echte Wert steht nur in CT 220
+(`/etc/asterisk/manager.conf`) und als `PBX_AMI_SECRET` in
+`/opt/rosenweg-core/.env` (CT 128). **Beim Ausrollen von `manager.conf` den
+Platzhalter nicht übernehmen** – vorher den echten Wert einsetzen oder nur die
+`permit`/`deny`-Zeilen von Hand übertragen.
+
+**Eingaben, die in Asterisk landen.** Namen und Rufnummern gehen in Dial-Strings,
+Call-Files, AGI-Befehle und `pjsip_phones.conf`. Dort wäre ein Zeilenumbruch ein
+eigener Befehl bzw. ein eigener Abschnitt. Darum prüft die PBX-API seit dem
+17.11.2026 beim Anlegen **und** Ändern:
+
+| Feld | Regel | Fehlermeldung (HTTP 400) |
+|---|---|---|
+| Ring-Mitglied `name` | 1–80 Zeichen, keine Steuerzeichen, kein `" \ < >` | `name ungueltig (1-80 Zeichen, …)` |
+| Ring-Mitglied `phone` (Mobil) | `+` und 6–20 Ziffern | `Telefonnummer im intl. Format (+41...)` |
+| Ring-Mitglied `phone` (SIP) | `A–Z a–z 0–9 _ -`, 1–32 | `SIP-Extension ungueltig` |
+| `priority` | Zahl 0–10000 | `priority muss 0-10000 sein` |
+| `valid_until` | `YYYY-MM-DD` (optional Uhrzeit) | `valid_until muss ein Datum sein (YYYY-MM-DD)` |
+| SIP-Telefon `ext` | 2–8 Ziffern | `Extension muss numerisch sein` |
+| SIP-Telefon `name` | höchstens 60 Zeichen, kein `[ ] < > ; " \` | `name ungueltig (…)` |
+| SIP-Telefon `secret` | 8–64 Zeichen aus `A–Z a–z 0–9 . _ ~ -` (leer = wird erzeugt) | `secret: 8-64 Zeichen …` |
+| SIP-Telefon `context` | nur `internal` | `context nicht erlaubt` |
+
+Ältere Einträge, die diese Regeln verletzen, schreibt die API nicht mehr in
+`pjsip_phones.conf` und meldet im Journal von `pbx-api`:
+`SIP-Extension … nicht in pjsip_phones.conf geschrieben (ungueltige Extension/Secret/Kontext)`.
+Das betroffene Telefon kann sich dann nicht anmelden – Eintrag in der
+Oberfläche korrigieren. Die AGI-Skripte bereinigen Namen und Nummern zusätzlich
+(`agi_sauber`), die Haupt-API weist AMI-Felder mit Steuerzeichen ab.
+
+**Weitere Regeln:**
+
+- AGI ↔ PBX-API: Header `X-PBX-Secret` = `PBX_SHARED_SECRET`, zeitkonstant
+  verglichen.
+- Provisionierungs-Token (QR) wird atomar verbraucht: Zwei gleichzeitige Abrufe
+  bekommen nicht beide das SIP-Passwort.
+- Der Anmelde-Proxy der PBX-API reicht nur `/api/auth…` und `/api/me…` (mit
+  Segmentgrenze, ohne `..`, `%`, `\`) an die Haupt-API weiter, sonst 404.
+
+## Dateien und Konfiguration
+
+| Repo | Ziel in CT 220 | Zweck |
+|---|---|---|
+| `asterisk-config/*.conf` | `/etc/asterisk/` | Trunk (`pjsip.conf`), Dialplan (`extensions.conf`), Konferenz, AMI (`manager.conf`, Platzhalter!) |
+| `agi/*.py` | `/var/lib/asterisk/agi-bin/` | Ring-Group, Geschäftszeiten, Anrufliste, Konferenz-Einladung, CNAM, Voicemail-Upload |
+| `api/app.py`, `db.py`, `ami.py`, `voicemail.py` | `/opt/pbx-api/` | PBX-API |
+| `api/pbx-api.service` | `/etc/systemd/system/` | Dienst als Benutzer `asterisk` |
+| `api/pbx-api.env.example` | Vorlage für `/etc/default/pbx-api` (0600) | Pfade, Hosts, Voicemail-KI, Provisionierung |
+| `web/pbx-admin.html` | `/opt/pbx-api/web/` | Oberfläche |
+| – | `/etc/default/asterisk-env` (0600) | Trunk-Zugang und `PBX_SHARED_SECRET`, gelesen von AGI und `pbx-api` |
+| – | `/var/lib/pbx-api/pbx.sqlite` | Daten der PBX-API |
+
+Variablen in `/etc/default/asterisk-env` (Werte nur dort bzw. im Passwortmanager):
+`PJSIP_USER`, `PJSIP_PASS`, `PJSIP_SERVER`, `EXTERNAL_IP`, `TECHNIK_NUMBERS`,
+`PBX_SHARED_SECRET`, `API_BASE`.
+
+Variablen in `/etc/default/pbx-api`: `MAIN_API_BASE`, `PBX_PUBLIC_HOST`,
+`PBX_API_PORT`, `PBX_DB_PATH`, `ASTERISK_PHONES_CONF`, `PBX_WEB_DIR`,
+`GROQ_API_KEY`, `OPENROUTER_API_KEY`, `VOICEMAIL_MODEL`, `GATEWAY_SEND_URL`,
+`GATEWAY_API_KEY`, `VOICEMAIL_WA_TARGET`, `FORWARD_VOICEMAIL_URL`,
+`FORWARD_VOICEMAIL_SECRET`, `PBX_SIP_HOST`, `PBX_SIP_TRANSPORT`,
+`PBX_SIP_REG_EXPIRES`, `PBX_PROV_TTL_MIN`, `PBX_CARDDAV_*`.
+
+In der Haupt-API (CT 128): `PBX_HOST` (Standard `100.64.2.55`), `PBX_AMI_USER`
+(`rosenweg`), `PBX_AMI_SECRET`, `PBX_SHARED_SECRET`.
+
+## Ausrollen (Änderungen aus dem Repo)
+
+Kurzform; ausführlich in [DEPLOY-PBX-API.md](DEPLOY-PBX-API.md):
 
 ```bash
-ssh root@100.64.2.21    # pve2
-
-# Naechste freie CTID, Trixie-Template
-pveam download local debian-13-standard_*.tar.zst 2>/dev/null
-pct create 220 \
-  local:vztmpl/debian-13-standard_13.0-1_amd64.tar.zst \
-  --hostname asterisk-pbx \
-  --memory 1024 --cores 2 --swap 512 \
-  --net0 name=eth0,bridge=vmbr0,ip=100.64.2.30/24,gw=100.64.2.1 \
-  --rootfs local-lvm:8 \
-  --features nesting=1 \
-  --onboot 1 --start 1 \
-  --unprivileged 0
+PVE=root@100.64.2.22   # pve3
+# AGI-Skripte
+tar -C pbx/agi -cf - --exclude=__pycache__ . | ssh $PVE 'pct exec 220 -- tar -C /var/lib/asterisk/agi-bin -xf -'
+ssh $PVE 'pct exec 220 -- sh -c "chmod +x /var/lib/asterisk/agi-bin/*.py && chown -R asterisk:asterisk /var/lib/asterisk/agi-bin"'
+# PBX-API
+tar -C pbx/api -cf - app.py db.py ami.py voicemail.py | ssh $PVE 'pct exec 220 -- tar -C /opt/pbx-api -xf -'
+tar -C pbx/web -cf - pbx-admin.html | ssh $PVE 'pct exec 220 -- tar -C /opt/pbx-api/web -xf -'
+ssh $PVE 'pct exec 220 -- sh -c "chown -R asterisk:asterisk /opt/pbx-api && systemctl restart pbx-api"'
+# AMI-ACL: nur permit/deny von Hand in /etc/asterisk/manager.conf übertragen (Secret bleibt!), dann:
+ssh $PVE 'pct exec 220 -- asterisk -rx "manager reload"'
 ```
 
-CT-IP `100.64.2.30` ist Beispiel; entsprechend deinem LAN setzen.
-
-### 2. Asterisk + Sangoma-Repo
+## Prüfen
 
 ```bash
-ssh root@100.64.2.21 pct enter 220
-apt update && apt install -y curl gnupg ca-certificates lsb-release
-# Sangoma-Repo (offiziell, immer aktuell)
-curl -fsSL https://packages.asterisk.org/asterisk-org-pub.gpg \
-  | gpg --dearmor -o /usr/share/keyrings/asterisk.gpg
-echo "deb [signed-by=/usr/share/keyrings/asterisk.gpg] https://packages.asterisk.org/debian trixie main" \
-  > /etc/apt/sources.list.d/asterisk.list
-apt update
-apt install -y asterisk asterisk-config python3 python3-requests
+ssh root@100.64.2.22 'pct exec 220 -- sh -c "
+  systemctl is-active asterisk pbx-api
+  curl -s localhost:8095/health
+  asterisk -rx \"pjsip show registrations\"
+  asterisk -rx \"manager show user rosenweg\""'
 ```
 
-### 3. Configs vom Repo deployen
+- `pjsip show registrations` muss den peoplefone-Trunk als `Registered` zeigen.
+- `manager show user rosenweg` zeigt die ACL; es dürfen nur `127.0.0.1` und
+  `100.64.2.52` als `permit` erscheinen.
+- In `pbx-admin` (Haupt-API-Weg) muss der Trunk-Status **● Registriert** zeigen –
+  das beweist, dass die Haupt-API das AMI erreicht.
+- Von einem anderen Host: `nc -vz -w 3 100.64.2.55 5038` darf zwar verbinden, ein
+  Login muss aber scheitern.
+- `journalctl -u pbx-api | grep "nicht in pjsip_phones.conf"` – leer, sonst
+  Einträge korrigieren.
 
-Aus dem Repo-Root:
+## Zurückbauen
 
-```bash
-scp -r pbx/asterisk-config/* root@100.64.2.30:/etc/asterisk/
-scp pbx/agi/transcribe_voicemail.py root@100.64.2.30:/var/lib/asterisk/agi-bin/
-ssh root@100.64.2.30 'chmod +x /var/lib/asterisk/agi-bin/transcribe_voicemail.py && chown -R asterisk:asterisk /etc/asterisk /var/lib/asterisk/agi-bin /var/spool/asterisk'
-```
+- PBX-API und AGI: die beim Rollout am 17.11.2026 ersetzten Dateien liegen als
+  `<datei>.vor-sicherheit-2026-11-17` daneben; zurückkopieren,
+  `systemctl restart pbx-api`.
+- AMI-ACL: in `/etc/asterisk/manager.conf` die alte Zeile
+  `permit = 100.64.0.0/255.252.0.0` wieder einsetzen, `manager reload`. Damit
+  dürfte wieder jeder Host im ganzen Hausnetz einen AMI-Login versuchen.
 
-### 4. peoplefone-Credentials + Environment
+## Neuaufbau (nur falls CT 220 verloren ist)
 
-```bash
-ssh root@100.64.2.30
-cat > /etc/default/asterisk-env <<EOF
-PJSIP_USER=41615510152
-PJSIP_PASS=<aus_peoplefone_portal>
-PJSIP_SERVER=sip.peoplefone.ch
-EXTERNAL_IP=<oeffentliche_IP_vor_NAT>
-TECHNIK_NUMBERS=+41765199970&+41795350856
-PBX_SHARED_SECRET=<openssl rand -hex 32>
-API_BASE=http://100.64.2.52:3000
-EOF
-```
+1. LXC auf pve3 anlegen: Debian 13, Hostname `asterisk-pbx`, IP `100.64.2.55/24`,
+   Gateway `100.64.2.1`, 2 Kerne, 1 GB RAM, `nesting=1`. Netzwerk-Bridge wie bei
+   den anderen Diensten im Netz `100.64.2.0/24` (aus `pct config` eines
+   Nachbar-Containers übernehmen).
+2. Asterisk aus dem Sangoma-Repo installieren:
 
-Asterisk liest diese via `pjsip.conf`-Substitution noch nicht direkt — entweder via systemd-`EnvironmentFile` und ein wrapper-Skript, das die Configs templatet, oder Werte direkt in `pjsip.conf` haerten. Schnellste Variante: hartkodieren beim ersten Setup.
+   ```bash
+   apt update && apt install -y curl gnupg ca-certificates lsb-release
+   curl -fsSL https://packages.asterisk.org/asterisk-org-pub.gpg | gpg --dearmor -o /usr/share/keyrings/asterisk.gpg
+   echo "deb [signed-by=/usr/share/keyrings/asterisk.gpg] https://packages.asterisk.org/debian trixie main" > /etc/apt/sources.list.d/asterisk.list
+   apt update && apt install -y asterisk asterisk-config python3 python3-requests python3-venv
+   ```
 
-API-Service braucht das gleiche `PBX_SHARED_SECRET`:
-```bash
-ssh root@100.64.2.24 "docker service update --env-add PBX_SHARED_SECRET=<...> rosenweg_api"
-```
+3. `/etc/default/asterisk-env` anlegen (Modus 0600), Werte aus dem
+   Passwortmanager:
 
-### 5. peoplefone-Routing umstellen
+   ```bash
+   install -m 0600 /dev/null /etc/default/asterisk-env
+   cat >> /etc/default/asterisk-env <<'EOF'
+   PJSIP_USER=<peoplefone-Benutzer>
+   PJSIP_PASS=<im Passwortmanager>
+   PJSIP_SERVER=sip.peoplefone.ch
+   EXTERNAL_IP=<öffentliche IP>
+   TECHNIK_NUMBERS=<+41…&+41…>
+   PBX_SHARED_SECRET=<im Passwortmanager, gleicher Wert wie in der Haupt-API>
+   API_BASE=http://100.64.2.52:3000
+   EOF
+   ```
 
-Im peoplefone-Portal die Inbound-Route fuer +41 61 551 01 52 vom alten Ziel (WhatsApp-Web-Bot) auf den neuen SIP-Trunk hin zur LXC umstellen. Achtung: WhatsApp-Pairing nutzt eine separate Linie via WhatsApp-Web (whatsapp-web.js Bot) — beide Welten koennen parallel laufen.
-
-### 6. Start + Test
-
-```bash
-ssh root@100.64.2.30
-systemctl enable --now asterisk
-asterisk -rvvv     # CLI fuer Live-Logs
-> pjsip show registrations    # sollte 'Registered' zeigen
-> pjsip show endpoints
-```
-
-Test:
-- **06-20h:** Anruf an die Nummer → Stefan + Andreas Mobiles klingeln parallel
-- **Sonst:** Voicemail-Greeting → Aufnahme → Mail mit Transkript an Technik
-- **Manuell:** `console dial pjsip/+41765199970@peoplefone`
+4. Configs, AGI und PBX-API wie in [DEPLOY-PBX-API.md](DEPLOY-PBX-API.md) ausrollen;
+   `manager.conf` mit echtem Secret.
+5. Portweiterleitung `udp/5060` an der UDM nur für `95.128.80.0/25` (siehe unten).
+6. Zertifikat für `sip.rosenweg4303.ch` (siehe unten), Daten aus dem letzten
+   Proxmox-Backup oder `migrate_from_postgres.py`.
 
 ## SIP-Transporte (Stand 2026-09-09)
 
@@ -161,8 +237,10 @@ antwortet auf dem Transport, ueber den sich das Telefon registriert hat. Es muss
 also nichts pro Nebenstelle umgestellt werden.
 
 **Zertifikat.** Let's Encrypt fuer `sip.rosenweg4303.ch`, per certbot mit
-DNS-01 ueber Cloudflare direkt in CT 220 (`/root/.cloudflare.ini`, Token aus
-CT 245 kopiert). Der Deploy-Hook
+DNS-01 ueber Cloudflare direkt in CT 220 (`/root/.cloudflare.ini`, Modus 0600;
+der Cloudflare-Token stammt aus CT 245 und muss beim Rotieren des
+Cloudflare-Tokens hier mitgeaendert werden, siehe `docs/sicherheit.md`
+Abschnitt 7.1). Der Deploy-Hook
 `/etc/letsencrypt/renewal-hooks/deploy/asterisk.sh` kopiert das erneuerte
 Zertifikat nach `/etc/asterisk/keys/sip.{crt,key}` — noetig, weil
 `/etc/letsencrypt/archive` `0700 root` ist und Asterisk als `asterisk` laeuft —
@@ -280,8 +358,9 @@ mit einem Klick widerrufbar.
 | Geschaeftszeiten | `extensions.conf` → `HOURS_OPEN_FROM` / `HOURS_OPEN_TO` |
 | Ring-Group-Nummern | `extensions.conf` → `TECHNIK_NUMBERS` (Format `+41xxx&+41yyy`) |
 | Max Voicemail-Dauer | `extensions.conf` → `Record(...,180)` |
-| Whisper-Modell | `api/server.js` → `transcribeWhisper()` |
-| Claude-Prompt | `api/server.js` → `summarizeVoicemail()` |
+| Whisper/Analyse-Modell | `pbx/api/voicemail.py`, Variable `VOICEMAIL_MODEL` in `/etc/default/pbx-api` |
+| Ziel der WhatsApp-Meldung | `VOICEMAIL_WA_TARGET` (Standard „Rosenweg Technik“) |
+| Mitglieder, Zeitsperren | Oberfläche `pbx.rosenweg4303.ch` (nicht mehr `extensions.conf`) |
 
 ## Backup
 
