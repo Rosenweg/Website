@@ -83,6 +83,13 @@ async function initSchema() {
     ALTER TABLE doodle_polls ADD COLUMN IF NOT EXISTS public_token VARCHAR(40);
     ALTER TABLE doodle_options ADD COLUMN IF NOT EXISTS tz_ok BOOLEAN NOT NULL DEFAULT false;
     ALTER TABLE doodle_options ALTER COLUMN tz_ok SET DEFAULT true;
+    CREATE TABLE IF NOT EXISTS doodle_einladungen_log (
+      id SERIAL PRIMARY KEY,
+      absender   VARCHAR(255) NOT NULL,
+      anzahl     INTEGER NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_doodle_einl_log ON doodle_einladungen_log(absender, created_at);
   `);
   // Altlast bis Okt. 2026: der Browser schickte "2026-11-05T19:00" ohne Zone, der
   // Server (UTC) speicherte daraus 19:00 UTC. Verschoben wird nur, wo das Label
@@ -188,16 +195,23 @@ async function canAccessPoll(actor, pollId) {
 // und je Konto und Tag begrenzen (sonst Massenversand/Phishing ueber MAIL_FROM).
 const EINLADUNGEN_JE_UMFRAGE = 50;
 const EINLADUNGEN_JE_TAG = 100;
-const einladungenHeute = new Map(); // email -> [timestamps]
-function einladungenErlaubt(email, anzahl) {
+// Zaehler in der DB (nicht im RAM): ueberlebt Neustarts und gilt fuer alle Prozesse.
+// Ein Statement prueft und bucht zugleich; Fehler -> nicht erlaubt (fail-safe).
+async function einladungenErlaubt(email, anzahl) {
   const key = String(email || '').toLowerCase();
-  const now = Date.now();
-  const arr = (einladungenHeute.get(key) || []).filter(t => now - t < 24 * 60 * 60 * 1000);
-  if (arr.length + anzahl > EINLADUNGEN_JE_TAG) { einladungenHeute.set(key, arr); return false; }
-  for (let i = 0; i < anzahl; i++) arr.push(now);
-  einladungenHeute.set(key, arr);
-  if (einladungenHeute.size > 5000) einladungenHeute.delete(einladungenHeute.keys().next().value);
-  return true;
+  if (!anzahl) return true;
+  try {
+    const r = await pool.query(
+      `INSERT INTO doodle_einladungen_log (absender, anzahl)
+       SELECT $1, $2 WHERE (SELECT COALESCE(SUM(anzahl), 0) FROM doodle_einladungen_log
+                             WHERE absender = $1 AND created_at > NOW() - INTERVAL '24 hours') + $2 <= $3
+       RETURNING id`, [key, anzahl, EINLADUNGEN_JE_TAG]);
+    pool.query("DELETE FROM doodle_einladungen_log WHERE created_at < NOW() - INTERVAL '2 days'").catch(() => {});
+    return r.rows.length > 0;
+  } catch (e) {
+    console.warn('[doodle] Einladungs-Zaehler:', e.message);
+    return false;
+  }
 }
 
 function mountDoodle({ app }) {
@@ -324,7 +338,7 @@ function mountDoodle({ app }) {
         .filter(i => validEmail(i.email)) : [];
       // Einladungen versenden Mails ueber den eigenen Server -> begrenzen.
       if (invites.length > EINLADUNGEN_JE_UMFRAGE) return res.status(400).json({ error: `Höchstens ${EINLADUNGEN_JE_UMFRAGE} Einladungen je Umfrage` });
-      if (!einladungenErlaubt(req.actor.email, invites.length)) return res.status(429).json({ error: 'Zu viele Einladungen heute — bitte morgen weiter.' });
+      if (!(await einladungenErlaubt(req.actor.email, invites.length))) return res.status(429).json({ error: 'Zu viele Einladungen heute — bitte morgen weiter.' });
       const beschreibung = b.beschreibung ? String(b.beschreibung).trim().slice(0, 4000) : null;
       const ort = b.ort ? String(b.ort).trim().slice(0, 255) : null;
       const deadline = parseZurich(b.deadline, true);
@@ -560,7 +574,7 @@ function mountDoodle({ app }) {
       const name = req.body?.name ? String(req.body.name).trim().slice(0, 255) : null;
       const anz = await pool.query('SELECT COUNT(*)::int AS n FROM doodle_invites WHERE poll_id = $1', [id]);
       if ((anz.rows[0]?.n || 0) >= EINLADUNGEN_JE_UMFRAGE) return res.status(400).json({ error: `Höchstens ${EINLADUNGEN_JE_UMFRAGE} Einladungen je Umfrage` });
-      if (!einladungenErlaubt(req.actor.email, 1)) return res.status(429).json({ error: 'Zu viele Einladungen heute — bitte morgen weiter.' });
+      if (!(await einladungenErlaubt(req.actor.email, 1))) return res.status(429).json({ error: 'Zu viele Einladungen heute — bitte morgen weiter.' });
       await pool.query('INSERT INTO doodle_invites (poll_id, email, name) VALUES ($1,$2,$3) ON CONFLICT (poll_id, email) DO UPDATE SET name = COALESCE(EXCLUDED.name, doodle_invites.name)', [id, email, name]);
       loggedSendMail({
         from: MAIL_FROM, to: email,
