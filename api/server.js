@@ -175,15 +175,17 @@ function rateLimitGuard(name, key, maxCount, windowMs) {
 // volle Sitzung am Authentik-Login (und dessen zweitem Faktor) vorbei. Wer ihn braucht,
 // setzt OTP_LOGIN_ENABLED=1. Codes: lib/otp.js (Zähler in der DB, 8 Stellen, zweckgebunden).
 const OTP_LOGIN_ENABLED = process.env.OTP_LOGIN_ENABLED === '1';
+// Limits aller drei Code-Routen (Login, Reparatur, Doodle) zentral in lib/otp.js.
+const { globalErlaubt: otpGlobalErlaubt, ipErlaubt: otpIpErlaubt } = require('./lib/otp');
 app.post('/api/otp/send', async (req, res) => {
   if (!OTP_LOGIN_ENABLED) return res.status(404).json({ error: 'OTP-Login ist abgeschaltet. Bitte normal anmelden.' });
   const email = normEmail(req.body?.email);
   if (!email) return res.status(400).json({ error: 'E-Mail erforderlich' });
   // Antwort ist immer dieselbe — sie verrät nicht, ob es die Adresse gibt.
   const antwort = { success: true, message: 'Falls die Adresse berechtigt ist, wurde ein Code per E-Mail gesendet.' };
-  // Globales Limit (alle Adressen) vor der Antwort; das Limit je Adresse erst nach der
-  // Personen-Pruefung, sonst fuellen erfundene Adressen den Zaehler (S4-2-1).
-  if (!rateLimitGuard('otp-global', 'login', 100, 10 * 60 * 1000).ok) return res.status(429).json({ error: 'Zu viele Anfragen. Bitte warten Sie einige Minuten.' });
+  // Vor der Antwort nur das Limit je Client-IP. Globales Limit und Limit je Adresse erst
+  // nach der Personen-Pruefung, sonst sperren erfundene Adressen alle aus (S4-2-1, S4-3-1).
+  if (!otpIpErlaubt(req)) return res.status(429).json({ error: 'Zu viele Anfragen. Bitte warten Sie einige Minuten.' });
   // Sofort antworten, Rest im Hintergrund: Laufzeit und SMTP-Fehler verraten sonst,
   // ob die Adresse bekannt ist.
   res.json(antwort);
@@ -191,6 +193,7 @@ app.post('/api/otp/send', async (req, res) => {
     const userResult = await pool.query(
       'SELECT id, name, email, role FROM users WHERE LOWER(email) = $1 AND active = true', [email]);
     if (userResult.rows.length === 0) return;
+    if (!otpGlobalErlaubt('login')) { console.warn('[otp-login] globales Limit erreicht, Code verworfen'); return; }
     if (!ausstellenErlaubt(email, 'login')) { console.warn('[otp-login] Limit je Adresse erreicht'); return; }
     const user = userResult.rows[0];
     const code = await otpAusstellen(email, 'login');
@@ -1054,6 +1057,53 @@ function emailFormatOk(v) {
   return typeof v === 'string' && v.length <= 254 && /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(v);
 }
 
+// R3-S1b: Gemeinsame Pruefung fuer selbst gepflegte Kontaktdaten (wie /me/emails, /me/phones).
+// E-Mail und Telefon dienen der Zuordnung (Login per E-Mail, WhatsApp/Anruf -> Person,
+// Gruppen/Broadcasts). Eine Adresse, die einem Konto oder einer ANDEREN Person gehoert,
+// oder eine Nummer einer anderen Person (Vergleich: letzte 9 Ziffern) wuerde deren
+// Identitaet uebernehmen. Liefert eine Fehlermeldung oder null. eigeneIds = Personen,
+// die der Anfragende ohnehin ist bzw. die gerade bearbeitet wird.
+async function fremdeKennung(db, { email, telefon, eigeneIds = [], ichEmail = '' }) {
+  const ids = eigeneIds.map(Number).filter(Number.isInteger);
+  const e = String(email || '').trim().toLowerCase();
+  if (e && e !== ichEmail) {
+    const r = await db.query(
+      `SELECT 1 WHERE EXISTS (SELECT 1 FROM users u WHERE LOWER(u.email) = $1)
+          OR EXISTS (SELECT 1 FROM personen p WHERE NOT (p.id = ANY($2::int[]))
+                       AND (LOWER(p.email) = $1
+                            OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(p.emails,'[]'::jsonb)) x WHERE LOWER(x) = $1)))`,
+      [e, ids]);
+    if (r.rows.length) return 'Diese E-Mail-Adresse gehört bereits zu einem Konto oder einer anderen Person. Bitte bei der Verwaltung melden.';
+  }
+  const ziffern = String(telefon || '').replace(/\D/g, '');
+  if (ziffern.length >= 9) {
+    const r = await db.query(
+      `SELECT 1 FROM personen p
+        WHERE NOT (p.id = ANY($2::int[]))
+          AND (RIGHT(regexp_replace(COALESCE(p.telefon,''), '\\D', '', 'g'), 9) = $1
+            OR RIGHT(regexp_replace(COALESCE(p.mobile,''), '\\D', '', 'g'), 9) = $1
+            OR EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(p.telefone, '[]'::jsonb)) x
+                        WHERE RIGHT(regexp_replace(COALESCE(x->>'nummer',''), '\\D', '', 'g'), 9) = $1))
+        LIMIT 1`, [ziffern.slice(-9), ids]);
+    if (r.rows.length) return 'Diese Telefonnummer ist bereits bei einer anderen Person hinterlegt. Bitte bei der Verwaltung melden.';
+  }
+  return null;
+}
+
+// Personen-IDs des Anfragenden (Primaer-E-Mail oder Alias).
+async function meinePersonenIds(db, ichEmail) {
+  if (!ichEmail) return [];
+  const r = await db.query(
+    `SELECT id FROM personen WHERE LOWER(email) = $1
+        OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(emails,'[]'::jsonb)) e WHERE LOWER(e) = $1)`, [ichEmail]);
+  return r.rows.map(x => x.id);
+}
+
+// Nur Ziffern-Ende vergleichen: "079 …" und "+41 79 …" sind dieselbe Nummer.
+function telefonGleich(a, b) {
+  return String(a || '').replace(/\D/g, '').slice(-9) === String(b || '').replace(/\D/g, '').slice(-9);
+}
+
 app.put('/api/me/kontakt/:id', authMiddleware, async (req, res) => {
   try {
     {
@@ -1067,7 +1117,7 @@ app.put('/api/me/kontakt/:id', authMiddleware, async (req, res) => {
     const email = (req.user.email || '').toLowerCase();
     const name = await wohnungsAbgleichName(req);
     const own = await pool.query(
-      `SELECT wk.id, wk.name, wk.email, wk.person_id, wk.wohnung_id FROM wohnungen_kontakte wk
+      `SELECT wk.id, wk.name, wk.email, wk.telefon, wk.person_id, wk.wohnung_id FROM wohnungen_kontakte wk
         WHERE wk.id = $1 AND wk.archiviert_am IS NULL AND (($2 <> '' AND LOWER(wk.email) = $2) OR ${kontaktNameTreffer('wk.', '$3')})`,
       [req.params.id, email, name]
     );
@@ -1084,6 +1134,16 @@ app.put('/api/me/kontakt/:id', authMiddleware, async (req, res) => {
         [newEmail.toLowerCase(), req.params.id, cur.person_id || -1]
       );
       if (conflict.rows.length > 0) return res.status(400).json({ error: 'Email wird bereits von einer anderen Person verwendet' });
+    }
+    // R3-S1b: neue E-Mail/Nummer darf keinem Konto und keiner anderen Person gehoeren.
+    {
+      const neueMail = newEmail && newEmail.toLowerCase() !== (cur.email || '').toLowerCase() ? newEmail : null;
+      const neueNr = telefon && !telefonGleich(telefon, cur.telefon) ? telefon : null;
+      if (neueMail || neueNr) {
+        const eigene = [...(await meinePersonenIds(pool, email)), ...(cur.person_id ? [cur.person_id] : [])];
+        const grund = await fremdeKennung(pool, { email: neueMail, telefon: neueNr, eigeneIds: eigene, ichEmail: email });
+        if (grund) return res.status(409).json({ error: grund });
+      }
     }
 
     if (cur.person_id) {
@@ -1145,7 +1205,9 @@ app.get('/api/me/wohnung/:id', authMiddleware, async (req, res) => {
     );
     if (own.rows.length === 0) return res.status(403).json({ error: 'Du kannst nur deine eigenen Wohnungen sehen' });
     const w = own.rows[0];
-    const k = await pool.query("SELECT * FROM wohnungen_kontakte WHERE wohnung_id = $1 ORDER BY rolle, sort_order, id", [w.id]);
+    // Nur aktive (und vorgemerkte) Kontakte wie in der Objektverwaltung: profil.html sendet die
+    // Liste beim Speichern zurueck, archivierte Eintraege kaemen sonst wieder als aktiv zurueck.
+    const k = await pool.query("SELECT * FROM wohnungen_kontakte WHERE wohnung_id = $1 AND archiviert_am IS NULL ORDER BY rolle, sort_order, id", [w.id]);
     w.kontakte = k.rows;
     res.json(w);
   } catch (err) {
@@ -1169,18 +1231,40 @@ async function meWohnungPersonenAbgleichen(client, wohnungId, bisherWerte, ichEm
        FROM wohnungen_kontakte k LEFT JOIN personen p ON p.id = k.person_id
       WHERE k.wohnung_id = $1 AND k.archiviert_am IS NULL`, [wohnungId])).rows;
   const istIch = (mail) => !!ichEmail && String(mail || '').toLowerCase() === ichEmail;
+  const meineIds = await meinePersonenIds(client, ichEmail);
+  // R3-S1d: Personen, die schon an einem aktiven Kontakt DIESER Wohnung hingen (Miteigentuemer,
+  // Mieter). Kommt ein solcher Kontakt als neue Zeile zurueck (Frontend ohne id, Zeile ersetzt),
+  // bleibt die Verknuepfung — eine fremde Person kommt so nicht herein.
+  const bisherPersonen = new Map();
+  for (const r of bisherWerte.values()) if (r.person_id && !bisherPersonen.has(r.person_id)) bisherPersonen.set(r.person_id, r);
   for (const n of nachher) {
-    const alt = bisherWerte.get(n.id);
+    let alt = bisherWerte.get(n.id);
     const altPid = alt ? alt.person_id : null;
     if (n.person_id && n.person_id !== altPid) {
-      if (!n.person_neu && !istIch(n.person_email)) {
-        await client.query('UPDATE wohnungen_kontakte SET person_id = $1 WHERE id = $2', [altPid, n.id]);
+      if (!alt && bisherPersonen.has(n.person_id)) {
+        alt = bisherPersonen.get(n.person_id); // weiter unten wie ein bestehender Kontakt behandeln
+      } else {
+        if (n.person_neu) {
+          // R3-S1b: Die neue Person traegt E-Mail/Telefon, die der Eigentuemer eingegeben hat.
+          // Gehoeren sie einem Konto oder einer anderen Person, die neue Person wieder entfernen
+          // (Kontakt bleibt ohne Verknuepfung gespeichert) — sonst zwei Personen mit derselben
+          // Kennung, und Zuordnungen per E-Mail/Nummer treffen u. U. die falsche.
+          const grund = await fremdeKennung(client, { email: n.email, telefon: n.telefon, eigeneIds: [n.person_id, ...meineIds], ichEmail });
+          if (grund) {
+            console.warn(`[me/wohnung] Wohnung ${wohnungId}: neue Person ${n.person_id} nicht angelegt (fremde Kennung)`);
+            await client.query('UPDATE wohnungen_kontakte SET person_id = NULL WHERE person_id = $1 AND wohnung_id = $2', [n.person_id, wohnungId]);
+            await client.query('DELETE FROM personen WHERE id = $1 AND created_at >= NOW()', [n.person_id]);
+          }
+        } else if (!istIch(n.person_email)) {
+          await client.query('UPDATE wohnungen_kontakte SET person_id = $1 WHERE id = $2', [altPid, n.id]);
+        }
+        continue; // neue Verknuepfung: Werte stammen aus der Anlage, nichts weiterzugeben
       }
-      continue; // neue Verknuepfung: Werte stammen aus der Anlage, nichts weiterzugeben
     }
     if (!alt || !n.person_id) continue;
     if (n.name === alt.name && n.email === alt.email && n.telefon === alt.telefon && n.adresse === alt.adresse) continue;
-    if (!istIch(alt.email)) {
+    const eigenerKontakt = istIch(alt.email) || istIch(n.person_email) || meineIds.includes(n.person_id);
+    if (!eigenerKontakt) {
       const schutz = await client.query(
         `SELECT EXISTS (SELECT 1 FROM wohnungen_kontakte WHERE person_id = $1 AND wohnung_id <> $2 AND archiviert_am IS NULL) AS geteilt,
                 EXISTS (SELECT 1 FROM users u JOIN personen p ON p.id = $1
@@ -1191,16 +1275,22 @@ async function meWohnungPersonenAbgleichen(client, wohnungId, bisherWerte, ichEm
         e.status = 409; throw e;
       }
     }
-    // Eine Adresse, die zu einem fremden Konto gehoert, nicht in eine Person schreiben
-    // (sonst gilt die Person in Zuordnungen per E-Mail als dieses Konto).
-    if (n.email && String(n.email).toLowerCase() !== String(alt.email || '').toLowerCase() && !istIch(n.email)) {
-      const fremd = await client.query('SELECT 1 FROM users WHERE active = true AND LOWER(email) = LOWER($1) LIMIT 1', [n.email]);
-      if (fremd.rows.length) { const e = new Error('Diese E-Mail-Adresse gehört zu einem anderen Konto.'); e.status = 409; throw e; }
+    // Eine Adresse oder Nummer, die zu einem fremden Konto oder einer anderen Person gehoert,
+    // nicht in eine Person schreiben (sonst gilt die Person in Zuordnungen als diese) (R3-S1b).
+    {
+      const neueMail = n.email && String(n.email).toLowerCase() !== String(alt.email || '').toLowerCase() ? n.email : null;
+      const neueNr = n.telefon && !telefonGleich(n.telefon, alt.telefon) ? n.telefon : null;
+      if (neueMail || neueNr) {
+        const grund = await fremdeKennung(client, { email: neueMail, telefon: neueNr, eigeneIds: [n.person_id, ...(eigenerKontakt ? meineIds : [])], ichEmail });
+        if (grund) { const e = new Error(grund); e.status = 409; throw e; }
+      }
     }
     // Wie der Trigger kontakte_propagate_to_person (der hier wegen person_sync schweigt).
+    // R3-S5a: Den Namen der EIGENEN Person nicht ueberschreiben — personen.name ist u. a. der
+    // Name in Vollmacht-Signaturen; den aendert die Verwaltung (bzw. kommt aus dem Konto).
     await client.query(
       `UPDATE personen SET name = COALESCE($1, name), email = $2, telefon = $3, adresse = $4, updated_at = NOW() WHERE id = $5`,
-      [n.name, n.email, n.telefon, n.adresse, n.person_id]);
+      [eigenerKontakt ? null : n.name, n.email, n.telefon, n.adresse, n.person_id]);
   }
 }
 
@@ -1247,7 +1337,8 @@ app.put('/api/me/wohnung/:id', authMiddleware, async (req, res) => {
     }
     // person_id nie aus der Anfrage: bestehende Kontakte behalten ihre Verknuepfung,
     // neue bekommt saveKontakte per find/create (vorher liess sich eine fremde Person anhaengen).
-    const bisherZeilen = (await client.query('SELECT id, person_id, name, email, telefon, adresse, rolle FROM wohnungen_kontakte WHERE wohnung_id = $1', [req.params.id])).rows;
+    // Nur aktive Kontakte: archivierte Zeilen geben keine Verknuepfung weiter (R3-S1d).
+    const bisherZeilen = (await client.query('SELECT id, person_id, name, email, telefon, adresse, rolle FROM wohnungen_kontakte WHERE wohnung_id = $1 AND archiviert_am IS NULL', [req.params.id])).rows;
     const bisher = new Map(bisherZeilen.map(r => [r.id, r.person_id]));
     const bisherWerte = new Map(bisherZeilen.map(r => [r.id, r]));
     for (const k of (Array.isArray(b.kontakte) ? b.kontakte : [])) {
@@ -4864,8 +4955,10 @@ async function pollGmailForVerteiler() {
             const headersUnfolded = headers.replace(/\r?\n[ \t]+/g, ' ');
             // Adresse aus <...> nehmen, nicht die erste Adresse im (frei waehlbaren)
             // Anzeigenamen: 'From: "chef@rosenweg4303.ch" <x@boese.example>' ergab sonst chef@.
-            const fromZeile = (headersUnfolded.match(/^From:[ \t]*([^\r\n]*)/im) || [])[1] || '';
-            const spitz = [...fromZeile.matchAll(/<([^<>\s]+@[^<>\s]+)>/g)].pop();
+            // S1-3-4: Zeile kuerzen und '@' im lokalen Teil ausschliessen — sonst probiert die
+            // Regex auf langen Zeilen ohne '>' jede Startposition quadratisch durch.
+            const fromZeile = ((headersUnfolded.match(/^From:[ \t]*([^\r\n]*)/im) || [])[1] || '').slice(0, 1000);
+            const spitz = [...fromZeile.matchAll(/<([^<>\s@]+@[^<>\s]+)>/g)].pop();
             const senderEmailRaw = (spitz ? spitz[1] : (fromZeile.trim().match(/^([a-z0-9._+-]+@[a-z0-9.-]+)$/i) || [])[1])?.toLowerCase();
             const senderEmail = senderEmailRaw?.replace(/\+[^@]*/, ''); // strip +tag
 
@@ -4883,9 +4976,22 @@ async function pollGmailForVerteiler() {
             // reichte nicht — Domains ohne DMARC-Eintrag oder Mails ohne Pruefvermerk liessen
             // sich mit gefaelschtem Absender drucken. Nur der OBERSTE Authentication-Results-
             // Kopf zaehlt (den setzt unser Mailserver); tiefere kann der Absender mitschicken.
-            const arOben = (headers.match(/^Authentication-Results:[^\r\n]*(?:\r?\n[ \t][^\r\n]*)*/im) || [''])[0];
-            const dmarcPass = /\bdmarc=pass\b/i.test(arOben);
+            const arOben = (headers.match(/^Authentication-Results:[^\r\n]*(?:\r?\n[ \t][^\r\n]*)*/im) || [''])[0]
+              .replace(/\r?\n[ \t]+/g, ' ').slice(0, 4000);
+            // R3-S1c: Der oberste Kopf zaehlt nur, wenn ihn UNSER Mailserver gesetzt hat
+            // (authserv-id = PRINT_AR_AUTHSERV_ID; ohne Variable kein Druck fuer Fremde), das
+            // dmarc=pass muss fuer die Domain der Absenderadresse gelten (header.from), und im
+            // From darf genau eine Adresse stehen (sonst prueft DMARC evtl. eine andere als wir).
+            const arAuthservSoll = String(process.env.PRINT_AR_AUTHSERV_ID || '').trim().toLowerCase();
+            const arAuthservIst = arOben.replace(/^Authentication-Results:\s*/i, '').split(';')[0].trim().split(/\s+/)[0].toLowerCase();
+            const arDmarc = arOben.split(';').map(t => t.trim()).find(t => /^dmarc=pass\b/i.test(t)) || '';
+            const arHeaderFrom = ((arDmarc.match(/\bheader\.from=([^\s;()]+)/i) || [])[1] || '').toLowerCase().split('@').pop();
+            const senderDomain = (senderEmail || '').split('@')[1] || '';
+            const fromEineAdresse = (fromZeile.match(/@/g) || []).length === 1;
+            const dmarcPass = !!arAuthservSoll && arAuthservIst === arAuthservSoll
+              && !!arDmarc && !!senderDomain && arHeaderFrom === senderDomain && fromEineAdresse;
             if (senderEmail && !senderEmail.endsWith(`@${VERTEILER_DOMAIN}`) && !dmarcPass) {
+              if (!arAuthservSoll) console.warn('[Print] PRINT_AR_AUTHSERV_ID fehlt — Mails fremder Absender werden nicht gedruckt');
               console.log(`[Print] Rejected (kein dmarc=pass) from=${senderEmailRaw} to=${verteilerAddress}`);
               await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
               continue;
@@ -19715,8 +19821,9 @@ app.get('/api/reklamationen/:id/foto', authMiddleware, requirePermission('reklam
 app.post('/api/reklamationen/code', async (req, res) => {
   const email = normEmail(req.body?.email);
   if (!/^[^@\s]+@[^@\s.]+(?:\.[^@\s.]+)+$/.test(email)) return res.status(400).json({ error: 'Gültige E-Mail erforderlich' });
-  // Globales Limit vor der Antwort; Limit je Adresse erst nach der Personen-Pruefung (S4-2-1).
-  if (!rateLimitGuard('otp-global', 'reklamation', 100, 10 * 60 * 1000).ok) return res.status(429).json({ error: 'Zu viele Anfragen. Bitte später erneut.' });
+  // Vor der Antwort nur das Limit je Client-IP; global und je Adresse erst nach der
+  // Personen-Pruefung im Hintergrund (S4-2-1, S4-3-1).
+  if (!otpIpErlaubt(req)) return res.status(429).json({ error: 'Zu viele Anfragen. Bitte später erneut.' });
   // Immer dieselbe Antwort, und SOFORT: Pruefung, Code und Mail laufen danach im
   // Hintergrund — weder Laufzeit noch SMTP-Fehler verraten, ob die Adresse bekannt ist.
   res.json({ ok: true, hinweis: 'Falls die Adresse im Verzeichnis steht, ist der Code unterwegs.' });
@@ -19726,6 +19833,7 @@ app.post('/api/reklamationen/code', async (req, res) => {
     let name = pr.rows[0]?.name;
     if (!name) { const ur = await pool.query('SELECT name FROM users WHERE LOWER(email) = $1 AND active = true LIMIT 1', [email]); name = ur.rows[0]?.name; }
     if (!name) return;
+    if (!otpGlobalErlaubt('reklamation')) { console.warn('[reklamation-code] globales Limit erreicht, Code verworfen'); return; }
     if (!ausstellenErlaubt(email, 'reklamation')) { console.warn('[reklamation-code] Limit je Adresse erreicht'); return; }
     const code = await otpAusstellen(email, 'reklamation');
     await loggedSendMail({
