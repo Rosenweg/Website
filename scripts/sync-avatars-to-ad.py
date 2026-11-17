@@ -10,7 +10,9 @@ Drei Fälle, in dieser Reihenfolge:
 
   1. Hochgeladenes Foto   Authentik liefert es als data:-URL (profil.html legt
                           es in attributes.avatar ab). Wird zugeschnitten.
-  2. Gravatar             eine http(s)-Adresse. Wird geholt und zugeschnitten.
+  2. Gravatar             eine https-Adresse eines Hosts aus AVATAR_HOSTS (Standard:
+                          Gravatar). Ohne Token geholt und zugeschnitten; andere
+                          Adressen werden nicht abgerufen (-> Initialen).
   3. Sonst                Initialen auf Rosenweg-Blau, hier gerendert.
 
 Vorgeschichte, damit die Fälle nicht wieder zusammenfallen (3. August 2026):
@@ -79,29 +81,74 @@ if not AUTHENTIK_URL or not AUTHENTIK_TOKEN:
           file=sys.stderr)
     sys.exit(1)
 
+# Fremde Bilder nur von diesen Hosts (Authentik erzeugt Gravatar-Adressen).
+# Das Avatar-Feld kann jede Person selbst setzen (PUT /api/auth/avatar) - ohne
+# Liste holte der DC beliebige, auch interne Adressen.
+FREMD_HOSTS = {h.strip().lower() for h in os.environ.get(
+    "AVATAR_HOSTS", "gravatar.com,www.gravatar.com,secure.gravatar.com,"
+    "en.gravatar.com,0.gravatar.com,1.gravatar.com,2.gravatar.com").split(",") if h.strip()}
+MAX_BILD = 5 * 1024 * 1024
+
 os.makedirs(CACHE_DIR, exist_ok=True)
+# Nur fuer Authentik selbst (interne Adresse, ggf. eigenes Zertifikat) bleibt
+# die Zertifikatspruefung aus - wie bisher. Fremde Adressen pruefen voll.
 ctx = ssl.create_default_context()
 ctx.check_hostname = False
 ctx.verify_mode = ssl.CERT_NONE
+ctx_fremd = ssl.create_default_context()
+
+
+class _KeineUmleitung(urllib.request.HTTPRedirectHandler):
+    # Eine Umleitung koennte auf http oder ins interne Netz zeigen.
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+_fremd_opener = urllib.request.build_opener(
+    _KeineUmleitung, urllib.request.HTTPSHandler(context=ctx_fremd))
+
+
+def _begrenzt_lesen(r):
+    daten = r.read(MAX_BILD + 1)
+    return daten if len(daten) <= MAX_BILD else None
 
 
 def api_get(path):
-    url = AUTHENTIK_URL + path if path.startswith("/") else path
+    # Der Bearer-Token geht ausschliesslich an AUTHENTIK_URL - nie an eine
+    # Adresse aus den Antwortdaten.
+    if not path.startswith("/") or path.startswith("//"):
+        raise ValueError(f"unerwarteter API-Pfad: {path[:80]!r}")
     req = urllib.request.Request(
-        url, headers={"Authorization": f"Bearer {AUTHENTIK_TOKEN}"}
+        AUTHENTIK_URL + path, headers={"Authorization": f"Bearer {AUTHENTIK_TOKEN}"}
     )
     with urllib.request.urlopen(req, context=ctx, timeout=15) as r:
         return json.loads(r.read())
 
 
 def bild_holen(url):
-    voll = url if url.startswith("http") else AUTHENTIK_URL + url
-    req = urllib.request.Request(
-        voll, headers={"Authorization": f"Bearer {AUTHENTIK_TOKEN}"}
-    )
     try:
-        with urllib.request.urlopen(req, context=ctx, timeout=15) as r:
-            return r.read()
+        # Relativer Pfad oder volle Adresse von Authentik selbst: mit Token.
+        if url.startswith("/") and not url.startswith("//"):
+            voll = AUTHENTIK_URL + url
+        elif url.startswith(AUTHENTIK_URL + "/"):
+            voll = url
+        else:
+            voll = None
+        if voll:
+            req = urllib.request.Request(
+                voll, headers={"Authorization": f"Bearer {AUTHENTIK_TOKEN}"}
+            )
+            with urllib.request.urlopen(req, context=ctx, timeout=15) as r:
+                return _begrenzt_lesen(r)
+        # Alles andere: nur https, nur erlaubte Hosts, ohne Token, mit
+        # Zertifikatspruefung, ohne Umleitungen und mit Groessenlimit.
+        teile = urllib.parse.urlsplit(url)
+        if teile.scheme != "https" or (teile.hostname or "").lower() not in FREMD_HOSTS:
+            return None
+        if teile.port not in (None, 443) or teile.username or teile.password:
+            return None
+        with _fremd_opener.open(urllib.request.Request(url), timeout=15) as r:
+            return _begrenzt_lesen(r)
     except Exception:
         return None
 
@@ -195,9 +242,14 @@ def zu_thumbnail_jpeg(rohdaten):
     return aus.getvalue()
 
 
+def ldap_filter_wert(wert):
+    """Wert fuer einen LDAP-Filter maskieren (RFC 4515): * ( ) Backslash NUL."""
+    return "".join("\\%02x" % ord(z) if z in "*()\\\x00" else z for z in wert)
+
+
 def benutzer_dn(benutzername):
     r = subprocess.run(
-        ["ldbsearch", "-H", SAM_DB, f"(sAMAccountName={benutzername})", "dn"],
+        ["ldbsearch", "-H", SAM_DB, f"(sAMAccountName={ldap_filter_wert(benutzername)})", "dn"],
         capture_output=True, text=True,
     )
     for zeile in r.stdout.splitlines():
@@ -222,8 +274,18 @@ def thumbnail_setzen(dn, jpeg):
     return r.returncode == 0, r.stderr
 
 
+def cache_datei(benutzername):
+    # Benutzername kommt aus Authentik; mit "/" oder ".." darin waere er ein
+    # Pfad ausserhalb des Caches. Unauffaellige Namen behalten ihre Datei.
+    if re.fullmatch(r"[A-Za-z0-9_@-][A-Za-z0-9._@-]*", benutzername):
+        name = benutzername
+    else:
+        name = "h-" + hashlib.sha256(benutzername.encode()).hexdigest()
+    return os.path.join(CACHE_DIR, f"{name}.hash")
+
+
 def gemerkte_pruefsumme(benutzername):
-    p = os.path.join(CACHE_DIR, f"{benutzername}.hash")
+    p = cache_datei(benutzername)
     if os.path.exists(p):
         with open(p) as f:
             return f.read().strip()
@@ -231,7 +293,7 @@ def gemerkte_pruefsumme(benutzername):
 
 
 def pruefsumme_merken(benutzername, h):
-    with open(os.path.join(CACHE_DIR, f"{benutzername}.hash"), "w") as f:
+    with open(cache_datei(benutzername), "w") as f:
         f.write(h)
 
 
@@ -253,7 +315,7 @@ def bild_fuer(u):
                       file=sys.stderr)
         return initialen_jpeg(u.get("name", ""), benutzername), "initialen"
 
-    if avatar.startswith("http"):
+    if avatar.startswith("http") or avatar.startswith("/"):
         rohdaten = bild_holen(avatar)
         if rohdaten:
             try:

@@ -28,6 +28,11 @@ services:
       AUTHENTIK_URL: "http://100.64.2.37:9000"
       AUTHENTIK_EXTERNAL_URL: "https://authentik.rosenweg4303.ch"
       SITE_URL: "https://www.rosenweg4303.ch"
+      # ACHTUNG (Sicherheitspruefung 17.11.2026, I-10/L-8): schaltet die Zertifikats-
+      # pruefung fuer ALLE ausgehenden https-Verbindungen der API ab (SMTP, Authentik,
+      # Cloudflare, GitHub …). Noch noetig fuer UniFi/Mailcow/PVE mit eigenen Zertifikaten.
+      # Ziel: deren CA-Kette als Datei einbinden (NODE_EXTRA_CA_CERTS=/certs/rosenweg-ca.pem
+      # + Volume) und erst dann diese Zeile entfernen.
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
       ENERGY_DB_HOST: "100.64.2.53"
       ENERGY_DB_PORT: "5432"

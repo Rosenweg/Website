@@ -1,3 +1,20 @@
+# Stufe 1: Docroot aus dem Repo zusammenstellen (Positivliste).
+FROM alpine:3.20 AS webroot
+RUN apk add --no-cache rsync
+COPY . /src
+# rsync: die erste passende Regel gewinnt — Ausschluesse daher zuerst.
+RUN rsync -a \
+      --exclude='/isp.html' --exclude='/isp-admin.html' --exclude='/isp-mein-zugang.html' \
+      --exclude='/wlan.html' --exclude='/tv.html' --exclude='/netzwerk.html' \
+      --exclude='/verbindungen.html' --exclude='/dmarc.html' --exclude='/pbx-admin.html' \
+      --exclude='/js/nav-isp.js' \
+      --include='/css/***' --include='/img/***' --include='/js/***' \
+      --include='/*.html' --include='/*.png' --include='/*.pdf' --include='/*.webmanifest' \
+      --include='/*-sw.js' --include='/CNAME' \
+      --include='/site-config.json' --include='/zaehler-config.json' --include='/access-manifest.json' \
+      --exclude='*' \
+      /src/ /out/
+
 FROM nginx:1.27-alpine
 
 # Remove default nginx config
@@ -5,63 +22,13 @@ RUN rm /etc/nginx/conf.d/default.conf
 
 # Copy custom nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Gemeinsame Sicherheits-Header (per include in nginx.conf)
+COPY frontends-lxc/nginx/sicherheit-header.conf /etc/nginx/snippets/rosenweg-sicherheit.conf
 
-# Copy website files
-COPY . /usr/share/nginx/html
-
-# Remove Docker/deployment files from served content
-RUN rm -f /usr/share/nginx/html/Dockerfile \
-          /usr/share/nginx/html/docker-stack.yml \
-          /usr/share/nginx/html/nginx.conf \
-          /usr/share/nginx/html/.env \
-          /usr/share/nginx/html/.env.example \
-          /usr/share/nginx/html/.gitignore \
-          /usr/share/nginx/html/README.md \
-    && rm -rf /usr/share/nginx/html/.git \
-              /usr/share/nginx/html/.github \
-              /usr/share/nginx/html/.claude \
-              /usr/share/nginx/html/.trunk \
-              /usr/share/nginx/html/api \
-              /usr/share/nginx/html/energy-collector \
-              /usr/share/nginx/html/wiki \
-              /usr/share/nginx/html/scripts \
-              /usr/share/nginx/html/stweg3/waschkueche-smart/README.md \
-              /usr/share/nginx/html/stweg3/README.md \
-              /usr/share/nginx/html/door-signs/README.md
-
-# ISP-Frontend lebt in seinem eigenen Container (isp.rosenweg4303.ch).
-# Hauptseite serviert diese Files NICHT — saubere Trennung.
-RUN rm -f /usr/share/nginx/html/isp.html \
-          /usr/share/nginx/html/isp-admin.html \
-          /usr/share/nginx/html/isp-mein-zugang.html \
-          /usr/share/nginx/html/wlan.html \
-          /usr/share/nginx/html/tv.html \
-          /usr/share/nginx/html/netzwerk.html \
-          /usr/share/nginx/html/verbindungen.html \
-          /usr/share/nginx/html/dmarc.html \
-          /usr/share/nginx/html/Dockerfile.isp \
-          /usr/share/nginx/html/nginx.isp.conf \
-          /usr/share/nginx/html/js/nav-isp.js
-
-# STWEG/MEG-Frontends leben in eigenen Containern (stwegN/meg.rosenweg4303.ch).
-# Hauptseite serviert die STWEG/MEG-Verzeichnisse NICHT mehr — inkl. der
-# Waschkueche-Module (lagen unter stweg3/). nav.js verlinkt jetzt absolut
-# auf die Subdomains.
-RUN rm -rf /usr/share/nginx/html/stweg1 \
-           /usr/share/nginx/html/stweg2 \
-           /usr/share/nginx/html/stweg3 \
-           /usr/share/nginx/html/stweg4 \
-           /usr/share/nginx/html/stweg5 \
-           /usr/share/nginx/html/stweg6 \
-           /usr/share/nginx/html/stweg7 \
-           /usr/share/nginx/html/meg \
-           /usr/share/nginx/html/nginx.stweg.conf \
-           /usr/share/nginx/html/Dockerfile.stweg
-
-# PBX-Frontend lebt im eigenen Container (pbx.rosenweg4303.ch / CT 220, pbx-api).
-# Hauptseite verlinkt nur dorthin (js/nav.js), serviert KEINE Kopie.
-RUN rm -rf /usr/share/nginx/html/pbx \
-           /usr/share/nginx/html/pbx-admin.html
+# Website-Dateien per Positivliste (wie assemble_website in frontends-lxc/deploy.sh).
+# Frueher "COPY . " plus Sperrliste: jede neue Repo-Datei (Schluessel-Exporte,
+# docs/, Installer …) landete ungefragt im oeffentlichen Docroot.
+COPY --from=webroot /out/ /usr/share/nginx/html/
 
 EXPOSE 80
 

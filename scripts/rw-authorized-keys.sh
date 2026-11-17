@@ -50,19 +50,39 @@ CACHE="$CACHE_DIR/$LOGIN.keys"
 # HTTP 200 und einen Fehler bei 4xx/5xx oder ausgefallenem Netz; die
 # Unterscheidung "kein Zugang" gegen "nicht erreichbar" bleibt damit
 # erhalten, und daran haengt, ob der Zwischenspeicher gilt.
+#
+# curl: Der Host-Token geht ueber stdin (-H @-), nicht als Argument — sonst
+# steht er fuer jeden lokalen Benutzer in der Prozessliste (/proc/*/cmdline).
+# Der Statuscode haengt als letzte Zeile an der Antwort: 400/404 heisst "gibt
+# es nicht / ungueltig" und ist eine endgueltige Absage — dann darf auch der
+# Zwischenspeicher nicht mehr gelten. Nur Netz-, 5xx- und Token-Fehler
+# (401/403, Fehlkonfiguration des Hosts) fallen auf den letzten Stand zurueck.
+# hole setzt ANTWORT direkt (kein $(...)), damit ABSAGE nicht in einer
+# Subshell verloren geht.
+ABSAGE=0
+ANTWORT=
 hole() {
   if command -v curl >/dev/null 2>&1; then
-    curl -fsS --max-time "${TIMEOUT:-3}" \
-         -H "X-Host-Token: $HOST_TOKEN" -H "X-Host-Name: $HOST_NAME" "$1" 2>/dev/null
+    _roh=$(printf 'X-Host-Token: %s\nX-Host-Name: %s\n' "$HOST_TOKEN" "$HOST_NAME" | \
+      curl -sS --max-time "${TIMEOUT:-3}" -H @- -w '\n%{http_code}' "$1" 2>/dev/null) || return 1
+    _code=$(printf '%s' "$_roh" | tail -n 1)
+    _text=$(printf '%s' "$_roh" | sed '$d')
+    case "$_code" in
+      2??) ANTWORT=$_text; return 0 ;;
+      400|404) ABSAGE=1; return 1 ;;
+      *) return 1 ;;
+    esac
   elif command -v wget >/dev/null 2>&1; then
-    wget -q -O - -T "${TIMEOUT:-3}" \
-         --header="X-Host-Token: $HOST_TOKEN" --header="X-Host-Name: $HOST_NAME" "$1" 2>/dev/null
+    # wget kennt keinen Header aus stdin; der Token steht hier kurz in der
+    # Prozessliste. curl nachinstallieren behebt das.
+    ANTWORT=$(wget -q -O - -T "${TIMEOUT:-3}" \
+         --header="X-Host-Token: $HOST_TOKEN" --header="X-Host-Name: $HOST_NAME" "$1" 2>/dev/null)
   else
     return 127
   fi
 }
 
-if ANTWORT=$(hole "$API_BASE/api/ssh/authorized-keys/$LOGIN"); then
+if hole "$API_BASE/api/ssh/authorized-keys/$LOGIN"; then
   printf '%s' "$ANTWORT"
   if [ -d "$CACHE_DIR" ] && [ -w "$CACHE_DIR" ]; then
     if [ -n "$ANTWORT" ]; then
@@ -74,6 +94,12 @@ if ANTWORT=$(hole "$API_BASE/api/ssh/authorized-keys/$LOGIN"); then
       rm -f "$CACHE" 2>/dev/null || true
     fi
   fi
+  exit 0
+fi
+
+# Endgueltige Absage der API: kein Zugang, auch nicht aus dem Zwischenspeicher.
+if [ "$ABSAGE" = 1 ]; then
+  rm -f "$CACHE" 2>/dev/null || true
   exit 0
 fi
 

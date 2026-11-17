@@ -3,6 +3,26 @@
 # Swarm-Service (Isolation), alle aus diesem Image. Die Waschkueche-Module
 # (stweg3/pages/waschkueche-*.html + stweg3/waschkueche-smart/) wandern damit
 # komplett aus der Hauptseite in den stweg3-Container.
+
+# Stufe 1: STWEG/MEG-Verzeichnisse per Positivliste (wie assemble_stweg in
+# frontends-lxc/deploy.sh). Frueher kamen data/kontakte.json (Namen, Mails,
+# Telefon) und README.md mit ins oeffentliche Docroot.
+FROM alpine:3.20 AS stwegroot
+RUN apk add --no-cache rsync
+COPY stweg1/ /src/stweg1/
+COPY stweg2/ /src/stweg2/
+COPY stweg3/ /src/stweg3/
+COPY stweg4/ /src/stweg4/
+COPY stweg5/ /src/stweg5/
+COPY stweg6/ /src/stweg6/
+COPY stweg7/ /src/stweg7/
+COPY meg/ /src/meg/
+RUN mkdir /out && cd /src && rsync -a --prune-empty-dirs --exclude='data/' --include='*/' \
+      --include='*.html' --include='*.pdf' --include='*.png' --include='*.jpg' --include='*.jpeg' \
+      --include='*.svg' --include='*.webp' --include='*.ico' --include='*.js' --include='*.css' \
+      --exclude='*' \
+      stweg1 stweg2 stweg3 stweg4 stweg5 stweg6 stweg7 meg /out/
+
 FROM nginx:1.27-alpine
 
 # Config als Template — der nginx-Entrypoint substituiert ${WASCHKUECHE}
@@ -11,19 +31,15 @@ FROM nginx:1.27-alpine
 # Service per --env-add WASCHKUECHE=1 zuschaltbar.
 RUN rm /etc/nginx/conf.d/default.conf
 COPY nginx.stweg.conf /etc/nginx/templates/default.conf.template
+# Gemeinsame Sicherheits-Header (per include in nginx.stweg.conf)
+COPY frontends-lxc/nginx/sicherheit-header.conf /etc/nginx/snippets/rosenweg-sicherheit.conf
 ENV WASCHKUECHE=0
 
 WORKDIR /usr/share/nginx/html
 
-# STWEG-Inhalte (inkl. Waschkueche unter stweg3/)
-COPY stweg1/ stweg1/
-COPY stweg2/ stweg2/
-COPY stweg3/ stweg3/
-COPY stweg4/ stweg4/
-COPY stweg5/ stweg5/
-COPY stweg6/ stweg6/
-COPY stweg7/ stweg7/
-COPY meg/ meg/
+# STWEG-Inhalte (inkl. Waschkueche unter stweg3/) aus der Positivliste der
+# ersten Stufe: nur Web-Dateitypen, kein data/, keine README.md.
+COPY --from=stwegroot /out/ ./
 
 # Shared Frontend-Module + Config + Logo (host-unabhaengig am Root)
 COPY js/ js/

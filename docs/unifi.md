@@ -8,7 +8,7 @@ UniFi Dream Machine Pro als zentraler Gateway/Controller für die Rosenweg-Koope
 - **WAN IP**: `37.17.232.133`
 - **Uptime**: 100% (WAN-Monitoring)
 - **Aktive Clients**: ~60
-- **API Key**: `eQq7HtvQwjnAJzHwBLMrlueFDjSfmc6H`
+- **API Key**: `<im Passwortmanager>`
 
 ```
 Internet (Init7) ─── WAN1
