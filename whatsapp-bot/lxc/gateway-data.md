@@ -35,7 +35,7 @@ oder per SQL wie unten.
 | `@rosenweg4303.ch` | interne Absender |
 | `@rosenweg9.ch` | interne Absender |
 | `@juroct.net` | Test/Admin |
-| `stefan.mueller.1694@gmail.com` | Admin (private Adresse; ob sie bleiben soll, ist offen – `docs/sicherheit.md` Abschnitt 7.3) |
+| `<private-admin-adresse>` | Admin (private Adresse; ob sie bleiben soll, ist offen – `docs/sicherheit.md` Abschnitt 7.3) |
 | `@em1102430.rosenweg4303.ch` | **SMTP2GO-Return-Path.** Website-Verteiler-Sends (rosenweg_api) laufen über SMTP2GO, das den Envelope-Absender auf diese **Subdomain** umschreibt. `@rosenweg4303.ch` deckt die Subdomain NICHT ab → ohne diesen Eintrag bounced der Gateway die Verteiler→WhatsApp-Mails mit `554 Quell-IP oder Absender nicht erlaubt`. |
 
 ## `smtp_ips` — erlaubte Quell-IPs
@@ -65,7 +65,7 @@ bleiben.
 | `ausschuss` | Rosenweg Ausschuss | group |
 | `rosenweg9` | Rosenweg 9 | group |
 | `allgemein` | Allgemein | group |
-| `stefan` | +41765199970 | number |
+| `stefan` | <private-mobilnummer> | number |
 | `stefan-test` | Rosenweg (Test 2P) | group |
 
 ## `wa_forwards` — WhatsApp → Mail (Inbound-Routing)
@@ -77,12 +77,12 @@ pct exec 116 -- docker exec -i whatsapp-bot node - <<'EOF'
 const db = require('better-sqlite3')('/data/gateway.sqlite');
 const now = new Date().toISOString();
 const sender = db.prepare("INSERT OR IGNORE INTO smtp_senders (addr,note,created_by,created_at) VALUES (?,?,?,?)");
-for (const s of ['@rosenweg4303.ch','@rosenweg9.ch','@juroct.net','stefan.mueller.1694@gmail.com','@em1102430.rosenweg4303.ch'])
+for (const s of ['@rosenweg4303.ch','@rosenweg9.ch','@juroct.net','<private-admin-adresse>','@em1102430.rosenweg4303.ch'])
   sender.run(s, 'seed', 'iac', now);
 db.prepare("INSERT OR IGNORE INTO smtp_ips (ip,note,created_by,created_at) VALUES (?,?,?,?)").run('100.64.2.33', 'Mailcow', 'iac', now);
 db.prepare("INSERT OR IGNORE INTO smtp_ips (ip,note,created_by,created_at) VALUES (?,?,?,?)").run('100.64.2.31', 'PMG-Transport', 'iac', now);
 const alias = db.prepare("INSERT INTO aliases (address,target,target_kind,note,created_by,created_at) VALUES (?,?,?,?,?,?) ON CONFLICT(address) DO UPDATE SET target=excluded.target, target_kind=excluded.target_kind");
-for (const [a,t,k] of [['technik','Rosenweg Technik','group'],['ausschuss','Rosenweg Ausschuss','group'],['rosenweg9','Rosenweg 9','group'],['allgemein','Allgemein','group'],['stefan','+41765199970','number']])
+for (const [a,t,k] of [['technik','Rosenweg Technik','group'],['ausschuss','Rosenweg Ausschuss','group'],['rosenweg9','Rosenweg 9','group'],['allgemein','Allgemein','group'],['stefan','<private-mobilnummer>','number']])
   alias.run(a, t, k, 'seed', 'iac', now);
 console.log('gateway-data seeded');
 EOF
