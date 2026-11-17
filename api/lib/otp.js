@@ -41,16 +41,31 @@ setInterval(() => {
 }, 10 * 60 * 1000).unref();
 
 // true = darf noch einen Code bekommen (und zählt diese Anfrage).
+// Erst NACH der Prüfung aufrufen, dass die Adresse bekannt ist: sonst füllen erfundene
+// Adressen die Map, und die Rückmeldung darf ohnehin nichts über die Adresse verraten.
 function ausstellenErlaubt(email, zweck) {
   const key = zweck + ':' + email;
   const now = Date.now();
   const arr = (ausgestellt.get(key) || []).filter(t => now - t < 24 * 60 * 60 * 1000);
   const letzte10min = arr.filter(t => now - t < GUELTIG_MS).length;
   if (letzte10min >= 3 || arr.length >= 12) { ausgestellt.set(key, arr); return false; }
-  // Speicher deckeln: bei sehr vielen verschiedenen Adressen nichts Neues mehr merken,
-  // sondern ablehnen (schützt vor Speicher-Aufblähen durch erfundene Adressen).
-  if (!ausgestellt.has(key) && ausgestellt.size > 20000) return false;
+  // Speicher deckeln: bei sehr vielen Adressen den ältesten Eintrag verdrängen statt
+  // abzulehnen — Ablehnen sperrte bei voller Map alle Bewohner aus (DoS).
+  if (!ausgestellt.has(key) && ausgestellt.size >= 20000) ausgestellt.delete(ausgestellt.keys().next().value);
+  ausgestellt.delete(key); // neu einfügen = ans Ende (jüngster)
   arr.push(now); ausgestellt.set(key, arr);
+  return true;
+}
+
+// Globales Limit je Zweck (alle Adressen zusammen): bremst Massen-Anfragen, bevor
+// überhaupt nachgeschaut wird, ob es die Adresse gibt — verrät also nichts über sie.
+const GLOBAL_MAX = Math.max(10, parseInt(process.env.OTP_GLOBAL_MAX_10MIN || '100', 10) || 100);
+const globalZaehler = new Map(); // zweck -> [timestamps]
+function globalErlaubt(zweck) {
+  const now = Date.now();
+  const arr = (globalZaehler.get(zweck) || []).filter(t => now - t < GUELTIG_MS);
+  if (arr.length >= GLOBAL_MAX) { globalZaehler.set(zweck, arr); return false; }
+  arr.push(now); globalZaehler.set(zweck, arr);
   return true;
 }
 
@@ -107,4 +122,4 @@ const OTP_SCHEMA_SQL = `
   ALTER TABLE otp_codes ALTER COLUMN code TYPE VARCHAR(12);
 `;
 
-module.exports = { otpAusstellen, otpPruefen, ausstellenErlaubt, normEmail, OTP_FEHLER, OTP_SCHEMA_SQL, MAX_VERSUCHE };
+module.exports = { otpAusstellen, otpPruefen, ausstellenErlaubt, globalErlaubt, normEmail, OTP_FEHLER, OTP_SCHEMA_SQL, MAX_VERSUCHE };

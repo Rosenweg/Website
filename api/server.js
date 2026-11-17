@@ -181,11 +181,17 @@ app.post('/api/otp/send', async (req, res) => {
   if (!email) return res.status(400).json({ error: 'E-Mail erforderlich' });
   // Antwort ist immer dieselbe — sie verrät nicht, ob es die Adresse gibt.
   const antwort = { success: true, message: 'Falls die Adresse berechtigt ist, wurde ein Code per E-Mail gesendet.' };
-  if (!ausstellenErlaubt(email, 'login')) return res.status(429).json({ error: 'Zu viele Anfragen. Bitte warten Sie einige Minuten.' });
+  // Globales Limit (alle Adressen) vor der Antwort; das Limit je Adresse erst nach der
+  // Personen-Pruefung, sonst fuellen erfundene Adressen den Zaehler (S4-2-1).
+  if (!rateLimitGuard('otp-global', 'login', 100, 10 * 60 * 1000).ok) return res.status(429).json({ error: 'Zu viele Anfragen. Bitte warten Sie einige Minuten.' });
+  // Sofort antworten, Rest im Hintergrund: Laufzeit und SMTP-Fehler verraten sonst,
+  // ob die Adresse bekannt ist.
+  res.json(antwort);
   try {
     const userResult = await pool.query(
       'SELECT id, name, email, role FROM users WHERE LOWER(email) = $1 AND active = true', [email]);
-    if (userResult.rows.length === 0) return res.json(antwort);
+    if (userResult.rows.length === 0) return;
+    if (!ausstellenErlaubt(email, 'login')) { console.warn('[otp-login] Limit je Adresse erreicht'); return; }
     const user = userResult.rows[0];
     const code = await otpAusstellen(email, 'login');
     await loggedSendMail({
@@ -204,10 +210,8 @@ app.post('/api/otp/send', async (req, res) => {
         </div>
       `,
     }, 'otp-login');
-    res.json(antwort);
   } catch (err) {
     console.error('OTP send error:', err);
-    res.status(500).json({ error: 'Fehler beim Senden des OTP-Codes' });
   }
 });
 
@@ -261,30 +265,56 @@ const webpushLib = require('./lib/webpush');
 // AUTHENTIK OAuth2 LOGIN
 // ═══════════════════════════════════════════════════════════════════
 
-// OAuth2 state store (CSRF protection) - states expire after 10 minutes
-const oauthStates = new Map();
+// OAuth2-State (CSRF-Schutz), 10 Minuten gueltig. Signiert statt im Speicher gemerkt:
+// eine volle State-Map hat frueher jede Anmeldung mit 429 abgewiesen (Flut von
+// Login-Starts = Login-Ausfall fuer alle). Der Schluessel entsteht je Prozessstart
+// zufaellig — kein Geheimnis im Code; nach einem Neustart muss ein laufender Login neu
+// beginnen (wie vorher mit der Map). Verbrauchte States werden kurz gemerkt (einmalig);
+// diese Liste verdraengt bei Ueberlauf die aeltesten statt neue Logins abzuweisen.
+const OAUTH_STATE_KEY = crypto.randomBytes(32);
+const OAUTH_STATE_MS = 10 * 60 * 1000;
+const oauthStateVerbraucht = new Map(); // nonce -> Zeitpunkt
 setInterval(() => {
   const now = Date.now();
-  for (const [key, val] of oauthStates) {
-    if (now - val.created > 10 * 60 * 1000) oauthStates.delete(key);
+  for (const [key, t] of oauthStateVerbraucht) {
+    if (now - t > OAUTH_STATE_MS) oauthStateVerbraucht.delete(key);
   }
 }, 60 * 1000);
+function oauthStateSig(teil) {
+  return crypto.createHmac('sha256', OAUTH_STATE_KEY).update(teil).digest('base64url');
+}
+function oauthStateErzeugen(daten) {
+  const teil = Buffer.from(JSON.stringify({ ...daten, n: crypto.randomBytes(12).toString('hex'), t: Date.now() })).toString('base64url');
+  return teil + '.' + oauthStateSig(teil);
+}
+// Liefert die Daten oder null (falsche Signatur, abgelaufen, schon verbraucht).
+function oauthStatePruefen(state) {
+  if (typeof state !== 'string' || state.length > 2048) return null;
+  const [teil, sig, rest] = state.split('.');
+  if (!teil || !sig || rest !== undefined) return null;
+  const soll = Buffer.from(oauthStateSig(teil)), ist = Buffer.from(sig);
+  if (soll.length !== ist.length || !crypto.timingSafeEqual(soll, ist)) return null;
+  let d;
+  try { d = JSON.parse(Buffer.from(teil, 'base64url').toString('utf8')); } catch { return null; }
+  if (!d || typeof d.n !== 'string' || typeof d.t !== 'number' || Date.now() - d.t > OAUTH_STATE_MS || d.t > Date.now() + 60000) return null;
+  if (oauthStateVerbraucht.has(d.n)) return null;
+  if (oauthStateVerbraucht.size >= 50000) oauthStateVerbraucht.delete(oauthStateVerbraucht.keys().next().value);
+  oauthStateVerbraucht.set(d.n, Date.now());
+  return d;
+}
 
 // OAUTH_ALLOWED_HOSTS, oauthRedirectUri -> lib/config.js
 
 app.get('/api/auth/login', (req, res) => {
   const { redirect: redirectRoh } = req.query;
-  // Map begrenzen: sonst fuellt eine Flut von Login-Starts den Speicher.
-  if (oauthStates.size >= 20000) return res.status(429).send('Zu viele Anmeldeversuche. Bitte in einigen Minuten erneut versuchen.');
-  const redirect = typeof redirectRoh === 'string' ? redirectRoh : '';
-  const state = crypto.randomBytes(16).toString('hex');
+  const redirect = typeof redirectRoh === 'string' && redirectRoh.length <= 1000 ? redirectRoh : '';
   const redirectUri = oauthRedirectUri(req);
 
   // Sanitize redirect: only allow relative paths to prevent open redirect
   const safeRedirect = (redirect && redirect.startsWith('/') && !redirect.startsWith('//')) ? redirect : '/';
-  // Store state for CSRF validation in callback (inkl. redirect_uri damit
+  // State signiert fuer die CSRF-Pruefung im Callback (inkl. redirect_uri damit
   // der Callback auf demselben Host kommt wie der Login-Start)
-  oauthStates.set(state, { redirect: safeRedirect, redirect_uri: redirectUri, created: Date.now() });
+  const state = oauthStateErzeugen({ redirect: safeRedirect, redirect_uri: redirectUri });
 
   const params = new URLSearchParams({
     response_type: 'code',
@@ -361,9 +391,8 @@ app.get('/api/auth/callback', async (req, res) => {
   if (!code) return res.status(400).send('Kein Authorization Code erhalten');
 
   // Validate CSRF state
-  const storedState = typeof state === 'string' ? oauthStates.get(state) : undefined;
+  const storedState = oauthStatePruefen(state);
   if (!storedState) return res.status(400).send('Ungültiger oder abgelaufener State-Parameter (CSRF-Schutz)');
-  oauthStates.delete(state);
 
   // Sanitize redirect path: must be a relative path starting with /, prevent open redirect
   let redirectPath = storedState.redirect || '/';
@@ -1102,6 +1131,57 @@ app.get('/api/me/wohnung/:id', authMiddleware, async (req, res) => {
   }
 });
 
+// R2-S1a: Nach saveKontakte im Self-Service (person_sync ist dort 'on'):
+//  1. Ein Kontakt darf nur mit einer Person verknuepft werden, die er schon hatte, die
+//     eben neu angelegt wurde oder die der Anfragende selbst ist. Alles andere (bestehende
+//     fremde Person per Name/E-Mail gefunden) wird wieder geloest.
+//  2. Aenderungen an Name/E-Mail/Telefon/Adresse eines bestehend verknuepften Kontakts
+//     gehen wie bisher an die Person — ausser die Person haengt an weiteren Wohnungen
+//     oder hat ein eigenes Konto (dann pflegt sie das selbst bzw. die Verwaltung).
+// Pruefung auf der tatsaechlich gespeicherten Zeile, damit Normalisierung (Telefon,
+// Platzhalter-Adressen) keine Fehlalarme ausloest.
+async function meWohnungPersonenAbgleichen(client, wohnungId, bisherWerte, ichEmail) {
+  const nachher = (await client.query(
+    `SELECT k.id, k.person_id, k.name, k.email, k.telefon, k.adresse,
+            (p.created_at >= NOW()) AS person_neu, LOWER(COALESCE(p.email, '')) AS person_email
+       FROM wohnungen_kontakte k LEFT JOIN personen p ON p.id = k.person_id
+      WHERE k.wohnung_id = $1 AND k.archiviert_am IS NULL`, [wohnungId])).rows;
+  const istIch = (mail) => !!ichEmail && String(mail || '').toLowerCase() === ichEmail;
+  for (const n of nachher) {
+    const alt = bisherWerte.get(n.id);
+    const altPid = alt ? alt.person_id : null;
+    if (n.person_id && n.person_id !== altPid) {
+      if (!n.person_neu && !istIch(n.person_email)) {
+        await client.query('UPDATE wohnungen_kontakte SET person_id = $1 WHERE id = $2', [altPid, n.id]);
+      }
+      continue; // neue Verknuepfung: Werte stammen aus der Anlage, nichts weiterzugeben
+    }
+    if (!alt || !n.person_id) continue;
+    if (n.name === alt.name && n.email === alt.email && n.telefon === alt.telefon && n.adresse === alt.adresse) continue;
+    if (!istIch(alt.email)) {
+      const schutz = await client.query(
+        `SELECT EXISTS (SELECT 1 FROM wohnungen_kontakte WHERE person_id = $1 AND wohnung_id <> $2 AND archiviert_am IS NULL) AS geteilt,
+                EXISTS (SELECT 1 FROM users u JOIN personen p ON p.id = $1
+                         WHERE u.active = true AND u.email <> '' AND LOWER(u.email) IN (LOWER(COALESCE(p.email, '')), LOWER(COALESCE($3, '')))) AS konto`,
+        [n.person_id, wohnungId, alt.email]);
+      if (schutz.rows[0]?.geteilt || schutz.rows[0]?.konto) {
+        const e = new Error(`Die Kontaktdaten von «${String(alt.name || alt.email || '').slice(0, 80)}» gehören zu einer Person mit eigenem Konto oder weiteren Wohnungen. Name, E-Mail, Telefon und Adresse ändert die Person selbst im Profil oder die Verwaltung.`);
+        e.status = 409; throw e;
+      }
+    }
+    // Eine Adresse, die zu einem fremden Konto gehoert, nicht in eine Person schreiben
+    // (sonst gilt die Person in Zuordnungen per E-Mail als dieses Konto).
+    if (n.email && String(n.email).toLowerCase() !== String(alt.email || '').toLowerCase() && !istIch(n.email)) {
+      const fremd = await client.query('SELECT 1 FROM users WHERE active = true AND LOWER(email) = LOWER($1) LIMIT 1', [n.email]);
+      if (fremd.rows.length) { const e = new Error('Diese E-Mail-Adresse gehört zu einem anderen Konto.'); e.status = 409; throw e; }
+    }
+    // Wie der Trigger kontakte_propagate_to_person (der hier wegen person_sync schweigt).
+    await client.query(
+      `UPDATE personen SET name = COALESCE($1, name), email = $2, telefon = $3, adresse = $4, updated_at = NOW() WHERE id = $5`,
+      [n.name, n.email, n.telefon, n.adresse, n.person_id]);
+  }
+}
+
 // PUT /api/me/wohnung/:id — full update of own apartment (all fields + kontakte)
 // Same shape as PUT /api/wohnungen/:stweg/:id but ownership-checked instead of permission-checked
 app.put('/api/me/wohnung/:id', authMiddleware, async (req, res) => {
@@ -1112,7 +1192,7 @@ app.put('/api/me/wohnung/:id', authMiddleware, async (req, res) => {
     // Ganze Wohnung (Wertquote, Kontaktliste) aendern nur Eigentuemer/Verwalter —
     // Mieter pflegen ihre eigenen Daten ueber /api/me/kontakt.
     const own = await client.query(
-      `SELECT w.id, w.stweg, w.typ, w.bezeichnung FROM wohnungen w JOIN wohnungen_kontakte k ON k.wohnung_id = w.id
+      `SELECT w.id, w.stweg, w.typ, w.bezeichnung, w.besonderheiten, w.notizen FROM wohnungen w JOIN wohnungen_kontakte k ON k.wohnung_id = w.id
        WHERE w.id = $1 AND k.archiviert_am IS NULL AND k.rolle IN ('eigentuemer','verwalter')
          AND (($2 <> '' AND LOWER(k.email) = $2) OR ${kontaktNameTreffer('k.', '$3')}) LIMIT 1`,
       [req.params.id, email, name]
@@ -1127,6 +1207,21 @@ app.put('/api/me/wohnung/:id', authMiddleware, async (req, res) => {
     if (b.bezeichnung != null && b.bezeichnung !== own.rows[0].bezeichnung
         && (typeof b.bezeichnung !== 'string' || b.bezeichnung.length > 100 || /[<>"'&]/.test(b.bezeichnung) || hatSteuerzeichen(b.bezeichnung))) {
       return res.status(400).json({ error: 'Bezeichnung enthält unzulässige Zeichen' });
+    }
+    // Freitexte erscheinen in Objektverwaltung/STWEG-Seiten: keine HTML-Zeichen, keine
+    // Steuerzeichen (Zeilenumbruch/Tab in Notizen erlaubt). Unveraenderte Altwerte bleiben speicherbar.
+    for (const f of ['besonderheiten', 'notizen']) {
+      const v = b[f];
+      if (v == null || v === '' || v === own.rows[0][f]) continue;
+      if (typeof v !== 'string' || v.length > 5000 || /[<>]/.test(v) || /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(v)) {
+        return res.status(400).json({ error: `Ungültiger Wert: ${f}` });
+      }
+    }
+    // Wertquote: nur ganze Zahlen (sie fliesst in Abrechnungen und wird in Seiten angezeigt).
+    for (const f of ['wertquote_zaehler', 'wertquote_nenner']) {
+      const v = b[f];
+      if (v == null || v === '') continue;
+      if (!Number.isInteger(v) || v < 1 || v > 1000000) return res.status(400).json({ error: 'Wertquote muss eine ganze Zahl sein' });
     }
     // person_id nie aus der Anfrage: bestehende Kontakte behalten ihre Verknuepfung,
     // neue bekommt saveKontakte per find/create (vorher liess sich eine fremde Person anhaengen).
@@ -1144,6 +1239,12 @@ app.put('/api/me/wohnung/:id', authMiddleware, async (req, res) => {
       if (k.id && bisher.has(Number(k.id))) k.person_id = bisher.get(Number(k.id)); else delete k.person_id;
     }
     await client.query('BEGIN');
+    // R2-S1a: Waehrend des Speicherns nichts automatisch in personen zurueckschreiben
+    // (Trigger kontakte_propagate_to_person prueft dieses Setting). Sonst liess sich ein
+    // neuer Kontakt per Name an eine fremde Person haengen und deren E-Mail/Telefon
+    // im zweiten Schritt auf eigene Werte umschreiben (= fremde Identitaet uebernehmen).
+    // Die erlaubte Weitergabe macht unten personenAbgleichen() von Hand.
+    await client.query("SELECT set_config('rosenweg.person_sync', 'on', true)");
     const result = await client.query(
       `UPDATE wohnungen SET bezeichnung=COALESCE($1,bezeichnung), stockwerk=$2, zimmer=$3, flaeche_m2=$4,
         typ=COALESCE($5,typ), besonderheiten=$6, bewohnt_von=COALESCE($7,bewohnt_von),
@@ -1155,6 +1256,7 @@ app.put('/api/me/wohnung/:id', authMiddleware, async (req, res) => {
        b.wertquote_zaehler || null, b.wertquote_nenner || null, req.params.id]
     );
     await saveKontakte(client, result.rows[0].id, b.kontakte, stweg);
+    await meWohnungPersonenAbgleichen(client, result.rows[0].id, bisherWerte, email);
     await client.query('COMMIT');
     const w = await loadWohnungMitKontakte(result.rows[0].id);
     res.json(w);
@@ -1162,6 +1264,7 @@ app.put('/api/me/wohnung/:id', authMiddleware, async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK').catch(()=>{});
     console.error('[me/wohnung PUT] error:', err.message);
+    if (err.status === 400 || err.status === 409) return res.status(err.status).json({ error: err.message });
     res.status(500).json({ error: 'Fehler' });
   } finally {
     client.release();
@@ -1192,19 +1295,24 @@ app.post('/api/change-password', authMiddleware, async (req, res) => {
     return res.status(400).json({ error: 'Neues Passwort ist zu lang' });
   }
   const userId = req.user.user_id || req.user.id;
-  if (!rateLimitGuard('change-password', userId || req.user.email, 5, 60 * 60 * 1000).ok) {
-    return res.status(429).json({ error: 'Zu viele Versuche. Bitte später erneut versuchen.' });
-  }
   const sitzungsToken = (req.headers.authorization || '').replace(/^Bearer /, '');
   let sitzung;
   try {
+    // Frische in SQL pruefen (Uhr der DB, die created_at gesetzt hat — keine Abweichung
+    // zwischen API- und DB-Uhr, keine Zeitzonen-Deutung von created_at in node).
     sitzung = (await pool.query(
-      'SELECT created_at, id_token FROM sessions WHERE token = $1 AND user_id = $2', [sitzungsToken, userId])).rows[0];
+      `SELECT id_token, created_at > NOW() - make_interval(secs => $3) AS frisch
+         FROM sessions WHERE token = $1 AND user_id = $2`, [sitzungsToken, userId, PASSWORT_FRISCH_MS / 1000])).rows[0];
   } catch (err) {
     return res.status(500).json({ error: fehlerFuerClient(err, 'Fehler') });
   }
-  if (!sitzung || !sitzung.id_token || Date.now() - new Date(sitzung.created_at).getTime() > PASSWORT_FRISCH_MS) {
+  if (!sitzung || !sitzung.id_token || !sitzung.frisch) {
     return res.status(403).json({ error: 'Bitte zur Bestätigung neu anmelden und das Passwort danach innert 15 Minuten ändern.', reauth: true });
+  }
+  // Limit erst nach der Frische-Pruefung: sonst verbrauchten die 403-Runden (Seite
+  // fragt, wird zur Neuanmeldung geschickt) die Versuche und sperrten den Wechsel (R2-S1f).
+  if (!rateLimitGuard('change-password', userId || req.user.email, 5, 60 * 60 * 1000).ok) {
+    return res.status(429).json({ error: 'Zu viele Versuche. Bitte später erneut versuchen.' });
   }
 
   const email = req.user.email;
@@ -1356,6 +1464,27 @@ app.put('/api/me/phones', authMiddleware, async (req, res) => {
     });
   }
   try {
+    // Nummern sind unbestaetigt, werden aber fuer Zuordnung (WhatsApp/Anruf -> Person)
+    // genutzt (S1-2-1): eine NEUE Nummer, die schon bei einer anderen Person steht, ablehnen.
+    const meine = await pool.query(
+      `SELECT id, telefone FROM personen WHERE LOWER(email) = $1
+          OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(emails,'[]'::jsonb)) e WHERE LOWER(e) = $1)`, [email]);
+    const meineIds = meine.rows.map(r => r.id);
+    const ohneLeer = (v) => String(v || '').replace(/\s/g, '');
+    const bisher = new Set(meine.rows.flatMap(r => (Array.isArray(r.telefone) ? r.telefone : []).map(t => ohneLeer(t?.nummer))));
+    for (const t of cleaned) {
+      if (bisher.has(ohneLeer(t.nummer))) continue;
+      const varianten = [...new Set([ohneLeer(t.nummer), ohneLeer(normalizePhone(t.nummer))].filter(Boolean))];
+      const fremd = await pool.query(
+        `SELECT 1 FROM personen
+          WHERE NOT (id = ANY($2::int[]))
+            AND (REPLACE(COALESCE(telefon,''), ' ', '') = ANY($1::text[])
+              OR REPLACE(COALESCE(mobile,''), ' ', '') = ANY($1::text[])
+              OR EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(telefone, '[]'::jsonb)) x
+                          WHERE REPLACE(COALESCE(x->>'nummer',''), ' ', '') = ANY($1::text[])))
+          LIMIT 1`, [varianten, meineIds]);
+      if (fremd.rows.length) return res.status(409).json({ error: `Die Nummer ${t.nummer.slice(0, 40)} ist bereits bei einer anderen Person hinterlegt. Bitte bei der Verwaltung melden.` });
+    }
     const r = await pool.query(
       `UPDATE personen SET telefone = $1::jsonb, updated_at = NOW()
          WHERE LOWER(email) = $2
@@ -1387,6 +1516,25 @@ app.put('/api/me/emails', authMiddleware, async (req, res) => {
     cleaned.push(s);
   }
   try {
+    // Aliase sind unbestaetigt, zaehlen aber fuer Gruppen-/Broadcast-Aufloesung und
+    // Zuordnung (S1-2-1): ein NEUER Alias, der Konto-E-Mail oder Adresse einer anderen
+    // Person ist, wuerde deren Identitaet uebernehmen -> ablehnen.
+    const meine = await pool.query(
+      `SELECT id, emails FROM personen WHERE LOWER(email) = $1
+          OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(emails,'[]'::jsonb)) e WHERE LOWER(e) = $1)`, [email]);
+    const meineIds = meine.rows.map(r => r.id);
+    const bisher = new Set(meine.rows.flatMap(r => (Array.isArray(r.emails) ? r.emails : []).map(e => String(e).toLowerCase())));
+    const neu = cleaned.filter(a => a !== email && !bisher.has(a));
+    if (neu.length) {
+      const fremd = await pool.query(
+        `SELECT a FROM unnest($1::text[]) a
+          WHERE EXISTS (SELECT 1 FROM users u WHERE LOWER(u.email) = a)
+             OR EXISTS (SELECT 1 FROM personen p WHERE NOT (p.id = ANY($2::int[]))
+                          AND (LOWER(p.email) = a
+                               OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(p.emails,'[]'::jsonb)) e WHERE LOWER(e) = a)))
+          LIMIT 1`, [neu, meineIds]);
+      if (fremd.rows.length) return res.status(409).json({ error: `Die Adresse ${fremd.rows[0].a} gehört bereits zu einem anderen Konto oder einer anderen Person.` });
+    }
     const r = await pool.query(
       `UPDATE personen SET emails = $1::jsonb, updated_at = NOW()
          WHERE LOWER(email) = $2
@@ -1839,20 +1987,35 @@ async function buildTV7Epg() {
   xml += '</tv>\n';
   return { xml, channels: channels.size, programmes: programmes.length };
 }
-app.get('/api/tv/epg.xml', async (req, res) => {
-  try {
-    if (!_tv7EpgCache || (Date.now() - _tv7EpgCache.ts) > TV7_EPG_TTL) {
-      const built = await buildTV7Epg();
+// Ein Aufbau fuer alle gleichzeitigen Anfragen (S1-2-4): die Route ist offen, und
+// jeder Aufbau laedt ~90'000 Eintraege von Init7 — parallele Abrufe vervielfachten
+// Last und Speicher. Nach einem Fehlschlag eine Minute Pause statt Dauerversuchen.
+let _tv7EpgBau = null;
+let _tv7EpgFehlerTs = 0;
+function tv7EpgHolen() {
+  if (_tv7EpgCache && (Date.now() - _tv7EpgCache.ts) <= TV7_EPG_TTL) return Promise.resolve(_tv7EpgCache);
+  if (_tv7EpgBau) return _tv7EpgBau;
+  if (Date.now() - _tv7EpgFehlerTs < 60 * 1000) return Promise.reject(new Error('EPG-Aufbau kurz pausiert'));
+  _tv7EpgBau = buildTV7Epg()
+    .then(built => {
       _tv7EpgCache = { xml: built.xml, ts: Date.now() };
       console.log(`[TV7-EPG] gebaut: ${built.channels} Kanaele, ${built.programmes} Sendungen`);
-    }
+      return _tv7EpgCache;
+    })
+    .catch(e => { _tv7EpgFehlerTs = Date.now(); throw e; })
+    .finally(() => { _tv7EpgBau = null; });
+  return _tv7EpgBau;
+}
+app.get('/api/tv/epg.xml', async (req, res) => {
+  try {
+    const cache = await tv7EpgHolen();
     res.set('Content-Type', 'application/xml; charset=utf-8');
     res.set('Cache-Control', 'public, max-age=3600');
-    res.send(_tv7EpgCache.xml);
+    res.send(cache.xml);
   } catch (e) {
     if (_tv7EpgCache) { res.set('Content-Type', 'application/xml; charset=utf-8'); return res.send(_tv7EpgCache.xml); }
     console.error('[TV7-EPG] error:', e.message);
-    res.status(502).json({ error: e.message });
+    res.status(502).json({ error: 'EPG derzeit nicht verfügbar' });
   }
 });
 
@@ -2247,6 +2410,12 @@ app.get('/api/wasch/rooms', authMiddleware, async (req, res) => {
     const result = stweg
       ? await pool.query('SELECT * FROM wasch_rooms WHERE active = true AND stweg = $1 ORDER BY name', [stweg])
       : await pool.query('SELECT * FROM wasch_rooms WHERE active = true ORDER BY name');
+    // Mandantentrennung (S1-2-3): Nicht-Admins sehen nur Raeume ihrer STWEG(s) —
+    // gleiche Regel wie beim Reservieren (Raum ohne STWEG: jede STWEG-Zugehoerigkeit).
+    if (!req.user.isAdmin) {
+      const meine = getUserStwegs(req.user.groups || []);
+      return res.json(result.rows.filter(r => r.stweg ? meine.has(Number(r.stweg)) : meine.size > 0));
+    }
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: 'Fehler beim Laden der Räume' });
@@ -2301,6 +2470,12 @@ app.get('/api/wasch/reservations', authMiddleware, async (req, res) => {
        JOIN wasch_rooms rm ON rm.id = r.room_id
        WHERE r.cancelled = false`;
     const params = [];
+    // Mandantentrennung (S1-2-3): Nicht-Admins sehen Reservationen (mit Namen) nur
+    // in Raeumen ihrer STWEG(s), wie beim Reservieren.
+    if (!req.user.isAdmin) {
+      params.push([...getUserStwegs(req.user.groups || [])]);
+      query += ` AND (rm.stweg = ANY($${params.length}::int[]) OR (rm.stweg IS NULL AND cardinality($${params.length}::int[]) > 0))`;
+    }
     if (room_id) { params.push(room_id); query += ` AND r.room_id = $${params.length}`; }
     if (from) { params.push(from); query += ` AND r.end_time >= $${params.length}::timestamp`; }
     if (to) { params.push(to); query += ` AND r.start_time <= $${params.length}::timestamp`; }
@@ -4679,6 +4854,17 @@ async function pollGmailForVerteiler() {
               || /^X-Spam-Flag:\s*YES/im.test(headers) || /^X-Spam:\s*Yes/im.test(headers);
             if (ausSpamOrdner || authFehler) {
               console.log(`[Print] Rejected (spam=${ausSpamOrdner} authFehler=${authFehler}) from=${senderEmailRaw} to=${verteilerAddress}`);
+              await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
+              continue;
+            }
+            // Fremde Absender nur mit POSITIVEM DMARC-Befund drucken (S1-3): "kein dmarc=fail"
+            // reichte nicht — Domains ohne DMARC-Eintrag oder Mails ohne Pruefvermerk liessen
+            // sich mit gefaelschtem Absender drucken. Nur der OBERSTE Authentication-Results-
+            // Kopf zaehlt (den setzt unser Mailserver); tiefere kann der Absender mitschicken.
+            const arOben = (headers.match(/^Authentication-Results:[^\r\n]*(?:\r?\n[ \t][^\r\n]*)*/im) || [''])[0];
+            const dmarcPass = /\bdmarc=pass\b/i.test(arOben);
+            if (senderEmail && !senderEmail.endsWith(`@${VERTEILER_DOMAIN}`) && !dmarcPass) {
+              console.log(`[Print] Rejected (kein dmarc=pass) from=${senderEmailRaw} to=${verteilerAddress}`);
               await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
               continue;
             }
@@ -19238,17 +19424,20 @@ app.get('/api/reklamationen/:id/foto', authMiddleware, requirePermission('reklam
 // ─── Reparatur-Melder OHNE Login: per E-Mail-Code (OTP) fuer bekannte Bewohner ───
 // Schritt 1: Code anfordern (autorisiert gegen personen/users, Anti-Spam).
 app.post('/api/reklamationen/code', async (req, res) => {
+  const email = normEmail(req.body?.email);
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Gültige E-Mail erforderlich' });
+  // Globales Limit vor der Antwort; Limit je Adresse erst nach der Personen-Pruefung (S4-2-1).
+  if (!rateLimitGuard('otp-global', 'reklamation', 100, 10 * 60 * 1000).ok) return res.status(429).json({ error: 'Zu viele Anfragen. Bitte später erneut.' });
+  // Immer dieselbe Antwort, und SOFORT: Pruefung, Code und Mail laufen danach im
+  // Hintergrund — weder Laufzeit noch SMTP-Fehler verraten, ob die Adresse bekannt ist.
+  res.json({ ok: true, hinweis: 'Falls die Adresse im Verzeichnis steht, ist der Code unterwegs.' });
   try {
-    const email = normEmail(req.body?.email);
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Gültige E-Mail erforderlich' });
-    if (!ausstellenErlaubt(email, 'reklamation')) return res.status(429).json({ error: 'Zu viele Anfragen. Bitte später erneut.' });
-    // Immer dieselbe Antwort: sie verrät nicht, ob die Adresse im Bewohner-Verzeichnis steht.
-    const antwort = { ok: true, hinweis: 'Falls die Adresse im Verzeichnis steht, ist der Code unterwegs.' };
     // Autorisierung: E-Mail muss im Bewohner-Verzeichnis (personen) oder als aktiver user bekannt sein.
     const pr = await pool.query('SELECT name FROM personen WHERE LOWER(email) = $1 LIMIT 1', [email]);
     let name = pr.rows[0]?.name;
     if (!name) { const ur = await pool.query('SELECT name FROM users WHERE LOWER(email) = $1 AND active = true LIMIT 1', [email]); name = ur.rows[0]?.name; }
-    if (!name) return res.json(antwort);
+    if (!name) return;
+    if (!ausstellenErlaubt(email, 'reklamation')) { console.warn('[reklamation-code] Limit je Adresse erreicht'); return; }
     const code = await otpAusstellen(email, 'reklamation');
     await loggedSendMail({
       from: MAIL_FROM, to: email,
@@ -19263,8 +19452,7 @@ app.post('/api/reklamationen/code', async (req, res) => {
         <p style="color:#6b7280;font-size:14px;">10 Minuten gültig. Code in der Reparatur-App eingeben. Falls Sie ihn nicht angefordert haben, ignorieren Sie diese E-Mail.</p>
       </div>`,
     }, 'reklamation-code');
-    res.json(antwort);
-  } catch (e) { console.error('[reklamation-code]', e); res.status(500).json({ error: 'Fehler' }); }
+  } catch (e) { console.error('[reklamation-code]', e); }
 });
 
 // Schritt 2: oeffentlich melden (Code verifizieren -> Reklamation, ohne Session).
@@ -28787,6 +28975,15 @@ function startSshGithubAbgleich() {
 // über den getesteten resolveBroadcastRecipients('stweg:3').
 mountAlarmpanel({ app, authMiddleware, requireManage: requireTechnikOrPraesident, resolveBroadcastRecipients });
 mountDoodle({ app });
+
+// Letzter Fehler-Handler (S1-18): Fehler aus Routen (next(err), Multer, Router) ohne
+// Stacktrace beantworten — Express zeigt ihn sonst ausserhalb von NODE_ENV=production.
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  const status = Number.isInteger(err?.status) && err.status >= 400 && err.status < 500 ? err.status : 500;
+  if (status === 500) console.error('[fehler]', req.method, req.path, err?.message);
+  res.status(status).json({ error: status === 500 ? 'Interner Fehler' : status === 413 ? 'Anfrage zu gross' : 'Ungültige Anfrage' });
+});
 
 initDB()
   .then(() => {
