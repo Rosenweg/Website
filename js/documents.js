@@ -92,6 +92,8 @@ const RosenwegDocs = {
     this.container = document.getElementById(containerId);
     if (!this.container) return;
 
+    // Gruppen/Token erst nach der Anmeldepruefung lesen (nach dem Callback leer)
+    if (AuthentikAuth.ready) await AuthentikAuth.ready;
     const user = AuthentikAuth.getUser();
     this.groups = user?.groups || [];
     this.isTechnik = this.groups.some(g => g.toLowerCase() === 'technik');

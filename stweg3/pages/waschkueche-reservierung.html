@@ -370,7 +370,8 @@
     // ROOMS
     // ═══════════════════════════════════════════════════════════════
     async function loadRooms() {
-        rooms = await api('/api/wasch/rooms');
+        // Nur Waschkuechen dieser STWEG (ohne Filter kaemen die aller STWEGs)
+        rooms = await api('/api/wasch/rooms?stweg=3');
         const tabs = document.getElementById('roomTabs');
         tabs.innerHTML = rooms.map(r =>
             `<button onclick="selectRoom(${Number(r.id)})" data-room="${esc(r.id)}"
