@@ -507,7 +507,7 @@
             const tel = h.mobile || h.telefon;
             const telLink = tel ? `<a href="tel:${esc(tel.replace(/[^0-9+]/g,''))}" class="text-blue-600 hover:underline">${esc(tel)}</a>` : '';
             const mailLink = h.email ? `<a href="mailto:${esc(h.email)}" class="text-blue-600 hover:underline block">${esc(h.email)}</a>` : '';
-            const webLink = h.website ? `<a href="${esc(h.website.startsWith('http') ? h.website : 'https://' + h.website)}" target="_blank" rel="noopener" class="text-blue-600 hover:underline text-xs block">${esc(h.website)}</a>` : '';
+            const webLink = h.website ? `<a href="${esc(/^https?:\/\//i.test(h.website) ? h.website : 'https://' + h.website)}" target="_blank" rel="noopener" class="text-blue-600 hover:underline text-xs block">${esc(h.website)}</a>` : '';
             const chips = renderChips(h.leistungen);
             const personen = Array.isArray(h.personen) ? h.personen : [];
             let personenCell = '';
@@ -1008,13 +1008,15 @@
             return;
         }
         list.innerHTML = currentVertraege.map(v => {
-            const statusPill = `<span class="px-2 py-0.5 rounded text-xs font-medium pill-${v.status || 'aktiv'}">${esc(v.status || 'aktiv')}</span>`;
+            const statusPill = `<span class="px-2 py-0.5 rounded text-xs font-medium pill-${esc(v.status || 'aktiv')}">${esc(v.status || 'aktiv')}</span>`;
             const naechst = v.naechster_termin
                 ? `<span class="px-2 py-0.5 rounded text-xs ${dateClass(v.naechster_termin)}">${esc(fmtDate(v.naechster_termin))}</span>`
                 : '<span class="text-xs text-gray-400">—</span>';
-            const stweg = v.stweg ? `<span class="ml-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-xs">STWEG ${v.stweg}</span>` : '';
+            const stweg = v.stweg ? `<span class="ml-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-xs">STWEG ${esc(v.stweg)}</span>` : '';
             const kosten = v.jahres_kosten_chf ? `${parseFloat(v.jahres_kosten_chf).toLocaleString('de-CH', {minimumFractionDigits: 2})} CHF/J` : '';
-            const docLink = v.vertragsdokument_url ? ` · <a href="${esc(v.vertragsdokument_url)}" target="_blank" class="text-blue-600 hover:underline">Vertrag ↗</a>` : '';
+            // Nur http(s)- oder seitenrelative Links (kein javascript:/data: aus Freitext)
+            const docUrl = String(v.vertragsdokument_url || '').trim();
+            const docLink = docUrl && (/^https?:\/\//i.test(docUrl) || (docUrl.startsWith('/') && !docUrl.startsWith('//'))) ? ` · <a href="${esc(docUrl)}" target="_blank" rel="noopener" class="text-blue-600 hover:underline">Vertrag ↗</a>` : '';
             const editBtn = canWrite ? `<button data-edit-vertrag="${v.id}" class="text-blue-600 hover:underline text-xs">✎</button>` : '';
             const delBtn = canWrite ? `<button data-del-vertrag="${v.id}" class="text-red-600 hover:underline text-xs">×</button>` : '';
             return `<div class="vertrag-row py-2">
@@ -1178,7 +1180,7 @@
         banner.classList.remove('hidden');
         $('anstehend-count').textContent = `· ${verträge.length} Eintrag${verträge.length === 1 ? '' : 'e'}`;
         list.innerHTML = verträge.map(v => {
-            const stweg = v.stweg ? `<span class="ml-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-xs">STWEG ${v.stweg}</span>` : '';
+            const stweg = v.stweg ? `<span class="ml-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-xs">STWEG ${esc(v.stweg)}</span>` : '';
             const datum = `<span class="px-2 py-0.5 rounded text-xs ${dateClass(v.naechster_termin)}">${esc(fmtDate(v.naechster_termin))}</span>`;
             const editLink = canWrite ? `<button data-edit-handwerker="${v.handwerker_id}" class="text-xs text-blue-600 hover:underline">→</button>` : '';
             return `<div class="flex items-center justify-between gap-2 text-sm py-1">

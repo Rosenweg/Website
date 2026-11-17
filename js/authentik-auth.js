@@ -45,6 +45,11 @@ const AuthentikAuth = {
   SSO_PROBE_MS: 2500,
   SSO_PAUSE_KEY: 'rosenweg_sso_pause',
   SSO_PAUSE_MS: 6 * 60 * 60 * 1000,
+  // Merker "Anmeldung in diesem Browser gestartet": ein #auth=-Fragment ohne
+  // vorherigen login() stammt aus einem fremden Link (Anmeldung unter fremdem
+  // Konto unterschieben) und wird verworfen.
+  LOGIN_MARKER_KEY: 'rosenweg_login_gestartet',
+  LOGIN_MARKER_MS: 15 * 60 * 1000,
 
   async _ssoVersuch() {
     let uhr = null;
@@ -77,23 +82,39 @@ const AuthentikAuth = {
   /** Start login - redirect to Authentik via API */
   async login(redirectPath) {
     const redirect = redirectPath || window.location.pathname;
+    try { localStorage.setItem(this.LOGIN_MARKER_KEY, String(Date.now())); } catch (_) {}
     await this._ssoVersuch();
     window.location.href = `/api/auth/login?redirect=${encodeURIComponent(redirect)}`;
   },
 
   /** Process auth callback from URL hash (after Authentik redirect) */
+  // Aus dem Fragment wird nur das Token genommen, und nur wenn die Anmeldung in
+  // diesem Browser begonnen wurde. Das Nutzerobjekt im Fragment ist ungeprueft
+  // (Rechte/isAdmin frei faelschbar) -> es zaehlt nur, was /api/auth/me liefert.
+  // Die Pruefung laeuft im Hintergrund; init() wartet auf _callbackPruefung.
   handleCallback() {
     const hash = window.location.hash;
     if (!hash.startsWith('#auth=')) return false;
+    // Fragment sofort entfernen, egal ob gueltig (Token nicht in Verlauf/Lesezeichen)
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+
+    let gestartet = 0;
+    try {
+      gestartet = Number(localStorage.getItem(this.LOGIN_MARKER_KEY) || 0);
+      localStorage.removeItem(this.LOGIN_MARKER_KEY);
+    } catch (_) {}
+    if (!gestartet || Date.now() - gestartet > this.LOGIN_MARKER_MS) {
+      console.warn('Auth-Callback ohne eigene Anmeldung verworfen');
+      return false;
+    }
 
     try {
       const data = JSON.parse(decodeURIComponent(hash.substring(6)));
-      if (data.token && data.user) {
+      if (data.token && typeof data.token === 'string') {
         localStorage.setItem(this.SESSION_KEY, data.token);
-        localStorage.setItem(this.USER_KEY, JSON.stringify(data.user));
+        localStorage.removeItem(this.USER_KEY);
         this._setSharedToken(data.token);
-        // Clean URL hash
-        history.replaceState(null, '', window.location.pathname + window.location.search);
+        this._callbackPruefung = this.validateSession();
         return true;
       }
     } catch (e) {
@@ -138,7 +159,8 @@ const AuthentikAuth = {
   },
   _clearSharedToken() {
     const dom = this._cookieDomain();
-    if (dom) document.cookie = `${this.SESSION_KEY}=; domain=${dom}; path=/; max-age=0`;
+    const secure = location.protocol === 'https:' ? '; secure' : '';
+    if (dom) document.cookie = `${this.SESSION_KEY}=; domain=${dom}; path=/; max-age=0; samesite=lax${secure}`;
   },
 
   /** Check if current user is admin */
@@ -233,10 +255,13 @@ const AuthentikAuth = {
    * If requireAdmin is true, shows error for non-admins.
    */
   async init({ requireAuth = true, requireAdmin = false, onLogin, onLogout } = {}) {
-    // Handle OAuth callback
+    // Handle OAuth callback (Token wird gegen /api/auth/me geprueft)
     if (this.handleCallback()) {
-      if (onLogin) onLogin(this.getUser());
-      return this.getUser();
+      const ok = await this._callbackPruefung;
+      if (ok) {
+        if (onLogin) onLogin(this.getUser());
+        return this.getUser();
+      }
     }
 
     // Check existing session

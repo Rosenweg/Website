@@ -143,14 +143,16 @@
         const el = $('#door-groups-mgmt'); if (!el) return;
         try {
             const { groups } = await api('/door-groups');
-            const items = groups.map(g => `<div class="flex items-center justify-between border-b last:border-0 px-3 py-2">
+            const items = groups.map((g, i) => `<div class="flex items-center justify-between border-b last:border-0 px-3 py-2">
                 <div><div class="font-medium text-sm">${esc(g.name)}</div>
                 <div class="text-xs text-gray-500">${(g.door_ids || []).length} Tür(en) · Gruppen: ${(g.authentik_groups || []).map(esc).join(', ') || '—'}</div></div>
-                <div class="whitespace-nowrap"><button onclick='editDoorGroup(${JSON.stringify(g).replace(/'/g, "&#39;")})' class="text-blue-600 hover:underline text-xs">Bearbeiten</button>
+                <div class="whitespace-nowrap"><button data-tuergruppe="${i}" class="text-blue-600 hover:underline text-xs">Bearbeiten</button>
                 <button onclick="delDoorGroup(${g.id})" class="text-red-600 hover:underline text-xs ml-2">Löschen</button></div></div>`).join('');
             el.innerHTML = `<div class="flex items-center justify-between mb-2"><h2 class="text-sm font-semibold text-gray-600">Tür-Gruppen (Gebäude)</h2>
                 <button onclick="editDoorGroup()" class="text-sm bg-gray-100 hover:bg-gray-200 rounded-lg px-3 py-1.5">+ Neu</button></div>
                 <div class="bg-white rounded-xl border">${items || '<div class="text-gray-400 text-sm px-3 py-3">Noch keine Tür-Gruppen. Bündle Türen z.B. nach Gebäude (R9, …) und gib der Gruppe Authentik-Gruppen — gilt dann für alle Türen der Gruppe.</div>'}</div>`;
+            // Gruppe per Index statt als JSON im onclick (Entities im Namen brachen aus dem Attribut aus)
+            el.querySelectorAll('[data-tuergruppe]').forEach(b => b.addEventListener('click', () => editDoorGroup(groups[Number(b.dataset.tuergruppe)])));
         } catch (e) { el.innerHTML = `<div class="text-red-500 text-sm">${esc(e.message)}</div>`; }
     }
     async function editDoorGroup(g) {

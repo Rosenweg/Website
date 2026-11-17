@@ -493,7 +493,8 @@
     </div>
 
     <script>
-        const esc = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : '';
+        // Vollstaendig escapen (auch '), Werte landen in Attributen und Text
+        const esc = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;') : '';
 
         const ROLLEN = [
             { value: 'eigentuemer', label: 'Eigentümer', color: 'green' },
@@ -788,7 +789,7 @@
                 const mieterName = getKontaktName(w, 'mieter');
                 const verwalterName = getKontaktName(w, 'verwalter');
                 const wq = (w.wertquote_zaehler && w.wertquote_nenner) ? `${w.wertquote_zaehler}/${w.wertquote_nenner} ‰` : '';
-                const details = [w.zimmer ? `${w.zimmer} Zi.` : '', w.flaeche_m2 ? `${w.flaeche_m2} m²` : '', wq].filter(Boolean).join(', ');
+                const details = esc([w.zimmer ? `${w.zimmer} Zi.` : '', w.flaeche_m2 ? `${w.flaeche_m2} m²` : '', wq].filter(Boolean).join(', '));
 
                 return `
                 <div class="bg-white rounded-lg border p-4 hover:shadow-sm transition cursor-pointer" onclick="editWohnung(${w.id})">
@@ -838,7 +839,7 @@
             const isVorgemerkt = gueltigAbVal && gueltigAbVal > heute;
             const passiveCls = isVorgemerkt ? 'opacity-60' : '';
             const passiveBadge = isVorgemerkt
-                ? `<span class="text-[11px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-medium">vorgemerkt ab ${gueltigAbVal}</span>`
+                ? `<span class="text-[11px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-medium">vorgemerkt ab ${esc(gueltigAbVal)}</span>`
                 : '';
 
             return `
@@ -940,7 +941,7 @@
                     if (!data.results?.length) { dropdown.classList.add('hidden'); return; }
                     dropdown.innerHTML = data.results.map(r => {
                         const label = r.attrs.label.replace(/<[^>]*>/g, '');
-                        return `<div class="px-3 py-2 text-sm hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-0" data-addr="${esc(label)}" onmousedown="selectAddress(this)">${r.attrs.label}</div>`;
+                        return `<div class="px-3 py-2 text-sm hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-0" data-addr="${esc(label)}" onmousedown="selectAddress(this)">${esc(label)}</div>`;
                     }).join('');
                     dropdown.classList.remove('hidden');
                 } catch(e) { dropdown.classList.add('hidden'); }
@@ -1078,8 +1079,8 @@
                                     <td>${esc(k.name || '')}</td>
                                     <td>${esc(k.email || '')}</td>
                                     <td>${esc(k.telefon || '')}</td>
-                                    <td class="text-right text-xs text-gray-500">${k.gueltig_ab ? String(k.gueltig_ab).slice(0,10) : '–'}</td>
-                                    <td class="text-right text-xs text-gray-500">${String(k.archiviert_am).slice(0,10)}</td>
+                                    <td class="text-right text-xs text-gray-500">${k.gueltig_ab ? esc(String(k.gueltig_ab).slice(0,10)) : '–'}</td>
+                                    <td class="text-right text-xs text-gray-500">${esc(String(k.archiviert_am).slice(0,10))}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -1278,7 +1279,7 @@
                 // Populate STWEG filter
                 const stwegs = [...new Set(eigentuemerData.flatMap(e => e.objects.map(o => o.stweg)))].sort();
                 const sel = document.getElementById('eig-stweg-filter');
-                sel.innerHTML = '<option value="">Alle STWEGs</option>' + stwegs.map(s => `<option value="${s}">STWEG ${s}</option>`).join('');
+                sel.innerHTML = '<option value="">Alle STWEGs</option>' + stwegs.map(s => `<option value="${esc(s)}">STWEG ${esc(s)}</option>`).join('');
                 renderEigentuemer();
             } catch (e) {
                 document.getElementById('eig-tbody').innerHTML = `<tr><td colspan="6" class="text-center text-red-600 py-6">Fehler: ${esc(e.message)}</td></tr>`;
@@ -1300,7 +1301,7 @@
                 }
                 return true;
             });
-            const groupObj = (objs, typ) => objs.filter(o => o.typ === typ).map(o => `STWEG ${o.stweg} · ${o.bezeichnung}`).join(', ');
+            const groupObj = (objs, typ) => objs.filter(o => o.typ === typ).map(o => esc(`STWEG ${o.stweg} · ${o.bezeichnung}`)).join(', ');
             const stats = {
                 eig: filtered.filter(e => (e.rollen||[]).includes('eigentuemer')).length,
                 ver: filtered.filter(e => (e.rollen||[]).includes('verwalter')).length,
@@ -1321,7 +1322,7 @@
             tbody.innerHTML = filtered.map(e => {
                 const wohnungen = groupObj(e.objects, 'Wohnung');
                 const parkpl = groupObj(e.objects, 'Parkplatz');
-                const sonstige = e.objects.filter(o => o.typ !== 'Wohnung' && o.typ !== 'Parkplatz').map(o => `${o.typ} (STWEG ${o.stweg} · ${o.bezeichnung})`).join(', ');
+                const sonstige = e.objects.filter(o => o.typ !== 'Wohnung' && o.typ !== 'Parkplatz').map(o => esc(`${o.typ} (STWEG ${o.stweg} · ${o.bezeichnung})`)).join(', ');
                 // Wertquoten nur über Eigentümer-Objekte zählen, nicht über Verwalter
                 const wq = e.objects.filter(o => o.rolle === 'eigentuemer').reduce((sum, o) => sum + (o.wertquote_zaehler || 0), 0);
                 const isDrucker = (e.email||'').startsWith('druckerr9+') || (e.email||'').startsWith('druckerr13+');
@@ -1337,7 +1338,7 @@
                     <td class="px-3 py-2 text-xs">${wohnungen || '<span class="text-gray-300">–</span>'}</td>
                     <td class="px-3 py-2 text-xs">${parkpl || '<span class="text-gray-300">–</span>'}</td>
                     <td class="px-3 py-2 text-xs">${sonstige || '<span class="text-gray-300">–</span>'}</td>
-                    <td class="px-3 py-2 text-right font-mono">${wq || ''}</td>
+                    <td class="px-3 py-2 text-right font-mono">${esc(wq || '')}</td>
                 </tr>`;
             }).join('');
         }
@@ -1566,7 +1567,7 @@
             }
         }
         function escapeHtml(s) {
-            return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
         }
 
         // ══════════════════════════════
@@ -1667,7 +1668,7 @@
                         <button onclick="editUser(${u.pk})" class="p-2 text-gray-400 hover:text-blue-600 rounded-lg hover:bg-blue-50 transition" title="Bearbeiten">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
                         </button>
-                        <button onclick="removeUser(${u.pk}, '${esc(u.name || u.username)}')" class="p-2 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition" title="Entfernen">
+                        <button data-aktion="removeUser" data-pk="${esc(u.pk)}" data-name="${esc(u.name || u.username)}" class="p-2 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition" title="Entfernen">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                         </button>
                     </div>` : '';
@@ -1805,6 +1806,11 @@
             btn.textContent = 'Speichern';
         }
 
+        // Entfernen-Knopf: Daten aus data-Attributen statt aus onclick-String (XSS ueber Namen)
+        document.addEventListener('click', ev => {
+            const b = ev.target.closest('[data-aktion="removeUser"]');
+            if (b) removeUser(Number(b.dataset.pk), b.dataset.name);
+        });
         async function removeUser(pk, name) {
             if (!confirm(`"${name}" wirklich entfernen?\n\nDer Benutzer wird deaktiviert.`)) return;
             try {

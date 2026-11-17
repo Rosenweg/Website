@@ -266,7 +266,8 @@
       fw.classList.remove('hidden');
       AuthentikAuth.apiFetch('/api/reklamationen/' + encodeURIComponent(id) + '/foto', { cache: 'no-store' })
         .then(resp => resp.ok ? resp.blob() : null)
-        .then(b => { if (b) { editFotoUrl = URL.createObjectURL(b); fi.src = editFotoUrl; } else { fi.alt = 'Foto nicht ladbar'; } })
+        // Nur Rasterbilder als Blob zeigen/oeffnen: ein SVG/HTML-Blob liefe beim Oeffnen auf unserer Origin (XSS)
+        .then(b => { if (b && ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/heic', 'image/heif'].includes(String(b.type).split(';')[0].trim().toLowerCase())) { editFotoUrl = URL.createObjectURL(b); fi.src = editFotoUrl; } else { fi.alt = 'Foto nicht ladbar'; } })
         .catch(() => { fi.alt = 'Foto-Fehler'; });
     } else { fw.classList.add('hidden'); }
     // Verlauf/History laden

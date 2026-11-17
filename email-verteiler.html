@@ -547,12 +547,17 @@
                                     <span>Reply-To: ${v.reply_to === 'list' ? 'Liste' : 'Absender'}</span>
                                 </div>
                             </div>
-                            <button onclick="event.stopPropagation(); deleteVerteiler(${v.id}, '${escapeHtml(v.name)}')" class="ml-2 text-gray-400 hover:text-red-500" title="Löschen">
+                            <button data-loesch-id="${escapeHtml(v.id)}" data-name="${escapeHtml(v.name)}" class="ml-2 text-gray-400 hover:text-red-500" title="Löschen">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                             </button>
                         </div>
                     </div>`;
                 }).join('');
+                // Loeschen: Name aus data-Attribut statt aus onclick-String (XSS ueber Verteilernamen)
+                el.querySelectorAll('button[data-loesch-id]').forEach(b => b.addEventListener('click', (ev) => {
+                    ev.stopPropagation();
+                    deleteVerteiler(Number(b.dataset.loeschId), b.dataset.name);
+                }));
             } catch (err) {
                 el.innerHTML = '<div class="text-sm text-red-500 text-center py-4">Fehler beim Laden.</div>';
             }
@@ -966,10 +971,9 @@
             if (e.target === this) closeModal();
         });
 
+        // Vollstaendig escapen: textContent->innerHTML liess " und ' durch (Attribute)
         function escapeHtml(str) {
-            const div = document.createElement('div');
-            div.textContent = str;
-            return div.innerHTML;
+            return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
         }
     </script>
 </body>

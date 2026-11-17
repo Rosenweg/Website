@@ -197,20 +197,28 @@
                         const key = `${group}::${p.id}`;
                         const access = permMap[key] || 'none';
                         return `<td class="px-3 py-2 text-center">
-                            <button onclick="cyclePermission('${escAttr(group)}', '${p.id}')"
-                                class="perm-${access} px-3 py-1 rounded-full text-xs font-medium cursor-pointer hover:opacity-80 transition min-w-[60px]">
-                                ${access}
+                            <button data-aktion="cycle" data-gruppe="${esc(group)}" data-seite="${esc(p.id)}"
+                                class="perm-${esc(access)} px-3 py-1 rounded-full text-xs font-medium cursor-pointer hover:opacity-80 transition min-w-[60px]">
+                                ${esc(access)}
                             </button>
                         </td>`;
                     }).join('')}
                     <td class="px-3 py-2">
-                        <button onclick="removeGroup('${escAttr(group)}')" class="text-gray-400 hover:text-red-500 p-1" title="Gruppe entfernen">
+                        <button data-aktion="remove" data-gruppe="${esc(group)}" class="text-gray-400 hover:text-red-500 p-1" title="Gruppe entfernen">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                         </button>
                     </td>
                 </tr>
             `).join('');
         }
+
+        // Knoepfe der Matrix: Werte aus data-Attributen statt aus onclick-Strings (escAttr war unvollstaendig)
+        document.addEventListener('click', (e) => {
+            const b = e.target.closest('button[data-aktion]');
+            if (!b) return;
+            if (b.dataset.aktion === 'cycle') cyclePermission(b.dataset.gruppe, b.dataset.seite);
+            else if (b.dataset.aktion === 'remove') removeGroup(b.dataset.gruppe);
+        });
 
         function cyclePermission(group, page) {
             const key = `${group}::${page}`;
@@ -270,9 +278,7 @@
 
         function esc(str) {
             if (!str) return '';
-            const d = document.createElement('div');
-            d.textContent = str;
-            return d.innerHTML;
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
         }
 
         function escAttr(str) {
