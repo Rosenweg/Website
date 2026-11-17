@@ -420,7 +420,10 @@
       try {
         const resp = await AuthentikAuth.apiFetch('/api/reklamationen/' + encodeURIComponent(r.id) + '/foto', { cache: 'no-store' });
         if (!resp.ok) { imgEl.alt = 'Foto nicht ladbar'; continue; }
-        const url = URL.createObjectURL(await resp.blob());
+        // Nur Rasterbilder als Blob-URL verwenden (SVG/HTML-Blob waere auf unserer Origin aktiv)
+        const blob = await resp.blob();
+        if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/heic', 'image/heif'].includes(String(blob.type).split(';')[0].trim().toLowerCase())) { imgEl.alt = 'Foto nicht ladbar'; continue; }
+        const url = URL.createObjectURL(blob);
         fotoUrls.set(String(r.id), url);
         imgEl.src = url;
       } catch { imgEl.alt = 'Foto-Fehler'; }

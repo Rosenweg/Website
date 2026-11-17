@@ -81,7 +81,7 @@
         const projects = await resp.json();
         const tabs = document.getElementById('project-tabs');
         tabs.innerHTML = projects.map((p, i) => `
-            <button onclick="loadProject(${jsArg(p.slug)})" id="tab-${p.slug}"
+            <button onclick="loadProject(${jsArg(p.slug)})" id="tab-${esc(p.slug)}"
                 class="whitespace-nowrap py-3 px-1 border-b-2 text-sm font-medium transition ${i === 0 ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-gray-500 hover:text-gray-700'}">
                 ${esc(p.title)}
             </button>`).join('');
@@ -164,7 +164,7 @@
                         <div class="flex flex-wrap gap-3 mt-2 text-sm text-gray-500">
                             ${c.telefon ? `<span>Tel: ${esc(c.telefon)}</span>` : ''}
                             ${c.email ? `<span>${esc(c.email)}</span>` : ''}
-                            ${c.webseite ? `<a href="${esc(c.webseite)}" target="_blank" class="text-emerald-600 hover:underline">Webseite</a>` : ''}
+                            ${c.webseite ? `<a href="${esc(sichereUrl(c.webseite))}" target="_blank" rel="noopener noreferrer" class="text-emerald-600 hover:underline">Webseite</a>` : ''}
                         </div>
                         ${c.offerte_betrag ? `<p class="mt-2 text-sm"><span class="font-medium">Offerte:</span> ${esc(c.offerte_betrag)}</p>` : ''}
                         ${c.offerte_details ? `<p class="text-sm text-gray-500">${esc(c.offerte_details)}</p>` : ''}
@@ -559,7 +559,7 @@
             const name = f.path.split('/').pop();
             const size = f.size ? ` <span class="text-gray-400">(${formatSize(f.size)})</span>` : '';
             return `<div class="flex items-center justify-between py-2 border-b last:border-0">
-                <a href="${esc(f.url)}" target="_blank" class="text-emerald-700 hover:underline flex-1 truncate">${esc(name)}${size}</a>
+                <a href="${esc(sichereUrl(f.url))}" target="_blank" class="text-emerald-700 hover:underline flex-1 truncate">${esc(name)}${size}</a>
                 ${canEdit ? `<button onclick="deleteDoc(${jsArg(f.path)})" class="text-red-300 hover:text-red-500 ml-2 text-xs" title="Löschen">&times;</button>` : ''}
             </div>`;
         }).join('');
@@ -571,7 +571,7 @@
         const directHtml = directFiles.map(f => {
             const name = f.path.split('/').pop();
             return `<span class="inline-flex items-center gap-1 bg-gray-50 rounded px-1.5 py-0.5">
-                <a href="${esc(f.url)}" target="_blank" class="text-emerald-600 hover:underline">${esc(name)}</a>
+                <a href="${esc(sichereUrl(f.url))}" target="_blank" class="text-emerald-600 hover:underline">${esc(name)}</a>
                 ${canEdit ? `<button onclick="deleteDoc(${jsArg(f.path)})" class="text-red-300 hover:text-red-500">&times;</button>` : ''}
             </span>`;
         }).join(' ');
@@ -581,9 +581,9 @@
         const linkedHtml = linked.map(a => {
             const name = a.doc_path.split('/').pop();
             const doc = projectDocs.find(d => d.path === a.doc_path);
-            const url = doc ? doc.url : `/api/documents/${a.doc_path}`;
+            const url = doc ? doc.url : `/api/documents/${String(a.doc_path).split('/').map(encodeURIComponent).join('/')}`;
             return `<span class="inline-flex items-center gap-1 bg-blue-50 rounded px-1.5 py-0.5">
-                <a href="${url}" target="_blank" class="text-blue-600 hover:underline">${esc(name)}</a>
+                <a href="${esc(sichereUrl(url))}" target="_blank" class="text-blue-600 hover:underline">${esc(name)}</a>
                 ${canEdit ? `<button onclick="unlinkDoc(${a.id})" class="text-red-300 hover:text-red-500" title="Verknüpfung lösen">&times;</button>` : ''}
             </span>`;
         }).join(' ');
@@ -688,6 +688,8 @@
 
     // Vollstaendig escapen — der fruehere textContent/innerHTML-Trick liess " und ' durch (unsicher in Attributen)
     function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+    // Links nur http(s)/mailto/tel oder seitenrelativ – javascript:/data: aus Freitext (Webseite) sperren
+    function sichereUrl(u) { const s = String(u ?? '').trim(); return /^(https?:|mailto:|tel:)/i.test(s) || (s.startsWith('/') && !s.startsWith('//')) ? s : '#'; }
     // Wert als JS-Argument in ein HTML-Attribut: erst JSON, dann HTML-escapen
     const jsArg = s => esc(JSON.stringify(String(s ?? '')));
 

@@ -749,7 +749,9 @@
         if (img) {
           try {
             const resp = await AuthentikAuth.apiFetch('/api/reklamationen/meine/' + r.id + '/foto', { cache: 'no-store' });
-            if (resp.ok) { const url = URL.createObjectURL(await resp.blob()); img.src = url; img.addEventListener('click', () => window.open(url)); }
+            // Nur Rasterbilder als Blob oeffnen: ein SVG/HTML-Blob liefe in window.open auf unserer Origin (XSS)
+            const blob = resp.ok ? await resp.blob() : null;
+            if (blob && ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/heic', 'image/heif'].includes(String(blob.type).split(';')[0].trim().toLowerCase())) { const url = URL.createObjectURL(blob); img.src = url; img.addEventListener('click', () => window.open(url)); }
             else img.alt = 'Foto nicht ladbar';
           } catch { img.alt = 'Foto-Fehler'; }
         }
