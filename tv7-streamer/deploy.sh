@@ -25,6 +25,8 @@ fi
 
 # Stelle sicher dass /opt/tv7-streamer existiert
 ssh "$PVE" "pct exec $CT -- mkdir -p /opt/tv7-streamer"
+# Dienst-Benutzer (Unit: User=tv7; kein DynamicUser im CT ohne nesting, R2-Dh)
+ssh "$PVE" "pct exec $CT -- bash -c 'id tv7 >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin tv7'"
 
 # server.js + service-Unit pushen
 scp "$SRC_DIR/server.js" "$PVE":/tmp/server.js

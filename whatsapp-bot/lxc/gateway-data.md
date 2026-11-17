@@ -10,7 +10,7 @@ Reproduktion bei Neuaufbau.
 Annahme, wenn **Quell-IP (`smtp_ips`) ODER Absender (`smtp_senders`)** gewhitelistet
 ist — **ausser** die Quelle ist eine Internet-Quelle (`GW_SMTP_STRENG_IPS`, Default PMG
 `100.64.2.31`): dann **muss** der Absender in `smtp_senders` stehen und Empfänger sind
-**nur Aliase** (keine freien Nummern/Gruppennamen/JIDs). Seit 17.11.2026 (D-2). Absender per exakter Adresse ODER ganzer Domain (`@domain`, **kein** Subdomain-Match).
+**nur Aliase** (keine freien Nummern/Gruppennamen/JIDs). Seit 17.11.2026 (D-2). Ausnahme (R2-De): Mail-Antwort an `nummer@…` (Reply-To einer WA→Mail-Weiterleitung) wird angenommen, wenn genau dieser Absender zuletzt per Mail an diese Nummer geschrieben hat. Absender per exakter Adresse ODER ganzer Domain (`@domain`, **kein** Subdomain-Match).
 
 | addr | Zweck |
 |---|---|

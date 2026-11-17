@@ -53,8 +53,16 @@ def consume_agi_env():
             return
 
 
+def agi_sauber(v, maxlen=60):
+    """Wert fuer eine AGI-Befehlszeile: ohne Steuerzeichen (ein Zeilenumbruch
+    waere ein zweiter AGI-Befehl, D-4), ohne Anfuehrungszeichen/Backslash, kurz."""
+    v = re.sub(r'[\x00-\x1f\x7f"\\]', ' ', str(v or ''))
+    return re.sub(r'\s+', ' ', v).strip()[:maxlen]
+
+
 def log(msg):
-    print(f'VERBOSE "[conf-invite] {msg}" 1')
+    # Meldung enthaelt API-Namen/Fehlertexte -> bereinigen (R2-Dd).
+    print(f'VERBOSE "[conf-invite] {agi_sauber(msg, 200)}" 1')
     sys.stdout.flush()
     sys.stdin.readline()
 

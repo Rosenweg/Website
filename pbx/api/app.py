@@ -545,8 +545,14 @@ def regenerate_phones_conf(conn):
     for r in rows:
         ext, name, secret, ctx = r["ext"], r["name"], r["secret"], r["context"]
         # Altbestand absichern: nichts, was eine neue Zeile oder einen Abschnitt beginnt.
-        if not re.fullmatch(r"[0-9]{2,8}", str(ext)) or not re.fullmatch(r"[A-Za-z0-9._~-]{8,64}", str(secret or "")) \
+        # Secret nur auf Zeilenumbruch/Steuerzeichen und [ ] pruefen (R2-Df): aeltere
+        # Secrets mit anderen Sonderzeichen sollen nicht still wegfallen; neue
+        # Secrets prueft sip_ext_create ohnehin streng.
+        if not re.fullmatch(r"[0-9]{2,8}", str(ext)) or not re.fullmatch(r"[^\x00-\x1f\x7f\[\]]{1,128}", str(secret or "")) \
                 or ctx not in SIP_KONTEXTE:
+            # Laut melden statt still auslassen: sonst faellt ein Telefon ohne Hinweis aus.
+            print(f"[pbx-api] SIP-Extension {re.sub(r'[^0-9A-Za-z]', '?', str(ext))[:12]} "
+                  "nicht in pjsip_phones.conf geschrieben (ungueltige Extension/Secret/Kontext)", flush=True)
             continue
         name = re.sub(r'[\x00-\x1f\x7f"<>\[\];\\]', " ", str(name or ""))[:60]
         # Kanonisches PJSIP-Muster: endpoint/auth/aor TEILEN den Namen (= Extension).
