@@ -72,9 +72,13 @@ unser() {
 # uebrigen holten stillschweigend nichts, und niemand merkte es.
 hole() {
   if command -v curl >/dev/null 2>&1; then
-    # Token ueber stdin (-H @-): als Argument stuende er in der Prozessliste.
-    printf 'X-Host-Token: %s\nX-Host-Name: %s\n' "$HOST_TOKEN" "$HOST_NAME" | \
-      curl -fsS --max-time 20 -H @- "$1"
+    # Token ueber stdin: als Argument stuende er in der Prozessliste.
+    # -K - (Konfig "header = ...") statt -H @-, das erst curl >= 7.55 kennt
+    # (R3-Ie). In "..." muessen \ und " maskiert sein.
+    printf 'header = "X-Host-Token: %s"\nheader = "X-Host-Name: %s"\n' \
+        "$(printf '%s' "$HOST_TOKEN" | sed 's/[\\"]/\\&/g')" \
+        "$(printf '%s' "$HOST_NAME" | sed 's/[\\"]/\\&/g')" | \
+      curl -fsS --max-time 20 -K - "$1"
   elif command -v wget >/dev/null 2>&1; then
     wget -q -O - -T 20 \
          --header="X-Host-Token: $HOST_TOKEN" --header="X-Host-Name: $HOST_NAME" "$1"

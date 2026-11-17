@@ -251,6 +251,13 @@ function startGateway(botCore) {
       const absender = String(session.envelope?.mailFrom?.address || '').trim().toLowerCase();
       const bridge = absender ? q.bridgeLookup.get(local + '@c.us') : null;
       if (bridge && String(bridge.sender || '').trim().toLowerCase() === absender && senderInList(absender)) return true;
+      // Antwort auf eine Regel-Weiterleitung (wa_forwards, R3-Dd): Absender ist
+      // als Empfaenger einer Regel fuer genau diese Nummer/JID eingetragen.
+      if (absender && senderInList(absender)) {
+        const regel = [...q.fwdMatch.all('number', local), ...q.fwdMatch.all('jid', local + '@c.us')]
+          .some(r => String(r.email || '').trim().toLowerCase() === absender);
+        if (regel) return true;
+      }
     }
     return false;
   }
@@ -355,6 +362,28 @@ function startGateway(botCore) {
   // 1) Reverse-Proxy fuer /api/* -> Haupt-API (Authentik-Login + /api/me).
   //    MUSS vor express.json() stehen, sonst wird der Body konsumiert.
   if (MAIN_API_BASE) {
+    // Nur die Pfade, die public/ wirklich braucht (D-3-1): ein offener Proxy
+    // fuer alle /api/* umging die nginx-Drosseln der Haupt-API (rw_otp usw.),
+    // weil alle Anfragen von hier mit der Gateway-IP ankommen. Exakter Pfad,
+    // kodierte/verschleierte Pfade (%, \, ..) gar nicht erst weiterreichen.
+    const PROXY_ERLAUBT = {
+      '/api/auth/login': ['GET'],
+      '/api/auth/callback': ['GET'],
+      '/api/auth/logout': ['GET'],
+      '/api/auth/me': ['GET'],
+      '/api/whatsapp/admin/recipients': ['GET'],
+      '/api/whatsapp/admin/broadcast': ['POST'],
+    };
+    app.use('/api', (req, res, next) => {
+      const roh = String(req.originalUrl || '');
+      const pfad = roh.split('?')[0];
+      if (/[%\\]/.test(pfad) || pfad.split('/').some(s => s === '.' || s === '..')
+          || !Object.prototype.hasOwnProperty.call(PROXY_ERLAUBT, pfad)
+          || !PROXY_ERLAUBT[pfad].includes(req.method)) {
+        return res.status(404).json({ error: 'Nicht gefunden' });
+      }
+      next();
+    });
     app.use('/api', createProxyMiddleware({
       target: MAIN_API_BASE,
       changeOrigin: true,
