@@ -40,7 +40,12 @@ Schaden, den ein Fehler anrichten kann:
 **Wir fassen nur an, was wir selbst angelegt haben.** Jedes erzeugte Konto
 kommt in die Gruppe `rw-verwaltet`. Ein von Hand angelegtes Konto gleichen
 Namens bleibt unberührt, auch wenn es in der Matrix steht. Systemkonten
-(UID unter 1000) und `root` sind ohnehin tabu.
+(UID unter 1000) und `root` sind ohnehin tabu. Auch `rw-authorized-keys`
+liefert Schlüssel nur für Mitglieder von `rw-verwaltet` — sonst bekäme ein
+lokales Betriebskonto (`claude`, `ansible`, `pi` …) die Portal-Schlüssel
+einer gleichnamigen Person. Soll ein von Hand angelegtes Konto trotzdem
+Schlüssel aus dem Portal bekommen, steht es ausdrücklich in
+`/etc/rosenweg-ssh.conf`: `SCHLUESSEL_AUCH_FUER="login1 login2"`.
 
 **Ein Konto braucht einen Schlüssel.** Wer keinen hinterlegt hat, bekommt
 keines — ein Konto ohne Schlüssel wäre eine Tür ohne Klinke.
