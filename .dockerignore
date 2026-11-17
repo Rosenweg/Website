@@ -28,6 +28,11 @@ docs/
 !docs/deswarm-plan.md
 !docs/mqtt-authentik-login.md
 !docs/technik-bot-konzept.md
+!docs/api.md
+!docs/infrastruktur.md
+!docs/active-directory.md
+!docs/cloudflare.md
+!docs/unifi.md
 node_modules/
 api/node_modules/
 energy-collector/node_modules/

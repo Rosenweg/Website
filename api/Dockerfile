@@ -22,6 +22,7 @@ COPY docs/Home.md docs/README.md docs/verwaltung-anleitung.md docs/email.md \
      docs/mcp.md docs/energie-api.md docs/datenbank.md docs/ssh-zugang.md \
      docs/netzwerk.md docs/routing.md docs/ip-zuordnung.md docs/systemuebersicht.md \
      docs/website.md docs/deswarm-plan.md docs/mqtt-authentik-login.md docs/technik-bot-konzept.md \
+     docs/api.md docs/infrastruktur.md docs/active-directory.md docs/cloudflare.md docs/unifi.md \
      ./docs/
 COPY api/scripts/ ./scripts/
 # site-config.json wird vom Auto-Seed gelesen (legacy Verwaltung -> DB)
