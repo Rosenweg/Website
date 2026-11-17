@@ -61,7 +61,14 @@ router.get('/anteile', authMiddleware, async (req, res) => {
              verifiziert_von, verifiziert_am, notizen
       FROM grundbuch_anteile ${wsql}
       ORDER BY parzelle, sub_id`, params);
-    res.json({ anteile: r.rows });
+    // Namen, Wohnadressen, Notizen und das Auszugsbild sind Personendaten:
+    // sie sieht nur Ausschuss/Technik und wer den Anteil selbst reserviert
+    // oder erfasst hat. Alle anderen sehen Status und Anteil, nicht wem er gehoert.
+    const alle = isAusschussOrTechnik(req);
+    const me = req.user?.email || req.user?.name || 'unknown';
+    const anteile = alle ? r.rows : r.rows.map(a => (a.erfasst_von === me || a.reserviert_von === me)
+      ? a : { ...a, eigentuemer: null, wohnadressen: null, notizen: null, bild_path: null });
+    res.json({ anteile });
   } catch (err) {
     console.error('grundbuch list err:', err.message);
     res.status(500).json({ error: 'Fehler' });
@@ -106,10 +113,27 @@ router.delete('/anteile/:parzelle/:sub_id/reserve', authMiddleware, async (req, 
 // POST /api/grundbuch/ocr — Grundbuchauszug-Bild via Claude Vision (OpenRouter) auslesen
 // Body: { bild_base64, bild_filename }
 // Returns: { eigentumsform?, eigentuemer:[], wohnadressen:[], anteil_z?, flaeche_m2?, raw }
+// Jeder OCR-Aufruf kostet beim Anbieter Geld. Pro Konto hoechstens 30 je
+// Stunde — fuer die Erfassung von Hand reicht das bei weitem.
+const OCR_FENSTER_MS = 60 * 60 * 1000;
+const OCR_MAX = 30;
+const ocrAufrufe = new Map(); // konto -> [zeitpunkte]
+setInterval(() => {
+  const jetzt = Date.now();
+  for (const [k, v] of ocrAufrufe) if (!v.some(t => jetzt - t < OCR_FENSTER_MS)) ocrAufrufe.delete(k);
+}, 10 * 60 * 1000).unref();
+
 router.post('/ocr', authMiddleware, async (req, res) => {
   try {
     const { bild_base64, bild_filename } = req.body || {};
-    if (!bild_base64) return res.status(400).json({ error: 'bild_base64 fehlt' });
+    if (!bild_base64 || typeof bild_base64 !== 'string') return res.status(400).json({ error: 'bild_base64 fehlt' });
+    // Wie beim Speichern: hoechstens 10 MB Bild (base64 ~ 4/3 davon).
+    if (bild_base64.length > Math.ceil(10 * 1024 * 1024 * 4 / 3) + 4) return res.status(400).json({ error: 'Datei zu gross (>10MB)' });
+    const konto = String(req.user?.email || req.user?.name || 'unknown').toLowerCase();
+    const jetzt = Date.now();
+    const bisher = (ocrAufrufe.get(konto) || []).filter(t => jetzt - t < OCR_FENSTER_MS);
+    if (bisher.length >= OCR_MAX) return res.status(429).json({ error: 'Zu viele Auslese-Versuche — bitte später erneut oder von Hand erfassen' });
+    ocrAufrufe.set(konto, [...bisher, jetzt]);
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'OPENROUTER_API_KEY nicht konfiguriert' });
 
@@ -158,7 +182,7 @@ Wenn ein Feld nicht eindeutig erkennbar ist, setze null bzw. leeres Array. Korri
     if (!orRes.ok) {
       const errText = await orRes.text().catch(() => '');
       console.error('[Grundbuch-OCR] OpenRouter error', orRes.status, errText.slice(0, 300));
-      return res.status(502).json({ error: `OCR-Service-Fehler (HTTP ${orRes.status})`, detail: errText.slice(0, 200) });
+      return res.status(502).json({ error: `OCR-Service-Fehler (HTTP ${orRes.status})` });
     }
     const orJson = await orRes.json();
     const content = orJson.choices?.[0]?.message?.content || '';
@@ -186,7 +210,7 @@ Wenn ein Feld nicht eindeutig erkennbar ist, setze null bzw. leeres Array. Korri
     res.json({ ...norm, model: orJson.model, usage: orJson.usage });
   } catch (err) {
     console.error('[Grundbuch-OCR] error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'OCR fehlgeschlagen' });
   }
 });
 
@@ -207,6 +231,20 @@ router.post('/anteile/:parzelle/:sub_id', authMiddleware, async (req, res) => {
       || (cur.status === 'reserviert' && cur.reserviert_von === me)
       || (cur.status === 'erfasst' && cur.erfasst_von === me);
     if (!darf) return res.status(403).json({ error: cur.status === 'freigegeben' ? 'Bereits freigegeben — nur Ausschuss/Technik' : 'Bitte zuerst reservieren' });
+    // Eigentuemer und Adressen landen in einer Tabelle, die andere im Browser
+    // anzeigen: nur Listen kurzer Zeichenketten, keine spitzen Klammern.
+    const textListe = (v) => v === undefined || v === null ? null
+      : (Array.isArray(v) && v.length <= 20 && v.every(x => typeof x === 'string' && x.length <= 200 && !/[<>]/.test(x))
+        ? v.map(x => x.trim()).filter(Boolean) : undefined);
+    const eigentuemer = textListe(b.eigentuemer), wohnadressen = textListe(b.wohnadressen);
+    if (eigentuemer === undefined || wohnadressen === undefined) {
+      return res.status(400).json({ error: 'eigentuemer/wohnadressen: Liste von Texten (max. 20 × 200 Zeichen, ohne < >)' });
+    }
+    for (const [feld, max] of [['eigentumsform', 200], ['notizen', 2000]]) {
+      if (b[feld] !== undefined && b[feld] !== null && (typeof b[feld] !== 'string' || b[feld].length > max || /[<>]/.test(b[feld]))) {
+        return res.status(400).json({ error: `${feld}: Text bis ${max} Zeichen, ohne < >` });
+      }
+    }
     let bildPath = null;
     if (b.bild_base64 && b.bild_filename) {
       const ext = (b.bild_filename.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -237,15 +275,15 @@ router.post('/anteile/:parzelle/:sub_id', authMiddleware, async (req, res) => {
       WHERE parzelle = $8 AND sub_id = $9
       RETURNING *`,
       [b.eigentumsform || null,
-       b.eigentuemer ? JSON.stringify(b.eigentuemer) : null,
-       b.wohnadressen ? JSON.stringify(b.wohnadressen) : null,
+       eigentuemer ? JSON.stringify(eigentuemer) : null,
+       wohnadressen ? JSON.stringify(wohnadressen) : null,
        b.flaeche_m2 || null, b.notizen || null,
        bildPath, me, p, s]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Anteil nicht gefunden' });
     res.json(r.rows[0]);
   } catch (err) {
     console.error('grundbuch save err:', err.message);
-    res.status(500).json({ error: 'Fehler', detail: err.message });
+    res.status(500).json({ error: 'Fehler' });
   }
 });
 
@@ -267,13 +305,20 @@ router.post('/anteile/:parzelle/:sub_id/verify', authMiddleware, async (req, res
 router.get('/anteile/:parzelle/:sub_id/bild', authMiddleware, async (req, res) => {
   try {
     const p = parseInt(req.params.parzelle), s = parseInt(req.params.sub_id);
-    const r = await pool.query('SELECT bild_path FROM grundbuch_anteile WHERE parzelle=$1 AND sub_id=$2', [p, s]);
+    const r = await pool.query('SELECT bild_path, erfasst_von, reserviert_von FROM grundbuch_anteile WHERE parzelle=$1 AND sub_id=$2', [p, s]);
     if (!r.rows[0]?.bild_path) return res.status(404).end();
+    // Der Auszug zeigt Namen und Adressen — wie in der Liste nur fuer
+    // Ausschuss/Technik und wer den Anteil selbst bearbeitet.
+    const me = req.user?.email || req.user?.name || 'unknown';
+    if (!isAusschussOrTechnik(req) && r.rows[0].erfasst_von !== me && r.rows[0].reserviert_von !== me) {
+      return res.status(403).json({ error: 'Nur Ausschuss/Technik oder wer den Anteil erfasst hat' });
+    }
     const fullPath = pathModule.join(DOCS_PATH, r.rows[0].bild_path);
     if (!fullPath.startsWith(pathModule.resolve(DOCS_PATH) + '/')) return res.status(400).end();
     const ext = r.rows[0].bild_path.split('.').pop().toLowerCase();
     const types = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', pdf: 'application/pdf' };
     res.setHeader('Content-Type', types[ext] || 'application/octet-stream');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     fsSync.createReadStream(fullPath).pipe(res);
   } catch (err) { res.status(500).json({ error: 'Fehler' }); }
 });

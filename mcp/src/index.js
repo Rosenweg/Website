@@ -27,7 +27,13 @@ async function api(method, path, body) {
       headers['Content-Type'] = 'application/json';
     }
   }
-  const r = await fetch(API + path, { method, headers, body: bodyInit });
+  // Der Token darf nur an die eigene API gehen: "API + path" mit path
+  // "@evil.example/…" oder "//evil…" hätte ihn an einen fremden Host geschickt.
+  const ziel = new URL(String(path || ''), API + '/');
+  if (ziel.origin !== new URL(API).origin || !ziel.pathname.startsWith('/api/') || !String(path).startsWith('/api/')) {
+    throw new Error(`Ungültiger Pfad (nur /api/… auf ${API}): ${String(path).slice(0, 100)}`);
+  }
+  const r = await fetch(ziel, { method, headers, body: bodyInit });
   const text = await r.text();
   let data;
   try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }

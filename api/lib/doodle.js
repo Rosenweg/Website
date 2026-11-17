@@ -359,7 +359,11 @@ function mountDoodle({ app }) {
       // Browser-Kennungen öffentlicher Stimmen sind Geheimnisse — nur Verwaltende sehen sie
       if (!canManage) votes.rows.forEach(v => {
         if (/^public:[a-f0-9]{32}$/.test(v.voter_email)) v.voter_email = 'public:' + crypto.createHash('sha256').update(v.voter_email).digest('hex').slice(0, 12);
+        // Fremde E-Mail-Adressen (auch eingeladener Externer) sieht nur, wer
+        // die Umfrage verwaltet. Ein stabiles Kürzel hält die Zeilen zusammen.
+        else if (normEmail(v.voter_email) !== req.actor.email) v.voter_email = 'person:' + crypto.createHash('sha256').update(normEmail(v.voter_email)).digest('hex').slice(0, 12);
       });
+      if (!canManage) opts.rows.forEach(o => { if (o.added_by && normEmail(o.added_by) !== req.actor.email) o.added_by = 'ergänzt'; });
       const out = {
         poll: {
           id: poll.id, titel: poll.titel, beschreibung: poll.beschreibung, ort: poll.ort,
@@ -631,10 +635,22 @@ function mountDoodle({ app }) {
       if (!name) { return res.status(400).json({ error: 'Bitte Namen angeben' }); }
       const key = publicVoterKey(req);
       if (!key) { return res.status(400).json({ error: 'Bitte Seite neu laden' }); }
-      const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '');
-      const now = Date.now(); const arr = (pubRate.get(ip) || []).filter(x => now - x < 60000);
-      if (arr.length >= 30) { return res.status(429).json({ error: 'Zu viele Anfragen — kurz warten.' }); }
+      // X-Forwarded-For von rechts lesen und nur die eigenen Proxy-Hops
+      // (Edge/Frontends 100.64.2.x, Docker, localhost) ueberspringen: der ganze
+      // Header war frei waehlbar und jede Variante ein neuer Zaehler.
+      // Zusaetzlich je Umfrage, damit wechselnde Absender nicht unbegrenzt
+      // Stimmen und Optionen anlegen.
+      const kette = [...String(req.headers['x-forwarded-for'] || '').split(',').map(x => x.trim()).filter(Boolean), req.socket?.remoteAddress || ''];
+      const proxyHop = (a) => /^(::ffff:)?(100\.64\.2\.|127\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a) || a === '::1';
+      let ip = kette[0] || '';
+      for (let i = kette.length - 1; i >= 0; i -= 1) if (kette[i] && !proxyHop(kette[i])) { ip = kette[i]; break; }
+      const now = Date.now();
+      if (pubRate.size > 10000) for (const [k, v] of pubRate) if (!v.some(x => now - x < 60000)) pubRate.delete(k);
+      const arr = (pubRate.get(ip) || []).filter(x => now - x < 60000);
+      const arrPoll = (pubRate.get('poll:' + id) || []).filter(x => now - x < 60000);
+      if (arr.length >= 30 || arrPoll.length >= 120) { return res.status(429).json({ error: 'Zu viele Anfragen — kurz warten.' }); }
       arr.push(now); pubRate.set(ip, arr);
+      arrPoll.push(now); pubRate.set('poll:' + id, arrPoll);
       const votes = req.body?.votes && typeof req.body.votes === 'object' ? req.body.votes : {};
       const newOptions = (poll.allow_add_options && Array.isArray(req.body?.new_options)) ? req.body.new_options.map(l => String(l || '').trim().slice(0, 255)).filter(Boolean).slice(0, 10) : [];
       await client.query('BEGIN');

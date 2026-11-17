@@ -346,7 +346,9 @@ function baueServer(req) {
       },
     );
   }
-  registriereRessourcen(server, technik);
+  // Ressourcen gehören zum Scope docs:read — ein Token mit wasch:* bekommt
+  // nur die Waschküche, nicht auch die Dokumentation.
+  if (scopeErlaubt(scopes, 'docs', 'GET')) registriereRessourcen(server, technik);
   registrierePrompts(server);
   return server;
 }

@@ -79,8 +79,17 @@ function authHeaders(s) {
   if (!s.auth_user) return {};
   return { Authorization: 'Basic ' + Buffer.from(`${s.auth_user}:${s.auth_pass || ''}`).toString('base64') };
 }
+// Nur ein nackter Host (IPv4, Name oder [IPv6]) mit optionalem Port: kein
+// Pfad, kein "user@", kein Schema. Sonst bestimmte das Feld frei, wohin die
+// API (mit Basic-Auth) Anfragen schickt.
+const HOST_MUSTER = /^(\[[0-9a-fA-F:]+\]|[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?)(:\d{1,5})?$/;
+function hostGueltig(h) { return typeof h === 'string' && HOST_MUSTER.test(h); }
+
 async function readSensor(s) {
-  const opt = { signal: AbortSignal.timeout(3000), headers: authHeaders(s) };
+  if (!hostGueltig(s.host)) throw new Error('ungültiger Host');
+  // Keine Weiterleitungen folgen: ein Geraet (oder wer sich dafuer ausgibt)
+  // koennte die Anfrage samt Basic-Auth sonst an ein anderes Ziel lenken.
+  const opt = { signal: AbortSignal.timeout(3000), headers: authHeaders(s), redirect: 'error' };
   if (s.device_type === 'smoke') {
     const r = await fetch(`http://${s.host}/rpc/Shelly.GetStatus`, opt);
     if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -180,10 +189,19 @@ function mountAlarmpanel({ app, authMiddleware, requireManage, resolveBroadcastR
     '(auth_user IS NOT NULL) AS has_auth', '(webhook_token IS NOT NULL) AS has_webhook',
     'status', 'in_alarm', 'battery_low', 'battery_percent', 'last_value', 'last_ok_at', 'last_alarm_at'].join(',');
 
+  // Darf die Person verwalten? requireManage als Middleware fragen, ohne
+  // dass eine Ablehnung schon die Antwort schreibt.
+  const darfVerwalten = (req) => new Promise((resolve) => {
+    const stub = { status() { return stub; }, json() { resolve(false); return stub; }, send() { resolve(false); return stub; }, end() { resolve(false); return stub; } };
+    try { Promise.resolve(requireManage(req, stub, () => resolve(true))).catch(() => resolve(false)); } catch { resolve(false); }
+  });
+
   // Liste + Live-Status
   app.get('/api/alarmpanel/sensors', authMiddleware, async (req, res) => {
     try {
       const { rows } = await pool.query(`SELECT ${VIEW} FROM alarm_sensors ORDER BY device_type, name`);
+      // Geraeteadressen im Hausnetz sind nur fuer die Verwaltung.
+      if (!(await darfVerwalten(req))) rows.forEach(r => { delete r.host; delete r.has_auth; });
       const agg = rows.reduce((a, s) => {
         if (!s.active) return a;
         if (s.in_alarm) a.alarm++;
@@ -206,6 +224,7 @@ function mountAlarmpanel({ app, authMiddleware, requireManage, resolveBroadcastR
     const host = String(b.host || '').trim();
     if (!name || !['smoke', 'gas'].includes(device_type)) return res.status(400).json({ error: 'name + device_type (smoke|gas) erforderlich' });
     if (conn === 'poll' && !host) return res.status(400).json({ error: 'host erforderlich (Polling)' });
+    if (conn === 'poll' && !hostGueltig(host)) return res.status(400).json({ error: 'host: nur IP oder Hostname, optional :Port' });
     const token = conn === 'webhook' ? 'wh_' + crypto.randomBytes(18).toString('hex') : null;
     try {
       const { rows } = await pool.query(
@@ -254,6 +273,8 @@ function mountAlarmpanel({ app, authMiddleware, requireManage, resolveBroadcastR
 
   app.put('/api/alarmpanel/sensors/:id', authMiddleware, requireManage, async (req, res) => {
     const b = req.body || {};
+    if (b.host != null && b.host !== '' && !hostGueltig(String(b.host).trim())) return res.status(400).json({ error: 'host: nur IP oder Hostname, optional :Port' });
+    if (typeof b.host === 'string') b.host = b.host.trim() || null;
     try {
       await pool.query(
         `UPDATE alarm_sensors SET name=COALESCE($1,name), location=$2, host=COALESCE($3,host),
