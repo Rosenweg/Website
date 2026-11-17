@@ -4,7 +4,7 @@
 
 - **Domain**: `rosenweg4303.ch`
 - **Zone ID**: `0b113bed342ed868b4b42c09149ea2b5`
-- **API Token**: `mroiX7XyATokA65Txk9g1k60nm1DhwxOv5Nm-U53`
+- **API Token**: `<im Passwortmanager>`
 
 ## Tunnel
 
