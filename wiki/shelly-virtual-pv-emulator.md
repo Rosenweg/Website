@@ -42,18 +42,27 @@ Spannung pro Phase fix 230V, Frequenz 50Hz, PF 1.0 — Shelly-EM erwartet diese 
 
 ## Deployment
 
-Container läuft als Docker-Swarm-Service `rosenweg_shelly-emulator`.
+Der Container läuft auf dem Backend-LXC CT 128 als Dienst `shelly-emulator` im
+Compose-Projekt `/opt/rosenweg-core/` (Datei im Repo: `backend-lxc/core/compose.yml`),
+veröffentlicht auf Host-Port **8089**. Die frühere Docker-Swarm-Variante
+(`rosenweg_shelly-emulator`, `docker-stack.yml`) ist abgelöst.
 
 ```bash
-# Build + Push lokal
+# Image bauen und veröffentlichen (lokal oder per CI)
 cd shelly-emulator/
 docker build -t ghcr.io/rosenweg/shelly-emulator:latest .
 docker push ghcr.io/rosenweg/shelly-emulator:latest
 
-# Deploy via Stack (siehe docker-stack.yml)
+# Auf CT 128 aktualisieren
+cd /opt/rosenweg-core && docker compose pull shelly-emulator && docker compose up -d shelly-emulator
 ```
 
-Env-Vars:
+Die Datenquelle `/api/energy/shelly` ist eine der offenen Energie-Routen (ohne
+Anmeldung, ohne Personendaten); die Sicherheitsänderungen vom 17.11.2026 betreffen
+den Emulator nicht. Details: [`docs/energie-api.md`](../docs/energie-api.md).
+
+Env-Vars (Werte in `backend-lxc/core/compose.yml`: `POLL_MS=10000`, `ENERGY_GROUP=r9`,
+`SHELLY_HOSTNAME=shellypvrosenweg9`, `PORT=8089`):
 
 | Var | Default | Bedeutung |
 |---|---|---|
@@ -111,8 +120,12 @@ GET  /health                          — Status + Cache-Alter
   EM-Werte auf 0 gesetzt (statt veraltete Daten zu zeigen)
 - **mDNS** funktioniert nur im selben Layer-2-Netz. Wenn der konsumierende Shelly oder
   HA in einem anderen VLAN sitzt, manuelle IP-Eintragung erforderlich
-- **Port 80**: läuft im Container auf 80, im Swarm-Stack auf einen freien Host-Port mappen
-  oder im Overlay nur intern
+- **Port**: Standard im Code ist 80; auf CT 128 läuft der Dienst mit `PORT=8089` und
+  ist unter `http://100.64.2.52:8089/` erreichbar (Hausnetz). Shelly-Clients, die
+  Port 80 erwarten, brauchen die Adresse mit Port.
+- **mDNS über Docker**: Der Container läuft im Bridge-Netz von Docker; mDNS-Ankündigungen
+  erreichen das Hausnetz darum möglicherweise nicht. Im Zweifel das Gerät manuell
+  per IP und Port hinzufügen.
 
 ## Variante A (Shelly-Script)
 
