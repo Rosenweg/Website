@@ -109,7 +109,7 @@
     <section id="gate-code1" class="hidden">
       <button type="button" class="gate-back text-sky-700 text-sm font-medium mb-4 active:text-sky-900">← Zurück</button>
       <h2 class="text-xl font-bold mb-1">✉️ Ohne Konto melden</h2>
-      <p class="text-slate-500 mb-6 text-sm">Gib deine E-Mail-Adresse ein. Wir senden dir einen 6-stelligen Code.</p>
+      <p class="text-slate-500 mb-6 text-sm">Gib deine E-Mail-Adresse ein. Wir senden dir einen 8-stelligen Code.</p>
       <form id="codeReqForm" class="space-y-4">
         <div>
           <label for="codeEmail" class="block text-sm font-semibold mb-2">E-Mail-Adresse <span class="text-red-500">*</span></label>
@@ -170,9 +170,9 @@
         <!-- Code -->
         <div>
           <label for="pubCode" class="block text-sm font-semibold mb-2">Code aus der E-Mail <span class="text-red-500">*</span></label>
-          <input id="pubCode" type="text" required inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code"
+          <input id="pubCode" type="text" required inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="one-time-code"
             class="w-full rounded-xl border border-slate-300 px-3 py-3 text-center text-2xl tracking-[0.5em] font-semibold focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none"
-            placeholder="000000">
+            placeholder="00000000">
         </div>
         <!-- Senden -->
         <button type="submit" id="pubSubmitBtn"
@@ -1049,7 +1049,7 @@
         $('codeEmailLabel').textContent = email;
         resetPubForm();
         gateStep('code2');
-        showGateMsg('codeReqMsg', 'Code per E-Mail gesendet (gültig 10 Min).', 'ok');
+        showGateMsg('codeReqMsg', 'Falls die Adresse im Verzeichnis steht, ist der Code unterwegs (gültig 10 Min).', 'ok');
       } else if (r.status === 403) {
         showGateMsg('codeReqMsg', 'Diese E-Mail ist nicht im Verzeichnis. Bitte mit Konto anmelden oder die Verwaltung kontaktieren.', 'err');
       } else if (r.status === 429) {
