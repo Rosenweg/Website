@@ -6140,11 +6140,17 @@ async function ispRecheckPendingDns() {
       } catch (e) { /* DNS-Fehler ignoreieren */ }
     }
     // Redirects
-    const rds = await pool.query(`SELECT id, source_host FROM isp_redirects WHERE approval_status = 'pending_dns'`).catch(() => ({ rows: [] }));
+    const rds = await pool.query(`SELECT id, source_host, owner_email FROM isp_redirects WHERE approval_status = 'pending_dns'`).catch(() => ({ rows: [] }));
     for (const r of rds.rows) {
       try {
         const check = await ispCheckDns(r.source_host);
-        if (check.matches) {
+        // Ueberschneidet sich der Name mit einem fremden Eintrag, gibt nur ein Admin frei —
+        // DNS auf uns beweist nicht, dass der Antragsteller den Namen besitzt.
+        const konflikt = check.matches ? await ispHostKonflikt(r.source_host, { ownerEmail: r.owner_email, ausser: { tabelle: 'isp_redirects', id: r.id } }) : null;
+        if (check.matches && konflikt) {
+          await pool.query(`UPDATE isp_redirects SET approval_status='pending_admin', dns_verified_at=NOW(),
+                             last_dns_check_at=NOW(), approval_reason=$2 WHERE id=$1`, [r.id, konflikt]);
+        } else if (check.matches) {
           await pool.query(`UPDATE isp_redirects SET approval_status='approved', dns_verified_at=NOW(),
                              last_dns_check_at=NOW(), active=true, approval_reason='DNS verifiziert (auto-Re-Check)' WHERE id=$1`, [r.id]);
           console.log('[isp-dns] Redirect ' + r.id + ' (' + r.source_host + ') → approved');
@@ -22828,7 +22834,7 @@ app.post('/api/isp/reverse-proxy', authMiddleware, async (req, res) => {
     let decision = ispIsAdmin(req)
       ? { approval_status: 'approved', approval_reason: 'Admin-erstellt', active: true,
           dns_verified_at: null, last_dns_check_at: null }
-      : await ispDecideApproval(b.hostname);
+      : await ispDecideApproval(b.hostname, { ownerEmail: owner });
     if (!ispIsAdmin(req) && decision.approval_status === 'approved') {
       decision = { ...decision, approval_status: 'pending_admin', active: false,
                    approval_reason: 'DNS ok — Backend wartet auf Admin-Freigabe' };
@@ -22946,7 +22952,7 @@ app.post('/api/isp/redirects', authMiddleware, async (req, res) => {
     }
     const decision = ispIsAdmin(req) && b.skip_approval
       ? { approval_status: 'approved', approval_reason: 'Admin-Bypass', active: true }
-      : await ispDecideApproval(b.source_host);
+      : await ispDecideApproval(b.source_host, { ownerEmail: owner });
     const r = await pool.query(
       `INSERT INTO isp_redirects (source_host, source_path, target_url, http_code, preserve_path,
                                    owner_email, wohnung_id, active, notizen,
@@ -22991,7 +22997,7 @@ app.put('/api/isp/redirects/:id', authMiddleware, async (req, res) => {
     if (b.target_url !== undefined && !ispZielUrlGueltig(b.target_url)) return res.status(400).json({ error: 'Ziel muss eine http(s)-URL sein' });
     if (!admin) {
       if (b.source_host !== undefined && b.source_host !== (v.source_host || '').toLowerCase()) {
-        const d = await ispDecideApproval(b.source_host);
+        const d = await ispDecideApproval(b.source_host, { ownerEmail: v.owner_email, ausser: { tabelle: 'isp_redirects', id: v.id } });
         push('approval_status', d.approval_status);
         push('approval_reason', d.approval_reason);
         push('dns_verified_at', d.dns_verified_at || null);
@@ -23806,7 +23812,7 @@ app.post('/api/isp/mail-relays', authMiddleware, async (req, res) => {
     // Hostname-Check (gleiche Logik wie redirects/rp — eigene Domains brauchen Admin)
     let decision = ispIsAdmin(req) && b.skip_approval
       ? { approval_status: 'approved', approval_reason: 'Admin-Bypass', active: true }
-      : await ispDecideApproval(b.domain);
+      : await ispDecideApproval(b.domain, { ownerEmail: owner });
     // Ziel-Host und IMAPS/SMTPS-Backends waehlt der Kunde frei (auch interne
     // Adressen) — wie beim Reverse-Proxy sieht sie immer ein Admin an, bevor
     // PMG/Traefik dorthin verbinden.
