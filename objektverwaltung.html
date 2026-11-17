@@ -6,7 +6,7 @@
     <title>Objektverwaltung - STWEG Rosenweg</title>
     <link rel="icon" href="/logo-rosenweg.png">
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT" crossorigin="anonymous"></script>
     <script src="/js/authentik-auth.js?v=2"></script>
     <script src="/js/nav.js?v=3"></script>
     <script src="/js/phone-helpers.js?v=1"></script>
@@ -1228,12 +1228,21 @@
             XLSX.writeFile(wb, `Wohnungen_${stwegName.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0,10)}.xlsx`);
         }
 
+        // CSV-Formelinjektion: Felder kommen teils von Bewohnern (Name, Notizen, ...).
+        // Beginnt ein Wert mit = + - @ Tab/CR, fuehrt Excel ihn als Formel aus ->
+        // ' voranstellen. Reine Zahlen/Telefonnummern (+41 79 ...) bleiben unveraendert.
+        function csvFormelSchutz(v) {
+            const s = String(v);
+            if (/^[=+\-@\t\r]/.test(s) && !/^[+\-]?[\d\s.,/()]+$/.test(s)) return "'" + s;
+            return s;
+        }
+
         function exportCSV() {
             if (!allWohnungen.length) return alert('Keine Daten zum Exportieren.');
             const stweg = stwegList.find(s => s.nr === currentStweg);
             const stwegName = stweg ? stweg.name : `STWEG ${currentStweg}`;
             const headers = ['Bezeichnung','Stockwerk','Zimmer','Fläche m²','Typ','Wertquote','Besonderheiten','Bewohnung','Waschküche','Rolle','Name','E-Mail','Telefon','Adresse','Notizen'];
-            const csvEsc = v => { const s = String(v ?? ''); return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g,'""')}"` : s; };
+            const csvEsc = v => { const s = csvFormelSchutz(v ?? ''); return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g,'""')}"` : s; };
             const wq = w => (w.wertquote_zaehler && w.wertquote_nenner) ? `${w.wertquote_zaehler}/${w.wertquote_nenner}` : '';
             const wkb = w => w.waschkueche_berechtigt === false ? 'Nein' : 'Ja';
             const rows = [headers.map(csvEsc).join(',')];
@@ -1412,7 +1421,7 @@
                 const s = e.objects.filter(o => o.typ !== 'Wohnung' && o.typ !== 'Parkplatz').map(o => `${o.typ} STWEG ${o.stweg} ${o.bezeichnung}`).join(', ');
                 const wq = e.objects.filter(o => o.rolle === 'eigentuemer').reduce((sum, o) => sum + (o.wertquote_zaehler || 0), 0);
                 const rollenLabel = (e.rollen||[]).map(r => r === 'eigentuemer' ? 'Eigentümer' : 'Verwalter').join(' + ');
-                const cell = v => `"${String(v||'').replace(/"/g,'""')}"`;
+                const cell = v => `"${csvFormelSchutz(v||'').replace(/"/g,'""')}"`;
                 lines.push([e.name, rollenLabel, e.email, e.telefon, w, p, s, wq].map(cell).join(';'));
             }
             const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });

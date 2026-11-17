@@ -938,7 +938,10 @@
                     // Passwortwechsel verlangt eine frische Anmeldung (Schutz bei gestohlener Sitzung)
                     msg.textContent = (data.error || 'Bitte neu anmelden.') + ' ';
                     const a = document.createElement('a');
-                    a.href = '/api/auth/login?reauth=1&redirect=' + encodeURIComponent('/profil.html');
+                    // Ueber login() starten: setzt den Anmelde-Merker, sonst wird der
+                    // Ruecksprung verworfen und die Seite landet in einer Login-Schleife
+                    a.href = '#';
+                    a.addEventListener('click', (ev) => { ev.preventDefault(); AuthentikAuth.login('/profil.html', { reauth: true }); });
                     a.textContent = 'Jetzt neu anmelden';
                     a.className = 'underline font-semibold';
                     msg.appendChild(a);
