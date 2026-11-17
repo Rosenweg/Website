@@ -23821,8 +23821,13 @@ app.put('/api/isp/redirects/:id', authMiddleware, async (req, res) => {
     // erneut — sonst wurde eine fuer die eigene Domain freigegebene Weiterleitung
     // per PUT auf authentik.rosenweg4303.ch umgebogen (Prioritaet 100 am Edge).
     const allowed = admin
-      ? ['source_host','source_path','target_url','http_code','preserve_path','active','notizen','owner_email','wohnung_id']
+      ? ['source_host','source_path','target_url','http_code','preserve_path','active','notizen','owner_email','wohnung_id',
+         'approval_status','approval_reason']
       : ['source_host','source_path','target_url','http_code','preserve_path','active','notizen'];
+    // Freigabe durch Admin (isp-admin "Genehmigen"): nur bekannte Zustaende.
+    if (admin && b.approval_status !== undefined && !['approved', 'pending_admin', 'pending_dns', 'rejected'].includes(b.approval_status)) {
+      return res.status(400).json({ error: 'Ungültiger Freigabe-Status' });
+    }
     if (b.source_host !== undefined) {
       b.source_host = String(b.source_host).toLowerCase();
       if (!ispHostGueltig(b.source_host)) return res.status(400).json({ error: 'Ungültiger Hostname' });
