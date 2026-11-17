@@ -92,9 +92,12 @@ async function authenticateAD(username, password) {
     }
 
     const sam = upn.split('@')[0];
+    // Werte nach RFC 4515 maskieren: der Name kommt vom Aufrufer, ein
+    // "*" oder ")(" haette sonst den Filter umgebaut.
+    const ldapWert = (v) => String(v).replace(/[\\*()\0]/g, c => '\\' + c.charCodeAt(0).toString(16).padStart(2, '0'));
     const { searchEntries } = await client.search(AD_BASE_DN, {
       scope: 'sub',
-      filter: `(&(objectClass=user)(|(sAMAccountName=${sam})(userPrincipalName=${upn})))`,
+      filter: `(&(objectClass=user)(|(sAMAccountName=${ldapWert(sam)})(userPrincipalName=${ldapWert(upn)})))`,
       attributes: ['distinguishedName', 'displayName', 'mail', 'sAMAccountName', 'memberOf'],
       sizeLimit: 2,
     });

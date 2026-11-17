@@ -107,7 +107,13 @@ router.get('/:id/attachment/:filename', authMiddleware, requireArchiveAccess, as
 
     const safeAttName = (att.filename || 'attachment').replace(/["\r\n\\]/g, '_');
     const safeAttAscii = safeAttName.replace(/[^\x20-\x7E]/g, '_');
-    res.setHeader('Content-Type', att.content_type || 'application/octet-stream');
+    // Der Typ stammt aus der eingegangenen Mail, also vom Absender. Ein
+    // image/svg+xml oder text/html liefe im Browser als Skript unter unserer
+    // Herkunft (Blob-URL im neuen Tab) — darum nur bekannte, passive Typen.
+    const ERLAUBTE_TYPEN = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'text/plain']);
+    const typ = String(att.content_type || '').split(';')[0].trim().toLowerCase();
+    res.setHeader('Content-Type', ERLAUBTE_TYPEN.has(typ) ? typ : 'application/octet-stream');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Content-Disposition', `attachment; filename="${safeAttAscii}"; filename*=UTF-8''${encodeURIComponent(safeAttName)}`);
     const stream = fsSync.createReadStream(filePath);
     stream.on('error', () => { if (!res.headersSent) res.status(404).json({ error: 'Datei nicht gefunden' }); else res.destroy(); });
