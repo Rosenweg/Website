@@ -1178,8 +1178,8 @@
             { value: 'eigentuemer', label: 'Eigentümer', color: 'green' },
             { value: 'mieter', label: 'Mieter', color: 'blue' },
             { value: 'verwalter', label: 'Verwalter', color: 'purple' },
-            { value: 'vertreter', label: 'Vertreter', color: 'teal' },
-            { value: 'kontakt', label: 'Kontakt', color: 'gray' },
+            { value: 'bewohner', label: 'Bewohner', color: 'teal' },
+            { value: 'sonstige', label: 'Sonstige', color: 'gray' },
         ];
         let kontaktCounter = 0;
         function escHtml(str) { return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
@@ -1225,8 +1225,10 @@
 
         function renderKontaktCard(kontakt = {}) {
             const id = `kontakt-${kontaktCounter++}`;
-            const rolleOptions = ROLLEN.map(r => `<option value="${r.value}" ${kontakt.rolle === r.value ? 'selected' : ''}>${r.label}</option>`).join('');
-            const rolleInfo = ROLLEN.find(r => r.value === (kontakt.rolle || 'eigentuemer')) || ROLLEN[0];
+            // Unbekannte (alte) Rolle als eigene Option behalten, sonst waehlt der Browser die erste (Eigentuemer)
+            const rolleOptions = ROLLEN.map(r => `<option value="${r.value}" ${kontakt.rolle === r.value ? 'selected' : ''}>${r.label}</option>`).join('')
+                + (kontakt.rolle && !ROLLEN.some(r => r.value === kontakt.rolle) ? `<option value="${escHtml(kontakt.rolle)}" selected>${escHtml(kontakt.rolle)}</option>` : '');
+            const rolleInfo = ROLLEN.find(r => r.value === (kontakt.rolle || 'eigentuemer')) || ROLLEN[4];
             const colorMap = { green: 'border-green-300 bg-green-50', blue: 'border-blue-300 bg-blue-50', purple: 'border-purple-300 bg-purple-50', teal: 'border-teal-300 bg-teal-50', gray: 'border-gray-300 bg-gray-50' };
             // data-kontakt-id: beim Speichern mitsenden, sonst gilt der Kontakt als neu und verliert seine Verknuepfung (R3-S1d)
             return `<div id="${id}" data-kontakt-id="${Number.isInteger(kontakt.id) ? kontakt.id : ''}" class="border rounded-lg p-3 ${colorMap[rolleInfo.color]||colorMap.gray} kontakt-card">
