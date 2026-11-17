@@ -38,7 +38,12 @@ router.get('/status', authMiddleware, async (req, res) => {
       SELECT erfasst_von AS user, COUNT(*) AS anzahl
       FROM grundbuch_anteile WHERE erfasst_von IS NOT NULL
       GROUP BY erfasst_von ORDER BY anzahl DESC LIMIT 10`);
-    res.json({ stats: r.rows[0], top_contributors: top.rows });
+    // Wer wie viel erfasst hat, sind E-Mail-Adressen: Namen nur fuer
+    // Ausschuss/Technik und den eigenen Eintrag, sonst nur die Anzahl.
+    const me = req.user?.email || req.user?.name || 'unknown';
+    const topListe = isAusschussOrTechnik(req) ? top.rows
+      : top.rows.map(t => ({ user: t.user === me ? t.user : null, anzahl: t.anzahl }));
+    res.json({ stats: r.rows[0], top_contributors: topListe });
   } catch (err) {
     console.error('grundbuch status err:', err.message);
     res.status(500).json({ error: 'Fehler' });
@@ -66,8 +71,10 @@ router.get('/anteile', authMiddleware, async (req, res) => {
     // oder erfasst hat. Alle anderen sehen Status und Anteil, nicht wem er gehoert.
     const alle = isAusschussOrTechnik(req);
     const me = req.user?.email || req.user?.name || 'unknown';
+    // Auch wer erfasst/reserviert/verifiziert hat (E-Mail) bleibt Fremden verborgen.
     const anteile = alle ? r.rows : r.rows.map(a => (a.erfasst_von === me || a.reserviert_von === me)
-      ? a : { ...a, eigentuemer: null, wohnadressen: null, notizen: null, bild_path: null });
+      ? a : { ...a, eigentuemer: null, wohnadressen: null, notizen: null, bild_path: null,
+        erfasst_von: null, reserviert_von: null, verifiziert_von: null });
     res.json({ anteile });
   } catch (err) {
     console.error('grundbuch list err:', err.message);

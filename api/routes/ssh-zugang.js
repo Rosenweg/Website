@@ -42,7 +42,12 @@ const LOGIN_MUSTER = /^[a-z_][a-z0-9._-]{0,31}$/;
 // landete sein Schluessel sonst in root's authorized_keys.
 const SYSTEM_LOGINS = new Set(['root', 'daemon', 'bin', 'sys', 'sync', 'games', 'man', 'lp', 'mail',
   'news', 'uucp', 'proxy', 'www-data', 'backup', 'list', 'irc', 'gnats', 'nobody', 'sshd',
-  'messagebus', 'postgres', 'postfix', 'docker', 'syslog', 'admin', 'administrator', 'operator']);
+  'messagebus', 'postgres', 'postfix', 'docker', 'syslog', 'admin', 'administrator', 'operator',
+  // Lokale Betriebskonten (Ansible, Workflows, Handarbeit, Image-Standard):
+  // ein gleichnamiges Portal-Konto bekaeme sonst deren Shell samt sudo.
+  'claude', 'ansible', 'github', 'ubuntu', 'debian', 'pi',
+  // Weitere hostspezifische Konten ohne Codeaenderung, kommagetrennt.
+  ...String(process.env.SSH_GESPERRTE_LOGINS || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean)]);
 function loginErlaubt(login) {
   const l = String(login || '').toLowerCase();
   return LOGIN_MUSTER.test(l) && !SYSTEM_LOGINS.has(l) && !l.startsWith('systemd-') && !l.startsWith('_');
