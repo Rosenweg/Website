@@ -13,9 +13,11 @@ Nextcloud-Adressbuch `kontakte/rosenweg`, die persönlichen SOGo-Adressbücher v
 > `100.64.2.24`) mit `docker exec rosenweg_postgres`. CT 201 und der Swarm
 > existieren nicht mehr; die Datenbank läuft heute auf **CT 128**
 > (`/opt/rosenweg-core`, Compose-Projekt `rosenweg-core`). Das Skript sucht den
-> Datenbank-Container weiterhin mit `docker ps -q -f name=rosenweg_postgres` –
-> auf CT 128 heisst er nach Compose-Schema anders. Wo und ob der Sync heute
-> läuft, ist vor der nächsten Änderung auf den Knoten zu prüfen:
+> Datenbank-Container jetzt per Compose-Label (`com.docker.compose.project=rosenweg-core`,
+> `com.docker.compose.service=postgres`), danach per Name (`rosenweg-core-postgres`,
+> alt `rosenweg_postgres`); `PG_CONTAINER` in der env-Datei überschreibt das.
+> Docker muss auf dem Host laufen, auf dem das Skript läuft (also CT 128). Wo
+> und ob der Sync heute läuft, ist vor dem Ausrollen auf den Knoten zu prüfen:
 >
 > ```bash
 > for n in 100.64.2.20 100.64.2.21 100.64.2.22; do
@@ -39,6 +41,7 @@ Variablen in `/root/.contacts-sync.env`:
 | `NC_KONTAKTE_PW` | ja | App-Passwort des Nextcloud-Kontos `kontakte` |
 | `INBOX_PW`, `PRAESIDENT_PW` | ja | Postfach-Passwörter für SOGo |
 | `ARCHIV_PW` | – | wird vom Skript derzeit nicht gelesen |
+| `PG_CONTAINER` | nein | Name/ID des Postgres-Containers, falls die Suche per Label/Name nicht passt |
 | `TLS_VERIFY` | nein | `1` = Zertifikate prüfen (seit 17.11.2026). Dann `NC_BASE` und `SOGO_BASE` auf Hostnamen-URLs setzen, weil die Standard-URLs die Server per IP ansprechen |
 | `NC_BASE` | nein | Standard `http://100.64.2.36/remote.php/dav/addressbooks/users/kontakte/rosenweg/` |
 | `NC_HOST` | nein | Host-Header für Nextcloud, Standard `nextcloud.rosenweg9.ch` |

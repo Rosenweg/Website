@@ -25,7 +25,7 @@ auf dem Knoten, der den Container gerade hat (`ha-manager status`).
 | `sync-avatars-to-ad.py` | CT 108 `dc1`, Cron | Profilbilder aus Authentik ins AD (`thumbnailPhoto`) | unten |
 | `whatsapp-bot-session-backup.sh` | CT 116, Cron 03:00 | Sicherung der WhatsApp-Sitzung | Kopfkommentar |
 | `whatsapp-bot-session-restore.sh` | CT 116 | Sitzung aus einer Sicherung zurückspielen | Kopfkommentar |
-| `wa-session-empfangen` | CT 106, erzwungener SSH-Befehl | nimmt die Sitzungssicherung von CT 116 entgegen (nur stdin, 14 Tage Aufbewahrung) | Kopfkommentar |
+| `wa-session-empfangen` | CT 106, erzwungener SSH-Befehl | nimmt die Sitzungssicherung von CT 116 entgegen (nur stdin, 14 Tage Aufbewahrung, Ablage `/var/backups/wa-session` 0700/0600 — bewusst nicht auf der Samba-Freigabe) | Kopfkommentar |
 | `gen-unterschriftenlisten.py` | Arbeitsplatz | Unterschriftenlisten (DOCX) je STWEG aus einem DB-Export | Kopfkommentar |
 | `shelly-surplus-switch.js` | Shelly Gen2 (Skript im Gerät) | Überschuss-Steuerung | `shelly-surplus-switch.md` |
 

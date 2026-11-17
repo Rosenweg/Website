@@ -62,17 +62,56 @@ VLAN_NETWORKS = {
 }
 
 # Regex patterns for UDM syslog messages
+#
+# D-4-1: Die frueheren Ein-Regex-Muster mit mehreren verketteten .*? / .*
+# (RE_FIREWALL, RE_CONNTRACK) liefen bei gezielt gebauten Zeilen in
+# polynomielles Backtracking (7 KB -> 83 s); ein einziges UDP-Paket legte den
+# Collector lahm. Jetzt: Nachricht auf MAX_MSG_CHARS kuerzen und die Felder
+# einzeln und in fester Reihenfolge suchen. Die Ergebnisse entsprechen den
+# alten Mustern (inkl. "." ohne Zeilenumbruch, lazy = erstes / greedy =
+# letztes Vorkommen).
+MAX_MSG_CHARS = 2048
+
 # Firewall/NAT log: [UFW ALLOW/BLOCK] or iptables format
-RE_FIREWALL = re.compile(
-    r'(?:\[UFW\s+)?(?P<action>ALLOW|BLOCK|DROP|REJECT)\]?\s*'
-    r'IN=(?P<iface>\S*)\s+'
-    r'.*?SRC=(?P<src_ip>\d+\.\d+\.\d+\.\d+)\s+'
-    r'DST=(?P<dst_ip>\d+\.\d+\.\d+\.\d+)\s+'
-    r'.*?PROTO=(?P<proto>\w+)'
-    r'(?:.*?SPT=(?P<src_port>\d+))?'
-    r'(?:.*?DPT=(?P<dst_port>\d+))?'
-    r'(?:.*?MAC=(?P<mac>[0-9a-f:]+))?'
-)
+FW_ANKER = re.compile(r'(?:\[UFW\s+)?(?P<action>ALLOW|BLOCK|DROP|REJECT)\]?\s*IN=(?P<iface>\S*)\s+')
+FW_SRCDST = re.compile(r'SRC=(?P<src_ip>\d+\.\d+\.\d+\.\d+)\s+DST=(?P<dst_ip>\d+\.\d+\.\d+\.\d+)\s+')
+FW_PROTO = re.compile(r'PROTO=(?P<v>\w+)')
+FW_SPT = re.compile(r'SPT=(?P<v>\d+)')
+FW_DPT = re.compile(r'DPT=(?P<v>\d+)')
+FW_MAC = re.compile(r'MAC=(?P<v>[0-9a-f:]+)')
+
+
+def _naechstes(muster, msg, pos):
+    """Wie '.*?MUSTER' ab pos: erstes Vorkommen, das vor dem naechsten
+    Zeilenumbruch beginnt ('.' matcht kein \\n). Linear."""
+    nl = msg.find('\n', pos)
+    m = muster.search(msg, pos)
+    if m and (nl < 0 or m.start() <= nl):
+        return m
+    return None
+
+
+def match_firewall(msg):
+    """Ersatz fuer RE_FIREWALL.search(msg): dict der Gruppen oder None."""
+    for anker in FW_ANKER.finditer(msg):
+        sd = _naechstes(FW_SRCDST, msg, anker.end())
+        if not sd:
+            continue
+        pr = _naechstes(FW_PROTO, msg, sd.end())
+        if not pr:
+            continue
+        g = {'action': anker.group('action'), 'iface': anker.group('iface'),
+             'src_ip': sd.group('src_ip'), 'dst_ip': sd.group('dst_ip'),
+             'proto': pr.group('v'), 'src_port': None, 'dst_port': None, 'mac': None}
+        pos = pr.end()
+        for name, muster in (('src_port', FW_SPT), ('dst_port', FW_DPT), ('mac', FW_MAC)):
+            m = _naechstes(muster, msg, pos)
+            if m:
+                g[name] = m.group('v')
+                pos = m.end()
+        return g
+    return None
+
 
 # WiFi associate/disassociate
 RE_WIFI_ASSOC = re.compile(
@@ -85,9 +124,51 @@ RE_DHCP = re.compile(
 )
 
 # conntrack/NAT new connection (if UDM logs these)
-RE_CONNTRACK = re.compile(
-    r'conntrack.*NEW.*src=(?P<src_ip>\d+\.\d+\.\d+\.\d+).*dst=(?P<dst_ip>\d+\.\d+\.\d+\.\d+).*sport=(?P<src_port>\d+).*dport=(?P<dst_port>\d+)'
-)
+# Frueher: conntrack.*NEW.*src=IP.*dst=IP.*sport=N.*dport=N (greedy) — also
+# innerhalb einer Zeile jeweils das LETZTE passende Vorkommen. Hier rueckwaerts
+# ab dem letzten dport= ermittelt.
+CT_SRC = re.compile(r'src=(\d+\.\d+\.\d+\.\d+)')
+CT_DST = re.compile(r'dst=(\d+\.\d+\.\d+\.\d+)')
+CT_SPORT = re.compile(r'sport=(\d+)')
+CT_DPORT = re.compile(r'dport=(\d+)')
+
+
+def _letztes(muster, zeile, start, ende):
+    """Letztes Vorkommen von muster mit start <= Beginn und Ende <= ende."""
+    best = None
+    for m in muster.finditer(zeile, start):
+        if m.start() >= ende:
+            break
+        if m.end() <= ende:
+            best = m
+    return best
+
+
+def match_conntrack(msg):
+    """Ersatz fuer RE_CONNTRACK.search(msg): dict der Gruppen oder None."""
+    for zeile in msg.split('\n'):
+        c = zeile.find('conntrack')
+        if c < 0:
+            continue
+        c += len('conntrack')
+        dp = _letztes(CT_DPORT, zeile, c, len(zeile))
+        if not dp:
+            continue
+        sp = _letztes(CT_SPORT, zeile, c, dp.start())
+        if not sp:
+            continue
+        ds = _letztes(CT_DST, zeile, c, sp.start())
+        if not ds:
+            continue
+        sr = _letztes(CT_SRC, zeile, c, ds.start())
+        if not sr:
+            continue
+        neu = zeile.find('NEW', c)
+        if neu < 0 or neu + 3 > sr.start():
+            continue
+        return {'src_ip': sr.group(1), 'dst_ip': ds.group(1),
+                'src_port': sp.group(1), 'dst_port': dp.group(1)}
+    return None
 
 # Buffer for batch inserts (max 10000 to prevent OOM on bursts)
 MAX_BUFFER_SIZE = 10000
@@ -127,25 +208,26 @@ def ip_to_vlan(ip):
 
 def parse_syslog(data):
     """Parse a syslog message and return event dict or None."""
-    msg = data.decode('utf-8', errors='replace').strip()
+    # Kuerzen vor jeder Regex (D-4-1): UDM-Zeilen sind deutlich kuerzer
+    msg = data[:MAX_MSG_CHARS * 4].decode('utf-8', errors='replace').strip()[:MAX_MSG_CHARS]
     now = datetime.now(timezone.utc)
 
     # Try firewall/NAT log
-    m = RE_FIREWALL.search(msg)
+    m = match_firewall(msg)
     if m:
-        src_ip = m.group('src_ip')
+        src_ip = m['src_ip']
         vlan, network = ip_to_vlan(src_ip)
         # Skip internal-only traffic (both src and dst in 100.64.x.x)
-        dst_ip = m.group('dst_ip')
+        dst_ip = m['dst_ip']
         if src_ip.startswith('100.64.') and dst_ip.startswith('100.64.'):
             return None  # Internal traffic, skip
         return {
             'timestamp': now, 'event_type': 'firewall',
-            'source': 'syslog', 'mac': m.group('mac'),
+            'source': 'syslog', 'mac': m['mac'],
             'ip': src_ip, 'dst_ip': dst_ip,
-            'src_port': int(m.group('src_port')) if m.group('src_port') else None,
-            'dst_port': int(m.group('dst_port')) if m.group('dst_port') else None,
-            'proto': m.group('proto'),
+            'src_port': int(m['src_port']) if m['src_port'] else None,
+            'dst_port': int(m['dst_port']) if m['dst_port'] else None,
+            'proto': m['proto'],
             'network_name': network, 'vlan': vlan,
             'raw_message': msg[:500],
         }
@@ -174,18 +256,18 @@ def parse_syslog(data):
         }
 
     # Try conntrack
-    m = RE_CONNTRACK.search(msg)
+    m = match_conntrack(msg)
     if m:
-        src_ip = m.group('src_ip')
-        dst_ip = m.group('dst_ip')
+        src_ip = m['src_ip']
+        dst_ip = m['dst_ip']
         if src_ip.startswith('100.64.') and dst_ip.startswith('100.64.'):
             return None
         vlan, network = ip_to_vlan(src_ip)
         return {
             'timestamp': now, 'event_type': 'nat',
             'source': 'syslog', 'ip': src_ip, 'dst_ip': dst_ip,
-            'src_port': int(m.group('src_port')),
-            'dst_port': int(m.group('dst_port')),
+            'src_port': int(m['src_port']),
+            'dst_port': int(m['dst_port']),
             'network_name': network, 'vlan': vlan,
             'raw_message': msg[:500],
         }
