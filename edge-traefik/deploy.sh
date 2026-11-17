@@ -3,9 +3,22 @@
 # Usage: ./deploy.sh
 set -euo pipefail
 
-PVE=root@100.64.2.20
+# CT 245 laeuft auf pve3 (100.64.2.22); pct wirkt nur auf dem Knoten, der den
+# Container hat. Ueberschreibbar per PVE=root@<knoten> ./deploy.sh
+PVE="${PVE:-root@100.64.2.22}"
 CT=245
 SRC="$(cd "$(dirname "$0")" && pwd)"
+
+# Vorab pruefen, ob der CT wirklich auf diesem Knoten liegt (z. B. nach
+# HA-Migration). Sonst abbrechen und den richtigen Knoten nennen, statt
+# halb zu deployen.
+if ! ssh "$PVE" "pct status $CT" >/dev/null 2>&1; then
+  KNOTEN=$(ssh "$PVE" "pvesh get /cluster/resources --type vm --output-format json" 2>/dev/null \
+    | python3 -c 'import json,sys; print(next((r.get("node","") for r in json.load(sys.stdin) if r.get("vmid")=='"$CT"'), ""))' 2>/dev/null || true)
+  echo "[deploy] FEHLER: CT $CT nicht auf $PVE.${KNOTEN:+ Laut Cluster auf Knoten: $KNOTEN.}" >&2
+  echo "  Aufruf mit passendem Knoten: PVE=root@<ip-von-${KNOTEN:-knoten}> $0" >&2
+  exit 1
+fi
 
 echo "[deploy] /etc/traefik prep"
 ssh "$PVE" "pct exec $CT -- bash -c '

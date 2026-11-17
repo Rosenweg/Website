@@ -133,10 +133,12 @@ http:
           - main: wetter.rosenweg4303.ch
     # display.rosenweg4303.ch -> www-Frontend (Kiosk-Anzeige Ankündigungen/Notfall).
     # "/" -> /display.html. Öffentlich (read-only MQTT-User display-public, nur display/#).
-    # /api/* auf display.rosenweg4303.ch -> Haupt-API (RSS-Ticker-Feed /api/display/rss).
+    # /api/display/* auf display.rosenweg4303.ch -> Haupt-API (RSS-Ticker-Feed,
+    # PDF/PDF-Bild, Geraetedateien). Nur dieser Teilbaum: alles andere unter /api/
+    # ginge hier an der nginx-Drossel (rw_otp, Login) vorbei direkt an die API.
     display-api-rw4303:
       entryPoints: [websecure]
-      rule: Host(`display.rosenweg4303.ch`) && PathPrefix(`/api/`)
+      rule: Host(`display.rosenweg4303.ch`) && PathPrefix(`/api/display/`)
       priority: 100
       service: core-api-svc
       tls:
