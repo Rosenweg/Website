@@ -1,38 +1,59 @@
 # Routing-Übersicht — Dienste, Adressen, Pfade
 
 Referenz: welcher Dienst hört auf welche Adresse und wie wird durchgeroutet.
-Stand: 2026-06-19. Bei Routing-Bugs zuerst hier nachsehen.
+Stand: 17.11.2026 (Grundkette, Frontends, Pfade); die Abschnitte ab „DNS für
+Web-Routing“ sind vom 6.9.2026. Bei Routing-Fehlern zuerst hier nachsehen.
+Sicherheitsregeln für Routen (Freigabe, Konflikte mit eigenen Zonen):
+[`sicherheit.md`](sicherheit.md) Abschnitt 4.7.
 
 ## Grundkette
-```
-DNS (Cloudflare) → CF-Tunnel ODER direkter A-Record → Traefik (Swarm-VIP 100.64.2.27)
-   → Service (nginx im Container) → ggf. Proxy zu api / collector
-```
-- **CF-proxied** (orange): die meisten HTTP-Hosts laufen über den **CF-Tunnel** auf den Swarm.
-- **Direkt** (grau/A-Record): Mail (SMTP/IMAP) — CF kann kein SMTP/IMAP → A direkt auf 37.17.232.133, Router-DNAT.
 
-## HTTP-Hosts → Swarm-Service (Traefik Host-Regeln)
-| Host | Service / Image | Notiz |
+```
+DNS (Cloudflare) → öffentliche Adresse (public.rosenweg4303.ch) → UDM-DNAT
+   → edge-traefik CT 245 (100.64.2.40, TLS) → Frontend-LXC (nginx, HTTP)
+   → /api → API CT 128 (100.64.2.52:3000) bzw. offene Energie-Routen → CT 129 (100.64.2.53:3001)
+```
+
+- Routen kommen aus zwei Quellen: der Tabelle `isp_reverse_proxy_routes`
+  (Pflege in `isp-admin.html`, Sync alle 15 s) und `edge-traefik/extra-routes.yml`
+  (fest, von Hand ausgerollt).
+- Der frühere Weg CF-Tunnel → Swarm-Traefik (`100.64.2.27`) ist abgebaut.
+- Mail (SMTP/IMAP) geht nicht über den Cloudflare-Proxy, sondern per
+  TCP-SNI-Router am Edge (siehe unten und `email.md`).
+
+## HTTP-Hosts → Frontend-LXC
+
+| Host | Ziel | Quelle der Route |
 |---|---|---|
-| `www.rosenweg4303.ch`, `rosenweg4303.ch` | `rosenweg_website` (rosenweg-website) | Hauptseite |
-| `isp.rosenweg4303.ch` | `rosenweg_isp` (rosenweg-isp) | CF-Tunnel **direkt** auf `tasks.rosenweg_isp:80` (NICHT über Traefik:80 → sonst Redirect-Loop) |
-| `stweg1..7.rosenweg4303.ch`, `meg.rosenweg4303.ch` | `stweg1..7` / `meg` (rosenweg-stweg) | ein Image, `$site`-Map in `nginx.stweg.conf` wählt docroot |
-| **`rosenweg9.ch`, `www.rosenweg9.ch`** | **`stweg3`** (rosenweg-stweg) | STWEG-3-Eigendomain → `$site=stweg3` |
-| `noc.rosenweg4303.ch` | `noc` | Monitoring |
-| `whatsapp.rosenweg4303.ch` | **CT 116 (.39)** — NICHT mehr Swarm | Route `isp_reverse_proxy_routes` id=25 → `http://100.64.2.39:8090` |
+| `www.rosenweg4303.ch`, `rosenweg4303.ch` | CT 118 `fe-www` `100.64.2.41` | `extra-routes.yml` (`www-lxc-svc`) |
+| `isp.rosenweg4303.ch`, `noc.rosenweg4303.ch` | CT 119 `fe-isp` `100.64.2.42` | DB |
+| `stweg1..7.rosenweg4303.ch` | CT 120–126 `100.64.2.43–.49` | DB |
+| `meg.rosenweg4303.ch` | CT 127 `100.64.2.50` | DB |
+| **`rosenweg9.ch`, `www.rosenweg9.ch`** | CT 122 `fe-stweg3` `100.64.2.45` (`$site=stweg3`) | `extra-routes.yml` (`rw9-lxc-svc`) |
+| `pwa.rosenweg4303.ch` | CT 130 `fe-pwa` `100.64.2.54` | `extra-routes.yml` (`pwa-lxc-svc`) |
+| `whatsapp.rosenweg4303.ch` | CT 116 `http://100.64.2.39:8090` | DB, id=25 |
+| `heizung.rosenweg9.ch`, `heizung.rosenweg4303.ch` | ioBroker `100.64.90.50:8082`, **immer** über Authentik | `extra-routes.yml` |
+| `contacts.rosenweg4303.ch` | CT 115 `100.64.2.38:443`, TLS-Passthrough | `extra-routes.yml` (TCP) |
 
 ## Pfad-Routing innerhalb der Frontends (nginx)
-Gilt für stweg/website/isp-nginx (`nginx.stweg.conf`, `nginx.conf`, `nginx.isp.conf`):
+
+Gilt für `frontends-lxc/nginx/{website,stweg,isp,pwa}.conf`:
+
 | Pfad | Ziel | Notiz |
 |---|---|---|
-| `/api/energy/` | `energy-collector:3001` | **muss VOR** `/api/` stehen (längeres `^~`-Prefix gewinnt) |
-| `/api/` | `api:3000` (rosenweg_api) | `X-Forwarded-Proto https` hardcoded |
-| `/js/`, `/css/` | shared, am html-Root | host-unabhängig |
+| `/api/energy/{surplus,surplus-available,lametric,shelly,solar-live,tariffs,tariffs/current}` | Collector `rw_energy` (CT 129) | nur diese offenen Geräte-/Anzeige-Routen (seit 17.11.2026) |
+| übrige `/api/energy/…` | API `rw_api` (CT 128) | Anmeldung + nur zugeordnete Zähler |
+| `/api/` | API `rw_api` (CT 128) | `X-Forwarded-Proto https` fest; Code-Endpunkte gedrosselt (`rw_otp`, 10/Min je IP) |
+| `/js/`, `/css/` | gemeinsam, am Docroot | hostunabhängig |
 | `/solar` | `/$site/pages/solaranlage-live.html` | Kurz-URL (stweg3/rosenweg9.ch) |
 | `/zaehler-technik` | `/$site/pages/zaehler-technik.html` | nur stweg3 |
-| sonst nicht gefunden | **`@www_fallback` → 302 `www.rosenweg4303.ch$uri`** | erklärt „landet auf Hauptseite" bei unbekannten Pfaden |
+| `/data/`, `*.md`, `*.json` (ausser Freigaben), `.alt` … | 404 | Sperrregeln, siehe `frontends-lxc/README.md` |
+| sonst nicht gefunden (stweg) | **`@www_fallback` → 302 `www.rosenweg4303.ch$uri`** | erklärt „landet auf Hauptseite“ bei unbekannten Pfaden |
 
-> **Debug-Tipp:** „wird auf rosenweg4303.ch umgeleitet" = entweder der Pfad fällt in `@www_fallback` (serverseitig, mit curl reproduzierbar) ODER ein **gecachter 301/302 im Browser** (curl bekommt 200, Browser leitet um → Inkognito testen).
+> **Debug-Tipp:** „wird auf rosenweg4303.ch umgeleitet“ = entweder der Pfad fällt
+> in `@www_fallback` (serverseitig, mit curl reproduzierbar) ODER ein
+> **gespeicherter 301/302 im Browser** (curl bekommt 200, Browser leitet um →
+> privates Fenster testen).
 
 ## Mail (direkt, nicht CF)
 | Zweck | Endpoint | Backend |
@@ -41,18 +62,18 @@ Gilt für stweg/website/isp-nginx (`nginx.stweg.conf`, `nginx.conf`, `nginx.isp.
 | IMAP Roamer | `imap.rosenweg9.ch:993` | → Mailcow (CT 240) |
 | Mailcow-Web/Autoconfig | `mailcow.rosenweg9.ch`, `personen.rosenweg4303.ch` | CT 240 |
 | PMG / Quarantäne | `pmg.rosenweg4303.ch`, `quarantine.rosenweg9.ch` | CT 230 (.31) |
-| WhatsApp-Inbound | `MX whatsapp.rosenweg4303.ch` → PMG → Transport `smtp:[100.64.2.39]:2525` | CT 116 |
+| WhatsApp-Inbound | `MX whatsapp.rosenweg4303.ch` → PMG → Transport `intern:[100.64.2.39]:2525` | CT 116; 2525 nur von PMG (IPv4+IPv6), Empfänger nur Aliase |
 
-## LXC-Dienste (außerhalb Swarm)
+## Weitere LXC-Dienste
 | Dienst | CT / IP | Host |
 |---|---|---|
-| Mailcow | CT 240 | mailcow.rosenweg9.ch |
+| Mailcow | CT 240 / .33 | mailcow.rosenweg9.ch |
 | PMG | CT 230 / .31 | pmg.rosenweg4303.ch |
 | WhatsApp-Bridge | CT 116 / .39 | whatsapp.rosenweg4303.ch |
-| Z-Push (Kontakte) | CT 115 | contacts.rosenweg4303.ch |
+| Z-Push (Kontakte) | CT 115 / .38 | contacts.rosenweg4303.ch (Zertifikat abgelaufen, offener Punkt) |
 | Nextcloud | CT 104 / .36 | (eigenes LXC) |
-| Authentik (SSO) | CT 114 | OAuth/OIDC für alle Frontends |
-| PBX | — | pbx.rosenweg4303.ch |
+| Authentik (SSO) | CT 114 / .37 | OAuth/OIDC für alle Frontends |
+| PBX | CT 220 / .55 (pve3) | pbx.rosenweg4303.ch |
 
 ## Entfernt
 - **NetBox** (`netbox.rosenweg4303.ch`) — Stack am 2026-06-19 entfernt (Crash-Loop → Ceph-Stall). Kachel in `netzwerk.html` + DNS + PVE-Token `netbox@pam!collector` noch aufzuräumen.
