@@ -23,10 +23,7 @@ Beide Endpoints geben JSON zurück:
   "grid_power_w": -1500,
   "production_w": 3500,
   "heizstab_w": 800,
-  "consumers": [
-    { "id": "r9-wohnung1", "name": "Wohnung 1", "power_w": 320 }
-  ],
-  "timestamp": "2026-03-25T14:30:00Z",
+  "timestamp": "2026-11-17T13:30:00Z",
   "group": "r9"
 }
 ```
@@ -37,7 +34,15 @@ Beide Endpoints geben JSON zurück:
 | `grid_power_w` | Netz-Leistung (negativ = Einspeisung, positiv = Bezug) |
 | `production_w` | Solar-Produktion in Watt |
 | `heizstab_w` | Heizstab-Verbrauch in Watt |
-| `consumers` | Einzelne Verbraucher mit ID, Name und aktueller Leistung |
+| `timestamp` | Zeitpunkt des letzten Netzwerts |
+| `group` | Zählergruppe (Standard `r9`, über `?group=` wählbar) |
+
+Diese Abfragen sind **ohne Anmeldung** erreichbar, damit der Shelly sie direkt lesen
+kann. Seit dem 17.11.2026 fehlt in der Antwort das frühere Feld `consumers` (Leistung
+je Wohnung) – es verriet, wer zu Hause ist. Für die Steuerung wird es nicht gebraucht;
+das Skript liest nur `surplus_w`. Liefern Hauptzähler und SmartFox seit zwei Minuten
+keinen Wert, antwortet die API trotzdem mit `surplus_w: 0` – der Shelly schaltet dann
+nicht ein. Alle Parameter und weitere offene Abfragen: [`docs/energie-api.md`](../docs/energie-api.md).
 
 ### Einzelwerte abrufen
 
@@ -70,7 +75,7 @@ Die LaMetric App **My Data DIY** zeigt beliebige Daten von einer URL auf dem LaM
 2. **Communication type**: `HTTP Poll`
 3. Bei **URL** eingeben:
    ```
-   https://rosenweg4303.ch/api/energy/lametric
+   https://www.rosenweg4303.ch/api/energy/lametric
    ```
 4. **Data format**: `Predefined`
 5. **Poll interval**: `30 seconds` (oder nach Wunsch)
@@ -82,7 +87,7 @@ Ohne Parameter werden alle 4 Hauptwerte angezeigt.
 
 **URL:**
 ```
-https://rosenweg4303.ch/api/energy/lametric
+https://www.rosenweg4303.ch/api/energy/lametric
 ```
 
 **Ergebnis:** Vier rotierende Frames:
@@ -97,7 +102,7 @@ Werte unter 1000W werden als `850 W` angezeigt, darueber als `1.5 kW`.
 
 **URL:**
 ```
-https://rosenweg4303.ch/api/energy/lametric?fields=surplus_w,production_w
+https://www.rosenweg4303.ch/api/energy/lametric?fields=surplus_w,production_w
 ```
 
 **Ergebnis:** Zwei rotierende Frames:
@@ -108,7 +113,7 @@ https://rosenweg4303.ch/api/energy/lametric?fields=surplus_w,production_w
 
 **URL:**
 ```
-https://rosenweg4303.ch/api/energy/lametric?fields=production_w
+https://www.rosenweg4303.ch/api/energy/lametric?fields=production_w
 ```
 
 **Ergebnis:** Ein einzelner Frame: `Solar 3.5 kW`
@@ -119,7 +124,7 @@ Zeigt was verfuegbar waere, wenn der Heizstab abgeschaltet wuerde:
 
 **URL:**
 ```
-https://rosenweg4303.ch/api/energy/lametric?fields=surplus_available_w,heizstab_w
+https://www.rosenweg4303.ch/api/energy/lametric?fields=surplus_available_w,heizstab_w
 ```
 
 **Ergebnis:**
@@ -180,7 +185,7 @@ Im Script die `CONFIG`-Werte anpassen:
 
 ```javascript
 let CONFIG = {
-  url: "http://rosenweg4303.ch/api/energy/surplus",
+  url: "https://www.rosenweg4303.ch/api/energy/surplus",
   check_interval: 15,   // Sekunden zwischen Checks
   on_threshold: 1000,   // Watt Überschuss zum Einschalten
   off_power: 10,        // Watt unter dem abgeschaltet wird
@@ -190,7 +195,7 @@ let CONFIG = {
 
 | Parameter | Standard | Beschreibung |
 |---|---|---|
-| `url` | `.../surplus` | API-Endpoint; `.../surplus-available` nutzen wenn Heizstab-Verbrauch berücksichtigt werden soll |
+| `url` | `.../surplus` | API-Endpoint; `.../surplus-available` nutzen wenn Heizstab-Verbrauch berücksichtigt werden soll. Die Datei `shelly-surplus-switch.js` im Repo enthält noch `http://rosenweg4303.ch/...`; `http` wird vom Edge-Proxy auf `https` umgeleitet. Darum beim Einfügen direkt die `https://www.`-Adresse eintragen. |
 | `check_interval` | 15 | Abfrageintervall in Sekunden (min. 10 empfohlen) |
 | `on_threshold` | 1000 | Mindest-Überschuss in Watt zum Einschalten |
 | `off_power` | 10 | Verbrauch am Ausgang in Watt unter dem abgeschaltet wird |
@@ -209,13 +214,13 @@ let CONFIG = {
   Surplus: 2300W
   CH0 EIN (Überschuss: 2300W)
   ```
-- Bei Fehlermeldungen `API error, skip` die URL und Netzwerkverbindung prüfen
+- Bei Fehlermeldungen `API error, skip` die URL und Netzwerkverbindung prüfen. Die URL im Browser öffnen: es muss JSON mit `surplus_w` kommen. Kommt `401`, ist eine Route eingetragen, die eine Anmeldung braucht (z. B. `/api/energy/live`) – für den Shelly nur `/surplus` oder `/surplus-available` verwenden.
 
 ## Voraussetzungen
 
 - Shelly Gen2 Gerät (1PM, 2PM, Plus 1PM, etc.)
 - Firmware >= 1.0.0
-- Shelly muss `rosenweg4303.ch` erreichen können (DNS + Internet oder lokales Netz)
+- Shelly muss `www.rosenweg4303.ch` über HTTPS erreichen können (DNS + Internet)
 
 ## Typische Anwendungsfälle
 

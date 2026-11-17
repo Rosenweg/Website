@@ -1,6 +1,40 @@
 # Konzept: Aufwand-Erfassung vereinheitlichen + Quittungs-Scanner (PWA)
 
-Status: **Planung** (noch nicht gebaut). Stand 2026-06-28.
+Status: Konzept vom 2026-06-28, **teilweise gebaut** (Ist-Stand vom 17.11.2026 direkt unten).
+
+## Ist-Stand (17.11.2026)
+
+Gebaut ist die PWA **„Arbeitserfassung“** (`pwa.rosenweg4303.ch/arbeit/`, Quelle
+`pwa/arbeit/`) mit Stoppuhr, manueller Zeit und einem Abschnitt **„📷 Quittungen /
+Material (optional)“** im selben Eintrag:
+
+- Fotos werden im Browser auf höchstens 1600 px verkleinert, dann über
+  `POST /api/auslagen/scan-beleg` per KI ausgelesen (höchstens **30 Scans pro Stunde**
+  und Person); der Material-Betrag ist danach anpassbar.
+- Ein Eintrag mit Stunden wird als Kategorie **Arbeitszeit** angelegt, ein Eintrag nur
+  mit Material als **Material**. In der Detailansicht ist die Kategorie wählbar.
+- **„Als Entwurf“** speichert ohne Betrag; eingereicht werden kann nur mit Betrag > 0.
+- Offline-Puffer in IndexedDB (`rosenweg-aufwand`), siehe
+  [pwa-konzept.md](pwa-konzept.md), Ist-Stand.
+- **„Meine Erfassungen“** zeigt die Einträge der Kategorie Arbeitszeit, auch Entwürfe
+  aus Reklamationen („aus Reklamation #…“).
+
+Nicht gebaut: Anhängen einer Quittung an einen **bestehenden** Eintrag oder direkt an
+eine Reklamation aus der PWA (§2 Punkt 2, §4 Schritt 5).
+
+Regeln der Auslagen-API, die für jede Erfassung gelten (Details:
+[sicherheit.md](sicherheit.md), Abschnitt 4.3; Bedienung für Prüfer:
+[anleitung-ausschuss.md](anleitung-ausschuss.md), Abschnitt 6):
+
+| Regel | Wirkung |
+|---|---|
+| Entwürfe gehören dem Ersteller | nur er sieht, ändert, reicht ein oder löscht sie (die Technik sieht sie auch); Prüfer können sie weder kommentieren noch genehmigen |
+| keine Selbstgenehmigung | eigene Auslagen genehmigt eine andere Person; auch Ausschuss und Technik |
+| Positionen und Belege | änderbar nur bei eigener Auslage im Status Entwurf oder eingereicht; nach der Genehmigung gesperrt |
+| Belege | PDF, JPG, PNG, WEBP, HEIC, je höchstens 15 MB |
+| Betrag | > 0 und höchstens 100 000 CHF zum Einreichen |
+| gleichzeitige Änderung | Genehmigen auf veraltetem Stand (Betrag/IBAN geändert) wird mit 409 abgelehnt |
+| Entwurf aus Reklamation | beim Status „erledigt“ einer Reklamation entsteht für die zugewiesene Person ein Entwurf (Kategorie Arbeitszeit, Betrag 0, letzte bekannte IBAN) |
 
 ## 0. Kernerkenntnis: es ist schon ein System
 
@@ -26,8 +60,9 @@ mit **mehreren Belegen**, optional **an eine Reklamation gehängt** — eine Ein
 ## 2. Entscheidungen (vom Auftraggeber)
 
 1. **Kategorie flexibel** — Auswahl statt fix; pro Auslage (und perspektivisch pro Position):
-   Material, Reparatur, Verpflegung, Reisekosten, Porto/Versand, Reinigung, Arbeitszeit, Sonstiges
-   (= bestehende `AUSLAGEN_KATEGORIEN`).
+   Material, Reparatur, Porto/Versand, Reinigung, Arbeitszeit, Sonstiges
+   (= `AUSLAGEN_KATEGORIEN` in `api/server.js`, Stand 17.11.2026; andere Werte speichert
+   die API als „keine Kategorie“).
 2. **Anhängbar** — eine Quittung kann an einen **bestehenden Eintrag** (dieselbe Auslage:
    weitere Position + weiterer Beleg) **oder an eine Reklamation** (`reklamation_id`) gehängt werden,
    statt immer eine separate Spesen-Auslage zu sein.
@@ -69,7 +104,7 @@ KI-Scan braucht Netz → Belege müssen offline **gepuffert** werden:
 - Gilt sinnvollerweise auch für die **Zeit-Einträge** (Manuell/Timer) → robust bei Funkloch.
 - Service-Worker cached `/api/` nicht (Live) — bleibt so; Queue ist App-Logik, nicht SW-Cache.
 
-## 6. UI-Konsolidierung (die größere Frage)
+## 6. UI-Konsolidierung (die grössere Frage)
 
 - **Kurzfristig:** PWA „Arbeit" → „Aufwand" mit Quittungs-Modus; auslagen.html unverändert (Verwaltung).
 - **Mittelfristig:** „Meine Auslagen"-Liste in der PWA zeigt **alle** Kategorien (Zeit + Spesen) gemeinsam,
@@ -81,7 +116,7 @@ KI-Scan braucht Netz → Belege müssen offline **gepuffert** werden:
 - **P1 (Frontend):** Quittungs-Modus + Scan + Plausi + Submit (neue Auslage). ~½ Tag inkl. Handy-Test.
 - **P2 (Frontend):** Anhängen an bestehenden Eintrag/Reklamation; Mehr-Beleg-UI; Kategorie-Auswahl. ~½ Tag.
 - **P3 (Frontend):** Offline-Queue (IndexedDB) für Quittung + Zeit. ~1 Tag.
-- Kein Build/Backend nötig (Endpoints existieren); Deploy nur `pwa` (CT130).
+- Kein Build/Backend nötig (Endpoints existieren); Deploy nur `pwa` (CT 130, `fe-pwa`).
   Ausnahme: falls „Kategorie pro Position" → kleine Backend-Erweiterung.
 
 ## 8. Offene Punkte

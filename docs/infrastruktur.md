@@ -1,255 +1,169 @@
 # Infrastruktur — Rosenweg 4303 Kaiseraugst
 
-## Übersicht
+Stand: 17.11.2026. Diese Seite ist der Einstieg für Techniker: wo welcher Dienst
+läuft, wie man hinkommt, wo die Betriebsanleitung liegt. Sicherheitsregeln,
+Pflichtvariablen, Reihenfolge beim Ausrollen und offene Punkte stehen zentral
+in [`sicherheit.md`](sicherheit.md).
 
-3-Node Proxmox Cluster mit Docker Swarm für die Rosenweg-Kooperation (8 STWEGs, ~60 Wohnungen).
+> **Der Docker Swarm ist abgebaut** (Juni 2026). Die Container CT 201–203
+> (`docker-pve1..3`, `100.64.2.24–26`) und die Swarm-Adresse `100.64.2.27` gibt
+> es nicht mehr; ebenso den Cloudflare-Tunnel auf den Swarm. Jeder Dienst hat
+> heute einen eigenen LXC. Anleitungen mit `docker service …`,
+> `docker stack deploy` oder `ssh root@100.64.2.24` sind veraltet.
+
+## Überblick
 
 ```
-Internet
-    │
+Internet (Init7, öffentliche Adresse dynamisch, Name public.rosenweg4303.ch)
+    │  Cloudflare: DNS für rosenweg4303.ch / rosenweg9.ch, teils Proxy
     ▼
-Cloudflare (DNS, CDN, Tunnel, Email Routing)
-    │
-    ├── CF Tunnel ──► Docker Swarm (Website, API, Authentik, NetBox)
-    ├── CF Email ──► Gmail (rosenweg4303@gmail.com)
-    └── SMTP2GO ◄── API (Outbound Mail)
+UDM-Pro ── DNAT 80/443/465/587/993/25/8883 ──▶ CT 245 edge-traefik (100.64.2.40)
+    │                                              │ TLS (Let's Encrypt über Cloudflare-DNS)
+    │                                              ├─▶ Frontend-LXCs CT 118–127, 130 (nginx)
+    │                                              │        └─ /api ─▶ CT 128 core-backend (API, Postgres)
+    │                                              │        └─ /api/energy (offen) ─▶ CT 129 energy-stack
+    │                                              ├─▶ Authentik CT 114, Nextcloud CT 104, WhatsApp CT 116, PBX CT 220 …
+    │                                              └─▶ TCP-SNI: Mail (Mailcow CT 240 / PMG CT 230), Kontakte (CT 115)
+    └── udp/5060 (nur peoplefone) ──▶ CT 220 asterisk-pbx
 ```
 
-## Proxmox Hosts
+## Proxmox-Knoten
 
-| Host | IP (Netbird) | IP (LAN) | Rolle |
-|------|-------------|-----------|-------|
-| pve1 | 100.64.90.20 | 100.64.2.20 | Proxmox VE, meiste CTs |
-| pve2 | 100.64.90.21 | 100.64.2.21 | Proxmox VE, DC + Docker |
-| pve3 | 100.64.90.22 | 100.64.2.22 | Proxmox VE, Docker |
+| Knoten | LAN | Rolle (Normalfall) |
+|------|-----------|-------|
+| pve1 | 100.64.2.20 | API, Energie, Frontends, Mail, VPN, TV, Router-CTs |
+| pve2 | 100.64.2.21 | Fileserver, Domänencontroller dc1, Authentik |
+| pve3 | 100.64.2.22 | Edge-Traefik, PBX, Druck, PMG, WhatsApp, Z-Push, dc2 |
 
-Zugriff auf LXC Container direkt via LAN-IP: `ssh root@100.64.2.20` (pve1), etc.
+Viele Container sind HA-schwebend; ihr Knoten kann sich ändern. `pct exec`
+funktioniert nur auf dem Knoten, der den Container gerade hat. Nachsehen:
 
-## LXC Container
-
-### pve1 (100.64.2.20)
-
-| CT | Name | IP | RAM | Disk | Funktion |
-|----|------|----|-----|------|----------|
-| 100 | proxmox-datacenter-manager | DHCP | 2GB | 10G | Proxmox Datacenter Manager |
-| 102 | ntp3 | DHCP | 512MB | 8G | NTP Server |
-| 103 | nextcloud-rosenweg-samba | 10.0.11.33 | 512MB | 8G | Nextcloud (alt) |
-| 104 | n8n | DHCP | 2GB | 20G | n8n Automation (veraltet) |
-| 105 | rk-mqtt-server | 10.0.2.32 | 1GB | 4G | MQTT Broker |
-| 106 | fileserver | 100.64.2.28 | 1GB | 50G | Samba Fileserver (AD-Member) |
-| 201 | docker-pve1 | 100.64.2.24 | 8GB | 100G | Docker Swarm Node |
-| 901 | iobroker-technik | 100.64.90.50 | 2GB | 8G | ioBroker Hausautomation |
-
-### pve2 (100.64.2.21)
-
-| CT | Name | IP | RAM | Disk | Funktion |
-|----|------|----|-----|------|----------|
-| 108 | dc1 | 100.64.2.30 | 2GB | 20G | Samba AD Domain Controller |
-| 202 | docker-pve2 | 100.64.2.25 | 8GB | 100G | Docker Swarm Node |
-| 204 | scan-server | 100.64.139.71 | 512MB | 4G | Scan Server |
-| 206 | fileserver-replica | 100.64.2.27 | 512MB | 50G | Fileserver Replikat (gestoppt) |
-
-### pve3 (100.64.2.22)
-
-| CT | Name | IP | RAM | Disk | Funktion |
-|----|------|----|-----|------|----------|
-| 101 | docker | DHCP | 2GB | 4G | Docker (alt) |
-| 203 | docker-pve3 | 100.64.2.26 | 8GB | 100G | Docker Swarm Node |
-
-## Docker Swarm
-
-**3 Manager Nodes**, alle aktiv (docker-pve1, docker-pve2, docker-pve3).
-
-### VIP (Virtual IP)
-`100.64.2.27` — Sekundäre IP auf CT 201 (eth0), für externen Zugriff auf Authentik.
-
-### Services
-
-| Service | Replicas | Image | Ports |
-|---------|----------|-------|-------|
-| **rosenweg_website** | 3/3 | ghcr.io/rosenweg/rosenweg-website:latest | — |
-| **rosenweg_api** | 1/1 | ghcr.io/rosenweg/rosenweg-api:latest | — |
-| **rosenweg_traefik** | 1/1 | traefik:v3.2 | 80, 443 |
-| **rosenweg_postgres** | 1/1 | postgres:17-alpine | — |
-| **rosenweg_energy-db** | 1/1 | postgres:17-alpine | — |
-| **rosenweg_energy-collector** | 1/1 | ghcr.io/rosenweg/energy-collector:latest | — |
-| **rosenweg_doc-converter** | 1/1 | gotenberg/gotenberg:8 | — |
-| **rosenweg_shepherd** | 1/1 | mazzolino/shepherd:latest | — |
-| **authentik_server** | 1/1 | ghcr.io/goauthentik/server:2024.12 | 9000, 9443 |
-| **authentik_worker** | 1/1 | ghcr.io/goauthentik/server:2024.12 | — |
-| **authentik_postgresql** | 1/1 | postgres:17-alpine | — |
-| **authentik_redis** | 1/1 | redis:7-alpine | — |
-| **authentik_ldap** | 1/1 | ghcr.io/goauthentik/ldap:2024.12 | 389, 636 |
-| **cloudflared_cloudflared** | 2/2 | cloudflare/cloudflared:latest | — |
-| **netbox_netbox** | 1/1 | netboxcommunity/netbox:latest | 8000 |
-| **netbox_netbox-worker** | 1/1 | netboxcommunity/netbox:latest | — |
-| **netbox_postgres** | 1/1 | postgres:17-alpine | — |
-| **netbox_redis** | 1/1 | redis:7-alpine | — |
-
-### Overlay Networks
-
-| Netzwerk | Funktion |
-|----------|----------|
-| rosenweg_rosenweg-net | Website, API, DBs, Traefik, Gotenberg |
-| authentik_authentik-net | Authentik + DB + Redis |
-| netbox_netbox-net | NetBox + DB + Redis |
-
-### CIFS Volume (Dokumenten-Zugriff)
-
-```
-rosenweg_rosenweg-documents
-  → //100.64.2.28/api
-  → username=api-svc, domain=ROSENWEG, sec=ntlmsspi
-  → Mounted in rosenweg_api als /documents
+```bash
+ssh root@100.64.2.20 'ha-manager status'                     # HA-Dienste mit Knoten
+ssh root@100.64.2.20 'pvesh get /cluster/resources --type vm --output-format json'
 ```
 
-### Cronjobs (alle 3 Docker-CTs)
+Zugang zu den Knoten: SSH als root (Notweg `/root/.ssh/authorized_keys`) oder
+mit einem Portal-Schlüssel (siehe [`ssh-zugang.md`](ssh-zugang.md)). Von
+ausserhalb über den Sprunghost `ssh -J stefan@10.0.10.149 …`.
 
-| Intervall | Script | Funktion |
-|-----------|--------|----------|
-| */5 Min | `/usr/local/bin/docker-ipvs-fix.sh` | ip_forward in Docker lb-Namespaces setzen |
-| */2 Min | `/usr/local/bin/docker-service-watchdog.sh` | Ausgefallene Services automatisch neustarten |
+## Dienste und Container (Stand 17.11.2026)
 
-## Active Directory
+| CT | Name | Knoten | Adresse | Dienst | Betriebsanleitung |
+|----|------|--------|---------|--------|-------------------|
+| 128 | core-backend | pve1 | 100.64.2.52 | API (3000), Postgres, Gotenberg, Syslog-Collector, Shelly-Emulator | [`../backend-lxc/README.md`](../backend-lxc/README.md) |
+| 129 | energy-stack | pve1 | 100.64.2.53 | Energie-Collector (3001), Energie-DB (5432) | dito |
+| 118 | fe-www | pve1 (HA) | 100.64.2.41 | Hauptseite | [`../frontends-lxc/README.md`](../frontends-lxc/README.md) |
+| 119 | fe-isp | pve1 (HA) | 100.64.2.42 | `isp.`, `noc.` | dito |
+| 120–126 | fe-stweg1..7 | pve1 (HA) | 100.64.2.43–.49 | STWEG-Seiten | dito |
+| 127 | fe-meg | pve1 (HA) | 100.64.2.50 | MEG | dito |
+| 130 | fe-pwa | pve1 (HA) | 100.64.2.54 | `pwa.` (Reparatur-Meldung) | dito |
+| 245 | edge-traefik | pve3 | 100.64.2.40 | Reverse-Proxy, TLS | [`../edge-traefik/README.md`](../edge-traefik/README.md) |
+| 116 | whatsapp-bridge | pve3 (HA) | 100.64.2.39 | WhatsApp-Bot und Gateway (8080/8090/2525) | [`../whatsapp-bot/lxc/README.md`](../whatsapp-bot/lxc/README.md) |
+| 220 | asterisk-pbx | pve3 | 100.64.2.55 | Telefonanlage, PBX-API (8095) | [`../pbx/README.md`](../pbx/README.md) |
+| 115 | zpush | pve3 | 100.64.2.38 | ActiveSync-Kontakte | [`../zpush/README.md`](../zpush/README.md) |
+| 113 | vpn-wg | pve1 | 100.64.2.34 | WireGuard, `wg-control` (3001) | [`../wg-control/README.md`](../wg-control/README.md) |
+| 250 | tv7-streamer | pve1 | 100.64.9.23 | TV-Proxy (3000) | [`../tv7-streamer/README.md`](../tv7-streamer/README.md) |
+| 109 | tv-proxy | pve1 | 100.64.9.24 | udpxy (4022) | – |
+| 240 | mailcow | pve1 | 100.64.2.33 | Mailserver | [`email.md`](email.md) |
+| 230 | pmg | pve3 | 100.64.2.31 | Mail-Gateway, Relay | [`../pmg/README.md`](../pmg/README.md) |
+| 111 | cups-server | pve3 | 100.64.2.32 | Druck-API (8080) | [`email.md`](email.md#druck-per-mail-druckerr9-druckerr13) |
+| 114 | authentik | pve2 | 100.64.2.37 | SSO (9000/9443), LDAP-Outpost (389/636) | – |
+| 104 | nextcloud | pve1 | 100.64.2.36 | Nextcloud | – |
+| 105 | rk-mqtt-server | pve1 | 100.64.2.51 | MQTT-Broker (1883, 9001) | `mqtt-*.md` |
+| 106 | fileserver | pve2 | 100.64.2.28 (Dienstadresse `files.ad…` = 100.64.2.29, keepalived) | Samba, Dokumentenablage, Git-Backup | [`active-directory.md`](active-directory.md), [`../fileserver-lxc/README.md`](../fileserver-lxc/README.md) |
+| 206 | fileserver2 | pve2 | 100.64.2.27 | Replikat (BACKUP für `.29`) | dito |
+| 108 | dc1 | pve2 | 100.64.2.30 | Samba-AD-DC, Passwort-API (8446), Avatar-Sync | [`active-directory.md`](active-directory.md) |
+| 136 | dc2 | pve3 | – | zweiter DC | [`../ad-dc/README.md`](../ad-dc/README.md) |
+| 131 | core-messenger | pve2 | 100.64.2.56 | Messenger-Backend | – |
+| 260 | nfs-shared | pve2 | 100.64.2.35 | NFS | – |
+| 500–518 | rw*-usernetze-router | pve1 | 100.64.x.250 | je ein Router pro Haus (`router-api`) | `routing.md` |
+| 901 | iobroker-technik | – | 100.64.90.50 | ioBroker (Heizung), nur hinter Authentik | `edge-traefik/README.md` |
 
-### Domain Controller (CT 108 — dc1)
-- **Domain**: `AD.ROSENWEG4303.CH`
-- **Workgroup**: `ROSENWEG`
-- **IP**: 100.64.2.30
-- **Forest Level**: Windows 2008 R2
-- **37 Users**, **91 Groups** (aus Authentik synchronisiert)
-- **Sync**: Authentik → AD alle 2 Minuten (`/opt/ad-sync/sync.py`)
-- **Password API**: Port 8446, `ad-password-api.service` aktiv
-  - Auth: `Bearer <AD_PASSWORD_API_SECRET>` (Wert nur in der Umgebung)
-  - Endpunkt: `POST http://100.64.2.30:8446/`
+Die Adresse `100.64.2.27` gehörte früher der Swarm-VIP und ist heute CT 206.
+Knoten in Klammern „(HA)“ und Einträge „–“ beim Knoten: vor `pct`-Befehlen
+nachsehen.
 
-### Fileserver (CT 106 — fileserver)
-- **Domain Member**: `ROSENWEG` (AD.ROSENWEG4303.CH)
-- **IP**: 100.64.2.28
-- **Dienste**: smbd, winbind, vsftpd (nmbd inaktiv)
-- **Shares**:
-  - `dokumente` → `/srv/documents` (valid users: @rosenweg)
-  - `api` → `/srv/documents` (valid users: ROSENWEG\api-svc)
-  - `scans` → `/srv/documents/Scans` (valid users: ROSENWEG\scanner)
-- **FTP**: vsftpd, lokale Auth (kein Winbind)
-  - User: `scanner`, Passwort: `****** (siehe .env)`
-  - Chroot: `/srv/documents`, Scanner wechselt nach `scans/`
-- **Disk**: 50GB, 5% belegt
-- **Clustername**: `files.ad.rosenweg4303.ch` → `100.64.2.29` und
-  `2a02:16a:1400:9::29`, von keepalived zwischen CT 106 (MASTER) und CT 206
-  (BACKUP) geschwenkt. Die Stationen hängen dort ein, nicht am einzelnen
-  Server.
+## Geheimnisse und Umgebungsvariablen
 
-  > **Die IPv6-Instanz braucht einen Riegel.** Sie ging am 12. August 2026
-  > beim Start in FAULT und kam nie zurück — `unicast_src_ip` ist die
-  > SLAAC-Adresse, und keepalived war schneller als die Router-Ankündigung.
-  > Drei Tage lang trug niemand die `::29`; weil `getaddrinfo` IPv6 bevorzugt,
-  > kostete das **jede Anmeldung im Haus dreissig Sekunden**. Datei und
-  > Herleitung: [`fileserver-lxc/`](../fileserver-lxc/README.md).
+- **Werte stehen nie im Repo und nie in der Doku**, nur im Passwortmanager und
+  in den Dateien auf den Containern (`.env`, `/etc/default/*`, Modus 0600).
+- Das Repo `github.com/Rosenweg/Website` ist öffentlich, und seine Historie
+  enthält ältere Klartext-Geheimnisse. Sie gelten bis zur Rotation als bekannt
+  (Liste und Reihenfolge: `sicherheit.md` Abschnitt 7.1).
+- Fehlt eine Pflichtvariable, schaltet sich die Funktion ab (fail closed). Liste
+  je Dienst: `sicherheit.md` Abschnitt 6.
+
+| Dienst | Datei |
+|---|---|
+| API | `/opt/rosenweg-core/.env` (CT 128) |
+| Energie | `/opt/rosenweg-energy/.env` (CT 129) |
+| WhatsApp | `/opt/whatsapp-bot/.env` (CT 116) |
+| Edge | `/etc/default/traefik`, `/etc/default/traefik-sync` (CT 245) |
+| PBX | `/etc/default/asterisk-env`, `/etc/default/pbx-api`, `/etc/asterisk/manager.conf` (CT 220) |
+| wg-control | `/etc/wg-control/env` (CT 113) |
+| TV | `/etc/default/tv7-streamer` (CT 250) |
+| Avatar-Sync | `/etc/default/sync-avatars-to-ad` (CT 108) |
+| SSH-Zugang | `/etc/rosenweg-ssh.conf` (jeder aufgenommene Host) |
+
+## Ausrollen nach Änderungen
+
+Reihenfolge und Rückbau des Sicherheits-Rollouts vom 17.11.2026:
+`sicherheit.md` Abschnitt 8. Für den Alltag:
+
+| Was | Wie |
+|---|---|
+| API | `pct exec 128 -- sh -c "cd /opt/rosenweg-core && docker compose pull api && docker compose up -d api"` ([`website.md`](website.md#api-ausrollen-ct-128)) |
+| Frontend-Konfiguration oder ganzer Stand | `/opt/rosenweg/repo/frontends-lxc/deploy.sh` im jeweiligen `fe-*` |
+| einzelne Web-Dateien | `scripts/rw-web-ausrollen.sh` |
+| Edge-Routen | `extra-routes.yml` nach `/etc/traefik/dynamic/` (CT 245) |
+| übrige Dienste | jeweilige README (Tabelle oben) |
+
+GitHub Actions baut bei jedem Push die Images (`rosenweg-api`,
+`energy-collector`, `rosenweg-whatsapp-bot` …), rollt aber nichts aus.
+
+## Active Directory, Fileserver
+
+Siehe [`active-directory.md`](active-directory.md). Kurz: Domäne
+`AD.ROSENWEG4303.CH`, NetBIOS `ROSENWEG`, dc1 (CT 108, `100.64.2.30`) und dc2
+(CT 136). Die Passwort-API auf dc1 (`http://100.64.2.30:8446/`, Header
+`Authorization: Bearer <AD_PASSWORD_API_SECRET>`) wird von der API beim
+Passwortwechsel und beim Anlegen eines neuen Kontos durch Technik/Präsident
+aufgerufen.
 
 ## Authentik (SSO)
 
-- **URL extern**: `https://authentik.rosenweg4303.ch` (via Cloudflare Tunnel)
-- **URL intern**: `https://server:9443` (Docker-intern) oder `https://100.64.2.27:9443`
-- **OAuth2 Provider**: Client ID `35oy6QKz0pjmNQGDeR97GDGhupMGNqWEgkGhIHtP`
-- **Admin-Gruppe**: `Technik` (case-sensitive Check: `Technik` oder `technik`)
-- **LDAP Outpost**: Port 389/636
-
-### Wichtig
-- Server-to-Server Calls müssen `AUTHENTIK_URL` (intern) nutzen, nicht die externe URL
-- Browser-Redirects nutzen `AUTHENTIK_EXTERNAL_URL`
-- `grant_type=password` ist NICHT aktiviert im OAuth2 Provider
-
-## Email
-
-### Inbound
-- **MX**: Cloudflare Email Routing → Gmail (`rosenweg4303@gmail.com`)
-- **IMAP-Polling**: API pollt Gmail alle 60s für Verteiler-Mails
-- **Verteiler-Adressen**: `ausschuss@`, `technik@`, `praesident@`, etc.
-- **DMARC-Reports**: `dmarc@rosenweg4303.ch` → Gmail DMARC-Ordner (107+ Reports)
-- **Archiv**: `archiv@rosenweg4303.ch` → Gmail Archiv-Ordner + DB
-
-### Outbound
-- **SMTP2GO**: `mail-eu.smtp2go.com:2525` (TLS)
-- **User**: `rk-website`
-- **From**: `noreply@rosenweg4303.ch`
-
-### DNS Records (Email)
-- **SPF**: `v=spf1 include:_spf.mx.cloudflare.net include:spf.smtp2go.com ~all`
-- **DKIM**: `s1102430._domainkey` → SMTP2GO, `cf2024-1._domainkey` → Cloudflare, `dkim._domainkey` → legacy
-- **DMARC**: `p=quarantine; adkim=s; aspf=s; pct=100`
-
-## Cloudflare
-
-### Tunnel
-- **ID**: `af2dc45e-2d4e-47cf-9d72-ac4ce71d96ec`
-- **Replicas**: 2 (cloudflared)
-- **Routes**:
-  - `rosenweg4303.ch` / `www.rosenweg4303.ch` → Website
-  - `authentik.rosenweg4303.ch` → Authentik
-
-### DNS Records (Auswahl)
-
-| Typ | Name | Ziel | Proxy |
-|-----|------|------|-------|
-| CNAME | rosenweg4303.ch | CF Tunnel | ☁️ |
-| CNAME | www | CF Tunnel | ☁️ |
-| CNAME | authentik | CF Tunnel | ☁️ |
-| CNAME | netbox | CF Tunnel | ☁️ |
-| A | mail | 138.199.226.209 | ⚡ |
-| A | pve1 | 100.64.90.20 | ⚡ |
-| A | pve2 | 100.64.90.21 | ⚡ |
-| A | pve3 | 100.64.90.22 | ⚡ |
-| MX | @ | route1/2/3.mx.cloudflare.net | ⚡ |
-
-### Zone ID
-`0b113bed342ed868b4b42c09149ea2b5`
-
-## Deployment
-
-### Website + API
-1. `git push` → GitHub Actions Build
-2. Images: `ghcr.io/rosenweg/rosenweg-website:latest`, `ghcr.io/rosenweg/rosenweg-api:latest`
-3. Deploy: `ssh root@100.64.2.24 "docker service update --force --image ghcr.io/rosenweg/rosenweg-<service>:latest rosenweg_<service>"`
-
-### Nginx Caching
-- JS/CSS: `no-cache` (revalidate)
-- Images/Fonts: 7 Tage, immutable
+- **Extern**: `https://authentik.rosenweg4303.ch` (über edge-traefik)
+- **Intern** (Server-zu-Server): `http://100.64.2.37:9000` (`AUTHENTIK_URL` der API)
+- **LDAP-Outpost**: `100.64.2.37:389` bzw. `:636` (Z-Push, Stationen)
+- **Admin-Gruppe**: `Technik` (Prüfung ohne Gross/Klein)
+- `grant_type=password` ist im OAuth2-Provider **nicht** aktiviert.
+- Anmeldung der Website: OAuth mit signiertem, einmaligem State und
+  Browser-Bindung (Cookie `rw_oauth_bind`), siehe `sicherheit.md` Abschnitt 4.1.
 
 ## Datenbanken
 
-### rosenweg_postgres (API)
-- **User**: `rosenweg`
-- **Password**: `****** (siehe .env)`
-- **DB**: `rosenweg`
-- **Host**: `postgres` (Docker-intern)
-
-### rosenweg_energy-db (Energie)
-- **User**: `energy`
-- **Password**: `****** (siehe .env)`
-- **DB**: `energy`
-- **Host**: `energy-db` (Docker-intern)
+| DB | Wo | Benutzer | Passwort |
+|---|---|---|---|
+| `rosenweg` | Container `postgres` in CT 128, nur Docker-intern | `rosenweg` | `DB_PASSWORD` in `/opt/rosenweg-core/.env` |
+| `energy` | Container `energy-db` in CT 129, Port 5432 nur für CT 128 (nftables) | `energy` | `ENERGY_DB_PASSWORD` in `/opt/rosenweg-energy/.env` **und** `/opt/rosenweg-core/.env` |
 
 ## Passwort-Sync
 
-Passwort-Änderung über die Website (`/profil.html`) setzt das Passwort gleichzeitig in:
-1. **Authentik** (via Admin API: `/core/users/{pk}/set_password/`)
-2. **AD** (via Password API auf DC: `http://100.64.2.30:8446/`)
+Passwortwechsel über `profil.html` setzt das Passwort in **Authentik** (Admin-API)
+und im **AD** (Passwort-API auf dc1). Bedingungen seit 17.11.2026: Anmeldung
+höchstens 15 Minuten alt („Jetzt neu anmelden“), 5 Versuche pro Stunde, danach
+werden alle anderen Sitzungen beendet. Fehlt `AD_PASSWORD_API_SECRET`, wird nur
+Authentik gesetzt (Meldung „Windows-Anmeldung wird nicht mitgeführt“).
 
-Der User muss nur einmal angemeldet sein (Session-Token) — altes Passwort wird nicht abgefragt.
+## Überwachung
 
-## Monitoring
-
-### Service Watchdog
-Alle 2 Minuten auf allen 3 Docker-Nodes:
-- Prüft `docker service ls` auf `running < desired`
-- Startet ausgefallene Services automatisch neu
-- Log: `/var/log/docker-watchdog.log`
-
-### IPVS Fix
-Alle 5 Minuten auf allen 3 Docker-Nodes:
-- Setzt `net.ipv4.ip_forward=1` in Docker lb-Namespaces
-- Verhindert Overlay-Netzwerk-Ausfälle nach Service-Neustarts
+- **Dienstwacht** (`scripts/rw-dienstwacht.sh` auf jedem Knoten, alle 15 Min):
+  meldet fehlgeschlagene oder hängende Units in Knoten und Containern an die API;
+  neue Befunde gehen an die Technik-WhatsApp-Gruppe, verstummte Knoten zusätzlich
+  per Mail.
+- **NOC** `noc.rosenweg4303.ch`: ohne Token gekürzte Sicht; Token per
+  `X-Noc-Token` bzw. `#token=` (`sicherheit.md` Abschnitt 4.7).
 
 ## HA-Umverteilung: Schwelle 40 % statt 20 % (18.09.2026)
 

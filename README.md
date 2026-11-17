@@ -16,9 +16,9 @@ Website der STWEG-Kooperation Rosenweg in Kaiseraugst, Aargau.
 | Frontend | HTML, Tailwind CSS, Vanilla JS |
 | Backend | Node.js API (`api/server.js`) |
 | Auth | Authentik SSO |
-| Hosting | Docker Swarm (3 Nodes) |
-| E-Mail | SMTP2GO (Versand), Gmail IMAP (Empfang) |
-| Proxy | Traefik + Cloudflare |
+| Hosting | Proxmox-Cluster, ein LXC je Dienst (Frontends: nginx; API: Docker Compose auf CT 128) |
+| E-Mail | Mailcow + Proxmox Mail Gateway; API-Versand über SMTP2GO |
+| Proxy | Traefik am Rand (CT 245), DNS bei Cloudflare |
 
 ## Struktur
 
@@ -28,22 +28,39 @@ Website der STWEG-Kooperation Rosenweg in Kaiseraugst, Aargau.
 ├── email-verteiler.html    # E-Mail-Verteilerlisten
 ├── energie-monitor.html    # Energieverbrauch & Solar
 ├── entsorgung.html         # Entsorgungskalender
-├── it-netzwerk.html        # IT & Netzwerk Dashboard
 ├── js/                     # Shared JavaScript
 │   ├── nav.js              # Navigation
 │   ├── authentik-auth.js   # SSO Integration
 │   └── site-config.js      # Konfiguration
 ├── api/                    # Node.js API Backend
 ├── energy-collector/       # Energie-Datensammler
-├── stweg1-8/               # STWEG-spezifische Seiten
+├── stweg1..7/, meg/        # STWEG-/MEG-Seiten
 ├── door-signs/             # Türschilder (A4 PDF)
-├── scripts/                # Cloudflare E-Mail Sync
-└── docker-stack.yml        # Docker Swarm Deployment
+├── frontends-lxc/          # nginx-Konfiguration + deploy.sh der Frontend-LXCs
+├── backend-lxc/            # Compose-Dateien API (CT 128) und Energie (CT 129)
+├── edge-traefik/           # Reverse-Proxy (CT 245)
+├── scripts/                # Betriebsskripte (SSH-Zugang, Dienstwacht, Ausrollen …)
+├── docs/                   # Dokumentation, Einstieg docs/infrastruktur.md
+└── docker-stack.yml        # historisch (Swarm, abgebaut)
 ```
 
 ## Deployment
 
-Push to `main` triggers GitHub Actions → Docker Image Build → Deploy via Docker Swarm.
+Ein Push auf `main` lässt GitHub Actions die Images bauen (`ghcr.io/rosenweg/…`);
+**ausgerollt wird von Hand**:
+
+- API: auf CT 128 `docker compose pull api && docker compose up -d api` in `/opt/rosenweg-core`
+- Frontends: `frontends-lxc/deploy.sh` im jeweiligen Container bzw. `scripts/rw-web-ausrollen.sh` für einzelne Dateien
+
+Einzelheiten: [`docs/infrastruktur.md`](docs/infrastruktur.md) und
+[`docs/website.md`](docs/website.md).
+
+## Sicherheit
+
+Das Repository ist **öffentlich**. Nie Geheimnisse, Tokens, Passwörter oder
+Exporte mit Schlüsseln einchecken – Werte gehören in die `.env`-Dateien auf den
+Containern. Regeln, Grenzwerte und offene Punkte nach der Prüfung vom
+17.11.2026: [`docs/sicherheit.md`](docs/sicherheit.md).
 
 ## Kontakt
 
