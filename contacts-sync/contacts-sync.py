@@ -6,7 +6,17 @@ for line in open("/root/.contacts-sync.env"):
     if "=" in line and not line.startswith("#"):
         k,v=line.split("=",1); ENV[k]=v.strip()
 NS=uuid.UUID("12345678-1234-5678-1234-567812345678")
-CTX=ssl.create_default_context(); CTX.check_hostname=False; CTX.verify_mode=ssl.CERT_NONE
+# TLS-Pruefung (D-16): mit TLS_VERIFY=1 in /root/.contacts-sync.env wird das
+# Zertifikat geprueft — dann NC_BASE/SOGO_BASE auf Hostnamen-URLs setzen (die
+# Standard-URLs sprechen die Server per IP an, dazu passt kein Zertifikat).
+# Ohne TLS_VERIFY wie bisher ohne Pruefung (nur internes Netz).
+CTX=ssl.create_default_context()
+if ENV.get("TLS_VERIFY")!="1":
+    CTX.check_hostname=False; CTX.verify_mode=ssl.CERT_NONE
+NC_BASE=ENV.get("NC_BASE","http://100.64.2.36/remote.php/dav/addressbooks/users/kontakte/rosenweg/")
+NC_HOST=ENV.get("NC_HOST","nextcloud.rosenweg9.ch")
+SOGO_BASE=ENV.get("SOGO_BASE","https://100.64.2.33/SOGo/dav/")
+SOGO_HOST=ENV.get("SOGO_HOST","mailcow.rosenweg9.ch")
 PGC=subprocess.check_output("docker ps -q -f name=rosenweg_postgres | head -1",shell=True).decode().strip()
 def psql(sql):
     return subprocess.check_output(["docker","exec",PGC,"sh","-c","psql -U $POSTGRES_USER -d $POSTGRES_DB -t -A -c \""+sql+"\""]).decode().strip()
@@ -16,7 +26,8 @@ personen=jq("SELECT COALESCE(json_agg(json_build_object('name',name,'tel',telefo
 verw=jq("SELECT COALESCE(json_agg(json_build_object('firma',firma_name,'tel',telefon,'email',email,'adresse',adresse,'website',website)),'[]'::json) FROM verwaltungen WHERE aktiv")
 vkont=jq("SELECT COALESCE(json_agg(json_build_object('firma',v.firma_name,'name',k.name,'funktion',k.funktion,'email',k.email,'tel',k.telefon)),'[]'::json) FROM verwaltungs_kontakte k JOIN verwaltungen v ON v.id=k.verwaltung_id WHERE v.aktiv")
 def esc(s):
-    s=s or ""; return s.replace("\\","\\\\").replace("\n","\\n").replace(",","\\,").replace(";","\;")
+    # \r zuerst: ein CR im Namen haette sonst eine eigene vCard-Zeile begonnen (D-16).
+    s=(s or "").replace("\r\n","\n").replace("\r","\n"); return s.replace("\\","\\\\").replace("\n","\\n").replace(",","\\,").replace(";","\;")
 def teltype(n):
     d=n.replace(" ","").replace("-",""); return "CELL" if re.search(r"(\+41|^0|^)7[5-9]\d{7}",d) else "VOICE"
 def slug(s): return re.sub(r"[^a-z0-9]+","-",(s or "").lower()).strip("-")
@@ -97,9 +108,9 @@ def carddav_sync(label,base,user,pw,delete_stale,host=None):
             except Exception: pass
     print("  "+label+": put="+str(ok)+" del="+str(dl))
 print("desired:",len(desired))
-carddav_sync("Nextcloud","http://100.64.2.36/remote.php/dav/addressbooks/users/kontakte/rosenweg/","kontakte",ENV["NC_KONTAKTE_PW"],True,"nextcloud.rosenweg9.ch")
-carddav_sync("SOGo inbox@","https://100.64.2.33/SOGo/dav/inbox@rosenweg4303.ch/Contacts/personal/","inbox@rosenweg4303.ch",ENV["INBOX_PW"],False,"mailcow.rosenweg9.ch")
-carddav_sync("SOGo praesident@","https://100.64.2.33/SOGo/dav/praesident@rosenweg4303.ch/Contacts/personal/","praesident@rosenweg4303.ch",ENV["PRAESIDENT_PW"],False,"mailcow.rosenweg9.ch")
+carddav_sync("Nextcloud",NC_BASE,"kontakte",ENV["NC_KONTAKTE_PW"],True,NC_HOST)
+carddav_sync("SOGo inbox@",SOGO_BASE+"inbox@rosenweg4303.ch/Contacts/personal/","inbox@rosenweg4303.ch",ENV["INBOX_PW"],False,SOGO_HOST)
+carddav_sync("SOGo praesident@",SOGO_BASE+"praesident@rosenweg4303.ch/Contacts/personal/","praesident@rosenweg4303.ch",ENV["PRAESIDENT_PW"],False,SOGO_HOST)
 TMP="/tmp/zpush-vcards"
 if os.path.isdir(TMP): shutil.rmtree(TMP)
 os.makedirs(TMP)

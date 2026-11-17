@@ -58,7 +58,21 @@ const ARCHIVE_ALL_GROUPS = (process.env.WA_ARCHIVE_ALL_GROUPS || '').trim().toLo
 const LOOP_HEADER = 'x-rosenweg-wa-gateway';
 const OWN_MAIL_HEADERS = { 'X-Rosenweg-WA-Gateway': '1', 'Auto-Submitted': 'auto-generated' };
 
+// Quell-IPs, ueber die auch Mail aus dem Internet kommt (PMG = oeffentlicher MX
+// fuer whatsapp.rosenweg4303.ch). Von dort reicht die IP allein NICHT: Absender
+// muss in smtp_senders stehen (PMG prueft SPF) und Empfaenger nur Aliase — sonst
+// koennte jeder per Mail in Gruppen posten oder beliebige Nummern anschreiben (D-2).
+const SMTP_STRENG_IPS = (process.env.GW_SMTP_STRENG_IPS || '100.64.2.31')
+  .split(',').map(s => s.trim().replace(/^::ffff:/i, '').toLowerCase()).filter(Boolean);
+
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
+// Zeitkonstanter Vergleich (Hash auf feste Laenge); leeres Geheimnis = nie gleich.
+function geheimnisGleich(eingabe, geheimnis) {
+  if (!geheimnis || typeof eingabe !== 'string') return false;
+  const a = crypto.createHash('sha256').update(eingabe).digest();
+  const b = crypto.createHash('sha256').update(String(geheimnis)).digest();
+  return crypto.timingSafeEqual(a, b);
+}
 const nowIso = () => new Date().toISOString();
 
 function startGateway(botCore) {
@@ -207,12 +221,28 @@ function startGateway(botCore) {
       return addr === e;                                // exact address
     });
   }
+  // Vertrauenswuerdige interne Quelle: IP in smtp_ips, aber keine "strenge"
+  // (Internet-)Quelle wie PMG. Nur von dort reicht die IP allein.
+  function smtpTrusted(remoteAddr) {
+    const ip = normIp(remoteAddr).toLowerCase();
+    return ipInList(remoteAddr) && !SMTP_STRENG_IPS.includes(ip);
+  }
   // Kombinierte Annahme-Entscheidung. Beide Listen leer -> offen (Warnung).
-  // Sonst: annehmen wenn Quell-IP ODER Absender gewhitelistet ist.
+  // Sonst: interne Quell-IP genuegt; jede andere Quelle (PMG, IPv6, unbekannt)
+  // braucht einen gewhitelisteten Absender.
   function smtpAccept(remoteAddr, from) {
     const ips = q.ipAll.all(), senders = q.senderAll.all();
     if (ips.length === 0 && senders.length === 0) return true; // nicht konfiguriert
-    return ipInList(remoteAddr) || senderInList(from);
+    return smtpTrusted(remoteAddr) || senderInList(from);
+  }
+  // Empfaenger: von nicht-internen Quellen nur konfigurierte Aliase (keine
+  // freien Nummern, Gruppennamen oder JIDs).
+  function rcptErlaubt(session, rcptAddr) {
+    if (session.user) return true;                 // SMTP-AUTH (eigene Zugangsdaten)
+    if (q.ipAll.all().length === 0 && q.senderAll.all().length === 0) return true; // nicht konfiguriert
+    if (smtpTrusted(session.remoteAddress)) return true;
+    const local = String(rcptAddr || '').split('@')[0].trim().toLowerCase();
+    return !!(local && q.aliasGet.get(local));
   }
 
   // ── Ziel-Aufloesung (gemeinsam fuer JSON-API + SMTP-in) ──────────────────
@@ -248,7 +278,9 @@ function startGateway(botCore) {
         secure: NOTIFY_RELAY_PORT === 465,
         requireTLS: NOTIFY_RELAY_PORT === 587,
         auth: NOTIFY_RELAY_USER ? { user: NOTIFY_RELAY_USER, pass: NOTIFY_RELAY_PASS } : undefined,
-        tls: { rejectUnauthorized: false },
+        // Zertifikatspruefung nur per GW_NOTIFY_TLS_VERIFY=1: der Relay (PMG) wird
+        // per IP angesprochen, das Zertifikat passt dazu nicht (D-18, Vermerk).
+        tls: { rejectUnauthorized: process.env.GW_NOTIFY_TLS_VERIFY === '1' },
       })
     : null;
 
@@ -348,6 +380,9 @@ function startGateway(botCore) {
     if (!MAIN_API_BASE) return res.status(503).json({ error: 'UI-Auth nicht konfiguriert (MAIN_API_BASE fehlt)' });
     const auth = req.headers.authorization || '';
     if (!auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Login erforderlich' });
+    // Nur Browser-Anmeldung: ein Zugangstoken (rw_pat_, evtl. nur me:read)
+    // bestuende /api/me und haette sonst volle Gateway-Rechte (D-18).
+    if (/^Bearer\s+rw_pat_/i.test(auth)) return res.status(403).json({ error: 'Zugangstoken hier nicht erlaubt — bitte im Browser anmelden' });
     try {
       const r = await fetch(`${MAIN_API_BASE}/api/me`, { headers: { Authorization: auth } });
       if (!r.ok) return res.status(401).json({ error: 'Ungueltige Session' });
@@ -556,8 +591,14 @@ function startGateway(botCore) {
       console.warn(`[Gateway-SMTP] abgewiesen (IP+Absender): ${session.remoteAddress} / ${address.address}`);
       const e = new Error('Quell-IP oder Absender nicht erlaubt'); e.responseCode = 554; return cb(e);
     },
+    // Empfaenger frueh pruefen: von PMG/Internet-Quellen nur Aliase (D-2).
+    onRcptTo(address, session, cb) {
+      if (rcptErlaubt(session, address.address)) return cb();
+      console.warn(`[Gateway-SMTP] Empfaenger abgewiesen (kein Alias): ${session.remoteAddress} / ${address.address}`);
+      const e = new Error('Empfaenger nicht erlaubt'); e.responseCode = 550; return cb(e);
+    },
     onAuth(auth, session, cb) {
-      if (SMTP_USER && auth.username === SMTP_USER && auth.password === SMTP_PASS) return cb(null, { user: auth.username });
+      if (SMTP_USER && geheimnisGleich(String(auth.username || ''), SMTP_USER) && geheimnisGleich(String(auth.password || ''), SMTP_PASS)) return cb(null, { user: auth.username });
       return cb(new Error('Ungueltige SMTP-Zugangsdaten'));
     },
     async onData(stream, session, cb) {
@@ -586,6 +627,8 @@ function startGateway(botCore) {
         let anySent = false; const errors = [];
         for (const rcpt of rcpts) {
           const local = rcpt.split('@')[0];
+          // Doppelt haelt besser: auch hier nur erlaubte Empfaenger (siehe onRcptTo).
+          if (!rcptErlaubt(session, rcpt)) { errors.push(`${rcpt}: nicht erlaubt`); continue; }
           try {
             await sendAndLog({ source: 'smtp-email', sender: from, to: local, title: subject, body, attachments });
             anySent = true;

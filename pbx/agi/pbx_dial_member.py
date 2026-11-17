@@ -8,6 +8,7 @@ setzt MEMBER_DIAL fuer ein anschliessendes Dial() im Dialplan.
   exten = _1XXX,n,Dial(${MEMBER_DIAL},40,tT)
 """
 import os
+import re
 import sys
 
 try:
@@ -59,14 +60,25 @@ def log(msg):
 def main():
     consume_agi_env()
     ext = sys.argv[1] if len(sys.argv) > 1 else ''
+    if not re.fullmatch(r'[0-9]{1,8}', ext):
+        set_var('MEMBER_DIAL', '')
+        return
     try:
         r = requests.get(f'{API_BASE}/api/pbx/ring-members/by-ext/{ext}',
                          headers={'X-PBX-Secret': PBX_SECRET}, timeout=5)
         if r.status_code == 200:
             m = r.json()
-            target = f"PJSIP/{m['phone']}" if m.get('kind') == 'sip' else f"PJSIP/{m['phone']}@peoplefone"
+            phone = str(m.get('phone') or '')
+            # Ziel landet im Dial-String/AGI-Befehl: nur Nummer bzw. SIP-Name (D-5).
+            gueltig = re.fullmatch(r'[A-Za-z0-9_-]{1,32}', phone) if m.get('kind') == 'sip' \
+                else re.fullmatch(r'\+?[0-9]{3,20}', phone)
+            if not gueltig:
+                set_var('MEMBER_DIAL', '')
+                log(f"{ext} -> ungueltiges Ziel, nicht gewaehlt")
+                return
+            target = f"PJSIP/{phone}" if m.get('kind') == 'sip' else f"PJSIP/{phone}@peoplefone"
             set_var('MEMBER_DIAL', target)
-            log(f"{ext} -> {m.get('name')} ({target})")
+            log(f"{ext} -> {re.sub(r'[^A-Za-z0-9 ._-]', ' ', str(m.get('name') or ''))[:60]} ({target})")
         else:
             set_var('MEMBER_DIAL', '')
             log(f"{ext} nicht gefunden ({r.status_code})")

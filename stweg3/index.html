@@ -445,7 +445,7 @@
 
             if (isAdmin) {
                 try {
-                    const mResp = await fetch('/api/energy/meters');
+                    const mResp = await fetch('/api/energy/meters', { headers: { Authorization: 'Bearer ' + token } });
                     energyMeters = await mResp.json();
                 } catch(e) { energyMeters = []; }
                 try {
