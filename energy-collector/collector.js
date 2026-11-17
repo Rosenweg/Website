@@ -425,7 +425,8 @@ async function readShelly(meter) {
 
   try {
     // Try Gen2+ API first (Shelly Plus/Pro)
-    const res = await fetch(urlMeter, { signal: AbortSignal.timeout(3000) });
+    // redirect:'error': ein Zaehler-Ziel darf uns nicht auf fremde Adressen umleiten (SSRF).
+    const res = await fetch(urlMeter, { signal: AbortSignal.timeout(3000), redirect: 'error' });
     const status = await res.json();
 
     if (status['em:0']) {
@@ -462,7 +463,7 @@ async function readShelly(meter) {
   } catch (gen2Err) {
     // Try Gen1 API (Shelly 1PM, Shelly Plug S, etc.)
     try {
-      const res = await fetch(`http://${httpHost(meter.host)}/status`, { signal: AbortSignal.timeout(3000) });
+      const res = await fetch(`http://${httpHost(meter.host)}/status`, { signal: AbortSignal.timeout(3000), redirect: 'error' });
       const status = await res.json();
       if (status.meters && status.meters[0]) {
         data.power_w = status.meters[0].power || 0;
@@ -822,6 +823,36 @@ function adminAuth(req, res, next) {
   outcome = 'ok';
   next();
 }
+
+// Lesende Routen mit Personen-/Technikdaten (Lastprofile, Zaehler-IPs,
+// Bewohner-Adressen) duerfen nur interne Leser abrufen: die Haupt-API
+// (api/routes/energie-lesen.js prueft dort Anmeldung + Zuordnung) oder wer
+// den Admin-Token hat. Oeffentlich (nginx direkt) bleiben nur Geraete-/
+// Anzeige-Routen. INTERN_LESER = Komma-Liste von Quell-IPs (oder IPv4/IPv6-
+// Praefixe mit abschliessendem ".", ":"), z. B. "100.64.2.52,127.0.0.1".
+// Ungesetzt = wie bisher offen (Warnung im Log), damit der Wechsel ohne Bruch
+// ausrollbar ist; nach der nginx-Umstellung setzen.
+const OFFENE_LESE_ROUTEN = new Set([
+  '/health', '/api/energy/surplus', '/api/energy/surplus-available', '/api/energy/lametric',
+  '/api/energy/shelly', '/api/energy/solar-live', '/api/energy/tariffs', '/api/energy/tariffs/current',
+]);
+const INTERN_LESER = String(process.env.INTERN_LESER || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+if (!INTERN_LESER.length) {
+  console.error('[intern-leser] WARNUNG: INTERN_LESER nicht gesetzt — personenbezogene Lese-Routen sind fuer jede Quelle offen.');
+}
+function quelleIntern(addr) {
+  const a = String(addr || '').toLowerCase().replace(/^::ffff:/, '');
+  return INTERN_LESER.some(e => (/[.:]$/.test(e) ? a.startsWith(e) : a === e));
+}
+app.use((req, res, next) => {
+  if (!INTERN_LESER.length) return next();
+  if (req.method !== 'GET' && req.method !== 'HEAD') return next(); // Schreiben: adminAuth an der Route
+  // Express routet gross/klein-unabhaengig und mit Schraegstrich am Ende -> normalisieren.
+  const pfad = req.path.toLowerCase().replace(/\/+$/, '') || '/';
+  if (OFFENE_LESE_ROUTEN.has(pfad)) return next();
+  if (quelleIntern(req.socket?.remoteAddress) || adminTokenOk(req.headers.authorization)) return next();
+  return res.status(403).json({ error: 'Nur ueber die Haupt-API mit Anmeldung' });
+});
 
 // Health check
 app.get('/health', async (req, res) => {
@@ -1217,8 +1248,10 @@ async function subtractChildrenAgg(meterId, rows, query, startDate, endDate, key
 app.get('/api/energy/daily/:meterId', async (req, res) => {
   const { meterId } = req.params;
   const { days, to } = req.query;
-  const numDays = parseInt(days) || 30;
+  // Obergrenze: Rohdaten-Scan ueber beliebig viele Tage waere ein billiger DoS.
+  const numDays = Math.min(Math.max(parseInt(days) || 30, 1), 400);
   const endDate = to ? new Date(to + 'T23:59:59') : new Date();
+  if (isNaN(endDate.getTime())) return res.status(400).json({ error: 'to ungueltig' });
   const startDate = new Date(endDate.getTime() - numDays * 86400000);
 
   const dailyQuery = `SELECT
@@ -1267,10 +1300,16 @@ app.get('/api/energy/today/:meterId', async (req, res) => {
      FROM readings
      WHERE meter_id = $1 AND ts >= $2 AND ts < $3`;
 
-  const result = await pool.query(todayQuery, [meterId, dayStart.toISOString(), dayEnd.toISOString()]);
-  const rows = result.rows[0] ? [result.rows[0]] : [];
-  await subtractChildrenAgg(meterId, rows, todayQuery, dayStart.toISOString(), dayEnd.toISOString(), null);
-  res.json(rows[0] || {});
+  // try/catch: ungueltiges ?date= wirft sonst ausserhalb jeder Fehlerbehandlung.
+  try {
+    if (isNaN(dayStart.getTime())) return res.status(400).json({ error: 'date ungueltig' });
+    const result = await pool.query(todayQuery, [meterId, dayStart.toISOString(), dayEnd.toISOString()]);
+    const rows = result.rows[0] ? [result.rows[0]] : [];
+    await subtractChildrenAgg(meterId, rows, todayQuery, dayStart.toISOString(), dayEnd.toISOString(), null);
+    res.json(rows[0] || {});
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Langzeit-Verlauf aus dem Stunden-Rollup (readings_hourly) — SCHNELL und haelt Monate an
@@ -1415,15 +1454,20 @@ app.get('/api/energy/tariffs', async (req, res) => {
 app.get('/api/energy/tariffs/current', async (req, res) => {
   const { date } = req.query;
   const refDate = date || new Date().toISOString().slice(0, 10);
-  const result = await pool.query(
-    `SELECT * FROM tariffs
-     WHERE active = true
-       AND (valid_from IS NULL OR valid_from <= $1)
-       AND (valid_to IS NULL OR valid_to >= $1)
-     ORDER BY name`,
-    [refDate]
-  );
-  res.json(result.rows);
+  // try/catch: ungueltiges ?date= liess die Anfrage sonst haengen (unhandled rejection).
+  try {
+    const result = await pool.query(
+      `SELECT * FROM tariffs
+       WHERE active = true
+         AND (valid_from IS NULL OR valid_from <= $1)
+         AND (valid_to IS NULL OR valid_to >= $1)
+       ORDER BY name`,
+      [refDate]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(400).json({ error: 'date ungueltig' });
+  }
 });
 
 app.post('/api/energy/tariffs', adminAuth, async (req, res) => {
@@ -1676,6 +1720,12 @@ async function getGroupLiveData(group) {
 
 // ─── Open CORS for IoT endpoints (Shelly, LaMetric, etc.) ──────────
 const openCors = cors({ origin: '*' });
+// Die offenen Routen sind aus dem Internet erreichbar. Die Liste "consumers"
+// enthaelt die Live-Leistung je Wohnungszaehler (= Anwesenheits-/Lastprofil)
+// -> nur fuer interne Leser oder mit Admin-Token (D-1). Geraete brauchen sie nicht.
+function verbraucherFuer(req, consumers) {
+  return (quelleIntern(req.socket?.remoteAddress) || adminTokenOk(req.headers.authorization)) ? consumers : undefined;
+}
 app.options('/api/energy/surplus', openCors);
 app.options('/api/energy/surplus-available', openCors);
 app.options('/api/energy/lametric', openCors);
@@ -1690,7 +1740,7 @@ app.get('/api/energy/surplus', openCors, async (req, res) => {
     const surplus_w = Math.max(0, -grid_w);
     const result = {
       surplus_w, grid_power_w: grid_w, production_w: data.production_w,
-      heizstab_w: data.heizstab_w, consumers: data.consumers,
+      heizstab_w: data.heizstab_w, consumers: verbraucherFuer(req, data.consumers),
       timestamp: data.timestamp, group,
     };
 
@@ -1718,7 +1768,7 @@ app.get('/api/energy/surplus-available', openCors, async (req, res) => {
     const surplus_w = Math.max(0, -grid_w) + heizstab;
     const result = {
       surplus_w, grid_power_w: grid_w, heizstab_w: heizstab,
-      production_w: data.production_w, consumers: data.consumers,
+      production_w: data.production_w, consumers: verbraucherFuer(req, data.consumers),
       timestamp: data.timestamp, group,
     };
 
@@ -1861,7 +1911,7 @@ app.get('/api/energy/shelly', openCors, async (req, res) => {
 app.get('/api/energy/compare', async (req, res) => {
   try {
     const meterIds = (req.query.meters || '').split(',').filter(Boolean);
-    const days = parseInt(req.query.days) || 7;
+    const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 800);
     if (meterIds.length === 0) return res.status(400).json({ error: 'meters parameter required' });
     if (meterIds.length > 10) return res.status(400).json({ error: 'max 10 meters' });
 

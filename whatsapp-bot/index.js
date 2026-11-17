@@ -497,6 +497,12 @@ async function sendHeartbeat() {
 setInterval(sendHeartbeat, HEARTBEAT_MS);
 
 // HTTP-Healthcheck + Groups-Endpoint
+// Zeitkonstanter Vergleich des Shared-Secrets (D-15); Hash auf feste Laenge.
+function waSecretOk(given) {
+  if (!WA_SECRET || typeof given !== 'string') return false;
+  const h = (v) => require('crypto').createHash('sha256').update(String(v)).digest();
+  return require('crypto').timingSafeEqual(h(given), h(WA_SECRET));
+}
 const healthServer = http.createServer(async (req, res) => {
   if (req.url === '/health') {
     // LIVENESS, nicht Readiness: solange der Prozess/Server antwortet, ist der
@@ -513,7 +519,7 @@ const healthServer = http.createServer(async (req, res) => {
     return;
   }
   if (req.url === '/groups') {
-    if (req.headers['x-wa-secret'] !== WA_SECRET) {
+    if (!waSecretOk(req.headers['x-wa-secret'])) {
       res.writeHead(401); res.end('Unauthorized'); return;
     }
     if (!isReady) { res.writeHead(503); res.end('not_ready'); return; }
@@ -532,7 +538,7 @@ const healthServer = http.createServer(async (req, res) => {
   // Body {chatId, sinceMs?, limit?, containing?, dryRun?}. dryRun=true (Default) zeigt nur,
   // was geloescht WUERDE. Nur fromMe-Nachrichten ab sinceMs (+ optional Body-Teilstring).
   if (req.url === '/delete-recent' && req.method === 'POST') {
-    if (req.headers['x-wa-secret'] !== WA_SECRET) { res.writeHead(401); res.end('Unauthorized'); return; }
+    if (!waSecretOk(req.headers['x-wa-secret'])) { res.writeHead(401); res.end('Unauthorized'); return; }
     if (!isReady) { res.writeHead(503); res.end('not_ready'); return; }
     try {
       let raw = ''; for await (const c of req) raw += c;
@@ -567,7 +573,7 @@ const healthServer = http.createServer(async (req, res) => {
   // Diagnose: laedt die Medien der letzten EIGENEN Nachrichten runter + meldet echte
   // Dekodier-Groesse + Magic-Bytes — um zu verifizieren dass gesendete Dokumente NICHT leer sind.
   if (req.url === '/media-check' && req.method === 'POST') {
-    if (req.headers['x-wa-secret'] !== WA_SECRET) { res.writeHead(401); res.end('Unauthorized'); return; }
+    if (!waSecretOk(req.headers['x-wa-secret'])) { res.writeHead(401); res.end('Unauthorized'); return; }
     if (!isReady) { res.writeHead(503); res.end('not_ready'); return; }
     try {
       let raw = ''; for await (const c of req) raw += c;

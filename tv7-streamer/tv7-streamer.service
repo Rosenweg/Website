@@ -5,7 +5,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
+# Nicht als root (D-11): eigener, fluechtiger Benutzer. Der Dienst schreibt
+# keine Dateien (ffmpeg -> stdout), braucht also nur Netz + Prozesse.
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
 EnvironmentFile=/etc/default/tv7-streamer
 WorkingDirectory=/opt/tv7-streamer
 ExecStart=/usr/bin/node /opt/tv7-streamer/server.js

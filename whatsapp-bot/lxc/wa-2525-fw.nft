@@ -1,0 +1,49 @@
+#!/usr/sbin/nft -f
+# Zugriffsschutz fuer den SMTP-in-Port 2525 des WhatsApp-Gateways (CT 116,
+# 100.64.2.39). Nur PMG (.31) darf einliefern — sonst koennten LAN-Hosts PMG
+# (SPF-Pruefung) umgehen und mit gefaelschtem MAIL FROM Mail->WhatsApp
+# einschleusen.
+#
+# Ersetzt die fruehere iptables-Regel (nur IPv4; ueber IPv6 war 2525 offen,
+# I-11, 17.11.2026). Tabelle "inet" = eine Regel fuer IPv4 UND IPv6. IPv6
+# bleibt an, nur eben auf dieselben Absender begrenzt. Docker leitet IPv4 per
+# DNAT weiter (Hook forward), IPv6 per docker-proxy (Hook input); beide Hooks
+# werden gefiltert. Docker-intern (Bridge) und lokal (lo) bleibt unberuehrt.
+# Vorbild: backend-lxc/energy/firewall/energy-firewall.nft.
+#
+# Installation (CT 116): Datei nach /etc/rosenweg/wa-2525-fw.nft,
+# wa-2525-fw.service nach /etc/systemd/system/, dann
+#   systemctl daemon-reload && systemctl restart wa-2525-fw
+# Alte iptables-Regel einmalig entfernen:
+#   iptables -D DOCKER-USER -p tcp --dport 2525 ! -s 100.64.2.31 -j DROP
+
+table inet rw_wa_2525
+delete table inet rw_wa_2525
+
+table inet rw_wa_2525 {
+	set smtp_clients4 {
+		type ipv4_addr
+		elements = { 100.64.2.31 }
+	}
+	# PMG liefert per IPv4 ein (Transport smtp:[100.64.2.39]:2525). Soll PMG
+	# kuenftig per IPv6 einliefern: dessen IPv6-Adresse hier eintragen.
+	set smtp_clients6 {
+		type ipv6_addr
+	}
+
+	chain guard {
+		ip saddr @smtp_clients4 return
+		ip6 saddr @smtp_clients6 return
+		counter reject with tcp reset
+	}
+
+	# Vor Dockers eigenen Ketten (priority filter = 0).
+	chain fwd_in {
+		type filter hook forward priority filter - 10; policy accept;
+		iifname "eth0" ct state new tcp dport 2525 jump guard
+	}
+	chain host_in {
+		type filter hook input priority filter - 10; policy accept;
+		iifname "eth0" ct state new tcp dport 2525 jump guard
+	}
+}
