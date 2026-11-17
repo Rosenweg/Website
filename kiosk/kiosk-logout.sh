@@ -27,6 +27,7 @@ import re
 import hashlib
 import base64
 import time
+import urllib.parse
 import urllib.request
 
 CDP_URL = "http://localhost:9222"
@@ -107,11 +108,14 @@ def main():
 
     try:
         # Check if session is active
+        # Den Sitzungstoken selbst holen: die API-Sitzung muss serverseitig enden,
+        # nicht nur im Browser. Sonst bleibt ein abgegriffener Token gueltig.
         ws_send(sock, 1, "Runtime.evaluate", {
-            "expression": "localStorage.getItem('rosenweg_session') !== null"
+            "expression": "localStorage.getItem('rosenweg_session') || ''"
         })
         result = ws_recv(sock)
-        is_logged_in = result.get("result", {}).get("result", {}).get("value", False)
+        token = result.get("result", {}).get("result", {}).get("value", "") or ""
+        is_logged_in = bool(token)
 
         if not is_logged_in:
             print("No active session, skipping logout.")
@@ -138,7 +142,8 @@ def main():
         ws_recv(sock)
 
         # Navigate to logout URL
-        ws_send(sock, 6, "Page.navigate", {"url": LOGOUT_URL})
+        ws_send(sock, 6, "Page.navigate", {"url": LOGOUT_URL + "?token="
+            + urllib.parse.quote(token, safe="") + "&redirect=" + urllib.parse.quote(SITE_URL, safe="")})
         ws_recv(sock)
 
         # Wait for logout redirect chain

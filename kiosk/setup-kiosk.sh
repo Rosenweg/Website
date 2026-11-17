@@ -64,6 +64,9 @@ if [ -d "$CONFIG_DIR" ]; then
 else
     git clone "$CONFIG_REPO" "$CONFIG_DIR"
 fi
+# config.json enthaelt Root- und WLAN-Passwort: nur root darf lesen.
+chown -R root:root "$CONFIG_DIR"
+chmod 700 "$CONFIG_DIR"
 
 # --- 3. Read config ---
 echo "[3/11] Reading configuration..."
@@ -90,6 +93,11 @@ echo "[4/11] Configuring system..."
 hostnamectl set-hostname "$HOSTNAME"
 if [ -n "$ROOT_PW" ] && [ "$ROOT_PW" != "CHANGE_ME" ]; then
     echo "root:$ROOT_PW" | chpasswd
+else
+    # Sonst bliebe das allgemein bekannte Installationspasswort aus preseed.cfg
+    # gueltig - an einem oeffentlich zugaenglichen Geraet.
+    echo "WARNUNG: kein root_password in config.json - Root-Passwort wird gesperrt."
+    passwd -l root
 fi
 
 # --- 5. Create kiosk user ---
@@ -99,16 +107,10 @@ if ! id -u kiosk &>/dev/null; then
 fi
 passwd -l kiosk
 
-# Set up SSH for kiosk user (for log pushing)
-mkdir -p /home/kiosk/.ssh
-cp "$DEPLOY_KEY" /home/kiosk/.ssh/deploy-key
-chmod 600 /home/kiosk/.ssh/deploy-key
-cat > /home/kiosk/.ssh/config << 'EOF'
-Host github.com
-    IdentityFile ~/.ssh/deploy-key
-    StrictHostKeyChecking accept-new
-EOF
-chown -R kiosk:kiosk /home/kiosk/.ssh
+# Der Deploy-Key (Schreibzugriff auf kiosk-config mit allen Passwoertern)
+# bleibt bei root. Der kiosk-Benutzer betreibt den oeffentlich bedienbaren
+# Browser und bekommt ihn nicht; den Log-Push erledigt ein root-Dienst.
+rm -f /home/kiosk/.ssh/deploy-key
 
 # --- 6. Set timezone and NTP ---
 timedatectl set-timezone "$TIMEZONE"
@@ -216,6 +218,7 @@ import sys
 import re
 import base64
 import time
+import urllib.parse
 import urllib.request
 
 CDP_URL = "http://localhost:9222"
@@ -288,11 +291,14 @@ def main():
         sys.exit(0)
 
     try:
+        # Den Sitzungstoken selbst holen: die API-Sitzung muss serverseitig enden,
+        # nicht nur im Browser. Sonst bleibt ein abgegriffener Token gueltig.
         ws_send(sock, 1, "Runtime.evaluate", {
-            "expression": "localStorage.getItem('rosenweg_session') !== null"
+            "expression": "localStorage.getItem('rosenweg_session') || ''"
         })
         result = ws_recv(sock)
-        is_logged_in = result.get("result", {}).get("result", {}).get("value", False)
+        token = result.get("result", {}).get("result", {}).get("value", "") or ""
+        is_logged_in = bool(token)
 
         if not is_logged_in:
             sys.exit(0)
@@ -305,7 +311,8 @@ def main():
         ws_recv(sock)
         ws_send(sock, 5, "Network.clearBrowserCookies")
         ws_recv(sock)
-        ws_send(sock, 6, "Page.navigate", {"url": LOGOUT_URL})
+        ws_send(sock, 6, "Page.navigate", {"url": LOGOUT_URL + "?token="
+            + urllib.parse.quote(token, safe="") + "&redirect=" + urllib.parse.quote(SITE_URL, safe="")})
         ws_recv(sock)
         time.sleep(5)
         ws_send(sock, 7, "Page.navigate", {"url": SITE_URL})
@@ -325,7 +332,7 @@ chmod +x /home/kiosk/kiosk-logout.sh
 chown kiosk:kiosk /home/kiosk/kiosk-browser.sh /home/kiosk/kiosk-logout.sh
 
 # Log pusher script
-cat > /home/kiosk/kiosk-log-push.sh << 'LOGPUSHEOF'
+cat > /usr/local/sbin/kiosk-log-push.sh << 'LOGPUSHEOF'
 #!/bin/bash
 # Rosenweg Kiosk - Push logs to private GitHub repo
 
@@ -334,7 +341,7 @@ HOSTNAME=$(hostname)
 LOG_DIR="$CONFIG_DIR/logs/$HOSTNAME"
 TIMESTAMP=$(date '+%Y-%m-%d_%H-%M-%S')
 
-export GIT_SSH_COMMAND="ssh -i /home/kiosk/.ssh/deploy-key -o StrictHostKeyChecking=accept-new"
+export GIT_SSH_COMMAND="ssh -i /root/deploy-key -o StrictHostKeyChecking=accept-new"
 
 cd "$CONFIG_DIR" || exit 1
 
@@ -376,8 +383,11 @@ git -c user.name="Kiosk $HOSTNAME" -c user.email="kiosk@rosenweg4303.ch" \
 git push --quiet 2>/dev/null || true
 LOGPUSHEOF
 
-chmod +x /home/kiosk/kiosk-log-push.sh
-chown kiosk:kiosk /home/kiosk/kiosk-log-push.sh
+# root-eigen ausserhalb von /home/kiosk: der Dienst laeuft als root und darf
+# kein Skript ausfuehren, das der kiosk-Benutzer aendern kann.
+chown root:root /usr/local/sbin/kiosk-log-push.sh
+chmod 700 /usr/local/sbin/kiosk-log-push.sh
+rm -f /home/kiosk/kiosk-log-push.sh
 
 # Bash profile (boot chain) - uses timeout from config
 cat > /home/kiosk/.bash_profile << PROFILEEOF
@@ -491,9 +501,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=kiosk
-***ENTFERNT***
-***ENTFERNT***
+ExecStart=/usr/local/sbin/kiosk-log-push.sh
 EOF
 
 cat > /etc/systemd/system/kiosk-log-push.timer << TIMEREOF

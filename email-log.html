@@ -6,7 +6,7 @@
     <title>Email-Versand-Protokoll — Rosenweg</title>
     <link rel="icon" href="/logo-rosenweg.png">
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="/js/authentik-auth.js?v=2"></script>
+    <script src="/js/authentik-auth.js?v=5"></script>
     <script src="/js/nav.js?v=3"></script>
     <script src="/js/excel-export.js?v=1"></script>
     <style>
@@ -142,7 +142,8 @@
             }
             if (qInput.value.trim()) params.set('q', qInput.value.trim());
             try {
-                const r = await fetch('/api/email-log?' + params.toString(), { credentials: 'include' });
+                // Die API erwartet den Bearer-Token (Cookie allein reicht nicht -> sonst immer 401)
+                const r = await AuthentikAuth.apiFetch('/api/email-log?' + params.toString());
                 if (!r.ok) throw new Error('HTTP ' + r.status);
                 const data = await r.json();
                 renderTriggers(data.triggers || []);
@@ -160,7 +161,7 @@
             const current = triggerSel.value;
             const opts = ['<option value="">— alle —</option>'];
             for (const t of triggers) {
-                opts.push(`<option value="${escapeHtml(t.trigger)}">${escapeHtml(t.trigger)} (${t.cnt})</option>`);
+                opts.push(`<option value="${escapeHtml(t.trigger)}">${escapeHtml(t.trigger)} (${escapeHtml(t.cnt)})</option>`);
             }
             triggerSel.innerHTML = opts.join('');
             triggerSel.value = current;
@@ -176,7 +177,7 @@
             const html = entries.map(e => {
                 const errorRow = e.error_message ? `<tr class="bg-red-50"><td colspan="6" class="px-3 py-2 text-xs text-red-800"><strong>Fehler:</strong> ${escapeHtml(e.error_message)}</td></tr>` : '';
                 const idCell = e.message_id ? `<div class="text-xxs text-gray-400 mono mt-1" style="font-size:10px">${escapeHtml(e.message_id)}</div>` : '';
-                const recipientCount = e.recipients_count > 1 ? ` <span class="text-xs text-gray-500">(${e.recipients_count})</span>` : '';
+                const recipientCount = e.recipients_count > 1 ? ` <span class="text-xs text-gray-500">(${escapeHtml(e.recipients_count)})</span>` : '';
                 return `<tr class="hover:bg-gray-50">
                     <td class="px-3 py-2 mono text-xs text-gray-700 whitespace-nowrap">${fmtTime(e.created_at)}</td>
                     <td class="px-3 py-2">${triggerBadge(e.trigger)}</td>
@@ -196,7 +197,7 @@
         sinceSel.addEventListener('change', load);
         qInput.addEventListener('input', () => { clearTimeout(debounce); debounce = setTimeout(load, 300); });
 
-        load();
+        AuthentikAuth.init({ requireAuth: true }).then(u => { if (u) load(); });
     })();
     </script>
 </body>

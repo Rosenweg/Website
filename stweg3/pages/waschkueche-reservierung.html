@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Waschküchen-Reservierung - STWEG 3</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="/js/authentik-auth.js?v=2"></script>
+    <script src="/js/authentik-auth.js?v=5"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; }
@@ -297,7 +297,7 @@
     // ═══════════════════════════════════════════════════════════════
     // HELPERS
     // ═══════════════════════════════════════════════════════════════
-    function esc(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    function esc(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
     function localDateStr(d) {
         return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     }
@@ -370,11 +370,12 @@
     // ROOMS
     // ═══════════════════════════════════════════════════════════════
     async function loadRooms() {
-        rooms = await api('/api/wasch/rooms');
+        // Nur Waschkuechen dieser STWEG (ohne Filter kaemen die aller STWEGs)
+        rooms = await api('/api/wasch/rooms?stweg=3');
         const tabs = document.getElementById('roomTabs');
         tabs.innerHTML = rooms.map(r =>
-            `<button onclick="selectRoom(${r.id})" data-room="${r.id}"
-                class="room-tab px-4 py-1.5 rounded-md text-sm font-medium transition whitespace-nowrap">${r.name}</button>`
+            `<button onclick="selectRoom(${Number(r.id)})" data-room="${esc(r.id)}"
+                class="room-tab px-4 py-1.5 rounded-md text-sm font-medium transition whitespace-nowrap">${esc(r.name)}</button>`
         ).join('');
         if (rooms.length > 0) selectRoom(rooms[0].id);
     }
@@ -607,7 +608,7 @@
                 <div class="flex items-start sm:items-center justify-between gap-3 p-3 rounded-lg border ${isActive ? 'border-green-300 bg-green-50' : 'hover:bg-gray-50'} transition">
                     <div class="min-w-0">
                         <div class="flex items-center gap-2 flex-wrap">
-                            <span class="font-medium text-gray-800 text-sm">${r.room_name}</span>
+                            <span class="font-medium text-gray-800 text-sm">${esc(r.room_name)}</span>
                             ${isActive ? '<span class="text-[0.65rem] bg-green-200 text-green-800 px-1.5 py-0.5 rounded-full font-medium">Aktiv</span>' : ''}
                             ${r.recurring ? '<span class="text-[0.65rem] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">Wöchentlich</span>' : ''}
                         </div>

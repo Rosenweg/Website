@@ -29,10 +29,10 @@
     Wallboard · powered by isp.rosenweg4303.ch
   </footer>
 
-  <script src="/js/authentik-auth.js?v=2"></script>
-  <script src="/js/noc-cockpit.js?v=1"></script>
+  <script src="/js/authentik-auth.js?v=5"></script>
+  <script src="/js/noc-cockpit.js?v=2"></script>
   <script>
-    // Mit ?token=… laeuft die Seite als Wandbildschirm ohne Anmeldung; ohne
+    // Mit #token=… (frueher ?token=…) laeuft die Seite als Wandbildschirm ohne Anmeldung; ohne
     // Token, aber angemeldet, nimmt sie die geschuetzten Endpunkte. Beides
     // regelt das Modul, damit ein Menueeintrag nicht nur Striche zeigt.
     NocCockpit.starten(document.getElementById('noc'), { modus: 'wandbild', intervallMs: 5000 });

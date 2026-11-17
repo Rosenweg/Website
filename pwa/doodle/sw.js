@@ -11,7 +11,8 @@ self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.map((k) => caches.delete(k)))) // ALLE alten Caches weg
+      // nur eigene alte Doodle-Caches weg - die anderen Apps teilen sich den Cache-Speicher der Origin
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('rosenweg-doodle-')).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });

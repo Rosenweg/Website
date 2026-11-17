@@ -5,7 +5,15 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
+# Nicht als root (D-11): eigener System-Benutzer (legt deploy.sh an). Der
+# Dienst schreibt keine Dateien (ffmpeg -> stdout), braucht nur Netz + Prozesse.
+# Bewusst KEIN DynamicUser/ProtectSystem/ProtectHome/PrivateTmp (R2-Dh): die
+# brauchen Mount-Namespaces, die im unprivilegierten CT 250 ohne nesting
+# scheitern (Start-Fehler 226/NAMESPACE); DynamicUser impliziert sie.
+User=tv7
+Group=tv7
+NoNewPrivileges=yes
+CapabilityBoundingSet=
 EnvironmentFile=/etc/default/tv7-streamer
 WorkingDirectory=/opt/tv7-streamer
 ExecStart=/usr/bin/node /opt/tv7-streamer/server.js

@@ -36,7 +36,7 @@ Node.js Express Server (`api/server.js`) mit folgenden Funktionen:
 | GET | `/api/auth/login` | — | OAuth2 Login-Redirect |
 | GET | `/api/auth/callback` | — | OAuth2 Callback |
 | GET | `/api/auth/me` | Bearer | User-Info |
-| POST | `/api/change-password` | Bearer | Passwort in Authentik + AD ändern |
+| POST | `/api/change-password` | Bearer | Passwort in Authentik + AD ändern (nur innert 15 Min. nach frischer Anmeldung; beendet alle anderen Sitzungen) |
 
 ### Dokumente
 | Method | Path | Auth | Beschreibung |
@@ -102,8 +102,8 @@ Node.js Express Server (`api/server.js`) mit folgenden Funktionen:
 | AUTHENTIK_URL | https://server:9443 | Interne URL (Server-to-Server) |
 | AUTHENTIK_EXTERNAL_URL | https://authentik.rosenweg4303.ch | Externe URL (Browser-Redirects) |
 | AUTHENTIK_CLIENT_ID | 35oy6Q... | OAuth2 Client ID |
-| AUTHENTIK_CLIENT_SECRET | QTIL0L... | OAuth2 Client Secret |
-| AUTHENTIK_API_TOKEN | oqCfoI... | Admin API Token |
+| AUTHENTIK_CLIENT_SECRET | <im Passwortmanager> | OAuth2 Client Secret |
+| AUTHENTIK_API_TOKEN | <im Passwortmanager> | Admin API Token |
 
 ### Email
 | Variable | Wert | Beschreibung |
@@ -111,23 +111,23 @@ Node.js Express Server (`api/server.js`) mit folgenden Funktionen:
 | SMTP_HOST | mail-eu.smtp2go.com | SMTP2GO Host |
 | SMTP_PORT | 2525 | SMTP2GO Port (TLS) |
 | SMTP_USER | rk-website | SMTP2GO User |
-| SMTP_PASS | BvyLJU... | SMTP2GO Passwort |
+| SMTP_PASS | <im Passwortmanager> | SMTP2GO Passwort |
 | MAIL_FROM | noreply@rosenweg4303.ch | Absender |
 | IMAP_USER | rosenweg4303@gmail.com | Gmail für IMAP-Polling |
-| IMAP_PASS | ***ENTFERNT*** | Gmail App-Passwort |
+| IMAP_PASS | <im Passwortmanager> | Gmail App-Passwort |
 
 ### AD / Passwort-Sync
 | Variable | Wert | Beschreibung |
 |----------|------|-------------|
 | AD_PASSWORD_API_URL | http://100.64.2.30:8446/ | DC Password API |
-| AD_PASSWORD_API_SECRET | ***ENTFERNT*** | DC Password API Token |
+| AD_PASSWORD_API_SECRET | (geheim, Pflicht) | DC Password API Token |
 
 ### Sonstiges
 | Variable | Wert | Beschreibung |
 |----------|------|-------------|
 | SITE_URL | https://www.rosenweg4303.ch | Website URL |
 | DOCS_PATH | /documents | CIFS-Mount Pfad |
-| SCAN_API_KEY | 171fd3... | API Key für Scanner-Upload |
+| SCAN_API_KEY | <im Passwortmanager> | API Key für Scanner-Upload |
 | PORT | 3000 | API Server Port |
 
 ## IMAP-Polling

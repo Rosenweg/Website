@@ -386,7 +386,9 @@
 <div id="fatal" class="hidden"></div>
 <div id="toasts"></div>
 
-<script src="authentik-auth.js"></script>
+<!-- authentik-auth.js ist eine byte-gleiche Kopie von /js/authentik-auth.js (Website);
+     bei Aenderungen dort mitkopieren (Merker-/Schleifenschutz). -->
+<script src="authentik-auth.js?v=5"></script>
 <script>
 "use strict";
 (function(){
@@ -409,7 +411,8 @@
     var opts = { method: method, headers: { 'Authorization': 'Bearer ' + (token||'') } };
     if (body !== undefined){ opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
     return fetch(path, opts).then(function(resp){
-      if (resp.status === 401){ AuthentikAuth.login(); throw new Error('Nicht angemeldet'); }
+      // auto: Schleifensperre, falls das Gateway ein Token ablehnt, das /api/auth/me annimmt
+      if (resp.status === 401){ AuthentikAuth.login(null, { auto: true }); throw new Error('Nicht angemeldet'); }
       return resp.text().then(function(txt){
         var data = {};
         try { data = txt ? JSON.parse(txt) : {}; } catch(e){ data = {}; }

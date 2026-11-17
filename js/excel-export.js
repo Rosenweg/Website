@@ -18,6 +18,9 @@
     _xlsxPromise = new Promise((resolve, reject) => {
       const s = document.createElement('script');
       s.src = SHEETJS_CDN;
+      // Prüfsumme der festen Version: ein verändertes CDN-Skript wird nicht ausgeführt.
+      s.integrity = 'sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT';
+      s.crossOrigin = 'anonymous';
       s.onload = () => window.XLSX ? resolve(window.XLSX) : reject(new Error('XLSX nicht geladen'));
       s.onerror = () => reject(new Error('SheetJS-Download fehlgeschlagen'));
       document.head.appendChild(s);

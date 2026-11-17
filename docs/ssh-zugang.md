@@ -40,7 +40,12 @@ Schaden, den ein Fehler anrichten kann:
 **Wir fassen nur an, was wir selbst angelegt haben.** Jedes erzeugte Konto
 kommt in die Gruppe `rw-verwaltet`. Ein von Hand angelegtes Konto gleichen
 Namens bleibt unberührt, auch wenn es in der Matrix steht. Systemkonten
-(UID unter 1000) und `root` sind ohnehin tabu.
+(UID unter 1000) und `root` sind ohnehin tabu. Auch `rw-authorized-keys`
+liefert Schlüssel nur für Mitglieder von `rw-verwaltet` — sonst bekäme ein
+lokales Betriebskonto (`claude`, `ansible`, `pi` …) die Portal-Schlüssel
+einer gleichnamigen Person. Soll ein von Hand angelegtes Konto trotzdem
+Schlüssel aus dem Portal bekommen, steht es ausdrücklich in
+`/etc/rosenweg-ssh.conf`: `SCHLUESSEL_AUCH_FUER="login1 login2"`.
 
 **Ein Konto braucht einen Schlüssel.** Wer keinen hinterlegt hat, bekommt
 keines — ein Konto ohne Schlüssel wäre eine Tür ohne Klinke.
@@ -101,11 +106,16 @@ Auf einem Proxmox-Knoten nimmt ein Aufruf den Knoten und auf Wunsch gleich
 alle laufenden Container mit:
 
 ```sh
-./rw-ssh-aufnehmen.sh --api https://www.rosenweg4303.ch --token GEHEIM --auch-cts
+./rw-ssh-aufnehmen.sh --api https://www.rosenweg4303.ch --token-datei /root/rw-token --auch-cts
 ```
 
+Ohne `--token-datei` fragt das Skript das Token verdeckt ab. `--token GEHEIM`
+geht noch, steht dann aber für jeden lokalen Benutzer in der Prozessliste.
 `--probelauf` zeigt vorher, was geschehen würde. Das Skript ist
-wiederholbar: Ein zweiter Lauf ändert nichts, was schon stimmt. Es enthält
+wiederholbar: Ein zweiter Lauf ändert nichts, was schon stimmt. In einer
+vorhandenen `/etc/rosenweg-ssh.conf` ersetzt es nur `API_BASE`, `HOST_TOKEN`
+und `HOST_NAME`; von Hand gesetzte Werte wie `SCHLUESSEL_AUCH_FUER`,
+`KONTEN_LOESCHEN`, `KONTEN_SCHONFRIST_TAGE` oder `KONTEN_TABU` bleiben. Es enthält
 Kopien der Host-Dateien; nach jeder Änderung an `rw-authorized-keys.sh`,
 `rw-konten-sync.sh` oder den Units muss
 `python3 scripts/rw-ssh-aufnehmen-bauen.py` neu laufen.

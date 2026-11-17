@@ -15,7 +15,8 @@ Pull-Falle weg, Session floatet auf der Ceph-rbd-Disk mit (Failover getestet, ~4
 ## Dateien
 - `compose.yml` → `/opt/whatsapp-bot/compose.yml` (hier im Repo).
 - `/opt/whatsapp-bot/.env` (0600, **nicht** im Repo): `WHATSAPP_SHARED_SECRET=...`.
-- `wa-2525-fw.service` → `/etc/systemd/system/` (2525 nur von PMG `.31`).
+- `wa-2525-fw.service` → `/etc/systemd/system/`, `wa-2525-fw.nft` → `/etc/rosenweg/` (2525 nur von PMG `.31`,
+  IPv4 und IPv6 per nftables inet; alte iptables-Regel entfernen, siehe Kopf der .nft-Datei).
 - Volume `whatsapp-bot_whatsapp-data` = gepairte WA-Session (Nr. **41615510152**) + `gateway.sqlite`.
 
 ## Deploy (neuer Flow — KEIN Swarm-Pull-Crashloop mehr)

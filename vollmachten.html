@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Vollmachten — Rosenweg</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/authentik-auth.js?v=5"></script>
   <script src="/js/nav.js?v=3"></script>
   <link rel="icon" href="/logo-rosenweg.png">
   <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'); body { font-family: 'Inter', sans-serif; }</style>
@@ -226,7 +226,7 @@
   </div>
 
   <script>
-  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   const fmtD = s => s ? new Date(s).toLocaleDateString('de-CH') : '—';
   const fmtDt = s => s ? new Date(s).toLocaleString('de-CH') : '—';
 
@@ -234,6 +234,10 @@
   let isAdmin = false;
   let currentTab = 'meine';
   let myEmail = '';
+  // Gruppen nur fuer die Anzeige der Admin-Knoepfe; der Server prueft selbst
+  // (activate-paper: Technik/Praesident/Verwaltung, upload-signed: Technik/Praesident).
+  let myGroups = [];
+  const hatGruppe = (...namen) => myGroups.some(g => namen.includes(g));
   let verwaltungenCache = [];
   let myWohnungen = [];
   let templates = [];
@@ -243,6 +247,7 @@
     const u = await AuthentikAuth.init({ requireAuth: true });
     if (!u) return;
     myEmail = (u.email || '').toLowerCase();
+    myGroups = (u.groups || []).map(g => String(g).toLowerCase());
     document.getElementById('auth-gate').classList.add('hidden');
     document.getElementById('content').classList.remove('hidden');
     // Tab-Handler
@@ -405,7 +410,7 @@
       widerrufen: ['bg-red-100 text-red-800', 'Widerrufen'],
       abgelaufen: ['bg-amber-100 text-amber-800', 'Abgelaufen'],
     }[s] || ['bg-gray-100 text-gray-700', s];
-    return `<span class="text-xs ${map[0]} px-2 py-0.5 rounded">${map[1]}</span>`;
+    return `<span class="text-xs ${map[0]} px-2 py-0.5 rounded">${esc(map[1])}</span>`;
   }
 
   function artLabel(a) {
@@ -427,7 +432,14 @@
     }
     empty.classList.add('hidden');
     wrap.innerHTML = list.map(v => {
-      const canSign = v.status === 'entwurf' && (v.vollmachtgeber_email || '').toLowerCase() === myEmail;
+      // Jede/r Miteigentuemer/in signiert die eigene, noch offene Zeile der Vollmachtgeber-Liste
+      // (nicht nur die/der erste). Ohne Liste wie bisher die Primaer-Adresse.
+      const vgListe = Array.isArray(v.vollmachtgeber_liste) ? v.vollmachtgeber_liste : [];
+      const canSign = v.status === 'entwurf' && (vgListe.length
+        ? vgListe.some(g => (g.email || '').toLowerCase() === myEmail && !g.signed_at)
+        : (v.vollmachtgeber_email || '').toLowerCase() === myEmail);
+      const canAdminUpload = v.status === 'entwurf' && !canSign && hatGruppe('technik', 'präsident', 'praesident');
+      const canActivatePaper = v.status === 'entwurf' && hatGruppe('technik', 'präsident', 'praesident', 'verwaltung');
       const canEdit = v.status === 'entwurf';
       const canRevoke = v.status === 'aktiv' && ((v.vollmachtgeber_email || '').toLowerCase() === myEmail || isAdmin);
       return `<div class="bg-white border rounded-lg p-4 hover:shadow-md transition">
@@ -435,14 +447,14 @@
           <div class="flex-1 min-w-0">
             <div class="flex flex-wrap items-center gap-2 mb-1">
               ${statusBadge(v.status)}
-              <span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">${artLabel(v.art)}</span>
+              <span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">${esc(artLabel(v.art))}</span>
               <span class="text-xs text-gray-500 font-mono">${esc(v.doc_hash || '#' + v.id)}</span>
             </div>
             <p class="text-sm">
               <strong>${esc(v.vollmachtgeber_name)}</strong>
               <span class="text-gray-500">bevollmaechtigt</span>
               <strong>${esc(v.bevollmaechtigter_name)}</strong>
-              <span class="text-gray-400">(${typLabel(v.bevollmaechtigter_typ)})</span>
+              <span class="text-gray-400">(${esc(typLabel(v.bevollmaechtigter_typ))})</span>
             </p>
             ${v.geltungsbereich ? `<p class="text-xs text-gray-600 mt-1 line-clamp-2">${esc(v.geltungsbereich)}</p>` : ''}
             <div class="text-xs text-gray-500 mt-2 flex flex-wrap gap-x-4 gap-y-1">
@@ -450,6 +462,7 @@
               ${v.wohnung_bezeichnung ? `<span>🏠 ${esc(v.wohnung_bezeichnung)}</span>` : (v.stweg ? `<span>🏠 STWEG ${v.stweg}</span>` : '')}
               ${v.signatur_typ === 'digital' ? `<span>✍ Digital signiert ${fmtDt(v.digital_signed_at)}</span>` : ''}
               ${v.signatur_typ === 'papier' ? `<span>📄 Papier-Signatur</span>` : ''}
+              ${v.status === 'entwurf' && Number(v.vg_total) > 1 ? `<span>✍ ${Number(v.vg_signed) || 0}/${Number(v.vg_total)} signiert</span>` : ''}
             </div>
           </div>
           <div class="flex flex-wrap gap-2 shrink-0">
@@ -457,6 +470,8 @@
             ${canEdit ? `<button onclick="editVollmacht(${v.id})" class="text-xs bg-gray-100 text-gray-700 rounded px-3 py-1.5 hover:bg-gray-200">✎ Bearbeiten</button>` : ''}
             ${canSign ? `<button onclick="signDigital(${v.id})" class="text-xs bg-green-600 text-white rounded px-3 py-1.5 hover:bg-green-700">✓ Digital signieren</button>` : ''}
             ${canSign ? `<button onclick="triggerUpload(${v.id})" class="text-xs bg-amber-600 text-white rounded px-3 py-1.5 hover:bg-amber-700">📤 Signierte PDF hochladen</button>` : ''}
+            ${canAdminUpload ? `<button onclick="triggerUpload(${v.id}, true)" class="text-xs bg-amber-700 text-white rounded px-3 py-1.5 hover:bg-amber-800" title="Admin: PDF mit den Unterschriften aller Geber hochladen">📤 PDF aller Geber hochladen (Admin)</button>` : ''}
+            ${canActivatePaper ? `<button onclick="activatePaper(${v.id})" class="text-xs bg-amber-100 text-amber-800 rounded px-3 py-1.5 hover:bg-amber-200">📄 Papier aktivieren</button>` : ''}
             ${v.papier_pdf_path ? `<button onclick="verifyAi(${v.id})" class="text-xs bg-purple-600 text-white rounded px-3 py-1.5 hover:bg-purple-700">🤖 KI-Prüfung</button>` : ''}
             ${canRevoke ? `<button onclick="revoke(${v.id})" class="text-xs bg-red-600 text-white rounded px-3 py-1.5 hover:bg-red-700">Widerrufen</button>` : ''}
             ${canEdit ? `<button onclick="deleteEntry(${v.id})" class="text-xs text-red-600 hover:underline">Löschen</button>` : ''}
@@ -516,17 +531,19 @@
       }
       const roleLabels = { eigentuemer: 'Miteigentuemer', mieter: 'Mieter', verwalter: 'Verwalter', bewohner: 'Bewohner' };
       const roleColors = { eigentuemer: 'bg-blue-100 text-blue-800', mieter: 'bg-amber-100 text-amber-800', verwalter: 'bg-purple-100 text-purple-800', bewohner: 'bg-green-100 text-green-800' };
-      wrap.innerHTML = kontakte.map(k => {
+      // Kontakt per Index aus data-Attribut, nicht als JSON im onclick (XSS ueber Namen)
+      wrap.innerHTML = kontakte.map((k, i) => {
         const alreadyAdded = vgList.some(v => (v.email || '').toLowerCase() === (k.email || '').toLowerCase());
-        return `<button type="button" ${alreadyAdded ? 'disabled' : ''} onclick='addVgFromKontakt(${JSON.stringify(k).replace(/'/g, "&apos;")})' class="block w-full text-left p-2 bg-white border border-blue-100 rounded ${alreadyAdded ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-100'} transition">
+        return `<button type="button" ${alreadyAdded ? 'disabled' : ''} data-idx="${i}" class="block w-full text-left p-2 bg-white border border-blue-100 rounded ${alreadyAdded ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-100'} transition">
           <div class="flex items-center justify-between gap-2">
             <div class="font-medium">${esc(k.name)}${alreadyAdded ? ' <span class="text-xs text-gray-400">(bereits hinzugefuegt)</span>' : ''}</div>
-            <span class="text-xs px-2 py-0.5 rounded ${roleColors[k.rolle] || 'bg-gray-100 text-gray-700'} flex-shrink-0">${roleLabels[k.rolle] || k.rolle}</span>
+            <span class="text-xs px-2 py-0.5 rounded ${roleColors[k.rolle] || 'bg-gray-100 text-gray-700'} flex-shrink-0">${esc(roleLabels[k.rolle] || k.rolle)}</span>
           </div>
           <div class="text-gray-500 text-xs">${esc(k.email || '')}</div>
-          <div class="text-gray-400 text-xs">aus ${esc(k.wohnung_bezeichnung || 'Wohnung #' + k.wohnung_id)} (STWEG ${k.stweg})</div>
+          <div class="text-gray-400 text-xs">aus ${esc(k.wohnung_bezeichnung || 'Wohnung #' + k.wohnung_id)} (STWEG ${esc(k.stweg)})</div>
         </button>`;
       }).join('');
+      wrap.querySelectorAll('button[data-idx]').forEach(b => b.addEventListener('click', () => addVgFromKontakt(kontakte[Number(b.dataset.idx)])));
     } catch (e) { wrap.innerHTML = '<div class="text-red-500 p-1">Fehler: ' + esc(e.message) + '</div>'; }
   }
 
@@ -625,18 +642,20 @@
       }
       const roleLabels = { eigentuemer: 'Miteigentuemer', mieter: 'Mieter', verwalter: 'Verwalter', bewohner: 'Bewohner' };
       const roleColors = { eigentuemer: 'bg-blue-100 text-blue-800', mieter: 'bg-amber-100 text-amber-800', verwalter: 'bg-purple-100 text-purple-800', bewohner: 'bg-green-100 text-green-800' };
-      wrap.innerHTML = kontakte.map(k => {
-        const rolleLabel = roleLabels[k.rolle] || k.rolle;
+      // Kontakt per Index aus data-Attribut, nicht als JSON im onclick (XSS ueber Namen)
+      wrap.innerHTML = kontakte.map((k, i) => {
+        const rolleLabel = esc(roleLabels[k.rolle] || k.rolle);
         const rolleClass = roleColors[k.rolle] || 'bg-gray-100 text-gray-700';
-        return `<button type="button" onclick='pickKontakt(${JSON.stringify(k).replace(/'/g, "&apos;")})' class="block w-full text-left p-2 bg-white border border-blue-100 rounded hover:bg-blue-100 transition">
+        return `<button type="button" data-idx="${i}" class="block w-full text-left p-2 bg-white border border-blue-100 rounded hover:bg-blue-100 transition">
           <div class="flex items-center justify-between gap-2">
             <div class="font-medium">${esc(k.name)}</div>
             <span class="text-xs px-2 py-0.5 rounded ${rolleClass} flex-shrink-0">${rolleLabel}</span>
           </div>
           <div class="text-gray-500 text-xs">${esc(k.email || '')}${k.telefon ? ' · ' + esc(k.telefon) : ''}</div>
-          <div class="text-gray-400 text-xs">aus ${esc(k.wohnung_bezeichnung || 'Wohnung #' + k.wohnung_id)} (STWEG ${k.stweg})</div>
+          <div class="text-gray-400 text-xs">aus ${esc(k.wohnung_bezeichnung || 'Wohnung #' + k.wohnung_id)} (STWEG ${esc(k.stweg)})</div>
         </button>`;
       }).join('');
+      wrap.querySelectorAll('button[data-idx]').forEach(b => b.addEventListener('click', () => pickKontakt(kontakte[Number(b.dataset.idx)])));
     } catch (e) { wrap.innerHTML = '<div class="text-red-500 p-1">Fehler: ' + esc(e.message) + '</div>'; }
   }
 
@@ -694,7 +713,9 @@
           if (list.length === 0) {
             results.innerHTML = '<div class="p-2 text-gray-400 italic">Keine Treffer</div>';
           } else {
-            results.innerHTML = list.map(p => `<div class="p-2 hover:bg-blue-50 cursor-pointer border-b last:border-b-0" onclick='pickPerson(${JSON.stringify(p).replace(/'/g, "&apos;")})'><strong>${esc(p.name)}</strong><br><span class="text-gray-500">${esc(p.email || '—')}</span></div>`).join('');
+            // Person per Index aus data-Attribut, nicht als JSON im onclick (XSS ueber Namen)
+            results.innerHTML = list.map((p, i) => `<div class="p-2 hover:bg-blue-50 cursor-pointer border-b last:border-b-0" data-idx="${i}"><strong>${esc(p.name)}</strong><br><span class="text-gray-500">${esc(p.email || '—')}</span></div>`).join('');
+            results.querySelectorAll('[data-idx]').forEach(el => el.addEventListener('click', () => pickPerson(list[Number(el.dataset.idx)])));
           }
           results.classList.remove('hidden');
         } catch (e) { console.warn('Person-Search:', e.message); }
@@ -827,7 +848,17 @@
     } catch (e) { alert('Fehler: ' + e.message); }
   }
 
-  function triggerUpload(id) {
+  // Admin: Vollmacht mit Papier-Signatur aktivieren, wenn das Original z.B. bei der Verwaltung liegt.
+  async function activatePaper(id) {
+    if (!confirm('Vollmacht als papier-signiert AKTIVIEREN (ohne Upload)?\n\nNur wenn das unterschriebene Original aller Vollmachtgeber vorliegt.')) return;
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/vollmachten/${id}/activate-paper`, { method: 'POST' });
+      if (!r.ok) throw new Error(await r.text());
+      await load();
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+
+  function triggerUpload(id, alsAdmin) {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'application/pdf,.pdf';
@@ -836,7 +867,7 @@
       if (!file) return;
       if (file.size > 20 * 1024 * 1024) { alert('Datei zu gross (max 20 MB)'); return; }
       try {
-        const r = await AuthentikAuth.apiFetch(`/api/vollmachten/${id}/upload-signed`, {
+        const r = await AuthentikAuth.apiFetch(`/api/vollmachten/${id}/upload-signed${alsAdmin ? '?als=admin' : ''}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/pdf' },
           body: file,
@@ -883,7 +914,7 @@
               </div>
               <div class="bg-gray-50 p-3 rounded">
                 <div class="text-xs text-gray-500 mb-1">Unterschriften-Indikatoren</div>
-                <div class="font-semibold">${d.unterschriften_indikatoren ?? '—'}</div>
+                <div class="font-semibold">${esc(d.unterschriften_indikatoren ?? '—')}</div>
               </div>
             </div>
             ${(d.fehlende_namen || []).length ? `<div class="bg-red-50 p-3 rounded"><div class="text-xs font-semibold text-red-800 mb-1">Fehlende Namen:</div><ul class="list-disc list-inside text-xs">${d.fehlende_namen.map(n => `<li>${esc(n)}</li>`).join('')}</ul></div>` : ''}

@@ -20,7 +20,11 @@ if [ "$(postconf -h relayhost 2>/dev/null)" != "$RELAY" ]; then
   logger -t pmg-restore-relay "Relay -> VPS ($RELAY), Fallback $FALLBACK"
 fi
 
-NEED="100.64.2.33 100.64.2.24 100.64.2.25 100.64.2.26 100.64.2.39"
+# Nur noch Mailcow (.33) und WA-Gateway (.39). 100.64.2.24-26 waren die Knoten
+# des abgebauten Docker Swarm; sie werden nicht mehr ergaenzt. Bereits
+# eingetragene Werte entfernt das Skript bewusst NICHT (vorher pruefen, ob die
+# Adressen neu vergeben sind) - siehe Sicherheitspruefung 17.11.2026, I-20.
+NEED="100.64.2.33 100.64.2.39"
 CUR=$(postconf -Ph smtpd/pass/mynetworks 2>/dev/null | tr -d ' ')
 if [ -n "$CUR" ]; then
   NEW="$CUR"
@@ -31,6 +35,29 @@ if [ -n "$CUR" ]; then
   fi
 fi
 
+# ── (2b) TLS zu den Relays erzwingen ──────────────────────────────────
+#
+# Global bleibt smtp_tls_security_level=may (interne Ziele sprechen teils kein
+# TLS). Fuer die beiden Relays, an die SASL-Zugangsdaten und alle Post nach
+# draussen gehen, gilt per Richtlinie "encrypt": ohne STARTTLS keine
+# Zustellung, statt still im Klartext (Downgrade durch Entfernen von
+# STARTTLS). Eigene Datei - pmgconfig sync fasst sie nicht an.
+TLS_POLICY=/etc/postfix/rosenweg_tls_policy
+TLS_SOLL="$RELAY encrypt
+$FALLBACK encrypt"
+if [ "$(cat "$TLS_POLICY" 2>/dev/null)" != "$TLS_SOLL" ]; then
+  printf '%s\n' "$TLS_SOLL" > "$TLS_POLICY"
+  postmap "hash:$TLS_POLICY"
+  RELOAD=1
+fi
+# Anhaengen statt ersetzen: PMG fuehrt in smtp_tls_policy_maps seine eigene
+# Tabelle (/etc/pmg/tls_policy, GUI "TLS Destination Policy"); die bleibt vorn.
+MAPS=$(postconf -h smtp_tls_policy_maps 2>/dev/null)
+if ! printf '%s' "$MAPS" | grep -q "hash:$TLS_POLICY"; then
+  postconf "smtp_tls_policy_maps=${MAPS:+$MAPS, }hash:$TLS_POLICY"
+  logger -t pmg-restore-relay "TLS-Pflicht fuer $RELAY und $FALLBACK gesetzt"
+  RELOAD=1
+fi
 
 # ── (3) Interne Ziele duerfen nicht ins Internet ausweichen ─────────────
 #

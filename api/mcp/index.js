@@ -346,7 +346,9 @@ function baueServer(req) {
       },
     );
   }
-  registriereRessourcen(server, technik);
+  // Ressourcen gehören zum Scope docs:read — ein Token mit wasch:* bekommt
+  // nur die Waschküche, nicht auch die Dokumentation.
+  if (scopeErlaubt(scopes, 'docs', 'GET')) registriereRessourcen(server, technik);
   registrierePrompts(server);
   return server;
 }
@@ -402,7 +404,7 @@ function mountMcp(app) {
     try {
       const r = await pool.query('SELECT id, zeit, user_email, pat_id, werkzeug, ok, dauer_ms, fehler, argumente FROM mcp_aufrufe ORDER BY zeit DESC LIMIT $1', [limit]);
       res.json({ aufrufe: r.rows });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { console.error('[MCP] aufrufe', e.message); res.status(500).json({ error: 'Interner Fehler' }); }
   });
 
   console.log(`[MCP] Portal-MCP bereit: ${ALLE_WERKZEUGE.length} Werkzeuge, ${PROMPTS.length} Prompts, Host ${MCP_HOST}`);

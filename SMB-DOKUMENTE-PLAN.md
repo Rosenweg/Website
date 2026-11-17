@@ -94,7 +94,7 @@ Gotenberg (Preview) ──────────────┘         /srv/d
 
 **Samba-User:**
 - `api-svc` — Service-Account für Docker CIFS Volume (Passwort: in `CIFS_PASSWORD` env var)
-- `scanner` — Service-Account für Netzwerkscanner (Passwort: `***ENTFERNT***`, nur Zugriff auf `[scans]` Share)
+- `scanner` — Service-Account für Netzwerkscanner (Passwort: `<im Passwortmanager>`, nur Zugriff auf `[scans]` Share)
 - `@rosenweg` — Gruppe für End-User (noch nicht konfiguriert, braucht LDAP/Authentik-Integration)
 
 **Daten:** 140 Dateien, ~114MB in `/srv/documents/`

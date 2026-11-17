@@ -8,7 +8,9 @@ Reproduktion bei Neuaufbau.
 
 ## `smtp_senders` — erlaubte Absender (Mail→WhatsApp)
 Annahme, wenn **Quell-IP (`smtp_ips`) ODER Absender (`smtp_senders`)** gewhitelistet
-ist. Absender per exakter Adresse ODER ganzer Domain (`@domain`, **kein** Subdomain-Match).
+ist — **ausser** die Quelle ist eine Internet-Quelle (`GW_SMTP_STRENG_IPS`, Default PMG
+`100.64.2.31`): dann **muss** der Absender in `smtp_senders` stehen und Empfänger sind
+**nur Aliase** (keine freien Nummern/Gruppennamen/JIDs). Seit 17.11.2026 (D-2). Ausnahme (R2-De): Mail-Antwort an `nummer@…` (Reply-To einer WA→Mail-Weiterleitung) wird angenommen, wenn genau dieser Absender zuletzt per Mail an diese Nummer geschrieben hat. Absender per exakter Adresse ODER ganzer Domain (`@domain`, **kein** Subdomain-Match).
 
 | addr | Zweck |
 |---|---|
@@ -24,7 +26,7 @@ ist. Absender per exakter Adresse ODER ganzer Domain (`@domain`, **kein** Subdom
 | `100.64.2.33` | Mailcow (Inbound-Verteiler-Fanout über die Mailcow-Alias-Expansion) |
 | `100.64.2.31` | PMG — Mailcow stellt `*@whatsapp.rosenweg4303.ch` über den PMG-Transport zu, jede Verteiler→WhatsApp-Mail kommt also von hier (Stand 24.10.2026, `ausschuss-verwaltung@`) |
 
-PMG `.31` steht drin, weil die Zustellung an `whatsapp.rosenweg4303.ch` über den
+PMG `.31` steht drin (zählt aber als strenge Quelle, s. o.), weil die Zustellung an `whatsapp.rosenweg4303.ch` über den
 PMG-Transport läuft (ohne den Eintrag kommt keine Verteiler-Mail in WhatsApp an).
 Früher stand hier, `.31` sei bewusst ausgelassen — das war vor diesem Weg. Die
 Kehrseite bleibt: Jede über PMG an eine Brückenadresse relayte Mail geht nach

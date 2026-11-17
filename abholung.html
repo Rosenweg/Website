@@ -83,7 +83,7 @@
         async function loadJob() {
             if (!token) { showError(); return; }
             try {
-                const resp = await fetch('/api/pickup/' + token);
+                const resp = await fetch('/api/pickup/' + encodeURIComponent(token));
                 if (!resp.ok) { showError(); return; }
                 const job = await resp.json();
                 showJob(job);
@@ -124,7 +124,7 @@
             btn.disabled = true;
             btn.textContent = 'Wird bestätigt...';
             try {
-                const resp = await fetch('/api/pickup/' + token, {
+                const resp = await fetch('/api/pickup/' + encodeURIComponent(token), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ name })

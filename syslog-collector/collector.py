@@ -27,6 +27,27 @@ DB_PASSWORD = os.environ.get('DB_PASSWORD', '')
 DB_NAME = os.environ.get('DB_NAME', 'rosenweg')
 BATCH_SIZE = int(os.environ.get('BATCH_SIZE', '50'))
 FLUSH_INTERVAL = int(os.environ.get('FLUSH_INTERVAL', '10'))  # seconds
+# Quellfilter (D-8): Komma-Liste erlaubter Absender-IPs (exakt, oder Praefix mit
+# abschliessendem "." / ":"), z. B. die UDM. Leer = alle (Warnung beim Start).
+# Wirkt nur, wenn der Port die echte Quell-IP sieht (Swarm-Ingress maskiert sie;
+# dort Port im mode: host veroeffentlichen).
+ALLOWED_SOURCES = [x.strip().lower() for x in os.environ.get('SYSLOG_ALLOWED_SOURCES', '').split(',') if x.strip()]
+MAX_TCP_CLIENTS = int(os.environ.get('SYSLOG_MAX_TCP_CLIENTS', '20'))
+MAX_LINE_BYTES = 65536  # TCP-Zeile ohne Zeilenende -> Verbindung schliessen statt endlos puffern
+# Untaetige TCP-Verbindung schliessen (R2-Db): sonst belegen 20 stille Verbindungen
+# alle Slots dauerhaft. Echte Sender verbinden sich bei Bedarf neu.
+# 600 s statt 60 s (R3-Df): ruhige Dauer-TCP-Sender (rsyslog/UniFi) sollen
+# nicht staendig getrennt werden; gegen Slot-Belegung reicht das weiterhin.
+TCP_IDLE_TIMEOUT = float(os.environ.get('SYSLOG_TCP_IDLE_TIMEOUT', '600'))
+
+
+def source_allowed(ip):
+    if not ALLOWED_SOURCES:
+        return True
+    ip = str(ip or '').lower()
+    if ip.startswith('::ffff:'):
+        ip = ip[7:]
+    return any(ip.startswith(e) if e.endswith(('.', ':')) else ip == e for e in ALLOWED_SOURCES)
 
 # VLAN → Network name mapping (populated from DB or hardcoded)
 VLAN_NETWORKS = {
@@ -312,13 +333,18 @@ def handle_tcp_client(conn, addr, stats):
     """Handle a TCP connection (one or more newline-delimited messages)."""
     buf = b''
     conn.settimeout(5.0)
+    letzte_daten = time.monotonic()
     try:
         while running:
             try:
                 chunk = conn.recv(65535)
                 if not chunk:
                     break
+                letzte_daten = time.monotonic()
                 buf += chunk
+                if b'\n' not in buf and len(buf) > MAX_LINE_BYTES:
+                    print(f'[Syslog] TCP {addr[0]}: Zeile zu lang, Verbindung geschlossen', flush=True)
+                    break
                 while b'\n' in buf:
                     line, buf = buf.split(b'\n', 1)
                     if line.strip():
@@ -332,12 +358,19 @@ def handle_tcp_client(conn, addr, stats):
                         else:
                             stats['skipped'] += 1
             except socket.timeout:
+                if time.monotonic() - letzte_daten > TCP_IDLE_TIMEOUT:
+                    break
                 continue
     except Exception as e:
         if running:
             print(f'[Syslog] TCP client error: {e}', flush=True)
     finally:
         conn.close()
+        tcp_slots.release()
+
+
+# Begrenzt gleichzeitige TCP-Verbindungen (je eine Thread) — sonst beliebig viele.
+tcp_slots = threading.BoundedSemaphore(MAX_TCP_CLIENTS)
 
 
 def main():
@@ -345,6 +378,8 @@ def main():
 
     print(f'[Syslog] Starting collector on UDP+TCP port {SYSLOG_PORT}', flush=True)
     print(f'[Syslog] DB: {DB_USER}@{DB_HOST}:{DB_PORT}/{DB_NAME}', flush=True)
+    if not ALLOWED_SOURCES:
+        print('[Syslog] WARNUNG: SYSLOG_ALLOWED_SOURCES nicht gesetzt — jede Quelle darf einliefern', flush=True)
 
     # Create UDP socket
     udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -379,11 +414,15 @@ def main():
         # UDP
         try:
             data, addr = udp_sock.recvfrom(65535)
+            if not source_allowed(addr[0]):
+                continue
             stats['received'] += 1
             event = handle_message(data, stats)
             if event:
                 with buffer_lock:
-                    event_buffer.append(event)
+                    # Obergrenze wie bei TCP: bei DB-Ausfall nicht unbegrenzt wachsen.
+                    if len(event_buffer) < MAX_BUFFER_SIZE:
+                        event_buffer.append(event)
                 stats['parsed'] += 1
             else:
                 stats['skipped'] += 1
@@ -396,6 +435,12 @@ def main():
         # TCP — accept new connections
         try:
             conn, addr = tcp_sock.accept()
+            if not source_allowed(addr[0]):
+                conn.close()
+                continue
+            if not tcp_slots.acquire(blocking=False):
+                conn.close()
+                continue
             print(f'[Syslog] TCP connection from {addr[0]}', flush=True)
             t = threading.Thread(target=handle_tcp_client, args=(conn, addr, stats), daemon=True)
             t.start()

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Verwaltungs-Mail Outbox — Rosenweg</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/authentik-auth.js?v=5"></script>
   <script src="/js/nav.js?v=3"></script>
   <script src="/js/modal-helpers.js?v=1"></script>
   <link rel="icon" href="/logo-rosenweg.png">
@@ -69,7 +69,34 @@
   </main>
 
   <script>
-  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+
+    // Datei mit Bearer-Token holen: ein direkter Link schickt keinen Token mit (-> 401).
+    // Nur harmlose Typen im Browser oeffnen; alles andere (z.B. SVG/HTML) herunterladen,
+    // denn eine Blob-URL laeuft mit der Herkunft dieser Seite.
+    async function dateiOeffnen(url, filename) {
+        const win = window.open('', '_blank'); // synchron oeffnen, sonst greift der Popup-Blocker
+        if (win) win.opener = null;
+        try {
+            const r = await AuthentikAuth.apiFetch(url);
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const blob = await r.blob();
+            const typ = (blob.type || '').split(';')[0].trim().toLowerCase();
+            const href = URL.createObjectURL(blob);
+            setTimeout(() => URL.revokeObjectURL(href), 60000);
+            if (win && ['application/pdf', 'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'text/plain'].includes(typ)) {
+                win.location.href = href;
+                return;
+            }
+            if (win) win.close();
+            const a = document.createElement('a');
+            a.href = href; a.download = filename || 'datei';
+            document.body.appendChild(a); a.click(); a.remove();
+        } catch (e) {
+            if (win) win.close();
+            alert('Datei konnte nicht geladen werden: ' + e.message);
+        }
+    }
   const fmtDt = s => s ? new Date(s).toLocaleString('de-CH') : '';
 
   let CURRENT = null;
@@ -115,7 +142,7 @@
     }
     ul.innerHTML = LIST.map(m => {
       const sel = CURRENT && CURRENT.id === m.id;
-      return `<li onclick="openDetail(${m.id})" class="px-4 py-3 cursor-pointer hover:bg-gray-50 ${sel ? 'bg-blue-50' : ''}">
+      return `<li onclick="openDetail(${Number(m.id)})" class="px-4 py-3 cursor-pointer hover:bg-gray-50 ${sel ? 'bg-blue-50' : ''}">
         <div class="flex items-center justify-between gap-2">
           <span class="badge-${esc(m.status)} text-xs px-2 py-0.5 rounded font-medium">${esc(m.status)}</span>
           <span class="text-xs text-gray-400">${esc(fmtDt(m.created_at))}</span>
@@ -123,8 +150,8 @@
         <div class="mt-1 font-medium text-gray-900 text-sm truncate">${esc(m.subject)}</div>
         <div class="text-xs text-gray-500 mt-0.5 truncate">→ ${esc(m.mail_to)}${m.bcc_count > 0 ? ` · BCC ${esc(m.bcc_count)}` : ''}</div>
         <div class="text-xs text-gray-400 mt-0.5">
-          ${esc(m.source_type)}${m.source_id ? ' #' + m.source_id : ''}
-          ${m.attachment_count > 0 ? ` · 📎 ${m.attachment_count}` : ''}
+          ${esc(m.source_type)}${m.source_id ? ' #' + esc(m.source_id) : ''}
+          ${m.attachment_count > 0 ? ` · 📎 ${esc(m.attachment_count)}` : ''}
           ${m.edited_by ? ` · ✎ editiert` : ''}
         </div>
       </li>`;
@@ -169,7 +196,7 @@
     const attRows = (m.attachments || []).map((a, i) => `
       <div class="flex items-center gap-2 text-xs py-1">
         <span class="text-gray-500">📎</span>
-        <a href="/api/verwaltung-mail-queue/${m.id}/attachment/${i}" target="_blank" class="text-blue-600 hover:underline">${esc(a.filename || 'Anhang ' + (i+1))}</a>
+        <a href="#" data-att="${i}" class="text-blue-600 hover:underline">${esc(a.filename || 'Anhang ' + (i+1))}</a>
         ${a.size ? `<span class="text-gray-400">(${Math.round(a.size / 1024)} KB)</span>` : ''}
         ${a.docs_path ? `<span class="text-gray-400">· live aus ${esc(a.docs_path)}</span>` : ''}
       </div>`).join('');
@@ -204,7 +231,7 @@
       <div class="flex items-center justify-between mb-3">
         <div>
           <span class="badge-${esc(m.status)} text-xs px-2 py-0.5 rounded font-medium">${esc(m.status)}</span>
-          <span class="text-xs text-gray-400 ml-2">${esc(m.source_type)}${m.source_id ? ' #' + m.source_id : ''}</span>
+          <span class="text-xs text-gray-400 ml-2">${esc(m.source_type)}${m.source_id ? ' #' + esc(m.source_id) : ''}</span>
         </div>
         ${m.source_type.startsWith('auslage') && m.source_id
           ? `<a href="/auslagen.html" class="text-xs text-blue-600 hover:underline">→ zur Auslage</a>`
@@ -237,7 +264,7 @@
           <textarea id="f-body" rows="14" ${editable} class="${editableCls} mt-1 w-full border rounded px-2 py-1.5 text-sm mono-body">${esc(m.body_text)}</textarea>
         </label>
         ${attRows ? `<div><div class="text-xs text-gray-500 mb-1">Anhänge</div>${attRows}</div>` : ''}
-        ${m.sent_message_id ? `<div class="border-t pt-2"><button onclick="loadChain('${esc(m.sent_message_id)}', this)" class="text-xs text-blue-600 hover:underline">📨 Folge-Mails dieser Mail anzeigen</button><div id="chain-out" class="mt-2"></div></div>` : ''}
+        ${m.sent_message_id ? `<div class="border-t pt-2"><button id="chain-btn" class="text-xs text-blue-600 hover:underline">📨 Folge-Mails dieser Mail anzeigen</button><div id="chain-out" class="mt-2"></div></div>` : ''}
         ${approvalBox}
         ${meta.length > 0 ? `<div class="text-xs text-gray-600 border-t pt-2 mt-2 space-y-1">${meta.map(x => '<div>' + x + '</div>').join('')}</div>` : ''}
         ${m.original_snapshot
@@ -255,6 +282,39 @@
         </div>
       ` : ''}
     `;
+    // Anhaenge mit Token laden; Folge-Mails ohne Daten im Inline-Handler
+    const detEl = document.getElementById('detail');
+    detEl.querySelectorAll('a[data-att]').forEach(a => a.addEventListener('click', ev => {
+      ev.preventDefault();
+      const i = Number(a.dataset.att);
+      dateiOeffnen(`/api/verwaltung-mail-queue/${encodeURIComponent(m.id)}/attachment/${i}`, (m.attachments || [])[i]?.filename);
+    }));
+    document.getElementById('chain-btn')?.addEventListener('click', ev => loadChain(m.sent_message_id, ev.currentTarget));
+  }
+
+  // Folge-Mails (Antworten, Bounces ...) zur versandten Mail ueber /api/admin/mail-chain
+  async function loadChain(messageId, btn) {
+    const out = document.getElementById('chain-out');
+    if (!out) return;
+    if (btn) btn.disabled = true;
+    out.innerHTML = '<div class="text-xs text-gray-400">Lade…</div>';
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/admin/mail-chain?message_id=' + encodeURIComponent(messageId));
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const folge = ((await r.json()).chain || []).filter(c => c.depth > 0);
+      out.innerHTML = folge.length === 0
+        ? '<div class="text-xs text-gray-400">Keine Folge-Mails gefunden.</div>'
+        : folge.map(c => `
+          <div class="border-l-4 border-amber-300 bg-amber-50 pl-3 py-1.5 mb-1 rounded-r text-xs">
+            <div class="text-gray-500">${esc(fmtDt(c.created_at))} · <span class="font-mono">${esc(c.trigger || '')}</span> · ${esc(c.status)}</div>
+            <div class="font-medium">${esc(c.subject || '(kein Betreff)')}</div>
+            <div class="text-gray-600">von <span class="font-mono">${esc(c.from_email || '')}</span> → <span class="font-mono">${esc(c.to_addresses || '')}</span></div>
+          </div>`).join('');
+    } catch (e) {
+      out.innerHTML = `<div class="text-xs text-red-600">Fehler: ${esc(e.message)}</div>`;
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   async function saveEdit() {

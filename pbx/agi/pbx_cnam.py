@@ -8,7 +8,9 @@ klingelnden Telefonen, im Anruf-Log und in der WhatsApp-Meldung erscheint.
   exten = _X.,n,AGI(pbx_cnam.py,${CALLERID(num)})
 """
 import os
+import re
 import sys
+from urllib.parse import quote
 
 try:
     import requests
@@ -38,6 +40,13 @@ MAIN_API   = os.environ.get('MAIN_API_BASE')     or _envfile.get('MAIN_API_BASE'
 PBX_SECRET = os.environ.get('PBX_SHARED_SECRET') or _envfile.get('PBX_SHARED_SECRET', '')
 
 
+def agi_sauber(v, maxlen=60):
+    """Wert fuer eine AGI-Befehlszeile: ohne Steuerzeichen (ein Zeilenumbruch
+    waere ein zweiter AGI-Befehl, D-4), ohne Anfuehrungszeichen/Backslash, kurz."""
+    v = re.sub(r'[\x00-\x1f\x7f"\\]', ' ', str(v or ''))
+    return re.sub(r'\s+', ' ', v).strip()[:maxlen]
+
+
 def consume_agi_env():
     while True:
         if not sys.stdin.readline().rstrip('\r\n'):
@@ -52,7 +61,7 @@ def set_var(key, value):
 
 
 def log(msg):
-    print(f'VERBOSE "[cnam] {msg}" 1')
+    print(f'VERBOSE "[cnam] {agi_sauber(msg, 200)}" 1')
     sys.stdout.flush()
     sys.stdin.readline()
 
@@ -63,9 +72,10 @@ def main():
     if not num or num in ('unknown', 'anonymous', ''):
         return
     try:
-        r = requests.get(f'{MAIN_API}/api/pbx/cnam/{num}',
+        # Nummer kommt vom Anrufer (SIP-From) -> als Pfadsegment kodieren.
+        r = requests.get(f'{MAIN_API}/api/pbx/cnam/{quote(num, safe="+")}',
                          headers={'X-PBX-Secret': PBX_SECRET}, timeout=5)
-        name = r.json().get('name') if r.ok else None
+        name = agi_sauber(r.json().get('name')) if r.ok else None
         if name:
             # CALLERID(name) + Marker CNAM setzen (Marker: macro-techring laesst
             # den Namen stehen statt ihn mit "Rosenweg" zu ueberschreiben).

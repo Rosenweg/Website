@@ -27,6 +27,8 @@ fi
 
 # 2) nginx-Config installieren (idempotent)
 install -D -m644 "$SRC/nginx/upstreams.conf" /etc/nginx/conf.d/00-upstreams.conf
+# Gemeinsame Sicherheits-Header, von jeder Site-Config per include geladen.
+install -D -m644 "$SRC/nginx/sicherheit-header.conf" /etc/nginx/snippets/rosenweg-sicherheit.conf
 install -D -m644 "$SRC/nginx/$TYPE.conf"     /etc/nginx/sites-available/rosenweg.conf
 ln -sf /etc/nginx/sites-available/rosenweg.conf /etc/nginx/sites-enabled/rosenweg.conf
 rm -f /etc/nginx/sites-enabled/default
@@ -70,7 +72,14 @@ assemble_isp() {
 
 assemble_stweg() {
   # Entspricht Dockerfile.stweg. Alle STWEG/MEG-Dirs + Shared; $site-Map wählt zur Laufzeit.
-  rsync -a stweg1 stweg2 stweg3 stweg4 stweg5 stweg6 stweg7 meg js css "$build/"
+  # STWEG/MEG-Dirs per Positivliste: nur Web-Dateitypen, kein data/ (Kontaktlisten
+  # mit Namen/Mails/Telefon waren oeffentlich abrufbar), keine README.md.
+  rsync -a --prune-empty-dirs --exclude='data/' --include='*/' \
+    --include='*.html' --include='*.pdf' --include='*.png' --include='*.jpg' --include='*.jpeg' \
+    --include='*.svg' --include='*.webp' --include='*.ico' --include='*.js' --include='*.css' \
+    --exclude='*' \
+    stweg1 stweg2 stweg3 stweg4 stweg5 stweg6 stweg7 meg "$build/"
+  rsync -a js css "$build/"
   cp site-config.json logo-rosenweg.png logo-stweg3-rosenweg9.png logo-stweg6-rosenweg1.png "$build/"
   cp waschkueche.html "$build/_waschkueche.html"
   cp steuerung.html "$build/steuerung.html"

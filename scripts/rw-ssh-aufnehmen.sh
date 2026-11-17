@@ -5,28 +5,44 @@
 # ein und auf Wunsch gleich alle laufenden Container per pct — ohne dass
 # man sich in jeden einzeln anmelden muesste.
 #
-# ERZEUGT von scripts/rw-ssh-aufnehmen-bauen.py am 2026-08-29.
+# ERZEUGT von scripts/rw-ssh-aufnehmen-bauen.py am 2026-11-17.
 # Nicht von Hand aendern — die Quellen liegen in scripts/.
 #
-#   ./rw-ssh-aufnehmen.sh --api https://www.rosenweg4303.ch --token GEHEIM
-#   ./rw-ssh-aufnehmen.sh --api ... --token ... --auch-cts
-#   ./rw-ssh-aufnehmen.sh --api ... --token ... --auch-cts --probelauf
+#   ./rw-ssh-aufnehmen.sh --api https://www.rosenweg4303.ch      (fragt das Token ab)
+#   ./rw-ssh-aufnehmen.sh --api ... --token-datei /root/rw-token --auch-cts
+#   ./rw-ssh-aufnehmen.sh --api ... --token-datei ... --auch-cts --probelauf
 #
+# Das Token nicht mit --token als Argument uebergeben: dort steht es fuer
+# jeden lokalen Benutzer in der Prozessliste (geht noch, mit Warnung).
 # Wiederholbar: Ein zweiter Lauf aendert nichts, was schon stimmt.
 set -euo pipefail
 
-API_BASE=""; HOST_TOKEN=""; AUCH_CTS=0; PROBE=0
+API_BASE=""; HOST_TOKEN=""; TOKEN_DATEI=""; AUCH_CTS=0; PROBE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --api)       API_BASE="${2:-}"; shift 2 ;;
-    --token)     HOST_TOKEN="${2:-}"; shift 2 ;;
+    --token)     HOST_TOKEN="${2:-}"; shift 2
+                 echo "WARNUNG: --token steht in der Prozessliste — besser --token-datei oder Abfrage" >&2 ;;
+    --token-datei) TOKEN_DATEI="${2:-}"; shift 2 ;;
     --auch-cts)  AUCH_CTS=1; shift ;;
     --probelauf) PROBE=1; shift ;;
-    -h|--help)   sed -n '2,20p' "$0"; exit 0 ;;
+    -h|--help)   sed -n '2,17p' "$0"; exit 0 ;;
     *) echo "Unbekannte Option: $1" >&2; exit 2 ;;
   esac
 done
-[ -n "$API_BASE" ] && [ -n "$HOST_TOKEN" ] || { echo "Fehlt: --api und --token" >&2; exit 2; }
+# Token aus Datei oder verdeckt vom Terminal (R3-Ib), nicht aus argv.
+if [ -n "$TOKEN_DATEI" ]; then
+  [ -r "$TOKEN_DATEI" ] || { echo "Token-Datei nicht lesbar: $TOKEN_DATEI" >&2; exit 2; }
+  HOST_TOKEN=$(head -n 1 "$TOKEN_DATEI" | tr -d '\r\n')
+elif [ -z "$HOST_TOKEN" ] && [ -t 0 ]; then
+  read -rsp "Host-Token: " HOST_TOKEN; echo
+fi
+[ -n "$API_BASE" ] && [ -n "$HOST_TOKEN" ] || { echo "Fehlt: --api und Token (--token-datei oder Abfrage)" >&2; exit 2; }
+# Das Token landet unquotiert in /etc/rosenweg-ssh.conf (wird per . gelesen)
+# und in einfachen Anfuehrungszeichen im CT-Skript: nur harmlose Zeichen.
+case "$HOST_TOKEN" in
+  *[!A-Za-z0-9._~+/=-]*) echo "Token enthaelt unerlaubte Zeichen" >&2; exit 2 ;;
+esac
 
 sage() { printf '  %s\n' "$*"; }
 tun()  { if [ "$PROBE" = 1 ]; then printf '  [Probelauf] %s\n' "$*"; else eval "$@"; fi; }
@@ -79,6 +95,25 @@ esac
 CACHE_DIR=${CACHE_DIR:-/var/cache/rosenweg-ssh}
 CACHE="$CACHE_DIR/$LOGIN.keys"
 
+# Schluessel nur fuer Konten, die rw-konten-sync angelegt hat (Gruppe
+# rw-verwaltet). Sonst bekaeme ein lokales Betriebskonto (claude, ansible,
+# github, ubuntu, pi ...) die Portal-Schluessel einer Person gleichen
+# Namens. Ausnahmen je Host nur ausdruecklich in der Konfiguration:
+# SCHLUESSEL_AUCH_FUER="stefan.mueller andere.person" (leerzeichengetrennt).
+: "${SCHLUESSEL_AUCH_FUER:=}"
+_erlaubt=0
+if id -nG "$LOGIN" 2>/dev/null | tr ' ' '\n' | grep -qx rw-verwaltet; then
+  _erlaubt=1
+else
+  for _a in $SCHLUESSEL_AUCH_FUER; do
+    [ "$_a" = "$LOGIN" ] && _erlaubt=1
+  done
+fi
+if [ "$_erlaubt" != 1 ]; then
+  rm -f "$CACHE" 2>/dev/null || true
+  exit 0
+fi
+
 # Entscheidend ist der Exitcode, nicht der Text. Eine leere Antwort mit
 # Status 200 heisst "diese Person darf hier nicht mehr" — der Cache muss
 # dann weg, sonst greift ein Entzug nie. Nur wenn curl selbst scheitert
@@ -89,19 +124,57 @@ CACHE="$CACHE_DIR/$LOGIN.keys"
 # HTTP 200 und einen Fehler bei 4xx/5xx oder ausgefallenem Netz; die
 # Unterscheidung "kein Zugang" gegen "nicht erreichbar" bleibt damit
 # erhalten, und daran haengt, ob der Zwischenspeicher gilt.
+#
+# curl: Der Host-Token geht ueber stdin (-K -, Konfig-Zeile "header = ..."),
+# nicht als Argument — sonst steht er fuer jeden lokalen Benutzer in der
+# Prozessliste (/proc/*/cmdline). -K - statt -H @- (R3-Ie): -H @- kennt
+# curl erst ab 7.55, aeltere Container haetten den Token gar nicht gesendet.
+# Der Statuscode haengt als letzte Zeile an der Antwort: 400/404 heisst "gibt
+# es nicht / ungueltig" und ist eine endgueltige Absage — dann darf auch der
+# Zwischenspeicher nicht mehr gelten. Nur Netz-, 5xx- und Token-Fehler
+# (401/403, Fehlkonfiguration des Hosts) fallen auf den letzten Stand zurueck.
+# hole setzt ANTWORT direkt (kein $(...)), damit ABSAGE nicht in einer
+# Subshell verloren geht.
+ABSAGE=0
+ANTWORT=
+# Wert fuer eine curl-Konfigzeile in "...": \ und " maskieren.
+kq() { printf '%s' "$1" | sed 's/[\\"]/\\&/g'; }
 hole() {
   if command -v curl >/dev/null 2>&1; then
-    curl -fsS --max-time "${TIMEOUT:-3}" \
-         -H "X-Host-Token: $HOST_TOKEN" -H "X-Host-Name: $HOST_NAME" "$1" 2>/dev/null
+    _roh=$(printf 'header = "X-Host-Token: %s"\nheader = "X-Host-Name: %s"\n' "$(kq "$HOST_TOKEN")" "$(kq "$HOST_NAME")" | \
+      curl -sS --max-time "${TIMEOUT:-3}" -K - -w '\n%{http_code}' "$1" 2>/dev/null) || return 1
+    _code=$(printf '%s' "$_roh" | tail -n 1)
+    _text=$(printf '%s' "$_roh" | sed '$d')
+    case "$_code" in
+      2??) ANTWORT=$_text; return 0 ;;
+      400|404) ABSAGE=1; return 1 ;;
+      *) return 1 ;;
+    esac
   elif command -v wget >/dev/null 2>&1; then
-    wget -q -O - -T "${TIMEOUT:-3}" \
-         --header="X-Host-Token: $HOST_TOKEN" --header="X-Host-Name: $HOST_NAME" "$1" 2>/dev/null
+    # wget kennt keinen Header aus stdin; der Token steht hier kurz in der
+    # Prozessliste. curl nachinstallieren behebt das.
+    # Statuscode aus den Serverkopfzeilen (-S, stderr) lesen (R3-Ia): wget
+    # endet bei 400/404 genauso mit Fehler wie bei 5xx — ohne Unterscheidung
+    # galt fuer ein entzogenes/geloeschtes Login weiter der Zwischenspeicher.
+    # GNU- und BusyBox-wget schreiben beide eine Zeile "HTTP/1.1 404 ...".
+    _err=$(mktemp "${TMPDIR:-/tmp}/rw-keys.XXXXXX" 2>/dev/null) || return 1
+    if ANTWORT=$(wget -q -S -O - -T "${TIMEOUT:-3}" \
+         --header="X-Host-Token: $HOST_TOKEN" --header="X-Host-Name: $HOST_NAME" "$1" 2>"$_err"); then
+      rm -f "$_err"
+      return 0
+    fi
+    _code=$(grep -oE 'HTTP/[0-9.]+ [0-9]{3}' "$_err" 2>/dev/null | tail -n 1 | grep -oE '[0-9]{3}$' || true)
+    rm -f "$_err"
+    case "$_code" in
+      400|404) ABSAGE=1 ;;
+    esac
+    return 1
   else
     return 127
   fi
 }
 
-if ANTWORT=$(hole "$API_BASE/api/ssh/authorized-keys/$LOGIN"); then
+if hole "$API_BASE/api/ssh/authorized-keys/$LOGIN"; then
   printf '%s' "$ANTWORT"
   if [ -d "$CACHE_DIR" ] && [ -w "$CACHE_DIR" ]; then
     if [ -n "$ANTWORT" ]; then
@@ -113,6 +186,12 @@ if ANTWORT=$(hole "$API_BASE/api/ssh/authorized-keys/$LOGIN"); then
       rm -f "$CACHE" 2>/dev/null || true
     fi
   fi
+  exit 0
+fi
+
+# Endgueltige Absage der API: kein Zugang, auch nicht aus dem Zwischenspeicher.
+if [ "$ABSAGE" = 1 ]; then
+  rm -f "$CACHE" 2>/dev/null || true
   exit 0
 fi
 
@@ -204,8 +283,13 @@ unser() {
 # uebrigen holten stillschweigend nichts, und niemand merkte es.
 hole() {
   if command -v curl >/dev/null 2>&1; then
-    curl -fsS --max-time 20 \
-         -H "X-Host-Token: $HOST_TOKEN" -H "X-Host-Name: $HOST_NAME" "$1"
+    # Token ueber stdin: als Argument stuende er in der Prozessliste.
+    # -K - (Konfig "header = ...") statt -H @-, das erst curl >= 7.55 kennt
+    # (R3-Ie). In "..." muessen \ und " maskiert sein.
+    printf 'header = "X-Host-Token: %s"\nheader = "X-Host-Name: %s"\n' \
+        "$(printf '%s' "$HOST_TOKEN" | sed 's/[\\"]/\\&/g')" \
+        "$(printf '%s' "$HOST_NAME" | sed 's/[\\"]/\\&/g')" | \
+      curl -fsS --max-time 20 -K - "$1"
   elif command -v wget >/dev/null 2>&1; then
     wget -q -O - -T 20 \
          --header="X-Host-Token: $HOST_TOKEN" --header="X-Host-Name: $HOST_NAME" "$1"
@@ -355,6 +439,13 @@ trap 'rm -f "$TMP"' EXIT
       [ "$sudo_ja" = "ja" ] || continue
       tabu "$login" && continue
       if id -u "$login" >/dev/null 2>&1; then
+        # Regeln 1 und 2 auch fuer sudo: nur eigene Konten, nie Systemkonten.
+        # Sonst machte ein Eintrag "www-data" oder ein fremdes Konto in der
+        # gelieferten Liste dieses zum passwortlosen root.
+        if [ "$(id -u "$login")" -lt 1000 ] || ! unser "$login"; then
+          echo "rw-konten-sync: sudo fuer $login nicht gesetzt — kein von uns verwaltetes Benutzerkonto" >&2
+          continue
+        fi
         echo "$login ALL=(ALL) NOPASSWD: ALL"
         eintraege=$((eintraege + 1))
       fi
@@ -423,8 +514,21 @@ einrichten_hier() {
   if [ "$PROBE" = 1 ]; then
     sage "[Probelauf] /etc/rosenweg-ssh.conf schreiben (API_BASE=$API_BASE, HOST_NAME=$name, HOST_TOKEN verdeckt)"
   else
-    printf '%s\n' "API_BASE=$API_BASE" "HOST_TOKEN=$HOST_TOKEN" "HOST_NAME=$name" > /etc/rosenweg-ssh.conf
-    chmod 0640 /etc/rosenweg-ssh.conf
+    # Nur die drei eigenen Schluessel ersetzen, den Rest behalten (R3-Ic):
+    # SCHLUESSEL_AUCH_FUER, KONTEN_LOESCHEN, KONTEN_SCHONFRIST_TAGE,
+    # KONTEN_TABU usw. sind je Host von Hand gesetzt — ein erneuter Lauf
+    # haette sie geloescht (Schonfrist 30 statt "nie", Ausnahmen weg).
+    local neu
+    neu=$(mktemp /etc/rosenweg-ssh.conf.XXXXXX)
+    {
+      printf '%s\n' "API_BASE=$API_BASE" "HOST_TOKEN=$HOST_TOKEN" "HOST_NAME=$name"
+      if [ -f /etc/rosenweg-ssh.conf ]; then
+        grep -vE '^[[:space:]]*(export[[:space:]]+)?(API_BASE|HOST_TOKEN|HOST_NAME)=' /etc/rosenweg-ssh.conf || true
+      fi
+    } > "$neu"
+    chmod 0640 "$neu"
+    [ -f /etc/rosenweg-ssh.conf ] && chown --reference=/etc/rosenweg-ssh.conf "$neu" 2>/dev/null || true
+    mv -f "$neu" /etc/rosenweg-ssh.conf
   fi
 
   # Eigener Benutzer fuer die Schluesselabfrage — nicht nobody, denn in
@@ -524,8 +628,11 @@ einrichten_hier() {
   fi
 
   if [ "$PROBE" = 0 ]; then
-    if curl -fsS --max-time 10 -H "X-Host-Token: $HOST_TOKEN" -H "X-Host-Name: $name" \
-         "$API_BASE/api/ssh/konten" >/dev/null 2>&1; then
+    # Token ueber stdin (-K -): als Argument stuende er in der Prozessliste;
+    # -H @- kennt erst curl >= 7.55 (R3-Ie). Token-Zeichen sind oben geprueft,
+    # ein Hostname enthaelt weder \ noch ".
+    if printf 'header = "X-Host-Token: %s"\nheader = "X-Host-Name: %s"\n' "$HOST_TOKEN" "$name" | \
+         curl -fsS --max-time 10 -K - "$API_BASE/api/ssh/konten" >/dev/null 2>&1; then
       sage "API erreichbar — $name ist aufgenommen"
     else
       echo "  ACHTUNG: $name erreicht die API nicht ($API_BASE). Netz oder Token pruefen." >&2
@@ -559,8 +666,17 @@ einrichten_ct() {
   cat > "$ABLAGE/ct-setup.sh" <<CTEOF
 #!/bin/bash
 set -e
-printf '%s\n' 'API_BASE=$API_BASE' 'HOST_TOKEN=$HOST_TOKEN' 'HOST_NAME=$name' > /etc/rosenweg-ssh.conf
-chmod 0640 /etc/rosenweg-ssh.conf
+# Nur API_BASE/HOST_TOKEN/HOST_NAME ersetzen, Rest der Datei behalten (R3-Ic).
+neu=\$(mktemp /etc/rosenweg-ssh.conf.XXXXXX)
+{
+  printf '%s\n' 'API_BASE=$API_BASE' 'HOST_TOKEN=$HOST_TOKEN' 'HOST_NAME=$name'
+  if [ -f /etc/rosenweg-ssh.conf ]; then
+    grep -vE '^[[:space:]]*(export[[:space:]]+)?(API_BASE|HOST_TOKEN|HOST_NAME)=' /etc/rosenweg-ssh.conf || true
+  fi
+} > "\$neu"
+chmod 0640 "\$neu"
+[ -f /etc/rosenweg-ssh.conf ] && chown --reference=/etc/rosenweg-ssh.conf "\$neu" 2>/dev/null || true
+mv -f "\$neu" /etc/rosenweg-ssh.conf
 id -u rw-keys >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin rw-keys
 chown root:rw-keys /etc/rosenweg-ssh.conf
 install -d -o rw-keys -g rw-keys -m 0750 /var/cache/rosenweg-ssh
@@ -634,6 +750,7 @@ if sshd -t 2>/dev/null; then
     timeout 20 systemctl reload sshd 2>/dev/null || echo "  Hinweis: Neuladen abgebrochen, Konfiguration liegt bereit"
   else
     echo "  sshd laeuft nicht als Dienst (socket-aktiviert) — kein Neuladen noetig"
+  fi
 else
   echo "  ACHTUNG in CT $id: sshd -t meldet einen Fehler — nicht neu geladen." >&2
   exit 1

@@ -10,13 +10,16 @@
 // ─────────────────────────────────────────────────────────────────────────
 const crypto = require('crypto');
 const { pool } = require('./db');
-const { loggedSendMail, generateOTP, MAIL_FROM } = require('./mail');
+const { loggedSendMail, MAIL_FROM } = require('./mail');
+const { otpAusstellen, otpPruefen, ausstellenErlaubt, globalErlaubt, ipErlaubt, OTP_FEHLER } = require('./otp');
 
 const SITE_URL = process.env.SITE_URL || 'https://www.rosenweg4303.ch';
 const pollUrl = (id) => `${SITE_URL}/sitzungs-doodle.html` + (id ? `?poll=${id}` : '');
 const isAdminGroups = (groups) => (groups || []).some(g => ['technik', 'präsident', 'praesident'].includes(String(g).toLowerCase()));
-const normEmail = (e) => String(e || '').trim().toLowerCase();
-const validEmail = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+// Laenge begrenzen: E-Mail-Adressen haben hoechstens 254 Zeichen; laengere Eingaben
+// sind Angriffe und duerfen nicht in Regex/DB-Abfragen laufen.
+const normEmail = (e) => (typeof e === 'string' ? e : String(e || '')).trim().toLowerCase().slice(0, 254);
+const validEmail = (e) => /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/.test(e);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const VOTE_VALUES = ['ja', 'vielleicht', 'nein'];
 
@@ -130,7 +133,7 @@ async function resolveActor(req) {
   const s = await pool.query(
     `SELECT u.email, u.name, u.role, u.groups_json
        FROM sessions s JOIN users u ON u.id = s.user_id
-      WHERE s.token = $1 AND s.expires_at > NOW()`, [token]);
+      WHERE s.token = $1 AND s.expires_at > NOW() AND u.active IS NOT FALSE`, [token]); // deaktivierte Konten wie in authMiddleware
   if (s.rows[0]) {
     let groups = []; try { groups = JSON.parse(s.rows[0].groups_json || '[]'); } catch { /* */ }
     return {
@@ -180,21 +183,21 @@ async function canAccessPoll(actor, pollId) {
   return r.rows.length > 0;
 }
 
-const codeRate = new Map(); // email -> [timestamps]
-function rateLimited(email) {
+// Codes: lib/otp.js (Zähler in der DB, 8 Stellen, an den Zweck 'doodle' gebunden).
+// Einladungsmails gehen ueber den eigenen Mailserver an beliebige Adressen: je Umfrage
+// und je Konto und Tag begrenzen (sonst Massenversand/Phishing ueber MAIL_FROM).
+const EINLADUNGEN_JE_UMFRAGE = 50;
+const EINLADUNGEN_JE_TAG = 100;
+const einladungenHeute = new Map(); // email -> [timestamps]
+function einladungenErlaubt(email, anzahl) {
+  const key = String(email || '').toLowerCase();
   const now = Date.now();
-  const arr = (codeRate.get(email) || []).filter(t => now - t < 600000);
-  if (arr.length >= 3) return true;
-  arr.push(now); codeRate.set(email, arr);
-  return false;
-}
-// Fehlversuche beim Code-Prüfen: max. 5 pro E-Mail in 10 Minuten (wie /api/otp/verify)
-const verifyFails = new Map(); // email -> [timestamps]
-const verifyBlocked = (email) => (verifyFails.get(email) || []).filter(t => Date.now() - t < 600000).length >= 5;
-function verifyFailed(email) {
-  const arr = (verifyFails.get(email) || []).filter(t => Date.now() - t < 600000);
-  arr.push(Date.now()); verifyFails.set(email, arr);
-  return arr.length >= 5;
+  const arr = (einladungenHeute.get(key) || []).filter(t => now - t < 24 * 60 * 60 * 1000);
+  if (arr.length + anzahl > EINLADUNGEN_JE_TAG) { einladungenHeute.set(key, arr); return false; }
+  for (let i = 0; i < anzahl; i++) arr.push(now);
+  einladungenHeute.set(key, arr);
+  if (einladungenHeute.size > 5000) einladungenHeute.delete(einladungenHeute.keys().next().value);
+  return true;
 }
 
 function mountDoodle({ app }) {
@@ -204,16 +207,20 @@ function mountDoodle({ app }) {
 
   // ── E-Mail-Code anfordern ────────────────────────────────────────────────
   app.post('/api/doodle/code', async (req, res) => {
+    const email = normEmail(req.body?.email);
+    if (!validEmail(email)) return res.status(400).json({ error: 'Ungültige E-Mail' });
+    // Vor der Antwort nur das Limit je Client-IP; global erst nach der Prüfung (S4-3-1).
+    if (!ipErlaubt(req)) return res.status(429).json({ error: 'Zu viele Anfragen — bitte in 10 Minuten erneut.' });
+    // Immer dieselbe Antwort, und zwar SOFORT: Prüfung, Code und Mailversand laufen
+    // danach im Hintergrund — weder Inhalt noch Laufzeit noch ein SMTP-Fehler verraten,
+    // ob die Adresse eingeladen ist. Das Limit je Adresse zählt nur bekannte Adressen.
+    res.json({ ok: true });
     try {
-      const email = normEmail(req.body?.email);
-      if (!validEmail(email)) return res.status(400).json({ error: 'Ungültige E-Mail' });
-      if (rateLimited(email)) return res.status(429).json({ error: 'Zu viele Anfragen — bitte in 10 Minuten erneut.' });
       const name = await emailAllowed(email);
-      if (name === undefined) return res.status(403).json({ error: 'Diese E-Mail ist (noch) zu keiner Umfrage eingeladen.' });
-      const code = generateOTP();
-      await pool.query('UPDATE otp_codes SET used = true WHERE email = $1 AND used = false', [email]);
-      await pool.query('INSERT INTO otp_codes (email, code, expires_at) VALUES ($1,$2,$3)',
-        [email, code, new Date(Date.now() + 10 * 60 * 1000)]);
+      if (name === undefined) return;
+      if (!globalErlaubt('doodle')) { console.warn('[doodle] code: globales Limit erreicht, Code verworfen'); return; }
+      if (!ausstellenErlaubt(email, 'doodle')) { console.warn('[doodle] code: Limit je Adresse erreicht'); return; }
+      const code = await otpAusstellen(email, 'doodle');
       await loggedSendMail({
         from: MAIL_FROM, to: email,
         subject: 'Ihr Code für die Terminumfrage – Rosenweg',
@@ -223,8 +230,7 @@ function mountDoodle({ app }) {
           <p style="color:#666">Gültig für 10 Minuten. Falls Sie das nicht angefordert haben, ignorieren Sie diese E-Mail.</p>
         </div>`,
       }, 'doodle-code');
-      res.json({ ok: true });
-    } catch (e) { console.error('[doodle] code', e); res.status(500).json({ error: 'Fehler beim Versand' }); }
+    } catch (e) { console.error('[doodle] code', e); }
   });
 
   // ── Code verifizieren -> doodle_session-Token ────────────────────────────
@@ -233,23 +239,8 @@ function mountDoodle({ app }) {
       const email = normEmail(req.body?.email);
       const code = String(req.body?.code || '').trim();
       if (!validEmail(email) || !code) return res.status(400).json({ error: 'E-Mail und Code erforderlich' });
-      if (verifyBlocked(email)) return res.status(429).json({ error: 'Zu viele Fehlversuche — bitte in 10 Minuten einen neuen Code anfordern.' });
-      const vr = await pool.query(
-        'SELECT id, code, expires_at FROM otp_codes WHERE email = $1 AND used = false ORDER BY created_at DESC LIMIT 1', [email]);
-      const row = vr.rows[0];
-      if (!row) return res.status(400).json({ error: 'Kein Code gefunden — bitte neu anfordern.' });
-      if (new Date() > new Date(row.expires_at)) {
-        await pool.query('UPDATE otp_codes SET used = true WHERE id = $1', [row.id]);
-        return res.status(400).json({ error: 'Code ist abgelaufen.' });
-      }
-      const a = Buffer.from(row.code), b = Buffer.from(code);
-      if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-        // Nach dem 5. Fehlversuch ist auch der Code verbraucht
-        if (verifyFailed(email)) await pool.query('UPDATE otp_codes SET used = true WHERE id = $1', [row.id]);
-        return res.status(400).json({ error: 'Ungültiger Code' });
-      }
-      verifyFails.delete(email);
-      await pool.query('UPDATE otp_codes SET used = true WHERE id = $1', [row.id]);
+      const pruefung = await otpPruefen(email, code, 'doodle');
+      if (!pruefung.ok) return res.status(pruefung.grund === 'gesperrt' ? 429 : 400).json({ error: OTP_FEHLER[pruefung.grund] });
       let name = await emailAllowed(email); if (name === undefined) name = null;
       const token = crypto.randomBytes(32).toString('hex');
       await pool.query('INSERT INTO doodle_sessions (token, email, name, expires_at) VALUES ($1,$2,$3,$4)',
@@ -269,6 +260,9 @@ function mountDoodle({ app }) {
     try {
       const conds = ["p.status = 'geschlossen'", 'p.final_option_id IS NOT NULL', 'o.starts_at IS NOT NULL', 'o.starts_at >= NOW()'];
       const params = [];
+      // Gaeste (nur eingeladen) sehen wie in /polls nur ihre eigenen Umfragen,
+      // sonst verriete /next Titel, Ort und Termin fremder Sitzungen.
+      if (!req.actor.isMember) { params.push(req.actor.email); conds.push(`p.id IN (SELECT poll_id FROM doodle_invites WHERE LOWER(email) = $${params.length})`); }
       if (req.query.project) { params.push(String(req.query.project)); conds.push(`p.project_slug = $${params.length}`); }
       if (req.query.stweg) { params.push(parseInt(req.query.stweg, 10)); conds.push(`p.stweg = $${params.length}`); }
       if (req.query.gremium) { params.push(String(req.query.gremium)); conds.push(`p.gremium = $${params.length}`); }
@@ -328,6 +322,9 @@ function mountDoodle({ app }) {
       const invites = Array.isArray(b.invites) ? b.invites
         .map(i => (typeof i === 'string' ? { email: normEmail(i), name: null } : { email: normEmail(i.email), name: i.name || null }))
         .filter(i => validEmail(i.email)) : [];
+      // Einladungen versenden Mails ueber den eigenen Server -> begrenzen.
+      if (invites.length > EINLADUNGEN_JE_UMFRAGE) return res.status(400).json({ error: `Höchstens ${EINLADUNGEN_JE_UMFRAGE} Einladungen je Umfrage` });
+      if (!einladungenErlaubt(req.actor.email, invites.length)) return res.status(429).json({ error: 'Zu viele Einladungen heute — bitte morgen weiter.' });
       const beschreibung = b.beschreibung ? String(b.beschreibung).trim().slice(0, 4000) : null;
       const ort = b.ort ? String(b.ort).trim().slice(0, 255) : null;
       const deadline = parseZurich(b.deadline, true);
@@ -391,7 +388,11 @@ function mountDoodle({ app }) {
       // Browser-Kennungen öffentlicher Stimmen sind Geheimnisse — nur Verwaltende sehen sie
       if (!canManage) votes.rows.forEach(v => {
         if (/^public:[a-f0-9]{32}$/.test(v.voter_email)) v.voter_email = 'public:' + crypto.createHash('sha256').update(v.voter_email).digest('hex').slice(0, 12);
+        // Fremde E-Mail-Adressen (auch eingeladener Externer) sieht nur, wer
+        // die Umfrage verwaltet. Ein stabiles Kürzel hält die Zeilen zusammen.
+        else if (normEmail(v.voter_email) !== req.actor.email) v.voter_email = 'person:' + crypto.createHash('sha256').update(normEmail(v.voter_email)).digest('hex').slice(0, 12);
       });
+      if (!canManage) opts.rows.forEach(o => { if (o.added_by && normEmail(o.added_by) !== req.actor.email) o.added_by = 'ergänzt'; });
       const out = {
         poll: {
           id: poll.id, titel: poll.titel, beschreibung: poll.beschreibung, ort: poll.ort,
@@ -557,6 +558,9 @@ function mountDoodle({ app }) {
       const email = normEmail(req.body?.email);
       if (!validEmail(email)) return res.status(400).json({ error: 'Ungültige E-Mail' });
       const name = req.body?.name ? String(req.body.name).trim().slice(0, 255) : null;
+      const anz = await pool.query('SELECT COUNT(*)::int AS n FROM doodle_invites WHERE poll_id = $1', [id]);
+      if ((anz.rows[0]?.n || 0) >= EINLADUNGEN_JE_UMFRAGE) return res.status(400).json({ error: `Höchstens ${EINLADUNGEN_JE_UMFRAGE} Einladungen je Umfrage` });
+      if (!einladungenErlaubt(req.actor.email, 1)) return res.status(429).json({ error: 'Zu viele Einladungen heute — bitte morgen weiter.' });
       await pool.query('INSERT INTO doodle_invites (poll_id, email, name) VALUES ($1,$2,$3) ON CONFLICT (poll_id, email) DO UPDATE SET name = COALESCE(EXCLUDED.name, doodle_invites.name)', [id, email, name]);
       loggedSendMail({
         from: MAIL_FROM, to: email,
@@ -663,10 +667,22 @@ function mountDoodle({ app }) {
       if (!name) { return res.status(400).json({ error: 'Bitte Namen angeben' }); }
       const key = publicVoterKey(req);
       if (!key) { return res.status(400).json({ error: 'Bitte Seite neu laden' }); }
-      const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '');
-      const now = Date.now(); const arr = (pubRate.get(ip) || []).filter(x => now - x < 60000);
-      if (arr.length >= 30) { return res.status(429).json({ error: 'Zu viele Anfragen — kurz warten.' }); }
+      // X-Forwarded-For von rechts lesen und nur die eigenen Proxy-Hops
+      // (Edge/Frontends 100.64.2.x, Docker, localhost) ueberspringen: der ganze
+      // Header war frei waehlbar und jede Variante ein neuer Zaehler.
+      // Zusaetzlich je Umfrage, damit wechselnde Absender nicht unbegrenzt
+      // Stimmen und Optionen anlegen.
+      const kette = [...String(req.headers['x-forwarded-for'] || '').split(',').map(x => x.trim()).filter(Boolean), req.socket?.remoteAddress || ''];
+      const proxyHop = (a) => /^(::ffff:)?(100\.64\.2\.|127\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a) || a === '::1';
+      let ip = kette[0] || '';
+      for (let i = kette.length - 1; i >= 0; i -= 1) if (kette[i] && !proxyHop(kette[i])) { ip = kette[i]; break; }
+      const now = Date.now();
+      if (pubRate.size > 10000) for (const [k, v] of pubRate) if (!v.some(x => now - x < 60000)) pubRate.delete(k);
+      const arr = (pubRate.get(ip) || []).filter(x => now - x < 60000);
+      const arrPoll = (pubRate.get('poll:' + id) || []).filter(x => now - x < 60000);
+      if (arr.length >= 30 || arrPoll.length >= 120) { return res.status(429).json({ error: 'Zu viele Anfragen — kurz warten.' }); }
       arr.push(now); pubRate.set(ip, arr);
+      arrPoll.push(now); pubRate.set('poll:' + id, arrPoll);
       const votes = req.body?.votes && typeof req.body.votes === 'object' ? req.body.votes : {};
       const newOptions = (poll.allow_add_options && Array.isArray(req.body?.new_options)) ? req.body.new_options.map(l => String(l || '').trim().slice(0, 255)).filter(Boolean).slice(0, 10) : [];
       await client.query('BEGIN');

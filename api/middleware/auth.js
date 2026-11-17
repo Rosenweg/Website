@@ -15,6 +15,7 @@ const PAT_GESPERRT = [
   'me/passkeys',          // Passkeys
   'auth',                 // OAuth-Fluss, Profil-Login
   'mqtt/my-app-passwords',// MQTT-Zugangsdaten
+  'mqtt/user-app-passwords',// MQTT-Zugangsdaten anderer (Technik)
 ];
 
 // Scope-Grammatik. Ein Token ohne Scopes hat alle Rechte der Person.
@@ -24,11 +25,12 @@ const PAT_GESPERRT = [
 function scopeErlaubt(scopes, pfad, method) {
   if (!Array.isArray(scopes) || scopes.length === 0) return true;
   const need = method === 'GET' ? 'read' : 'write';
-  const teile = String(pfad || '').split('/').filter(Boolean);
+  // Klein geschrieben auf beiden Seiten — Express routet ohnehin so.
+  const teile = String(pfad || '').toLowerCase().split('/').filter(Boolean);
   const segment = teile[0] || 'root';
   const unter = teile.length > 1 ? segment + '/' + teile[1] : null;
   const passt = (s, name) => s === name + ':*' || s === name + ':' + need;
-  return scopes.some(s => s === '*' || s === 'all:' + need || passt(s, segment) || (unter && passt(s, unter)));
+  return scopes.map(s => String(s).toLowerCase()).some(s => s === '*' || s === 'all:' + need || passt(s, segment) || (unter && passt(s, unter)));
 }
 
 async function authMiddleware(req, res, next) {
@@ -63,7 +65,11 @@ async function authMiddleware(req, res, next) {
       // Innerhalb eines Routers (/api/ssh, /api/stations …) ist req.path nur der
       // Rest hinter dem Mount — der Scope-Check würde dort das falsche Segment
       // lesen. baseUrl + path ergibt in beiden Fällen den vollen Pfad.
-      const vollerPfad = ((req.baseUrl || '') + req.path).replace(/^\/api\//, '');
+      // Express routet ohne Rücksicht auf Gross-/Kleinschreibung und mit
+      // Schrägstrich am Ende — /api/Change-Password/ träfe dieselbe Route.
+      // Darum vor Sperrliste und Scope-Check normalisieren.
+      const vollerPfad = ((req.baseUrl || '') + req.path).toLowerCase()
+        .replace(/\/{2,}/g, '/').replace(/^\/api\//, '').replace(/^\/+|\/+$/g, '');
       // Ein Token darf nie ändern, womit man sich anmeldet. Token, Passkeys
       // und MQTT-Zugangsdaten schützt requireUserLogin an der Route schon;
       // /change-password hatte diese Sperre nicht und verlangt das alte

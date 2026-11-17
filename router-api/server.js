@@ -20,6 +20,7 @@ const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
 const { execSync } = require('child_process');
+const net = require('net');
 
 const TOKEN_FILE = '/etc/rosenweg-router-api/token';
 const PORT = 8080;
@@ -58,8 +59,17 @@ function vlanFullyConfigured(vlan) {
 }
 
 function addVlan({ vlan, gateway, mask, dhcp_from, dhcp_to }) {
+  vlan = Number(vlan);
   if (!Number.isInteger(vlan) || vlan < 1 || vlan > 4094) throw new Error('vlan invalid');
   if (!gateway || !mask || !dhcp_from || !dhcp_to) throw new Error('gateway/mask/dhcp_from/dhcp_to Pflicht');
+  // Die Werte landen in Shell-Befehlen (ip addr) und in der dnsmasq-Konfiguration:
+  // nur reine IPv4-Adressen und eine Praefixlaenge zulassen (D-12).
+  for (const [k, v] of Object.entries({ gateway, dhcp_from, dhcp_to })) {
+    if (typeof v !== 'string' || !net.isIPv4(v)) throw new Error(`${k} ist keine IPv4-Adresse`);
+  }
+  const maskNum = Number(mask);
+  if (!Number.isInteger(maskNum) || maskNum < 8 || maskNum > 30) throw new Error('mask muss eine Praefixlaenge 8-30 sein');
+  mask = maskNum;
   const iface = `eth0.${vlan}`;
   const steps = [];
   // 1. Interface
@@ -159,14 +169,20 @@ setInterval(() => {
 
 // ----------------------------------- HTTP -------------------------------
 
+const TOKEN_DIGEST = crypto.createHash('sha256').update(`Bearer ${TOKEN}`).digest();
+function tokenOk(header) {
+  if (!TOKEN || typeof header !== 'string') return false;
+  return crypto.timingSafeEqual(crypto.createHash('sha256').update(header).digest(), TOKEN_DIGEST);
+}
+
 const server = http.createServer((req, res) => {
-  const auth = req.headers.authorization || '';
-  if (auth !== `Bearer ${TOKEN}`) {
+  // Zeitkonstanter Token-Vergleich (D-12/D-15).
+  if (!tokenOk(req.headers.authorization)) {
     res.writeHead(401, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ error: 'unauthorized' }));
   }
   let body = '';
-  req.on('data', c => body += c);
+  req.on('data', c => { body += c; if (body.length > 65536) req.destroy(); });
   req.on('end', () => {
     try {
       const url = new URL(req.url, 'http://localhost');

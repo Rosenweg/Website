@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="/icons/icon-192-2.png">
   <link rel="icon" href="/logo-rosenweg.png" type="image/png">
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/authentik-auth.js?v=5"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
     body { font-family: 'Inter', sans-serif; }
@@ -643,7 +643,33 @@
   async function idbAll() { const db = await idbOpen(); return new Promise((res, rej) => { const r = db.transaction('queue').objectStore('queue').getAll(); r.onsuccess = () => res(r.result || []); r.onerror = () => rej(r.error); }); }
   async function idbDel(id) { const db = await idbOpen(); return new Promise((res, rej) => { const tx = db.transaction('queue', 'readwrite'); tx.objectStore('queue').delete(id); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); }
 
-  async function enqueue(op) { await idbAdd({ ...op, ts: Date.now() }); updateQueueBadge(); }
+  async function enqueue(op) { await idbAdd({ ...op, owner: ownerKey(currentUser), ts: Date.now() }); updateQueueBadge(); }
+
+  // Offline-Erfassungen und gemerkte IBAN gehoeren dem angemeldeten Benutzer:
+  // nach Abmelden oder Benutzerwechsel auf demselben Geraet nicht weiterverwenden.
+  function ownerKey(u) { return String((u && (u.email || u.sub || u.username)) || '').toLowerCase(); }
+  async function idbClear() { const db = await idbOpen(); return new Promise((res, rej) => { const tx = db.transaction('queue', 'readwrite'); tx.objectStore('queue').clear(); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); }
+  async function idbPurgeForeign(owner) {
+    // Eintraege ohne owner stammen aus der Version davor und bleiben beim aktuellen Benutzer
+    for (const rec of await idbAll()) if (rec.owner && rec.owner !== owner) await idbDel(rec.id);
+  }
+  function ibanSpeichern(iban) {
+    try { localStorage.setItem(IBAN_KEY, JSON.stringify({ owner: ownerKey(currentUser), iban })); } catch {}
+  }
+  function ibanLaden() {
+    try {
+      const raw = localStorage.getItem(IBAN_KEY);
+      if (!raw) return '';
+      let v = null; try { v = JSON.parse(raw); } catch {}
+      // Altformat (reiner Text, ohne Besitzer) oder fremder Besitzer → verwerfen
+      if (!v || typeof v !== 'object' || v.owner !== ownerKey(currentUser)) { localStorage.removeItem(IBAN_KEY); return ''; }
+      return String(v.iban || '');
+    } catch { return ''; }
+  }
+  function lokaleDatenLoeschen() {
+    try { localStorage.removeItem(IBAN_KEY); } catch {}
+    return idbClear().catch(() => {});
+  }
 
   async function updateQueueBadge() {
     const el = $('queueBadge'); if (!el) return;
@@ -674,11 +700,13 @@
     if (FLUSHING || !navigator.onLine) return;
     FLUSHING = true;
     try {
-      const all = await idbAll();
+      if (!currentUser) return;
+      // Nur eigene Eintraege senden; 401 (Sitzung abgelaufen) behaelt den Eintrag fuer nach dem Login.
+      const all = (await idbAll()).filter(rec => !rec.owner || rec.owner === ownerKey(currentUser));
       for (const rec of all) {
         try { await sendCreateOp(rec); await idbDel(rec.id); }
         catch (e) {
-          if (e.httpStatus && e.httpStatus >= 400 && e.httpStatus < 500) { console.warn('[queue] verwerfe unsendbaren Eintrag', rec.id, e.message); await idbDel(rec.id); }
+          if (e.httpStatus && e.httpStatus >= 400 && e.httpStatus < 500 && e.httpStatus !== 401) { console.warn('[queue] verwerfe unsendbaren Eintrag', rec.id, e.message); await idbDel(rec.id); }
           else break; // Netzwerk/Server → später erneut
         }
       }
@@ -708,7 +736,7 @@
     if (!asDraft && total <= 0) { showFormMsg('Bitte Stunden erfassen oder eine Quittung / einen Material-Betrag hinzufügen.', 'err'); return; }
     if (!asDraft && SCAN_WARN && !confirm('Plausi-Warnung: ' + SCAN_WARN + '\n\nTrotzdem einreichen?')) return;
 
-    if (ibanRaw) { try { localStorage.setItem(IBAN_KEY, ibanRaw); } catch {} }
+    if (ibanRaw) ibanSpeichern(ibanRaw);
 
     const btn = asDraft ? $('draftBtn') : $('submitBtn');
     btn.disabled = true; const old = btn.textContent; btn.textContent = asDraft ? 'Speichert …' : 'Wird eingereicht …';
@@ -1254,12 +1282,19 @@
       navigator.serviceWorker.register('/arbeit/sw.js', { scope: '/arbeit/' }).catch(() => {});
     }
 
+    // Kein Loeschen bei logout(): authentik-auth.js meldet auch bei abgelaufenem
+    // Token oder Serverfehlern ab — die Offline-Queue ginge sonst verloren.
+    // Fremde Daten verwirft idbPurgeForeign/ibanLaden nach dem Login (Besitzerpruefung).
+
     // Login zwingend
     currentUser = await AuthentikAuth.init({
       requireAuth: true,
       onLogout: () => { /* init() leitet automatisch zum Login um */ },
     });
-    if (!currentUser) return; // Redirect zum Login laeuft
+    if (!currentUser) {
+      return; // Redirect zum Login laeuft
+    }
+    await idbPurgeForeign(ownerKey(currentUser)).catch(() => {});
 
     // Berechtigung pruefen (403 → freundlicher Hinweis)
     const ok = await loadSaetze();
@@ -1268,7 +1303,7 @@
     // App aufbauen
     buildStwegSelect();
     $('datum').value = todayIso();
-    try { const iban = localStorage.getItem(IBAN_KEY); if (iban) $('iban').value = iban; } catch {}
+    { const iban = ibanLaden(); if (iban) $('iban').value = iban; }
     applySatz();
     setMode('timer');
     showApp();

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sitzungs-Doodle — Rosenweg</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/authentik-auth.js?v=5"></script>
   <script src="/js/nav.js?v=3"></script>
   <style>
     .vbtn { border:1px solid #e2e8f0; border-radius:.5rem; padding:.3rem .55rem; font-size:.95rem; cursor:pointer; background:#fff; }
@@ -37,7 +37,7 @@
         </div>
         <div id="step-code" class="hidden">
           <label class="text-sm font-medium">Code aus der E-Mail</label>
-          <input id="in-code" inputmode="numeric" class="w-full border rounded-lg px-3 py-2 mt-1 tracking-widest text-center text-lg" placeholder="123456">
+          <input id="in-code" inputmode="numeric" class="w-full border rounded-lg px-3 py-2 mt-1 tracking-widest text-center text-lg" placeholder="12345678">
           <button onclick="verifyCode()" class="w-full mt-2 bg-teal-700 hover:bg-teal-800 text-white rounded-lg py-2 font-semibold">Anmelden</button>
           <button onclick="resetLogin()" class="w-full mt-1 text-sm text-slate-500">andere E-Mail</button>
         </div>
@@ -102,7 +102,7 @@
       if (!r.ok) { $('login-msg').className = 'text-sm mt-2 text-red-600'; $('login-msg').textContent = d.error || 'Fehler'; return; }
       window._doodleEmail = email;
       $('step-email').classList.add('hidden'); $('step-code').classList.remove('hidden');
-      $('login-msg').className = 'text-sm mt-2 text-green-700'; $('login-msg').textContent = 'Code gesendet — bitte E-Mail prüfen.';
+      $('login-msg').className = 'text-sm mt-2 text-green-700'; $('login-msg').textContent = 'Falls die Adresse eingeladen ist, ist der Code unterwegs — bitte E-Mail prüfen.';
     }
     async function verifyCode() {
       const code = $('in-code').value.trim();

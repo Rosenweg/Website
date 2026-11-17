@@ -11,7 +11,7 @@
  *  (Kein Web-Push noetig.)
  */
 
-const CACHE = 'rosenweg-solar-v10';
+const CACHE = 'rosenweg-solar-v11';
 
 // App-Shell — alles was fuer den Offline-Start noetig ist.
 const SHELL = [
@@ -37,7 +37,8 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
+      // Nur eigene alte Versionen loeschen: alle Apps teilen sich den Cache-Speicher der Origin.
+      Promise.all(keys.filter((k) => k.startsWith('rosenweg-solar-') && k !== CACHE).map((k) => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
 });
@@ -61,8 +62,11 @@ self.addEventListener('fetch', (event) => {
       fetch(req)
         .then((resp) => {
           // frische Navigationsantwort fuer spaeter ablegen
-          const copy = resp.clone();
-          caches.open(CACHE).then((c) => c.put('/solar/index.html', copy)).catch(() => {});
+          // nur echte eigene Seiten ablegen: keine Fehler-/Login-/Fremdantworten als Offline-Seite
+          if (resp && resp.ok && resp.type === 'basic') {
+            const copy = resp.clone();
+            caches.open(CACHE).then((c) => c.put('/solar/index.html', copy)).catch(() => {});
+          }
           return resp;
         })
         .catch(() =>

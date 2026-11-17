@@ -25,6 +25,7 @@ const { authMiddleware, requireUserLogin } = require('../middleware/auth');
 const { isTechnik, isPraesident } = require('../lib/groups');
 const { schluesselPruefen, alsZeile, githubSchluessel, GITHUB_BENUTZER } = require('../lib/sshkeys');
 const { queueWhatsappMessage, resolveTechnikWhatsappGroupId } = require('../lib/whatsapp');
+const { geheimnisGleich, fehlerFuerClient } = require('../lib/utils');
 
 const router = express.Router();
 
@@ -36,14 +37,50 @@ const HOSTNAME_MUSTER = /^[a-zA-Z0-9]([a-zA-Z0-9._-]{0,118}[a-zA-Z0-9])?$/;
 // (stefan.mueller); das fuehrende [a-z_] schliesst '.' und '..' aus, und
 // ein Schraegstrich kommt gar nicht erst vor.
 const LOGIN_MUSTER = /^[a-z_][a-z0-9._-]{0,31}$/;
+// Systemkonten bekommen nie Schluessel aus dem Portal. Waere der
+// Benutzername in Authentik aenderbar (oder hiesse jemand dort "root"),
+// landete sein Schluessel sonst in root's authorized_keys.
+const SYSTEM_LOGINS = new Set(['root', 'daemon', 'bin', 'sys', 'sync', 'games', 'man', 'lp', 'mail',
+  'news', 'uucp', 'proxy', 'www-data', 'backup', 'list', 'irc', 'gnats', 'nobody', 'sshd',
+  'messagebus', 'postgres', 'postfix', 'docker', 'syslog', 'admin', 'administrator', 'operator',
+  // Lokale Betriebskonten (Ansible, Workflows, Handarbeit, Image-Standard):
+  // ein gleichnamiges Portal-Konto bekaeme sonst deren Shell samt sudo.
+  'claude', 'ansible', 'github', 'ubuntu', 'debian', 'pi',
+  // Weitere hostspezifische Konten ohne Codeaenderung, kommagetrennt.
+  ...String(process.env.SSH_GESPERRTE_LOGINS || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean)]);
+function loginErlaubt(login) {
+  const l = String(login || '').toLowerCase();
+  return LOGIN_MUSTER.test(l) && !SYSTEM_LOGINS.has(l) && !l.startsWith('systemd-') && !l.startsWith('_');
+}
+
+// Fehlversuche je Absender (X-Forwarded-For von rechts, ohne eigene Proxys).
+// Ein richtiger Token geht immer durch: sshd haengt am AuthorizedKeysCommand,
+// eine Sperre fuer alle hinter demselben Proxy sperrte die Technik aus.
+// Falsche Tokens bekommen nach 20 Versuchen in 10 Minuten nur noch 429.
+const HOST_FEHL_FENSTER_MS = 10 * 60 * 1000;
+const hostFehlversuche = new Map();
+setInterval(() => {
+  const jetzt = Date.now();
+  for (const [k, v] of hostFehlversuche) if (!v.some(t => jetzt - t < HOST_FEHL_FENSTER_MS)) hostFehlversuche.delete(k);
+}, 10 * 60 * 1000).unref();
 
 function requireHostToken(req, res, next) {
   if (!HOST_TOKEN) return res.status(503).json({ error: 'SSH_HOST_TOKEN nicht gesetzt' });
-  const gesendet = req.headers['x-host-token'] || '';
-  // Laengengleicher Vergleich waere schoener, aber der Token ist ein
-  // fixes Geheimnis ohne Rateflaeche pro Request — Ratelimit steht davor.
-  if (gesendet !== HOST_TOKEN) return res.status(403).json({ error: 'forbidden' });
-  next();
+  const gesendet = String(req.headers['x-host-token'] || '');
+  if (geheimnisGleich(gesendet, HOST_TOKEN)) return next();
+  // Von rechts den ersten Eintrag, der kein eigener Proxy-Hop ist.
+  const kette = [...String(req.headers['x-forwarded-for'] || '').split(',').map(x => x.trim()).filter(Boolean), req.socket?.remoteAddress || ''];
+  const proxyHop = (a) => /^(::ffff:)?(100\.64\.2\.|127\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a) || a === '::1';
+  let key = kette[0] || 'unbekannt';
+  for (let i = kette.length - 1; i >= 0; i -= 1) if (kette[i] && !proxyHop(kette[i])) { key = kette[i]; break; }
+  const jetzt = Date.now();
+  const liste = [...(hostFehlversuche.get(key) || []).filter(t => jetzt - t < HOST_FEHL_FENSTER_MS), jetzt];
+  hostFehlversuche.set(key, liste);
+  if (liste.length > 20) {
+    if (liste.length === 21) console.warn(`[ssh] Viele falsche Host-Tokens von ${key}`);
+    return res.status(429).json({ error: 'Zu viele Fehlversuche' });
+  }
+  return res.status(403).json({ error: 'forbidden' });
 }
 
 function requireTechnik(req, res, next) {
@@ -82,6 +119,7 @@ async function hostRegistrieren(hostname, adresse) {
 // Spezifischer schlaegt allgemeiner: Benutzer vor Gruppe, ein einzelner
 // Host vor der Regel fuer alle. Findet sich keine Regel, gibt es nichts.
 async function zugriffErmitteln(login, host) {
+  if (!loginErlaubt(login)) return { erlaubt: false, grund: 'Systemkonto' };
   const u = await pool.query(
     `SELECT id, email, name, username, groups_json, active
        FROM users WHERE LOWER(username) = LOWER($1)`, [login]);
@@ -187,6 +225,14 @@ async function githubAbgleich(userId, benutzer) {
   return { entfernt: w.rowCount, uebernommen, gefunden: keys.length };
 }
 
+// Nur die eigenen Meldungen aus githubSchluessel an den Client geben;
+// DB-/Netzfehler bleiben im Log (Fehlertexte verraten sonst Interna).
+function githubFehlerText(err) {
+  const m = String(err?.message || '');
+  if (/^(Ungültiger GitHub-Benutzername$|GitHub-Konto "|GitHub antwortete mit \d+$|Antwort von GitHub unplausibel gross$)/.test(m)) return m;
+  return fehlerFuerClient(err, 'GitHub-Abgleich fehlgeschlagen');
+}
+
 // Periodischer Lauf. Ein Fehler bei einer Person darf die uebrigen
 // nicht aufhalten — GitHub ist erreichbar oder eben nicht.
 async function githubAbgleichAlle() {
@@ -228,7 +274,7 @@ router.get('/me', authMiddleware, requireUserLogin, async (req, res) => {
       hosts: erreichbar,
       hinweis: user.username ? null : 'Ohne Benutzernamen im Konto lässt sich kein Systemzugang zuordnen.',
     });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // POST /api/ssh/me/schluessel — einen Schluessel von Hand hinterlegen
@@ -248,7 +294,7 @@ router.post('/me/schluessel', authMiddleware, requireUserLogin, async (req, res)
        (label || k.kommentar || 'Schlüssel').slice(0, 100)]);
     if (!r.rows.length) return res.status(409).json({ error: 'Dieser Schlüssel ist bereits hinterlegt' });
     res.json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // DELETE /api/ssh/me/schluessel/:id
@@ -262,7 +308,7 @@ router.delete('/me/schluessel/:id', authMiddleware, requireUserLogin, async (req
     // Ein GitHub-Schluessel kommt beim naechsten Abgleich wieder — das
     // ist kein Fehler, sondern der Sinn der Quelle. Sagen wir es aber.
     res.json({ ok: true, wiederkehrend: r.rows[0].quelle === 'github' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // PUT /api/ssh/me/github  { benutzer: 'name' | null }
@@ -275,11 +321,11 @@ router.put('/me/github', authMiddleware, requireUserLogin, async (req, res) => {
     }
     let ergebnis;
     try { ergebnis = await githubAbgleich(req.user.id, benutzer); }
-    catch (e) { return res.status(400).json({ error: e.message }); }
+    catch (e) { return res.status(400).json({ error: githubFehlerText(e) }); }
     await pool.query(`UPDATE users SET github_benutzer = $1, updated_at = NOW() WHERE id = $2`,
       [benutzer, req.user.id]);
     res.json({ github_benutzer: benutzer, ...ergebnis, schluessel: await schluesselVonUser(req.user.id) });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // POST /api/ssh/me/github/abgleich — von Hand nachziehen
@@ -290,7 +336,7 @@ router.post('/me/github/abgleich', authMiddleware, requireUserLogin, async (req,
     if (!benutzer) return res.status(400).json({ error: 'Kein GitHub-Konto hinterlegt' });
     const ergebnis = await githubAbgleich(req.user.id, benutzer);
     res.json({ ...ergebnis, schluessel: await schluesselVonUser(req.user.id) });
-  } catch (err) { res.status(400).json({ error: err.message }); }
+  } catch (err) { res.status(400).json({ error: githubFehlerText(err) }); }
 });
 
 // ════════════════════════════════════════════════════════════════════
@@ -306,14 +352,17 @@ router.get('/authorized-keys/:login', requireHostToken, async (req, res) => {
   try {
     const login = String(req.params.login || '').toLowerCase();
     const hostname = String(req.headers['x-host-name'] || req.query.host || '').trim();
-    if (!LOGIN_MUSTER.test(login)) return res.status(400).send('');
+    if (!loginErlaubt(login)) return res.status(400).send('');
     if (!HOSTNAME_MUSTER.test(hostname)) return res.status(400).send('');
 
     const host = await hostRegistrieren(hostname, req.headers['x-host-adresse'] || null);
     const z = await zugriffErmitteln(login, host);
     if (!z.erlaubt) return res.send('');
 
-    const keys = await schluesselVonUser(z.user.id);
+    // Mit sudo zaehlen nur die eigenen Schluessel, nie ein Sitzungsschluessel:
+    // der entsteht auf einem geteilten Geraet und wird nur mit dem
+    // gemeinsamen Host-Token angemeldet.
+    const keys = (await schluesselVonUser(z.user.id)).filter(k => !(z.sudo && k.quelle === 'sitzung'));
     if (keys.length) {
       await pool.query(`UPDATE ssh_schluessel SET zuletzt_gesehen = NOW() WHERE user_id = $1`, [z.user.id]);
     }
@@ -348,12 +397,12 @@ router.get('/konten', requireHostToken, async (req, res) => {
     const konten = [];
     for (const row of u.rows) {
       const login = String(row.username).toLowerCase();
-      if (!LOGIN_MUSTER.test(login)) continue;
+      if (!loginErlaubt(login)) continue;
       const z = await zugriffErmitteln(row.username, host);
       if (z.erlaubt) konten.push({ login, name: row.name || login, sudo: !!z.sudo });
     }
     res.json({ host: hostname, konten });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // ════════════════════════════════════════════════════════════════════
@@ -375,13 +424,51 @@ router.get('/konten', requireHostToken, async (req, res) => {
 // Frist bliebe sein Zugang fuer immer offen.
 const SITZUNG_FRIST_STUNDEN = 16;
 
+async function istStationHost(hostname) {
+  const h = await pool.query(
+    `SELECT 1 FROM ssh_hosts WHERE hostname = $1 AND sitzungsgebunden = true AND aktiv IS NOT FALSE LIMIT 1`, [hostname]);
+  if (h.rows.length) return true;
+  try {
+    const kurz = hostname.toLowerCase().split('.')[0];
+    const s = await pool.query(
+      `SELECT 1 FROM stations WHERE revoked_at IS NULL AND status = 'aktiv'
+          AND (LOWER(hostname) = $1 OR LOWER(id) = $1) LIMIT 1`, [kurz]);
+    return s.rows.length > 0;
+  } catch (e) {
+    // Tabelle fehlt (noch keine Station registriert) -> keine Station.
+    console.warn('[ssh] Stationsliste nicht lesbar:', e.message);
+    return false;
+  }
+}
+
+async function hatSudoIrgendwo(login, gruppen) {
+  if (isTechnik(gruppen) || isPraesident(gruppen)) return true;
+  const r = await pool.query(
+    `SELECT 1 FROM ssh_zugriff
+      WHERE ssh AND sudo
+        AND ( (subjekt_typ = 'benutzer' AND LOWER(subjekt) = LOWER($1))
+           OR (subjekt_typ = 'gruppe'   AND LOWER(subjekt) = ANY($2::text[])) )
+      LIMIT 1`, [login, gruppen]);
+  return r.rows.length > 0;
+}
+
 // POST /api/ssh/sitzung  { login }  — Anmeldung an einer Station
 router.post('/sitzung', requireHostToken, async (req, res) => {
   try {
     const hostname = String(req.headers['x-host-name'] || req.query.host || '').trim();
     const login = String(req.body?.login || '').trim().toLowerCase();
     if (!HOSTNAME_MUSTER.test(hostname)) return res.status(400).json({ error: 'Hostname fehlt oder ist ungültig' });
-    if (!LOGIN_MUSTER.test(login)) return res.status(400).json({ error: 'Ungültiger Anmeldename' });
+    if (!loginErlaubt(login)) return res.status(400).json({ error: 'Ungültiger Anmeldename' });
+
+    // Sitzungen meldet nur eine Station. Der Host-Token ist fuer alle Hosts
+    // derselbe; ohne diese Pruefung haette jeder Host (oder wer den Token
+    // kennt) unter erfundenem Namen Sitzungen und Schluessel anlegen koennen.
+    // Bekannt ist ein Host als Station, wenn er schon sitzungsgebunden ist
+    // oder als aktive Station registriert ist.
+    if (!(await istStationHost(hostname))) {
+      console.warn(`[ssh] Sitzung abgelehnt: '${hostname}' ist keine bekannte Station`);
+      return res.status(403).json({ error: 'Host ist keine registrierte Station' });
+    }
 
     await hostRegistrieren(hostname, req.headers['x-host-adresse'] || null);
     // Wer Sitzungen meldet, ist eine Station. Das muss niemand von Hand
@@ -405,8 +492,15 @@ router.post('/sitzung', requireHostToken, async (req, res) => {
       try { k = schluesselPruefen(req.body.pubkey); }
       catch (e) { return res.status(400).json({ error: e.message }); }
       const u = await pool.query(
-        `SELECT id FROM users WHERE LOWER(username) = LOWER($1) AND active = true`, [login]);
+        `SELECT id, groups_json FROM users WHERE LOWER(username) = LOWER($1) AND active = true`, [login]);
       if (!u.rows.length) return res.status(404).json({ error: 'Unbekannter Anmeldename' });
+      // Kein Sitzungsschluessel fuer Konten mit sudo irgendwo: er haengt nur
+      // am gemeinsamen Host-Token und laege auf einem geteilten Geraet. Die
+      // Sitzung selbst gilt trotzdem; nur der Schluessel faellt weg.
+      if (await hatSudoIrgendwo(login, gruppenVonUser(u.rows[0]))) {
+        return res.json({ ok: true, host: hostname, login, schluessel: null,
+          hinweis: 'Kein Sitzungsschlüssel für Konten mit sudo-Rechten — eigenen Schlüssel verwenden.' });
+      }
       await pool.query(
         `INSERT INTO ssh_schluessel (user_id, quelle, typ, blob_b64, kommentar, fingerprint, label, sitzung_host)
          VALUES ($1, 'sitzung', $2, $3, $4, $5, $6, $7)
@@ -417,7 +511,7 @@ router.post('/sitzung', requireHostToken, async (req, res) => {
     }
 
     res.json({ ok: true, host: hostname, login, schluessel });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // DELETE /api/ssh/sitzung  { login }  — Abmeldung
@@ -442,7 +536,7 @@ router.delete('/sitzung', requireHostToken, async (req, res) => {
           `DELETE FROM ssh_schluessel WHERE quelle = 'sitzung' AND sitzung_host = $1`, [hostname]);
 
     res.json({ ok: true, beendet: r.rowCount, schluessel_entfernt: k.rowCount });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // GET /api/ssh/sitzungen — wer sitzt gerade wo (Technik)
@@ -453,7 +547,7 @@ router.get('/sitzungen', authMiddleware, requireTechnik, async (req, res) => {
               (zuletzt_gesehen < NOW() - ($1 || ' hours')::interval) AS veraltet
          FROM ssh_sitzung ORDER BY host, login`, [String(SITZUNG_FRIST_STUNDEN)]);
     res.json({ sitzungen: r.rows, frist_stunden: SITZUNG_FRIST_STUNDEN });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // ════════════════════════════════════════════════════════════════════
@@ -528,7 +622,7 @@ router.post('/dienste', requireHostToken, async (req, res) => {
     }
 
     res.json({ aufgenommen: gesehen.length, neu: neuGemeldet, behoben: weg.rowCount });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // GET /api/ssh/dienste — was gerade im Argen liegt (Technik)
@@ -545,7 +639,7 @@ router.get('/dienste', authMiddleware, requireTechnik, async (req, res) => {
       `SELECT knoten, zuletzt FROM dienst_wacht_knoten
         WHERE zuletzt < NOW() - INTERVAL '30 minutes' ORDER BY knoten`);
     res.json({ befunde: r.rows, stumme_knoten: stumm.rows });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // Verstummte Knoten aktiv melden — einmal je Ausfall, per Mail (kommt auch an,
@@ -581,7 +675,7 @@ router.get('/hosts', authMiddleware, requireTechnik, async (req, res) => {
       `SELECT id, hostname, adresse, erst_gesehen, zuletzt_gesehen, abfragen, aktiv, notiz
          FROM ssh_hosts ORDER BY aktiv DESC, hostname`);
     res.json({ hosts: r.rows });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // PATCH /api/ssh/hosts/:id  { aktiv, notiz }
@@ -598,7 +692,7 @@ router.patch('/hosts/:id', authMiddleware, requireTechnik, async (req, res) => {
       [id, typeof aktiv === 'boolean' ? aktiv : null, notiz === undefined ? null : String(notiz).slice(0, 500)]);
     if (!r.rows.length) return res.status(404).json({ error: 'Nicht gefunden' });
     res.json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // GET /api/ssh/matrix — Regeln, dazu die aufgeloeste Wirkung je Person
@@ -633,7 +727,7 @@ router.get('/matrix', authMiddleware, requireTechnik, async (req, res) => {
       notiz: 'Fest im Code verdrahtet — gilt auf allen Hosts und lässt sich hier nicht entziehen.',
     }];
     res.json({ regeln: regeln.rows, fest, hosts: hosts.rows, wirkung });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // POST /api/ssh/matrix — Regel anlegen oder aendern
@@ -669,7 +763,7 @@ router.post('/matrix', authMiddleware, requireTechnik, async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
       [hostId, subjekt_typ, wert, sshWert, sudoWert, notiz ? String(notiz).slice(0, 500) : null]);
     res.json({ id: r.rows[0].id, neu: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // DELETE /api/ssh/matrix/:id
@@ -680,7 +774,7 @@ router.delete('/matrix/:id', authMiddleware, requireTechnik, async (req, res) =>
     const r = await pool.query(`DELETE FROM ssh_zugriff WHERE id = $1 RETURNING id`, [id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Nicht gefunden' });
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 router.githubAbgleichAlle = githubAbgleichAlle;
