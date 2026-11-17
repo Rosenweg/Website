@@ -303,7 +303,7 @@ services:
       DB_PORT: "5432"
       DB_NAME: energy
       DB_USER: energy
-      DB_PASSWORD: "${ENERGY_DB_PASSWORD:-energy2026}"
+      DB_PASSWORD: "${ENERGY_DB_PASSWORD:?ENERGY_DB_PASSWORD fehlt (kein Standardpasswort mehr)}"
       # MQTT-Publish der Zaehlerdaten (Broker = CT105 Mosquitto, VLAN2 .51).
       # MQTT_ENERGY_PASS kommt aus /root/.env (deploy-stack.sh sourct das).
       # Leer => Publish aus, Collector laeuft normal weiter.
@@ -339,7 +339,7 @@ services:
     environment:
       POSTGRES_DB: energy
       POSTGRES_USER: energy
-      POSTGRES_PASSWORD: "${ENERGY_DB_PASSWORD:-energy2026}"
+      POSTGRES_PASSWORD: "${ENERGY_DB_PASSWORD:?ENERGY_DB_PASSWORD fehlt (kein Standardpasswort mehr)}"
     volumes:
       - energy-pgdata:/var/lib/postgresql/data
     networks:

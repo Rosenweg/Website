@@ -368,7 +368,7 @@
     }
 
     async function loadMeters() {
-        const res = await fetch(`${API}/meters`);
+        const res = await AuthentikAuth.apiFetch(`${API}/meters`);
         const meters = await res.json();
 
         // Populate group suggestions datalist
@@ -453,7 +453,7 @@
     }
 
     async function loadTariffs() {
-        const res = await fetch(`${API}/tariffs`);
+        const res = await AuthentikAuth.apiFetch(`${API}/tariffs`);
         const tariffs = await res.json();
         const list = document.getElementById('tariff-list');
         if (tariffs.length === 0) {
@@ -505,7 +505,7 @@
     }
 
     async function loadMetersForSelect() {
-        const res = await fetch(`${API}/meters`);
+        const res = await AuthentikAuth.apiFetch(`${API}/meters`);
         const meters = await res.json();
         const sel = document.getElementById('u-meter');
         sel.innerHTML = meters.map(m => `<option value="${esc(m.id)}">${esc(meterDisplayName(m))}</option>`).join('');
@@ -603,15 +603,15 @@
     }
 
     async function loadAllAssignments() {
-        const metersRes = await fetch(`${API}/meters`);
+        const metersRes = await AuthentikAuth.apiFetch(`${API}/meters`);
         const meters = await metersRes.json();
         const list = document.getElementById('user-list');
         let html = '';
 
         for (const meter of meters) {
             const [usersRes, groupsRes] = await Promise.all([
-                fetch(`${API}/meters/${meter.id}/users`),
-                fetch(`${API}/meters/${meter.id}/groups`)
+                AuthentikAuth.apiFetch(`${API}/meters/${encodeURIComponent(meter.id)}/users`),
+                AuthentikAuth.apiFetch(`${API}/meters/${encodeURIComponent(meter.id)}/groups`)
             ]);
             const users = await usersRes.json();
             const groups = await groupsRes.json();

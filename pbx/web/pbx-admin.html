@@ -206,8 +206,8 @@ async function loadMembers(){
     <td>${esc(m.name)}</td>
     <td class="mono">${esc(m.phone)}</td>
     <td><span class="tag">${m.kind==='sip'?'SIP':'Mobil'}</span></td>
-    <td class="mono">${m.internal_ext||'—'}</td>
-    <td>${m.priority}</td>
+    <td class="mono">${esc(m.internal_ext||'—')}</td>
+    <td>${esc(m.priority)}</td>
     <td><label style="display:inline-flex;align-items:center;gap:.4rem;cursor:pointer" title="angehakt = nur in Geschäftszeit (Zeitsperre); aus = klingelt immer">
       <input type="checkbox" ${m.bypass_hours?'':'checked'} onchange="toggleZeitsperre(${m.id},this.checked)">
       <span style="font-size:.78rem" class="${m.bypass_hours?'':'muted'}">${m.bypass_hours?'klingelt immer':'Zeitsperre'}</span></label></td>

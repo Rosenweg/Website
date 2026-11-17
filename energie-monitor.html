@@ -329,7 +329,7 @@
     async function loadTariffs(date) {
         try {
             const dateParam = date ? `?date=${date}` : '';
-            const res = await fetch(`${API}/tariffs/current${dateParam}`);
+            const res = await AuthentikAuth.apiFetch(`${API}/tariffs/current${dateParam}`);
             const tariffs = await res.json();
             const netz = tariffs.find(t => t.name === 'Netztarif');
             const solar = tariffs.find(t => t.name === 'Solartarif');
@@ -366,11 +366,11 @@
         try {
             let meters;
             if (isTechnik(currentUser)) {
-                const res = await fetch(`${API}/meters`);
+                const res = await AuthentikAuth.apiFetch(`${API}/meters`);
                 meters = await res.json();
             } else {
-                const userGroups = (currentUser.groups || []).join(',');
-                const res = await fetch(`${API}/user/${encodeURIComponent(currentUser.email)}/meters?groups=${encodeURIComponent(userGroups)}`);
+                // E-Mail und Gruppen nimmt der Server aus der Anmeldung.
+                const res = await AuthentikAuth.apiFetch(`${API}/meine-zaehler?gemeinschaft=1`);
                 meters = await res.json();
             }
             allMeters = meters;
@@ -539,8 +539,8 @@
         try {
             // Fetch selected meter + solar reference meters in parallel
             const [meterRes, liveAllRes] = await Promise.all([
-                fetch(`${API}/live/${currentMeter}`),
-                fetch(`${API}/live`),
+                AuthentikAuth.apiFetch(`${API}/live/${currentMeter}`),
+                AuthentikAuth.apiFetch(`${API}/live`),
             ]);
             if (!meterRes.ok) throw new Error('No data');
             const d = await meterRes.json();
@@ -675,7 +675,7 @@
         if (!currentMeter) return;
         try {
             const dateParam = isLive ? '' : `?date=${selectedDate.toISOString().slice(0, 10)}`;
-            const res = await fetch(`${API}/today/${currentMeter}${dateParam}`);
+            const res = await AuthentikAuth.apiFetch(`${API}/today/${currentMeter}${dateParam}`);
             const d = await res.json();
 
             // Update label
@@ -736,9 +736,9 @@
 
             // Load selected meter + reference meters (production + grid) in parallel
             const [res, solarRes, hauptRes] = await Promise.all([
-                fetch(endpointFn(currentMeter)),
-                prodMeterId ? fetch(endpointFn(prodMeterId)).catch(e => { console.warn('Solar fetch failed:', e); return null; }) : null,
-                gridMeterId ? fetch(endpointFn(gridMeterId)).catch(e => { console.warn('Grid fetch failed:', e); return null; }) : null,
+                AuthentikAuth.apiFetch(endpointFn(currentMeter)),
+                prodMeterId ? AuthentikAuth.apiFetch(endpointFn(prodMeterId)).catch(e => { console.warn('Solar fetch failed:', e); return null; }) : null,
+                gridMeterId ? AuthentikAuth.apiFetch(endpointFn(gridMeterId)).catch(e => { console.warn('Grid fetch failed:', e); return null; }) : null,
             ]);
             const data = await res.json();
             const solarRaw = solarRes?.ok ? await solarRes.json() : [];
@@ -876,9 +876,9 @@
 
             // Load meter + reference meters (rollup, daily) in parallel for solar split
             const [meterRes, hauptRes, prodRes] = await Promise.all([
-                fetch(rurl(currentMeter)),
-                gridMeterId ? fetch(rurl(gridMeterId)) : null,
-                prodMeterId ? fetch(rurl(prodMeterId)) : null,
+                AuthentikAuth.apiFetch(rurl(currentMeter)),
+                gridMeterId ? AuthentikAuth.apiFetch(rurl(gridMeterId)) : null,
+                prodMeterId ? AuthentikAuth.apiFetch(rurl(prodMeterId)) : null,
             ]);
             const data = await meterRes.json();
             const hauptData = hauptRes ? await hauptRes.json() : [];
@@ -1062,8 +1062,8 @@
         try {
             if (!gridMeterId || !prodMeterId) return;
             const [hauptRes, prodRes] = await Promise.all([
-                fetch(`${API}/today/${gridMeterId}?date=${dateStr}`),
-                fetch(`${API}/today/${prodMeterId}?date=${dateStr}`),
+                AuthentikAuth.apiFetch(`${API}/today/${gridMeterId}?date=${dateStr}`),
+                AuthentikAuth.apiFetch(`${API}/today/${prodMeterId}?date=${dateStr}`),
             ]);
             const haupt = await hauptRes.json();
             const prod = await prodRes.json();
@@ -1127,7 +1127,7 @@
         const container = document.getElementById('dashboard-groups');
         container.innerHTML = '<p class="text-gray-400 text-sm">Lade Dashboard...</p>';
         try {
-            const res = await fetch(`${API}/dashboard`);
+            const res = await AuthentikAuth.apiFetch(`${API}/dashboard`);
             const groups = await res.json();
             if (groups.length === 0) {
                 container.innerHTML = '<p class="text-gray-400 text-sm">Keine Zählergruppen gefunden.</p>';
@@ -1244,7 +1244,7 @@
         const ids = [...compareSelected];
         const days = document.getElementById('compare-days').value;
         try {
-            const res = await fetch(`${API}/compare?meters=${ids.join(',')}&days=${days}`);
+            const res = await AuthentikAuth.apiFetch(`${API}/compare?meters=${ids.join(',')}&days=${days}`);
             const data = await res.json();
 
             // Build day labels and per-meter data
@@ -1303,7 +1303,7 @@
             return;
         }
         try {
-            const res = await fetch(`${API}/projection/${currentMeter}`);
+            const res = await AuthentikAuth.apiFetch(`${API}/projection/${currentMeter}`);
             const p = await res.json();
             if (p.days_analyzed === 0) {
                 document.getElementById('projection-card').classList.add('hidden');
@@ -1326,7 +1326,7 @@
     // ─── Alerts ─────────────────────────────────────────────────────
     async function loadAlerts() {
         try {
-            const res = await fetch(`${API}/alerts`);
+            const res = await AuthentikAuth.apiFetch(`${API}/alerts`);
             const alerts = await res.json();
             const bar = document.getElementById('alerts-bar');
             if (alerts.length === 0) {
@@ -1355,7 +1355,19 @@
         const days = daysMap[consumptionPeriod] || 30;
         const from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
         const to = new Date().toISOString().slice(0, 10);
-        window.open(`${API}/export/${currentMeter}?from=${from}&to=${to}`, '_blank');
+        // Export braucht das Anmelde-Token -> per apiFetch laden und als Datei speichern.
+        AuthentikAuth.apiFetch(`${API}/export/${encodeURIComponent(currentMeter)}?from=${from}&to=${to}`)
+            .then(async (res) => {
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const blob = await res.blob();
+                const m = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '');
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = m ? m[1] : `${currentMeter}_${from}_${to}.csv`;
+                document.body.appendChild(a); a.click(); a.remove();
+                setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+            })
+            .catch(err => alert('Export fehlgeschlagen: ' + err.message));
     }
 
     // ─── Refresh All ────────────────────────────────────────────────

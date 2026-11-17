@@ -185,7 +185,7 @@
     function fetchT(url, ms = 22000) {
         const ac = new AbortController();
         const t = setTimeout(() => ac.abort(), ms);
-        return fetch(url, { signal: ac.signal }).finally(() => clearTimeout(t));
+        return AuthentikAuth.apiFetch(url, { signal: ac.signal }).finally(() => clearTimeout(t));
     }
 
     // ── Zahlformatierung ────────────────────────────────────────────
@@ -205,11 +205,10 @@
 
     // ── Zähler laden (eigene vs Gemeinschaft via zwei Abfragen) ─────
     async function loadMeters() {
-        const email = encodeURIComponent(USER.email);
-        const groups = (USER.groups || []).join(',');
+        // E-Mail und Gruppen nimmt der Server aus der Anmeldung (Token).
         const [ownR, allR] = await Promise.all([
-            fetch(`${API}/user/${email}/meters`),                                   // nur persönlich (meter_users)
-            fetch(`${API}/user/${email}/meters?groups=${encodeURIComponent(groups)}`) // + Gemeinschaft (meter_groups)
+            AuthentikAuth.apiFetch(`${API}/meine-zaehler`),                // nur persönlich (meter_users)
+            AuthentikAuth.apiFetch(`${API}/meine-zaehler?gemeinschaft=1`)  // + Gemeinschaft (meter_groups)
         ]);
         if (!ownR.ok || !allR.ok) throw new Error('Zähler konnten nicht geladen werden');
         const own = await ownR.json();
@@ -243,7 +242,7 @@
     // Live-Werte in den Auswahl-Chips (leichtgewichtig, alle Zähler auf einmal)
     async function refreshChipLive() {
         try {
-            const r = await fetch(`${API}/live`);
+            const r = await AuthentikAuth.apiFetch(`${API}/live`);
             if (!r.ok) return;
             const all = await r.json(); // erwartet Map/Array je Zähler
             const map = Array.isArray(all) ? Object.fromEntries(all.map(x => [x.meter_id || x.id, x])) : all;
@@ -286,7 +285,7 @@
     async function pollLive() {
         if (!CURRENT) return;
         try {
-            const r = await fetch(`${API}/live/${encodeURIComponent(CURRENT.id)}`);
+            const r = await AuthentikAuth.apiFetch(`${API}/live/${encodeURIComponent(CURRENT.id)}`);
             if (!r.ok) { $('dPower').textContent = 'offline'; return; }
             const d = await r.json();
             $('dPower').textContent = Number.isFinite(d.power_w) ? fmtW(d.power_w) : 'offline';

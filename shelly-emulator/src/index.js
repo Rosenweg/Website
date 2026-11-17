@@ -287,7 +287,11 @@ const RPC = MODEL === 'plus1pm'
 
 // ─── HTTP-Server ────────────────────────────────────────────────────
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, 'http://' + req.headers.host);
+  // Feste Basis statt Host-Header: ein ungueltiger Host liess new URL werfen
+  // und den Emulator abstuerzen (D-11).
+  let url;
+  try { url = new URL(req.url, 'http://localhost'); }
+  catch { res.writeHead(400); res.end(); return; }
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Server', 'Mongoose/' + FW);
   function json(obj, code = 200) {
