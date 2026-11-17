@@ -23555,7 +23555,17 @@ app.get('/api/isp/reverse-proxy', authMiddleware, async (req, res) => {
                            WHERE LOWER(r.owner_email) = $1 OR r.public = true
                                  OR LOWER(COALESCE(r.owner_group,'')) = ANY($2::text[])
                            ORDER BY r.active DESC, r.hostname`, [email, meineGruppen(req)]);
-    res.json({ routes: r.rows, is_admin: admin });
+    // Fremde oeffentliche Routen nur mit Hostname/Status zeigen — Backend-URL,
+    // Besitzer und Wohnung gehen nur den Eigentuemer (bzw. seine Gruppe) an.
+    const gruppen = meineGruppen(req);
+    const routes = admin ? r.rows : r.rows.map(x => {
+      const eigen = String(x.owner_email || '').toLowerCase() === email
+        || (x.owner_group && gruppen.includes(String(x.owner_group).toLowerCase()));
+      if (eigen) return x;
+      return { id: x.id, hostname: x.hostname, public: x.public, active: x.active, ssl: x.ssl,
+               approval_status: x.approval_status, backend_url: '', fremd: true };
+    });
+    res.json({ routes, is_admin: admin });
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
@@ -24185,66 +24195,76 @@ app.post('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
     if (!ispIsAdmin(req) && !isAllowedForRelay(req.user, rel.rows[0])) {
       return res.status(403).json({ error: `Mailboxen für ${rel.rows[0].domain} sind nur für berechtigte STWEG-Mitglieder verfuegbar` });
     }
-    // Rollen-Adressen (postmaster@, abuse@, technik@ ...) und mehr als
-    // MAILBOX_AUTO_MAX Postfaecher pro Person nie automatisch anlegen — sonst
-    // holt sich jeder Berechtigte Adressen, an die Passwort-Resets, DMARC-
-    // Berichte oder Vertrauen haengen. Solche Antraege gehen an die Technik.
-    const MAILBOX_AUTO_MAX = 3;
-    const reserviert = MAILBOX_RESERVIERT.has(lp) || /^(stweg|meg|r)\d/.test(lp);
-    const autoAnzahl = (await pool.query(
-      `SELECT COUNT(*)::int AS n FROM mailbox_requests
-        WHERE LOWER(antragsteller_email) = $1 AND auto_approved = true AND status = 'approved'`,
-      [(req.user.email || '').toLowerCase()])).rows[0].n;
-    const standard = isStandardMailboxRequest(b) && !reserviert && autoAnzahl < MAILBOX_AUTO_MAX;
-    const username = `${lp}@${rel.rows[0].domain}`;
+    // Zaehlung und Anlage pro Antragsteller serialisieren — sonst umgehen
+    // parallele Antraege MAILBOX_AUTO_MAX (Zaehlung vor dem INSERT).
+    const sperrSchluessel = 'mailbox-antrag:' + (req.user.email || '').toLowerCase();
+    const sperre = await pool.connect();
+    try {
+      await sperre.query('SELECT pg_advisory_lock(hashtext($1))', [sperrSchluessel]);
+      // Rollen-Adressen (postmaster@, abuse@, technik@ ...) und mehr als
+      // MAILBOX_AUTO_MAX Postfaecher pro Person nie automatisch anlegen — sonst
+      // holt sich jeder Berechtigte Adressen, an die Passwort-Resets, DMARC-
+      // Berichte oder Vertrauen haengen. Solche Antraege gehen an die Technik.
+      const MAILBOX_AUTO_MAX = 3;
+      const reserviert = MAILBOX_RESERVIERT.has(lp) || /^(stweg|meg|r)\d/.test(lp);
+      const autoAnzahl = (await pool.query(
+        `SELECT COUNT(*)::int AS n FROM mailbox_requests
+          WHERE LOWER(antragsteller_email) = $1 AND auto_approved = true AND status = 'approved'`,
+        [(req.user.email || '').toLowerCase()])).rows[0].n;
+      const standard = isStandardMailboxRequest(b) && !reserviert && autoAnzahl < MAILBOX_AUTO_MAX;
+      const username = `${lp}@${rel.rows[0].domain}`;
 
-    if (standard) {
-      // Auto-Approve: PW generieren, in Mailcow anlegen, in DB mit
-      // status=approved + initial_password speichern.
-      const password = generateMailboxPassword();
-      try {
-        await provisionMailcowMailbox({
-          local_part: lp,
-          domain: rel.rows[0].domain,
-          full_name: b.full_name || null,
-          quota_mb: 1024,
-          password,
+      if (standard) {
+        // Auto-Approve: PW generieren, in Mailcow anlegen, in DB mit
+        // status=approved + initial_password speichern.
+        const password = generateMailboxPassword();
+        try {
+          await provisionMailcowMailbox({
+            local_part: lp,
+            domain: rel.rows[0].domain,
+            full_name: b.full_name || null,
+            quota_mb: 1024,
+            password,
+          });
+        } catch (mcErr) {
+          return res.status(502).json({ error: fehlerFuerClient(mcErr, 'Mailcow-Provisionierung fehlgeschlagen') });
+        }
+        const ins = await pool.query(
+          `INSERT INTO mailbox_requests
+             (relay_id, antragsteller_email, assigned_user_email, local_part, full_name, quota_mb,
+              status, auto_approved, approved_by, approved_at, mailcow_synced_at, initial_password)
+           VALUES ($1,$2,$2,$3,$4,1024,'approved',true,'auto',NOW(),NOW(),$5) RETURNING *`,
+          [b.relay_id, req.user.email, lp, b.full_name || null, password],
+        );
+        notifyTechnikMailbox(
+          `📬 *Mailbox auto-erstellt*\n${username}\nfuer ${req.user.email}${b.full_name ? ` (${b.full_name})` : ''}`,
+        );
+        // PW IM Response: persoenliche Mailbox -> User darf es sehen.
+        return res.json({
+          ...ins.rows[0],
+          auto_approved: true,
+          initial_password: password,
+          username,
         });
-      } catch (mcErr) {
-        return res.status(502).json({ error: 'Mailcow-Provisionierung fehlgeschlagen: ' + mcErr.message });
       }
+
+      // Custom-Antrag -> pending; Admin muss approven.
       const ins = await pool.query(
         `INSERT INTO mailbox_requests
-           (relay_id, antragsteller_email, assigned_user_email, local_part, full_name, quota_mb,
-            status, auto_approved, approved_by, approved_at, mailcow_synced_at, initial_password)
-         VALUES ($1,$2,$2,$3,$4,1024,'approved',true,'auto',NOW(),NOW(),$5) RETURNING *`,
-        [b.relay_id, req.user.email, lp, b.full_name || null, password],
+           (relay_id, antragsteller_email, assigned_user_email, local_part, full_name, quota_mb, notizen)
+         VALUES ($1,$2,$2,$3,$4,COALESCE($5,1024),$6) RETURNING *`,
+        [b.relay_id, req.user.email, lp, b.full_name || null, b.quota_mb || null, b.notizen || null],
       );
       notifyTechnikMailbox(
-        `📬 *Mailbox auto-erstellt*\n${username}\nfuer ${req.user.email}${b.full_name ? ` (${b.full_name})` : ''}`,
+        `📧 *Neuer Mailbox-Antrag* (pending)\n${username}\nvon ${req.user.email}` +
+        `\nQuota: ${b.quota_mb || 1024} MB${b.notizen ? `\nNotiz: ${b.notizen}` : ''}` +
+        `\n${SITE_URL}/isp-admin.html#mail`,
       );
-      // PW IM Response: persoenliche Mailbox -> User darf es sehen.
-      return res.json({
-        ...ins.rows[0],
-        auto_approved: true,
-        initial_password: password,
-        username,
-      });
+      res.json(ins.rows[0]);
+    } finally {
+      await sperre.query('SELECT pg_advisory_unlock(hashtext($1))', [sperrSchluessel]).catch(() => {});
+      sperre.release();
     }
-
-    // Custom-Antrag -> pending; Admin muss approven.
-    const ins = await pool.query(
-      `INSERT INTO mailbox_requests
-         (relay_id, antragsteller_email, assigned_user_email, local_part, full_name, quota_mb, notizen)
-       VALUES ($1,$2,$2,$3,$4,COALESCE($5,1024),$6) RETURNING *`,
-      [b.relay_id, req.user.email, lp, b.full_name || null, b.quota_mb || null, b.notizen || null],
-    );
-    notifyTechnikMailbox(
-      `📧 *Neuer Mailbox-Antrag* (pending)\n${username}\nvon ${req.user.email}` +
-      `\nQuota: ${b.quota_mb || 1024} MB${b.notizen ? `\nNotiz: ${b.notizen}` : ''}` +
-      `\n${SITE_URL}/isp-admin.html#mail`,
-    );
-    res.json(ins.rows[0]);
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Diese Mailbox existiert bereits oder ist beantragt' });
     res.status(500).json({ error: fehlerFuerClient(err) });
@@ -24293,7 +24313,7 @@ app.post('/api/isp/admin-create-mailbox', authMiddleware, requireTechnikOrPraesi
         password,
       });
     } catch (mcErr) {
-      return res.status(502).json({ error: 'Mailcow-Provisionierung fehlgeschlagen: ' + mcErr.message });
+      return res.status(502).json({ error: fehlerFuerClient(mcErr, 'Mailcow-Provisionierung fehlgeschlagen') });
     }
     const ins = await pool.query(
       `INSERT INTO mailbox_requests
@@ -24360,7 +24380,7 @@ app.post('/api/isp/mailbox-requests/:id/approve', authMiddleware, requireTechnik
         password,
       });
     } catch (mcErr) {
-      return res.status(502).json({ error: 'Mailcow-Provisionierung fehlgeschlagen: ' + mcErr.message });
+      return res.status(502).json({ error: fehlerFuerClient(mcErr, 'Mailcow-Provisionierung fehlgeschlagen') });
     }
     await pool.query(
       `UPDATE mailbox_requests
@@ -24820,7 +24840,7 @@ app.post('/api/isp/mail-relays/:id/smarthost', authMiddleware, requireTechnikOrP
     // Enable: bei SMTP2GO registrieren + Status holen
     let status;
     try { status = await smtp2goEnsureDomain(v.domain); }
-    catch (err) { return res.status(502).json({ error: 'SMTP2GO: ' + err.message }); }
+    catch (err) { return res.status(502).json({ error: fehlerFuerClient(err, 'SMTP2GO-Abfrage fehlgeschlagen') }); }
     await pool.query(
       `UPDATE isp_mail_relays SET
          outbound_via_smarthost=true,
@@ -24844,7 +24864,7 @@ app.post('/api/isp/mail-relays/:id/smarthost/recheck', authMiddleware, async (re
     if (!v.outbound_via_smarthost) return res.status(400).json({ error: 'Smarthost ist für diese Domain nicht aktiviert' });
     let status;
     try { status = await smtp2goGetDomainStatus(v.domain); }
-    catch (err) { return res.status(502).json({ error: 'SMTP2GO: ' + err.message }); }
+    catch (err) { return res.status(502).json({ error: fehlerFuerClient(err, 'SMTP2GO-Abfrage fehlgeschlagen') }); }
     if (!status) return res.status(404).json({ error: 'Domain nicht in SMTP2GO gefunden' });
     await pool.query(
       `UPDATE isp_mail_relays SET smtp2go_dkim_verified=$1, smtp2go_rpath_verified=$2,
@@ -24874,11 +24894,15 @@ app.post('/api/isp/mail-relays/:id/recheck-dns', authMiddleware, async (req, res
     // Nur ein Admin schaltet per MX-Pruefung frei. Beim Besitzer fuehrt eine
     // passende MX nur von pending_dns zu pending_admin (Ziel-Host prueft Admin).
     const status = v.approval_status || 'approved';
+    // Kunden-Ziele fuer IMAP/SMTPS gibt "MX pruefen" auch beim Admin nicht frei —
+    // die braucht die ausdrueckliche Freigabe (Genehmigen-Knopf), sonst wuerde
+    // ein Klick auf die MX-Pruefung ungesehene Weiterleitungen einschalten.
+    const kundenZiele = !!(v.imap_host || v.imap_sni_hostname || v.smtps_host || v.smtps_sni_hostname);
     const upd = !matches
       ? { last_dns_check_at: new Date() }
-      : ispIsAdmin(req)
+      : ispIsAdmin(req) && (status === 'approved' || !kundenZiele)
         ? { approval_status: 'approved', dns_verified_at: new Date(), last_dns_check_at: new Date(), active: true, approval_reason: 'MX zeigt auf PMG' }
-        : status === 'pending_dns'
+        : status === 'pending_dns' || ispIsAdmin(req)
           ? { approval_status: 'pending_admin', dns_verified_at: new Date(), last_dns_check_at: new Date(), approval_reason: 'MX ok — Ziel wartet auf Admin-Freigabe' }
           : { dns_verified_at: new Date(), last_dns_check_at: new Date() };
     await pool.query(
@@ -25564,22 +25588,32 @@ async function vmObjektPruefen(req, wohnungId, stweg) {
 
 // Name eines Vollmachtgebers gegen das Konto pruefen: Wer seine eigene Zeile
 // (gleiche E-Mail) mit fremdem Namen erfasst, unterschreibt sonst digital "als"
-// jemand anderes. Passt der Name (Woerter als Teilmenge, Reihenfolge egal)
-// nicht zum Namen in personen bzw. Authentik, gilt der Kontoname.
+// jemand anderes. Passt der Name (gleiche Woerter, Reihenfolge egal) nicht zum
+// Kontonamen, gilt der Kontoname. Keine Ober-/Teilmengen: "Anna Muster Meier"
+// waere sonst zu "Anna Meier" passend.
 function vmNamenWoerter(s) {
   return String(s || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '')
     .split(/[^a-z0-9]+/).filter(t => t.length > 1);
 }
 function vmNamePasst(eingabe, konto) {
-  const a = vmNamenWoerter(eingabe), k = vmNamenWoerter(konto);
-  if (!a.length || !k.length) return false;
-  return a.every(t => k.includes(t)) || k.every(t => a.includes(t));
+  const a = new Set(vmNamenWoerter(eingabe)), k = new Set(vmNamenWoerter(konto));
+  if (!a.size || a.size !== k.size) return false;
+  return [...a].every(t => k.has(t));
+}
+// Kontonamen: personen.name; users.name nur, solange die Person ihn nicht selbst
+// geaendert hat (req.user.name ist selbst aenderbar und daher kein Ausweis).
+async function vmKontoNamen(req) {
+  const email = (req.user.email || '').toLowerCase();
+  if (!email) return [];
+  const p = await pool.query('SELECT name FROM personen WHERE LOWER(email) = $1 AND name IS NOT NULL LIMIT 1', [email]);
+  const u = await pool.query(
+    `SELECT name FROM users WHERE LOWER(email) = $1 AND name IS NOT NULL AND name_selbst_geaendert_am IS NULL LIMIT 1`,
+    [email]).catch(() => ({ rows: [] }));
+  return [p.rows[0]?.name, u.rows[0]?.name].map(n => String(n || '').trim()).filter(Boolean);
 }
 async function vmKontoNameFuer(req, eingabe) {
-  const email = (req.user.email || '').toLowerCase();
-  const p = await pool.query('SELECT name FROM personen WHERE LOWER(email) = $1 AND name IS NOT NULL LIMIT 1', [email]);
-  const kandidaten = [p.rows[0]?.name, req.user.name].filter(Boolean);
-  if (kandidaten.length === 0) return eingabe;   // nichts zum Vergleichen
+  const kandidaten = await vmKontoNamen(req);
+  if (kandidaten.length === 0) return eingabe;   // nichts zum Vergleichen (Signieren verlangt Kontonamen)
   if (kandidaten.some(n => vmNamePasst(eingabe, n))) return eingabe;
   return kandidaten[0];
 }
@@ -25763,9 +25797,12 @@ app.post('/api/vollmachten/:id/sign-digital', authMiddleware, async (req, res) =
     const ip = vmSignaturIp(req);
     const ua = req.headers['user-agent'] || null;
     const sub = req.user.sub || req.user.id || null;
-    // Signiert wird unter dem Namen des Kontos, falls die Zeile einen fremden
-    // Namen traegt (Zeile kann ein anderer Vollmachtgeber erfasst haben).
-    const signName = await vmKontoNameFuer(req, my.rows[0].name);
+    // Signiert wird immer unter dem Namen des Kontos (personen bzw. nicht selbst
+    // geaenderter users-Name) — der Zeilenname ist frei erfassbar.
+    const signName = (await vmKontoNamen(req))[0];
+    if (!signName) {
+      return res.status(409).json({ error: 'Für dein Konto ist kein bestätigter Name hinterlegt — bitte die Verwaltung kontaktieren oder auf Papier unterschreiben' });
+    }
     await pool.query(
       `UPDATE vollmachten_vollmachtgeber
          SET signatur_typ='digital', signed_at=NOW(), signed_ip=$1, signed_user_agent=$2, signed_authentik_sub=$3, name=$5
@@ -25972,7 +26009,9 @@ Pruefe und liefere JSON mit folgenden Feldern:
     });
     if (!orRes.ok) {
       const errText = await orRes.text().catch(() => '');
-      return res.status(502).json({ error: 'KI-Service-Fehler ' + orRes.status, detail: errText.slice(0, 300) });
+      // Antworttext des KI-Dienstes nur ins Protokoll (kann Konto-/Schluesselhinweise enthalten).
+      console.warn('[ki] OpenRouter-Fehler', orRes.status, errText.slice(0, 300));
+      return res.status(502).json({ error: 'KI-Service-Fehler ' + orRes.status });
     }
     const orJson = await orRes.json();
     const content = orJson.choices?.[0]?.message?.content || '';
