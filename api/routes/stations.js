@@ -330,30 +330,47 @@ function nurTechnik(req, res, next) {
 // Fehlversuche beim AD-Passwort-Login (Stationen + App): ohne Grenze liessen sich
 // Passwoerter beliebig oft durchprobieren, auch fuer Technik-Konten.
 const AD_FEHL_FENSTER_MS = 15 * 60 * 1000;
-// Nur pro Benutzername: hinter dem Proxy ist req.ip fuer alle gleich (kein trust proxy),
-// eine IP-Grenze wuerde nach ein paar Tippfehlern im ganzen Haus alle aussperren.
-const adFehlversuche = new Map(); // 'u:<name>' / 'global' -> [zeitpunkte]
+// Pro Benutzername 10 Versuche. Dazu eine Grenze je Absender-IP (clientIp, von
+// rechts gelesen) gegen das Durchprobieren vieler Namen. Frueher war das eine
+// globale Grenze — wer 100 falsche Logins schickte, sperrte alle aus.
+const adFehlversuche = new Map(); // 'u:<name>' / 'ip:<adresse>' -> [zeitpunkte]
 // Der Zaehler haengt am normalisierten Namen: " Stefan", "stefan@ad.rosenweg4303.ch"
 // und "AD\\stefan" sind fuer das AD dasselbe Konto, haetten aber je eigene
-// 10 Versuche bekommen. Zusaetzlich eine globale Obergrenze gegen das
-// Durchprobieren vieler Namen (Passwort-Spraying) — hoch genug, dass ein paar
-// Tippfehler im Haus niemanden aussperren.
-const AD_FEHL_GLOBAL = 100;
+// 10 Versuche bekommen. Die IP-Grenze ist hoch genug, dass ein paar
+// Tippfehler im Haus (gemeinsame oeffentliche Adresse) niemanden aussperren.
+const AD_FEHL_JE_IP = 50;
 function adNameKey(username) {
   let n = String(username || '').trim().toLowerCase();
   if (n.includes('\\')) n = n.slice(n.lastIndexOf('\\') + 1);
   if (n.includes('@')) n = n.slice(0, n.indexOf('@'));
   return 'u:' + n.trim();
 }
+function adIpKey(req) {
+  return 'ip:' + (clientIp(req) || 'unbekannt');
+}
 function adGesperrt(req, username) {
   const jetzt = Date.now();
   const zaehle = (k) => (adFehlversuche.get(k) || []).filter(t => jetzt - t < AD_FEHL_FENSTER_MS).length;
-  return zaehle(adNameKey(username)) >= 10 || zaehle('global') >= AD_FEHL_GLOBAL;
+  return zaehle(adNameKey(username)) >= 10 || zaehle(adIpKey(req)) >= AD_FEHL_JE_IP;
 }
-function adFehlversuch(req, username) {
+// Versuch VOR dem AD-Aufruf vormerken: sonst laufen beliebig viele parallele
+// Anfragen durch die Pruefung, bevor die erste ihren Fehlschlag eintraegt.
+// Bei Erfolg (oder AD nicht erreichbar) wird der Eintrag wieder entfernt.
+function adVersuchVormerken(req, username) {
   const jetzt = Date.now();
-  for (const k of [adNameKey(username), 'global']) {
+  const keys = [adNameKey(username), adIpKey(req)];
+  for (const k of keys) {
     adFehlversuche.set(k, [...(adFehlversuche.get(k) || []).filter(t => jetzt - t < AD_FEHL_FENSTER_MS), jetzt]);
+  }
+  return { keys, t: jetzt };
+}
+function adVersuchZuruecknehmen(v) {
+  for (const k of v.keys) {
+    const liste = adFehlversuche.get(k);
+    if (!liste) continue;
+    const i = liste.indexOf(v.t);
+    if (i >= 0) liste.splice(i, 1);
+    if (!liste.length) adFehlversuche.delete(k);
   }
 }
 setInterval(() => {
@@ -365,15 +382,18 @@ router.post('/login', a(async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'Benutzer und Passwort nötig' });
   if (adGesperrt(req, username)) return res.status(429).json({ error: 'Zu viele Fehlversuche — bitte in 15 Minuten erneut versuchen' });
+  const versuch = adVersuchVormerken(req, username);
 
   let user;
   try {
     user = await authenticateAD(username, password);
   } catch (e) {
+    adVersuchZuruecknehmen(versuch);
     console.error('[stations] AD nicht erreichbar:', e.message);
     return res.status(503).json({ error: 'Verzeichnisdienst nicht erreichbar' });
   }
-  if (!user) { adFehlversuch(req, username); return res.status(401).json({ error: 'Benutzer oder Passwort stimmt nicht' }); }
+  if (!user) return res.status(401).json({ error: 'Benutzer oder Passwort stimmt nicht' });
+  adVersuchZuruecknehmen(versuch);
   adFehlversuche.delete(adNameKey(username));
 
   const fehlt = missingSecrets();
@@ -405,8 +425,10 @@ router.get('/types', setupSession, (req, res) => res.json({ types: STATION_TYPES
 
 // POST /api/stations/os — neue Version veroeffentlichen (Technik).
 // Der Tarball kommt roh im Koerper; Version und Kanal als Kopfzeilen.
-router.post('/os', express.raw({ type: '*/*', limit: '64mb' }),
-  appSession, darfOsVeroeffentlichen, a(async (req, res) => {
+// Erst Sitzung und Recht pruefen, dann den Koerper puffern: sonst liest jeder
+// Anonyme 64 MB in den Speicher, bevor er mit 401 abgewiesen wird.
+router.post('/os', appSession, darfOsVeroeffentlichen, express.raw({ type: '*/*', limit: '64mb' }),
+  a(async (req, res) => {
     const version = String(req.headers['x-version'] || '').trim();
     const kanal = String(req.headers['x-kanal'] || 'main').trim();
     // Node liest Kopfzeilen als latin-1 — ein "ü" in der Notiz kam deshalb als
@@ -944,15 +966,18 @@ router.post('/app-login', a(async (req, res) => {
   const { username, password, station_id } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'Benutzer und Passwort nötig' });
   if (adGesperrt(req, username)) return res.status(429).json({ error: 'Zu viele Fehlversuche — bitte in 15 Minuten erneut versuchen' });
+  const versuch = adVersuchVormerken(req, username);
 
   let user;
   try {
     user = await authenticateAD(username, password);
   } catch (e) {
+    adVersuchZuruecknehmen(versuch);
     console.error('[stations] AD nicht erreichbar:', e.message);
     return res.status(503).json({ error: 'Verzeichnisdienst nicht erreichbar' });
   }
-  if (!user) { adFehlversuch(req, username); return res.status(401).json({ error: 'Benutzer oder Passwort stimmt nicht' }); }
+  if (!user) return res.status(401).json({ error: 'Benutzer oder Passwort stimmt nicht' });
+  adVersuchZuruecknehmen(versuch);
   adFehlversuche.delete(adNameKey(username));
 
   await ensureSchema();
