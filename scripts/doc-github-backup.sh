@@ -152,7 +152,9 @@ done > "$FEHLEND"
 if [ -s "$FEHLEND" ]; then
   ANZAHL=$(tr -cd "\0" < "$FEHLEND" | wc -c)
   echo "$(date) [$MODE]: $ANZAHL Datei(en) von GitHub zurueckgeholt, die hier fehlten" >> $LOG
-  xargs -0 -r git checkout origin/main -- < "$FEHLEND" >> $LOG 2>&1
+  # Ueber die git()-Funktion statt xargs: xargs ruft das git-Programm direkt
+  # auf und umginge damit die Schutzoptionen oben (I-9).
+  git checkout origin/main --pathspec-from-file="$FEHLEND" --pathspec-file-nul >> $LOG 2>&1
 fi
 rm -f "$FEHLEND"
 

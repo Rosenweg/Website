@@ -40,6 +40,25 @@ esac
 CACHE_DIR=${CACHE_DIR:-/var/cache/rosenweg-ssh}
 CACHE="$CACHE_DIR/$LOGIN.keys"
 
+# Schluessel nur fuer Konten, die rw-konten-sync angelegt hat (Gruppe
+# rw-verwaltet). Sonst bekaeme ein lokales Betriebskonto (claude, ansible,
+# github, ubuntu, pi ...) die Portal-Schluessel einer Person gleichen
+# Namens. Ausnahmen je Host nur ausdruecklich in der Konfiguration:
+# SCHLUESSEL_AUCH_FUER="stefan.mueller andere.person" (leerzeichengetrennt).
+: "${SCHLUESSEL_AUCH_FUER:=}"
+_erlaubt=0
+if id -nG "$LOGIN" 2>/dev/null | tr ' ' '\n' | grep -qx rw-verwaltet; then
+  _erlaubt=1
+else
+  for _a in $SCHLUESSEL_AUCH_FUER; do
+    [ "$_a" = "$LOGIN" ] && _erlaubt=1
+  done
+fi
+if [ "$_erlaubt" != 1 ]; then
+  rm -f "$CACHE" 2>/dev/null || true
+  exit 0
+fi
+
 # Entscheidend ist der Exitcode, nicht der Text. Eine leere Antwort mit
 # Status 200 heisst "diese Person darf hier nicht mehr" — der Cache muss
 # dann weg, sonst greift ein Entzug nie. Nur wenn curl selbst scheitert
