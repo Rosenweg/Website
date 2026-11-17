@@ -34,25 +34,41 @@ KOPF = '''#!/bin/bash
 # ERZEUGT von scripts/rw-ssh-aufnehmen-bauen.py am {datum}.
 # Nicht von Hand aendern — die Quellen liegen in scripts/.
 #
-#   ./rw-ssh-aufnehmen.sh --api https://www.rosenweg4303.ch --token GEHEIM
-#   ./rw-ssh-aufnehmen.sh --api ... --token ... --auch-cts
-#   ./rw-ssh-aufnehmen.sh --api ... --token ... --auch-cts --probelauf
+#   ./rw-ssh-aufnehmen.sh --api https://www.rosenweg4303.ch      (fragt das Token ab)
+#   ./rw-ssh-aufnehmen.sh --api ... --token-datei /root/rw-token --auch-cts
+#   ./rw-ssh-aufnehmen.sh --api ... --token-datei ... --auch-cts --probelauf
 #
+# Das Token nicht mit --token als Argument uebergeben: dort steht es fuer
+# jeden lokalen Benutzer in der Prozessliste (geht noch, mit Warnung).
 # Wiederholbar: Ein zweiter Lauf aendert nichts, was schon stimmt.
 set -euo pipefail
 
-API_BASE=""; HOST_TOKEN=""; AUCH_CTS=0; PROBE=0
+API_BASE=""; HOST_TOKEN=""; TOKEN_DATEI=""; AUCH_CTS=0; PROBE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --api)       API_BASE="${{2:-}}"; shift 2 ;;
-    --token)     HOST_TOKEN="${{2:-}}"; shift 2 ;;
+    --token)     HOST_TOKEN="${{2:-}}"; shift 2
+                 echo "WARNUNG: --token steht in der Prozessliste — besser --token-datei oder Abfrage" >&2 ;;
+    --token-datei) TOKEN_DATEI="${{2:-}}"; shift 2 ;;
     --auch-cts)  AUCH_CTS=1; shift ;;
     --probelauf) PROBE=1; shift ;;
-    -h|--help)   sed -n '2,20p' "$0"; exit 0 ;;
+    -h|--help)   sed -n '2,17p' "$0"; exit 0 ;;
     *) echo "Unbekannte Option: $1" >&2; exit 2 ;;
   esac
 done
-[ -n "$API_BASE" ] && [ -n "$HOST_TOKEN" ] || {{ echo "Fehlt: --api und --token" >&2; exit 2; }}
+# Token aus Datei oder verdeckt vom Terminal (R3-Ib), nicht aus argv.
+if [ -n "$TOKEN_DATEI" ]; then
+  [ -r "$TOKEN_DATEI" ] || {{ echo "Token-Datei nicht lesbar: $TOKEN_DATEI" >&2; exit 2; }}
+  HOST_TOKEN=$(head -n 1 "$TOKEN_DATEI" | tr -d '\\r\\n')
+elif [ -z "$HOST_TOKEN" ] && [ -t 0 ]; then
+  read -rsp "Host-Token: " HOST_TOKEN; echo
+fi
+[ -n "$API_BASE" ] && [ -n "$HOST_TOKEN" ] || {{ echo "Fehlt: --api und Token (--token-datei oder Abfrage)" >&2; exit 2; }}
+# Das Token landet unquotiert in /etc/rosenweg-ssh.conf (wird per . gelesen)
+# und in einfachen Anfuehrungszeichen im CT-Skript: nur harmlose Zeichen.
+case "$HOST_TOKEN" in
+  *[!A-Za-z0-9._~+/=-]*) echo "Token enthaelt unerlaubte Zeichen" >&2; exit 2 ;;
+esac
 
 sage() {{ printf '  %s\\n' "$*"; }}
 tun()  {{ if [ "$PROBE" = 1 ]; then printf '  [Probelauf] %s\\n' "$*"; else eval "$@"; fi; }}
@@ -74,8 +90,21 @@ einrichten_hier() {
   if [ "$PROBE" = 1 ]; then
     sage "[Probelauf] /etc/rosenweg-ssh.conf schreiben (API_BASE=$API_BASE, HOST_NAME=$name, HOST_TOKEN verdeckt)"
   else
-    printf '%s\n' "API_BASE=$API_BASE" "HOST_TOKEN=$HOST_TOKEN" "HOST_NAME=$name" > /etc/rosenweg-ssh.conf
-    chmod 0640 /etc/rosenweg-ssh.conf
+    # Nur die drei eigenen Schluessel ersetzen, den Rest behalten (R3-Ic):
+    # SCHLUESSEL_AUCH_FUER, KONTEN_LOESCHEN, KONTEN_SCHONFRIST_TAGE,
+    # KONTEN_TABU usw. sind je Host von Hand gesetzt — ein erneuter Lauf
+    # haette sie geloescht (Schonfrist 30 statt "nie", Ausnahmen weg).
+    local neu
+    neu=$(mktemp /etc/rosenweg-ssh.conf.XXXXXX)
+    {
+      printf '%s\n' "API_BASE=$API_BASE" "HOST_TOKEN=$HOST_TOKEN" "HOST_NAME=$name"
+      if [ -f /etc/rosenweg-ssh.conf ]; then
+        grep -vE '^[[:space:]]*(export[[:space:]]+)?(API_BASE|HOST_TOKEN|HOST_NAME)=' /etc/rosenweg-ssh.conf || true
+      fi
+    } > "$neu"
+    chmod 0640 "$neu"
+    [ -f /etc/rosenweg-ssh.conf ] && chown --reference=/etc/rosenweg-ssh.conf "$neu" 2>/dev/null || true
+    mv -f "$neu" /etc/rosenweg-ssh.conf
   fi
 
   # Eigener Benutzer fuer die Schluesselabfrage — nicht nobody, denn in
@@ -175,9 +204,11 @@ einrichten_hier() {
   fi
 
   if [ "$PROBE" = 0 ]; then
-    # Token ueber stdin (-H @-): als Argument stuende er in der Prozessliste.
-    if printf 'X-Host-Token: %s\nX-Host-Name: %s\n' "$HOST_TOKEN" "$name" | \
-         curl -fsS --max-time 10 -H @- "$API_BASE/api/ssh/konten" >/dev/null 2>&1; then
+    # Token ueber stdin (-K -): als Argument stuende er in der Prozessliste;
+    # -H @- kennt erst curl >= 7.55 (R3-Ie). Token-Zeichen sind oben geprueft,
+    # ein Hostname enthaelt weder \ noch ".
+    if printf 'header = "X-Host-Token: %s"\nheader = "X-Host-Name: %s"\n' "$HOST_TOKEN" "$name" | \
+         curl -fsS --max-time 10 -K - "$API_BASE/api/ssh/konten" >/dev/null 2>&1; then
       sage "API erreichbar — $name ist aufgenommen"
     else
       echo "  ACHTUNG: $name erreicht die API nicht ($API_BASE). Netz oder Token pruefen." >&2
@@ -211,8 +242,17 @@ einrichten_ct() {
   cat > "$ABLAGE/ct-setup.sh" <<CTEOF
 #!/bin/bash
 set -e
-printf '%s\n' 'API_BASE=$API_BASE' 'HOST_TOKEN=$HOST_TOKEN' 'HOST_NAME=$name' > /etc/rosenweg-ssh.conf
-chmod 0640 /etc/rosenweg-ssh.conf
+# Nur API_BASE/HOST_TOKEN/HOST_NAME ersetzen, Rest der Datei behalten (R3-Ic).
+neu=\$(mktemp /etc/rosenweg-ssh.conf.XXXXXX)
+{
+  printf '%s\n' 'API_BASE=$API_BASE' 'HOST_TOKEN=$HOST_TOKEN' 'HOST_NAME=$name'
+  if [ -f /etc/rosenweg-ssh.conf ]; then
+    grep -vE '^[[:space:]]*(export[[:space:]]+)?(API_BASE|HOST_TOKEN|HOST_NAME)=' /etc/rosenweg-ssh.conf || true
+  fi
+} > "\$neu"
+chmod 0640 "\$neu"
+[ -f /etc/rosenweg-ssh.conf ] && chown --reference=/etc/rosenweg-ssh.conf "\$neu" 2>/dev/null || true
+mv -f "\$neu" /etc/rosenweg-ssh.conf
 id -u rw-keys >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin rw-keys
 chown root:rw-keys /etc/rosenweg-ssh.conf
 install -d -o rw-keys -g rw-keys -m 0750 /var/cache/rosenweg-ssh

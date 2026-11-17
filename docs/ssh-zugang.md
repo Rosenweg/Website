@@ -106,11 +106,16 @@ Auf einem Proxmox-Knoten nimmt ein Aufruf den Knoten und auf Wunsch gleich
 alle laufenden Container mit:
 
 ```sh
-./rw-ssh-aufnehmen.sh --api https://www.rosenweg4303.ch --token GEHEIM --auch-cts
+./rw-ssh-aufnehmen.sh --api https://www.rosenweg4303.ch --token-datei /root/rw-token --auch-cts
 ```
 
+Ohne `--token-datei` fragt das Skript das Token verdeckt ab. `--token GEHEIM`
+geht noch, steht dann aber für jeden lokalen Benutzer in der Prozessliste.
 `--probelauf` zeigt vorher, was geschehen würde. Das Skript ist
-wiederholbar: Ein zweiter Lauf ändert nichts, was schon stimmt. Es enthält
+wiederholbar: Ein zweiter Lauf ändert nichts, was schon stimmt. In einer
+vorhandenen `/etc/rosenweg-ssh.conf` ersetzt es nur `API_BASE`, `HOST_TOKEN`
+und `HOST_NAME`; von Hand gesetzte Werte wie `SCHLUESSEL_AUCH_FUER`,
+`KONTEN_LOESCHEN`, `KONTEN_SCHONFRIST_TAGE` oder `KONTEN_TABU` bleiben. Es enthält
 Kopien der Host-Dateien; nach jeder Änderung an `rw-authorized-keys.sh`,
 `rw-konten-sync.sh` oder den Units muss
 `python3 scripts/rw-ssh-aufnehmen-bauen.py` neu laufen.
