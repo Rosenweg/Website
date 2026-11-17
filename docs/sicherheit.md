@@ -172,8 +172,10 @@ Alles in `api/lib/otp.js`:
   nur Technik/Präsident umbenennen, umadressieren oder zusammenführen.
 - **Kontakte in der Wohnungsverwaltung**: `person_id` aus dem Formular wird
   verworfen (nur die bisherige gilt); die Weitergabe an die Person übernimmt der
-  Server nur für ungeschützte Personen. Wechselt an einer Karte die E-Mail
-  (Mieterwechsel), wird der Kontakt auf eine eigene Person umgehängt.
+  Server nur für ungeschützte Personen. Wechselt an einer Karte die E-Mail einer **geschützten** Person
+  (eigenes Konto oder Wohnungen in einer anderen STWEG, z. B. beim Mieterwechsel), wird
+  der Kontakt auf eine eigene Person umgehängt; bei ungeschützten Personen werden Name
+  und E-Mail wie bisher in die gemeinsame Person übernommen.
 - **Eigene Wohnung im Profil** (`/api/me/wohnung`): neue Kontakte werden nie mit
   fremden Personen verknüpft; geänderte Namen am eigenen Kontakt gehen nicht in
   `personen.name` (der Signaturname bleibt verwaltet); E-Mail/Telefon, die einer
@@ -225,8 +227,9 @@ Strict-Transport-Security: max-age=31536000
 
 Keine `script-src`-Regel (die Seiten nutzen Inline-Skripte). Gesperrt werden
 ausserdem `.md`, `.alt`, `.bak`, Quell- und Konfigurationsdateien, `/data/` auf den
-STWEG-Hosts und alle `.json` ausser `site-config.json`, `zaehler-config.json`,
-`access-manifest.json`. `/.well-known/` bleibt erreichbar.
+STWEG-Hosts. JSON: auf `fe-www` nur `site-config.json`, `zaehler-config.json`,
+`access-manifest.json`; auf den STWEG-Hosts nur `site-config.json`; isp und pwa
+haben keine eigene JSON-Sperre (dort liegen keine Datendateien). `/.well-known/` bleibt erreichbar.
 
 ### 4.6 Energie
 
@@ -273,7 +276,8 @@ STWEG-Hosts und alle `.json` ausser `site-config.json`, `zaehler-config.json`,
 - **WhatsApp-Gateway (CT 116):** SMTP 2525 nur von PMG (nftables für IPv4 **und**
   IPv6). Von PMG nur Absender aus `smtp_senders` und nur Aliase als Empfänger
   (Antworten auf eigene Weiterleitungen ausgenommen). Der HTTP-Proxy zur API lässt
-  nur `/api/auth/*`, `/api/auth/me` und `/api/whatsapp/admin/recipients|broadcast`
+  nur `GET /api/auth/{login,callback,logout,me}`, `GET /api/whatsapp/admin/recipients` und
+  `POST /api/whatsapp/admin/broadcast`
   durch. PATs werden in der Oberfläche abgelehnt.
 - **Mail-Composer:** immer über die Freigabe-Outbox; direkt nur an einen
   Stammempfänger mit „ohne Freigabe“, wenn alle Adressen unverändert sind.

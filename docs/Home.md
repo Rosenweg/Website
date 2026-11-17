@@ -40,6 +40,15 @@ Die STWEG-Kooperation Rosenweg besteht aus 8 Stockwerkeigentümergemeinschaften 
 - [Sicherheit](sicherheit.md) — Vorfälle, Schutzregeln, Grenzwerte, Variablen, offene Punkte
 - [SSH-Zugang](ssh-zugang.md) — Schlüssel aus dem Profil, Konten, sudo
 
+## Anleitungen
+
+- [Bedienanleitung Ausschuss und Verwaltung](anleitung-ausschuss.md)
+- [Bedienanleitung Technik und Präsident](anleitung-technik.md)
+- [Objektverwaltung – Felder und Knöpfe](verwaltung-anleitung.md)
+- [Berechtigungen (Rechte-Matrix)](../wiki/berechtigungen.md)
+- [API-Übersicht](api.md) · [Energie-API](energie-api.md) · [MCP](mcp.md) · [Datenbank](datenbank.md)
+- Für Bewohner: Hilfe-Seite im Portal (`/hilfe.html`)
+
 ## Kontakt
 
 **Technischer Dienst Rosenweg**
