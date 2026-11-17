@@ -120,7 +120,7 @@ rosenweg_rosenweg-documents
 - **37 Users**, **91 Groups** (aus Authentik synchronisiert)
 - **Sync**: Authentik → AD alle 2 Minuten (`/opt/ad-sync/sync.py`)
 - **Password API**: Port 8446, `ad-password-api.service` aktiv
-  - Auth: `Bearer ***ENTFERNT***`
+  - Auth: `Bearer <AD_PASSWORD_API_SECRET>` (Wert nur in der Umgebung)
   - Endpunkt: `POST http://100.64.2.30:8446/`
 
 ### Fileserver (CT 106 — fileserver)

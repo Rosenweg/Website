@@ -36,7 +36,7 @@ Node.js Express Server (`api/server.js`) mit folgenden Funktionen:
 | GET | `/api/auth/login` | — | OAuth2 Login-Redirect |
 | GET | `/api/auth/callback` | — | OAuth2 Callback |
 | GET | `/api/auth/me` | Bearer | User-Info |
-| POST | `/api/change-password` | Bearer | Passwort in Authentik + AD ändern |
+| POST | `/api/change-password` | Bearer | Passwort in Authentik + AD ändern (nur innert 15 Min. nach frischer Anmeldung; beendet alle anderen Sitzungen) |
 
 ### Dokumente
 | Method | Path | Auth | Beschreibung |
@@ -120,7 +120,7 @@ Node.js Express Server (`api/server.js`) mit folgenden Funktionen:
 | Variable | Wert | Beschreibung |
 |----------|------|-------------|
 | AD_PASSWORD_API_URL | http://100.64.2.30:8446/ | DC Password API |
-| AD_PASSWORD_API_SECRET | ***ENTFERNT*** | DC Password API Token |
+| AD_PASSWORD_API_SECRET | (geheim, Pflicht) | DC Password API Token |
 
 ### Sonstiges
 | Variable | Wert | Beschreibung |
