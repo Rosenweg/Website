@@ -6400,9 +6400,17 @@ async function saveKontakte(client, wohnungId, kontakte, stweg) {
   // Verwalter existiert. CH-Recht: Vertretung braucht Schriftform,
   // daher MUSS der Eigentümer noch signieren bevor der Verwalter
   // tatsaechlich vertreten darf.
-  autoCreateVollmachtForVerwalter(client, wohnungId, stweg, incoming).catch(err =>
-    console.warn('[vollmacht-auto] saveKontakte:', err.message),
-  );
+  // Mit await: die Funktion arbeitet auf dem Transaktions-Client des Aufrufers, der
+  // danach COMMIT/ROLLBACK schickt und ihn freigibt.
+  // Savepoint: ein Fehler hier darf die Transaktion des Speicherns nicht abbrechen.
+  try {
+    await client.query('SAVEPOINT vollmacht_auto');
+    await autoCreateVollmachtForVerwalter(client, wohnungId, stweg, incoming);
+    await client.query('RELEASE SAVEPOINT vollmacht_auto');
+  } catch (err) {
+    console.warn('[vollmacht-auto] saveKontakte:', err.message);
+    await client.query('ROLLBACK TO SAVEPOINT vollmacht_auto').catch(() => {});
+  }
 }
 
 // Liest aktive Kontakte einer Wohnung (nicht archiviert). Wird vor dem
@@ -6810,6 +6818,18 @@ async function lokalesKontoNachLoeschung(email) {
   }
 }
 
+// Eine Vormerkung gilt nur, solange die Adresse an keiner Wohnung mehr aktiv ist.
+// trackRemovedKontakte laeuft ausserhalb der Speicher-Transaktion: wurde diese danach
+// zurueckgerollt (z. B. 409), ist der Kontakt noch da -> Vormerkung stornieren.
+async function nochAktiverKontakt(row) {
+  const r = await pool.query(
+    'SELECT 1 FROM wohnungen_kontakte WHERE LOWER(email) = LOWER($1) AND archiviert_am IS NULL LIMIT 1', [row.email]);
+  if (!r.rows.length) return false;
+  await pool.query('UPDATE authentik_pending_deletions SET cancelled = true WHERE id = $1', [row.id]);
+  console.warn(`[Authentik] Loeschung ${row.email} storniert: Adresse ist wieder aktiver Kontakt`);
+  return true;
+}
+
 async function processAuthentiKDeletions() {
   if (!AUTHENTIK_API_TOKEN) return;
   try {
@@ -6826,6 +6846,7 @@ async function processAuthentiKDeletions() {
     );
     for (const row of reminders.rows) {
       try {
+        if (await nochAktiverKontakt(row)) continue;
         const deleteDate = new Date(row.scheduled_at);
         const formattedDate = `${deleteDate.getDate()}.${deleteDate.getMonth() + 1}.${deleteDate.getFullYear()}`;
         await loggedSendMail({
@@ -6864,6 +6885,7 @@ async function processAuthentiKDeletions() {
     );
     for (const row of deletions.rows) {
       try {
+        if (await nochAktiverKontakt(row)) continue;
         // Find user in Authentik by email
         const user = await authentikKontoPerEmail(row.email);
         // Gruppen koennen sich seit der Vormerkung geaendert haben: nur reine
@@ -14842,11 +14864,30 @@ async function userCanEditPerson(user, personId) {
   const r = await pool.query(
     `SELECT 1 FROM wohnungen_kontakte k
        JOIN wohnungen w ON w.id = k.wohnung_id
-      WHERE k.person_id = $1 AND w.stweg = ANY($2::int[])
+      WHERE k.person_id = $1 AND w.stweg = ANY($2::int[]) AND k.archiviert_am IS NULL
       LIMIT 1`,
     [personId, ausschussStwegs],
   );
   return r.rows.length > 0;
+}
+
+// Schutz gemeinsamer Personen (Runde 4): Eine Person, die ein eigenes aktives Konto hat
+// oder an Wohnungen einer STWEG haengt, in der der Anfragende NICHT Ausschuss ist, darf
+// ein Ausschuss nicht umbenennen, umadressieren oder zusammenfuehren - sonst laesst sich
+// per neuem Kontakt (findOrCreatePerson) + Personen-Bearbeitung die Identitaet eines
+// Bewohners einer fremden STWEG uebernehmen (Trigger personen_propagate_to_kontakte).
+async function personGeschuetztFuer(user, personId) {
+  const groups = user?.groups || [];
+  if (isTechnik(groups) || isPraesident(groups)) return false;
+  const eigene = [...getAusschussStwegs(groups)];
+  const r = await pool.query(
+    `SELECT EXISTS (SELECT 1 FROM wohnungen_kontakte k JOIN wohnungen w ON w.id = k.wohnung_id
+                     WHERE k.person_id = $1 AND k.archiviert_am IS NULL AND NOT (w.stweg = ANY($2::int[]))) AS fremd_stweg,
+            EXISTS (SELECT 1 FROM users u JOIN personen p ON p.id = $1
+                     WHERE u.active IS NOT FALSE AND COALESCE(p.email, '') <> '' AND LOWER(u.email) = LOWER(p.email)) AS konto`,
+    [personId, eigene]);
+  const z = r.rows[0] || {};
+  return !!(z.fremd_stweg || z.konto);
 }
 
 // STWEG-Scope fuer Personen-Lesezugriffe: null = alle (Technik/Praesident), sonst
@@ -14941,6 +14982,14 @@ app.put('/api/personen/:id', authMiddleware, requireWohnungsverwaltungWrite, asy
     const allowed = await userCanEditPerson(req.user, id);
     if (!allowed) return res.status(403).json({ error: 'Diese Person gehört nicht zu einem STWEG für den du Ausschuss-Berechtigung hast' });
     const b = req.body || {};
+    const IDENT_FELDER = ['name', 'vorname', 'nachname', 'email', 'telefon', 'mobile', 'telefone', 'adresse'];
+    if (IDENT_FELDER.some(f => b[f] !== undefined) && await personGeschuetztFuer(req.user, id)) {
+      return res.status(409).json({ error: 'Diese Person hat ein eigenes Konto oder Wohnungen in einer anderen STWEG. Name und Kontaktdaten aendert sie selbst im Profil oder die Technik.' });
+    }
+    if (b.email && !(isTechnik(req.user?.groups || []) || isPraesident(req.user?.groups || []))) {
+      const fremd = await fremdeKennung(pool, { email: String(b.email), eigeneIds: [id] });
+      if (fremd) return res.status(409).json({ error: fremd });
+    }
     const updates = [];
     const params = [];
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
@@ -15090,6 +15139,12 @@ app.post('/api/personen/merge', authMiddleware, requireWohnungsverwaltungWrite, 
     ]);
     if (!canKeep || !canMerge) {
       return res.status(403).json({ error: 'Mindestens eine Person gehört nicht zu deinem STWEG-Scope' });
+    }
+    const [schutzKeep, schutzMerge] = await Promise.all([
+      personGeschuetztFuer(req.user, keepId), personGeschuetztFuer(req.user, mergeId),
+    ]);
+    if (schutzKeep || schutzMerge) {
+      return res.status(409).json({ error: 'Mindestens eine Person hat ein eigenes Konto oder Wohnungen in einer anderen STWEG - Zusammenfuehren nur durch die Technik.' });
     }
     await client.query('BEGIN');
     const k = await client.query('SELECT * FROM personen WHERE id = $1', [keepId]);
