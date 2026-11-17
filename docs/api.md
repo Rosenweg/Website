@@ -1,140 +1,414 @@
-# API Server — Rosenweg
+# API-Server – Übersicht, Anmeldung, Bereiche, Fehlercodes
 
-## Übersicht
+Stand: 17.11.2026 (nach der Sicherheitsprüfung, PR #23). Dieses Dokument ist die
+Landkarte der Haupt-API: wie man sich ausweist, welche Bereiche es gibt, wer welche
+Routen aufrufen darf und was die Fehlercodes bedeuten. Sicherheitsregeln,
+Grenzwerte und alle sicherheitsrelevanten Variablen stehen in
+[`sicherheit.md`](sicherheit.md); die vollständige Rechte-Matrix nach Rollen in
+[`../wiki/berechtigungen.md`](../wiki/berechtigungen.md).
 
-Node.js Express Server (`api/server.js`) mit folgenden Funktionen:
-- Authentik OAuth2 SSO Login/Callback
-- Dokumentenverwaltung (CIFS-Mount)
-- Email-Verteiler (IMAP-Polling + SMTP2GO)
-- Energie-Monitoring (Stromzähler)
-- Benutzerverwaltung (Authentik + AD)
-- DMARC-Report Parsing
-- Proxmox-Integration
+---
 
-## Authentifizierung
+## 1. Betrieb
 
-### OAuth2 Flow
-1. Browser → `/api/auth/login?redirect=/path` → Redirect zu Authentik
-2. Authentik → `/api/auth/callback?code=...&state=...` → Token-Exchange
-3. API setzt Session-Token → Redirect zurück mit `#auth={token,user}`
+| | |
+|---|---|
+| Code | `api/server.js` (Haupt-App, ~530 Routen), `api/routes/*.js` (Router: `email-archive`, `energie-lesen`, `grundbuch`, `meg`, `ssh-zugang`, `stations`), `api/lib/doodle.js`, `api/lib/alarmpanel.js`, `api/mcp/` (MCP-Server) |
+| Middleware | `api/middleware/auth.js` (`authMiddleware`, `adminOnly`, `requirePermission`, `requireUserLogin`, `scopeErlaubt`) |
+| Laufzeit | Docker-Image `ghcr.io/rosenweg/rosenweg-api`, Dienst `api` im Compose-Projekt `/opt/rosenweg-core/` auf **CT 128** (`100.64.2.52:3000`); Datei im Repo `backend-lxc/core/compose.yml` |
+| Umgebung | `/opt/rosenweg-core/.env` (Geheimnisse) plus feste Werte in der Compose-Datei |
+| Erreichbar | über die Frontend-LXCs (`location ^~ /api/` → `upstream rw_api` in `frontends-lxc/nginx/upstreams.conf`) unter `www.`, `isp.`, `pwa.`, `stwegN.`, `meg.rosenweg4303.ch` und `rosenweg9.ch`; MCP zusätzlich unter `mcp.rosenweg4303.ch` |
+| Ausrollen | `cd /opt/rosenweg-core && docker compose pull api && docker compose up -d api` (Reihenfolge und Rückbau: [`sicherheit.md`](sicherheit.md) Abschnitt 8) |
+| Gesundheit | `GET /api/health` → `{status, db, dokumente}`; 503 nur, wenn die DB nicht antwortet (eine leere Dokumentenablage meldet `dokumente: "leer"`, ohne 503) |
 
-### Token-Validierung
-- Bearer Token im `Authorization` Header
-- Introspection via `AUTHENTIK_URL/application/o/introspect/`
-- Cache: 1 Minute TTL
-- User wird in DB angelegt/aktualisiert bei jedem Login
+**CORS:** erlaubt sind `SITE_URL`, `https://rosenweg4303.ch`, `https://www.rosenweg4303.ch`,
+`https://tv.rosenweg4303.ch` und jede `https`-Unterdomain von `rosenweg4303.ch` ohne
+Port; Anfragen ohne `Origin` (curl, Geräte, Server) ebenfalls. Andere Herkunft →
+**403** „Herkunft nicht erlaubt“.
 
-### Rollen
-- `admin`: Mitglied der Authentik-Gruppe `Technik` oder `Präsident`
-- `bewohner`: Alle anderen
+**Körpergrössen:** JSON bis 10 MB; Dokument-Upload (`application/octet-stream`) und
+Scanner bis 500 MB, Vollmacht-PDF 20 MB, Voicemail-WAV 50 MB, eingehende Mail 25 MB.
+Grosse Körper werden erst gelesen, **nachdem** der Ausweis geprüft ist. Zu gross →
+**413** „Anfrage zu gross“; nginx begrenzt `/api/` zusätzlich auf 100 MB.
 
-## Endpunkte
+---
 
-### Auth
-| Method | Path | Auth | Beschreibung |
-|--------|------|------|-------------|
-| GET | `/api/auth/login` | — | OAuth2 Login-Redirect |
-| GET | `/api/auth/callback` | — | OAuth2 Callback |
-| GET | `/api/auth/me` | Bearer | User-Info |
-| POST | `/api/change-password` | Bearer | Passwort in Authentik + AD ändern (nur innert 15 Min. nach frischer Anmeldung; beendet alle anderen Sitzungen) |
+## 2. Ausweise (Authentifizierung)
 
-### Dokumente
-| Method | Path | Auth | Beschreibung |
-|--------|------|------|-------------|
-| GET | `/api/documents/*` | Bearer | Datei/Ordner lesen |
-| POST | `/api/documents/*` | Bearer+Admin | Datei hochladen |
-| DELETE | `/api/documents/*` | Bearer+Admin | Datei löschen |
-| GET | `/api/documents/preview/*` | Bearer | DOCX/PDF Vorschau (via Gotenberg) |
-| POST | `/api/scan-upload` | API Key | Scanner-Upload |
+Alle geschützten Routen erwarten `Authorization: Bearer <token>`. `authMiddleware`
+prüft der Reihe nach: **PAT** (Präfix `rw_pat_`) → **Sitzungstoken** → **Authentik-Token**.
+Kein Header → **401** „Nicht authentifiziert“; nichts passt → **401** „Session
+abgelaufen“. Dienste, Geräte und Hosts haben eigene Geheimnisse (Abschnitt 2.5).
 
-### Email-Verteiler
-| Method | Path | Auth | Beschreibung |
-|--------|------|------|-------------|
-| GET | `/api/verteiler` | Bearer+Admin | Verteiler-Liste |
-| GET | `/api/verteiler/:name/emails` | Bearer+Admin | Mails eines Verteilers |
+### 2.1 Browser-Sitzung (Authentik OAuth2)
 
-### Energie
-| Method | Path | Auth | Beschreibung |
-|--------|------|------|-------------|
-| GET | `/api/energy/meters` | Bearer | Zähler-Liste |
-| GET | `/api/energy/readings` | Bearer | Messwerte |
-| GET | `/api/energy/tariffs` | Bearer | Tarife (Netztarif, Solartarif) |
+1. Seite ruft `GET /api/auth/login?redirect=/pfad` (bei `?reauth=1` mit
+   `prompt=login`, z. B. vor dem Passwortwechsel).
+2. Die API erzeugt einen **signierten, einmaligen `state`** (HMAC, Schlüssel je
+   Prozessstart, 10 Min. gültig) und setzt das Cookie `rw_oauth_bind`
+   (HttpOnly, Secure, SameSite=Lax, Path=`/api/auth/callback`, 10 Min.). Danach
+   Umleitung zu Authentik.
+3. Authentik → `GET /api/auth/callback?code=…&state=…`. Fehlt das Cookie oder passt
+   es nicht zum `state` → Seite „Anmeldung abgebrochen“ (**400**). Ungültiger oder
+   abgelaufener `state` → **400** „Ungültiger oder abgelaufener State-Parameter“.
+   Nach einem Neustart der API muss eine laufende Anmeldung neu begonnen werden.
+4. Die API tauscht den Code, legt/aktualisiert die Zeile in `users` und bindet sie
+   an das Authentik-Konto (`users.authentik_sub`). Gehört die E-Mail schon einem
+   anderen Konto → **403** „Diese E-Mail gehört zu einem anderen Konto“.
+5. Sie legt eine Sitzung an (`sessions`, 30 Tage, verlängert sich bei Benutzung) und
+   leitet zurück auf `<origin><redirect>#auth=<token,user>`. `js/authentik-auth.js`
+   übernimmt das Token nur, wenn `login()` im selben Browser in den letzten 15 Min.
+   gestartet wurde, und holt das Benutzerobjekt von `/api/auth/me`.
 
-### Benutzerverwaltung
-| Method | Path | Auth | Beschreibung |
-|--------|------|------|-------------|
-| GET | `/api/users` | Bearer+Admin | Alle Benutzer |
-| PUT | `/api/users/:id` | Bearer+Admin | Benutzer bearbeiten |
-| POST | `/api/users/:id/password` | Bearer+Admin | Passwort setzen (Authentik + AD) |
+Erlaubte Rücksprung-Hosts stehen in `OAUTH_ALLOWED_HOSTS` (`api/lib/config.js`);
+`redirect` muss ein Pfad sein (`/…`, nicht `//…`). Abmelden:
+`GET /api/auth/logout?redirect=…` (beendet auch die Authentik-Sitzung).
 
-### DMARC
-| Method | Path | Auth | Beschreibung |
-|--------|------|------|-------------|
-| GET | `/api/dmarc/reports` | Bearer+Admin | DMARC-Reports aus Gmail parsen |
+**Rolle:** Beim Login bekommt die Zeile `role='admin'`, wenn die Person in `technik`
+oder `Präsident` ist; daraus folgt `req.user.isAdmin`.
 
-### SMTP Quota
-| Method | Path | Auth | Beschreibung |
-|--------|------|------|-------------|
-| GET | `/api/smtp-quota` | Bearer+Admin | SMTP2GO Kontingent |
+### 2.2 Authentik-Token
 
-## Umgebungsvariablen
+Ein Access-Token von Authentik (z. B. aus einer App) wird per Introspection geprüft
+(`AUTHENTIK_URL/application/o/introspect/`, Ergebnis 1 Minute zwischengespeichert).
+Auch hier gilt die Bindung an `users.authentik_sub`: passt das Konto nicht zur
+gebundenen Zeile, wird der Token abgewiesen (**401**). Gruppen kommen aus dem Token.
 
-### Datenbank
-| Variable | Wert | Beschreibung |
-|----------|------|-------------|
-| DB_HOST | postgres | PostgreSQL Host (Docker-intern) |
-| DB_PORT | 5432 | PostgreSQL Port |
-| DB_USER | rosenweg | DB Benutzer |
-| DB_PASSWORD | ****** (siehe .env) | DB Passwort |
-| DB_NAME | rosenweg | DB Name |
+### 2.3 Persönlicher Zugangstoken (PAT)
 
-### Energie-DB
-| Variable | Wert | Beschreibung |
-|----------|------|-------------|
-| ENERGY_DB_HOST | energy-db | Energie-DB Host |
-| ENERGY_DB_USER | energy | Energie-DB Benutzer |
-| ENERGY_DB_PASSWORD | ****** (siehe .env) | Energie-DB Passwort |
-| ENERGY_DB_NAME | energy | Energie-DB Name |
+Für Skripte, Agenten und den MCP-Server.
 
-### Authentik
-| Variable | Wert | Beschreibung |
-|----------|------|-------------|
-| AUTHENTIK_URL | https://server:9443 | Interne URL (Server-to-Server) |
-| AUTHENTIK_EXTERNAL_URL | https://authentik.rosenweg4303.ch | Externe URL (Browser-Redirects) |
-| AUTHENTIK_CLIENT_ID | 35oy6Q... | OAuth2 Client ID |
-| AUTHENTIK_CLIENT_SECRET | <im Passwortmanager> | OAuth2 Client Secret |
-| AUTHENTIK_API_TOKEN | <im Passwortmanager> | Admin API Token |
+- **Anlegen** nur aus einer Browser-Sitzung (Profil → Zugangstoken):
+  `POST /api/me/tokens` mit `{ "name": "…", "scopes": ["…"], "expires_days": 90 }`.
+  Antwort enthält den Klartext **einmalig** (`rw_pat_` + 64 Hex-Zeichen); gespeichert
+  wird nur der SHA-256-Hash. `GET /api/me/tokens` listet, `DELETE /api/me/tokens/:id`
+  widerruft.
+- **Gültig**, solange nicht widerrufen, nicht abgelaufen und das Konto aktiv ist.
+  Jede Benutzung schreibt `last_used_at` und `last_used_ip`. Wird das Konto in
+  Authentik gelöscht, widerruft die API alle PATs.
+- **Rechte:** die der Person (Gruppen aus `users.groups_json`), eingeschränkt durch
+  die Scopes. `isAdmin` gilt bei `role='admin'` oder Gruppe `technik`.
 
-### Email
-| Variable | Wert | Beschreibung |
-|----------|------|-------------|
-| SMTP_HOST | mail-eu.smtp2go.com | SMTP2GO Host |
-| SMTP_PORT | 2525 | SMTP2GO Port (TLS) |
-| SMTP_USER | rk-website | SMTP2GO User |
-| SMTP_PASS | <im Passwortmanager> | SMTP2GO Passwort |
-| MAIL_FROM | noreply@rosenweg4303.ch | Absender |
-| IMAP_USER | rosenweg4303@gmail.com | Gmail für IMAP-Polling |
-| IMAP_PASS | <im Passwortmanager> | Gmail App-Passwort |
+**Scopes** (`scopeErlaubt` in `api/middleware/auth.js`; kein Scope = alle Rechte):
 
-### AD / Passwort-Sync
-| Variable | Wert | Beschreibung |
-|----------|------|-------------|
-| AD_PASSWORD_API_URL | http://100.64.2.30:8446/ | DC Password API |
-| AD_PASSWORD_API_SECRET | (geheim, Pflicht) | DC Password API Token |
+| Scope | erlaubt |
+|---|---|
+| `*` | alles |
+| `all:read` / `all:write` | alle GET-Routen / alle anderen Methoden |
+| `<segment>:read`, `<segment>:write`, `<segment>:*` | erstes Pfadsegment nach `/api/`, z. B. `wasch:*`, `reklamationen:write`, `energy:read` |
+| `<segment>/<unter>:…` | feiner, z. B. `isp/vpn-accounts:read` |
+| `docs:read` | nur MCP: Dokumentations-Ressourcen (siehe [`mcp.md`](mcp.md)) |
 
-### Sonstiges
-| Variable | Wert | Beschreibung |
-|----------|------|-------------|
-| SITE_URL | https://www.rosenweg4303.ch | Website URL |
-| DOCS_PATH | /documents | CIFS-Mount Pfad |
-| SCAN_API_KEY | <im Passwortmanager> | API Key für Scanner-Upload |
-| PORT | 3000 | API Server Port |
+`GET` zählt als `read`, alles andere als `write` (darum braucht die Suche
+`POST /api/ki-search` den Scope `ki-search:write`). Pfad und Scopes werden
+klein geschrieben verglichen. Fehlt der Scope → **403** „PAT-Scope fehlt:
+<segment>:<read|write>“.
 
-## IMAP-Polling
+**Für PATs gesperrte Pfade** (`PAT_GESPERRT`, gilt unabhängig von den Scopes; der
+Pfad wird vorher normalisiert – Gross/Klein, doppelte und abschliessende `/`):
 
-- Pollt Gmail (`rosenweg4303@gmail.com`) alle 60 Sekunden
-- Verarbeitet Plus-Tags: `rosenweg4303+ausschuss@gmail.com` → Verteiler `ausschuss@rosenweg4303.ch`
-- Spezialbehandlung:
-  - `dmarc@` → In DMARC-Ordner verschieben
-  - `archiv@` → In Email-Archiv-DB speichern
-  - Alle anderen → Verteiler-DB + Weiterleitung
+| Pfad unter `/api/` | Grund |
+|---|---|
+| `change-password` | Passwort ändern verlangt kein altes Passwort |
+| `me/tokens` | Token dürfen keine Token erzeugen oder widerrufen |
+| `me/passkeys` | Passkeys |
+| `auth` (alles darunter, auch `auth/profile`, `auth/avatar`) | OAuth-Fluss, Profil-Login |
+| `mqtt/my-app-passwords`, `mqtt/user-app-passwords` | MQTT-Zugangsdaten |
+
+Antwort: **403** „Mit einem Zugangstoken nicht erlaubt — nur angemeldet im Profil“.
+Zusätzlich sperrt `requireUserLogin` an der Route: `/api/me/tokens`, `/api/me/passkeys`,
+`/api/ssh/me/*` (SSH-Schlüssel, GitHub-Abgleich), `/api/mqtt/my-access` und die
+MQTT-App-Passwörter (**403** „Token-Verwaltung nur via Browser-Login“).
+
+```bash
+T="rw_pat_…"   # im Passwortmanager, nie im Repo
+curl -s -H "Authorization: Bearer $T" https://www.rosenweg4303.ch/api/me
+curl -s -H "Authorization: Bearer $T" https://www.rosenweg4303.ch/api/wasch/my/reservations
+```
+
+### 2.4 Einmal-Codes (ohne Konto)
+
+| Route | Zweck | Zustand |
+|---|---|---|
+| `POST /api/reklamationen/code`, `POST /api/reklamationen/oeffentlich` | Reparatur melden ohne Konto | aktiv |
+| `POST /api/doodle/code`, `POST /api/doodle/verify` | Terminumfrage ohne Konto | aktiv |
+| `POST /api/otp/send`, `POST /api/otp/verify` | Login per E-Mail-Code | **abgeschaltet** (404), solange `OTP_LOGIN_ENABLED` nicht `1` |
+
+Codes: 8 Ziffern, zweckgebunden, 10 Min. gültig, 5 Versuche je Code; Ausstellen
+antwortet immer gleich. Grenzwerte (je IP, je Adresse, global) und die nginx-Drossel
+`rw_otp`: [`sicherheit.md`](sicherheit.md) Abschnitt 4.2. Zu viele Fehlversuche →
+**429** „Zu viele Fehlversuche. Bitte einen neuen Code anfordern.“; falscher Code →
+**400** „Ungültiger Code“; abgelaufen/kein Code → **400** mit Hinweis, einen neuen
+anzufordern.
+
+### 2.5 Dienst-, Host- und Geräte-Ausweise
+
+Diese Routen nehmen **kein** Benutzer-Token, sondern ein Geheimnis im Header. Alle
+Vergleiche laufen in konstanter Zeit. Fehlt das Geheimnis in der Umgebung, ist die
+Schnittstelle zu (fail closed).
+
+| Routen | Header / Ausweis | Variable | falsch → | Variable fehlt → |
+|---|---|---|---|---|
+| `POST /api/email/inbound` | `X-Email-Secret` | `EMAIL_INBOUND_SECRET` | 401/403 | 401/403 |
+| `POST /api/scan-upload` | `X-Api-Key`, Datei in `X-Filename` | `SCAN_API_KEY` | 401 | 401 |
+| `/api/pbx/voicemail`, `call-notify`, `voicemail-reklamation`, `cnam/:nr`, `hours/check`, `ring-members/active`, `call-event` | `X-Pbx-Secret` | `PBX_SHARED_SECRET` | 401 | 503 |
+| `/api/whatsapp/inbound`, `backfill`, `outbox-poll`, `status`, `delete-poll`, `delete-status`, `heartbeat`, `qr`; `/api/technik-bot/resolve/:id` | `X-Wa-Secret` | `WHATSAPP_SHARED_SECRET` | 401 | 503 |
+| `GET /api/traefik/dynamic`, `GET /api/isp/traefik-config` | `X-Traefik-Secret` | `TRAEFIK_CONFIG_SECRET` | 403 | 403 |
+| `POST /api/isp/relay-status/ingest`, `POST /api/isp/outbound-usage/ingest`, `GET /api/verteiler/mailcow-gate` | `X-Tracker-Secret` | `TRACKER_SHARED_SECRET` | 403 | 403 |
+| `POST /api/pve-messages` | `X-Pve-Secret` | `PVE_MSG_SECRET` | 403 | 503 |
+| `POST /api/alarm` | `X-Alarm-Secret` | `ALARM_SECRET` | 403 | 403 |
+| `/api/mqtt/getuser`, `superuser`, `aclcheck`; `POST /api/wetter/:station/ingest` | Query `?k=` (vom Broker) | `MQTT_AUTH_SECRET` | 403 | 403 |
+| `/api/ssh/authorized-keys/:login`, `konten`, `sitzung`, `dienste` (POST) | `X-Host-Token` | `SSH_HOST_TOKEN` | 403; nach > 20 Fehlversuchen je Quelle 429 | 503 |
+| `GET /api/cf-ddns` | `Authorization` | `CF_DDNS_TOKEN` | Fehlertext | `badconfig` (500) |
+| `POST /api/stations/login`, `POST /api/stations/app-login` | AD-Benutzer und -Passwort im Körper; liefern Einrichtungs- bzw. App-Token | – | 401; 10 Fehlversuche / 15 Min. je Name bzw. 50 je IP → 429 | 503, wenn das AD nicht erreichbar ist |
+| `/api/stations/register`, `types` | `Bearer rw_setup_…` (Einrichtungstoken) | – | 401 | – |
+| `/api/stations/:id/*`, `/api/benutzer/:login/einstellungen` | `Bearer rw_station_…` (Stationstoken) | – | 401 | – |
+| `/api/stations/telefonbuch`, `os`, `POST /api/stations/:id/tunnel` | `Bearer rw_app_…` (App-Sitzung) | – | 401 | – |
+| `/api/tv/stream/:id?token=`, `/api/tv/extern*` | signierter Stream-Token bzw. Extern-Token | `TV7_HMAC_SECRET` | 401 | – |
+| `/api/pickup/:token` (Druck-Abholung) | Abholtoken im Pfad (8–64 Zeichen) | – | 404 „Druckauftrag nicht gefunden“ | – |
+
+Werte stehen nur in `/opt/rosenweg-core/.env` bzw. beim jeweiligen Dienst (Liste
+und Rotation: [`sicherheit.md`](sicherheit.md) Abschnitte 6 und 7.1). Header statt
+Query, weil Query-Werte in Zugriffslogs landen; Ausnahme ist der MQTT-Broker (`?k=`).
+
+---
+
+## 3. Rollen in Kürze
+
+| Rolle | Erkennung | Kurz |
+|---|---|---|
+| Technik / Präsident | Gruppe `technik` / `Präsident`; `isAdmin` | alles; bestehen jede `requirePermission`-Prüfung |
+| Verwaltung | Gruppe `verwaltung` | Seitenrechte aus der Rechteverwaltung; schreibt in STWEG-Bereichen nur mit Gruppe dieser STWEG |
+| Ausschuss | `stwegN-ausschuss`, `meg-ausschuss` | verwaltet nur **seine** STWEG |
+| Eigentümer | `*-eigentuemer`, `eigentuemer` | eigene Daten, Projekte, Auslagen einreichen |
+| Bewohner / Mieter | `*-bewohner`, `bewohner` | eigene Daten, Waschküche, Meldungen |
+| Anonym | – | öffentliche Routen (Abschnitt 4.1) |
+
+Seitenrechte (`requirePermission(seite, read|write)`) kommen aus der Tabelle
+`permissions`. Vollständige Matrix: [`../wiki/berechtigungen.md`](../wiki/berechtigungen.md).
+
+---
+
+## 4. Bereiche und wichtigste Routen
+
+Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Präsident;
+`A🅢` = Ausschuss der betroffenen STWEG; `Recht x:y` = `requirePermission('x','y')`.
+
+### 4.1 Öffentlich (ohne Anmeldung)
+
+| Route | Inhalt |
+|---|---|
+| `GET /api/health` | Zustand |
+| `GET /api/auth/login`, `/callback`, `/logout` | Anmeldung |
+| `POST /api/reklamationen/code`, `/oeffentlich`; `POST /api/doodle/code`, `/verify`; `GET/POST /api/doodle/public/:id` | Code-Abläufe |
+| `GET /api/melde-ort/:code` | Melde-Ort zu einem QR-Code |
+| `GET /api/energy/{surplus,surplus-available,lametric,shelly,solar-live,tariffs,tariffs/current}` | Geräte und Anzeigen, ohne `consumers` ([`energie-api.md`](energie-api.md)) |
+| `GET /api/public/ausschuss`, `/api/public/technik`, `/api/verwaltungen/public` | öffentliche Kontakte |
+| `GET /api/stweg/:stweg/wohnungen`, `/api/stweg/:stweg/overview` | Wohnungsliste und Belegung **ohne** Namen |
+| `GET /api/stweg-modules`, `/api/stweg-content/:stweg`, `/api/stweg-sections/:stweg` | Inhalte der STWEG-Seiten |
+| `GET /api/verteiler/by-stweg/:stweg` | Namen und Adressen der Verteiler einer STWEG |
+| `GET /api/calendar` | Termine (503, wenn `GOOGLE_CALENDAR_ICS_URL` fehlt) |
+| `GET /api/public/project/:slug`, `…/document/:path` | öffentlich geschaltete Projekte |
+| `GET /api/unterschriftenliste/verify-json`, `verify`, `snapshot/:hash.pdf` | Echtheitsprüfung (30 / 10 Min. je Client) |
+| `GET /api/display/pdf/:name`, `pdfbild/:name`, `geraetedatei/…`, `rss` | Anzeigen im Treppenhaus |
+| `GET /api/isp/noc/public/*`, `/api/isp/status-summary`, `/api/isp/maintenance/public` | NOC-Wandbild (gekürzt), Störungen |
+| `GET /api/meg/einstellplaetze/verfuegbar` | freie Einstellplätze (ohne Personendaten) |
+| `GET /api/tv/playlist.m3u`, `/api/tv/epg.xml` | TV-Senderliste |
+| `GET /api/wetter/:station/history`, `GET /api/push/vapid-public-key`, `GET /api/nav/audience-map` | Wetter, Push-Schlüssel, Menü-Zuordnung |
+
+### 4.2 Konto und Profil (`me`, `auth`)
+
+| Route | Wer | Bemerkung |
+|---|---|---|
+| `GET /api/auth/me`, `GET /api/me` | angemeldet | Benutzer, Gruppen, Rechte |
+| `GET /api/me/wohnungen`, `GET/PUT /api/me/wohnung/:id`, `PUT /api/me/kontakt/:id` | angemeldet, eigene | neue Kontakte nie mit fremden Personen verknüpft; fremde E-Mail/Telefon → 409 |
+| `PUT /api/me/phones`, `PUT /api/me/emails`, `PUT /api/me/whatsapp-optin` | angemeldet | 409 bei Adressen anderer Personen/Konten |
+| `GET/POST /api/me/mutation` | angemeldet | Adressmutation als Antrag |
+| `POST /api/change-password` | Browser-Sitzung ≤ 15 Min. alt, nicht per PAT | 5 / Std.; 403 mit `reauth: true`, wenn die Sitzung zu alt ist; danach andere Sitzungen gelöscht |
+| `PUT /api/auth/profile`, `PUT /api/auth/avatar` | Browser-Sitzung | Avatar nur PNG/JPEG/WebP ≤ 512 KB |
+| `/api/me/tokens`, `/api/me/passkeys` | Browser-Sitzung | siehe 2.3 |
+| `GET/PUT /api/me/einstellungen` | angemeldet | persönliche Einstellungen |
+
+### 4.3 Benutzer und Rechte (`admin`, `permissions`, `personen`)
+
+| Route | Wer |
+|---|---|
+| `GET /api/admin/users` | T/P alle; Ausschuss nur Konten der eigenen STWEG; sonst 403 |
+| `POST /api/admin/users` | Recht `bewohner-verwaltung:write`; Nicht-T/P ohne Passwort, Name `vorname.nachname`, nur Bewohner-/Eigentümer-Gruppen der eigenen Ausschuss-STWEG; Kollision (auch Gross/Klein, auch E-Mail) → 409 |
+| `PUT /api/admin/users/:pk` | T/P; Ausschuss nur Konten seiner STWEG, ohne E-Mail, Aktivierung, Gruppen, nie Technik-/Präsident-Konten |
+| `DELETE /api/admin/users/:pk` | nur T/P (sonst 403 „Konten löschen kann nur Technik“) |
+| `GET /api/admin/groups`, `PUT /api/admin/groups/:pk/add_user|remove_user` | Recht `bewohner-verwaltung`; Nicht-T/P nur eigene Bewohner-/Eigentümer-Gruppen; Gruppen-IDs nur als UUID |
+| `GET/PUT /api/admin/pending-deletions…`, `GET /api/admin/mail-chain` | T/P |
+| `GET/PUT /api/permissions`, `GET /api/permissions/pages` | Recht `rechteverwaltung` |
+| `GET /api/personen`, `/api/personen/:id` | Recht `wohnungsverwaltung:read`, nur eigene STWEG(s) |
+| `PUT /api/personen/:id`, `POST /api/personen`, `POST /api/personen/merge`, `GET /api/personen-dedup/kandidaten` | Recht `wohnungsverwaltung:write`; geschützte Personen nur T/P (409) |
+| `GET /api/users` | T/P; `GET /api/users/:id` nur eigene Zeile oder T/P |
+
+### 4.4 STWEG-Verwaltung (`wohnungen`, `zev`, `unterschriftenliste`, `verwaltungen`, `stweg*`)
+
+| Route | Wer |
+|---|---|
+| `GET /api/wohnungen/:stweg`, `…/:id`, `…/stats` | Recht `wohnungsverwaltung:read` + Gruppe dieser STWEG (T/P immer) |
+| `POST/PUT/DELETE /api/wohnungen/:stweg…`, `POST …/import`, `POST …/kontakte/:kid/archive` | Recht `wohnungsverwaltung:write` + `requireStwegWrite` (A🅢, T/P, Verwaltung mit Gruppe der STWEG) → sonst 403 „Schreiben nur für den Ausschuss dieser STWEG“ |
+| `GET /api/wohnungen/:stweg/:id/historie` | T/P, Verwaltung, Ausschuss (mit Zugang zur STWEG) |
+| `GET /api/wohnungen/eigentuemer-uebersicht` | Recht `wohnungsverwaltung:read` |
+| `GET/PUT /api/zev/config/:stweg`, `POST /api/zev/sync/:stweg` | wie Wohnungen (PUT/POST mit `requireStwegWrite`) |
+| `GET /api/zev/unzugeordnet`, `POST /api/zev/rechnung/:id/zuordnen` | Recht `wohnungsverwaltung`; Zuordnen nur A🅢 für unzugeordnete, Umhängen nur T/P (409) |
+| `GET /api/zev/meine-rechnungen`, `…/rechnung/:id/pdf`, `POST …/bezahlt` | angemeldet, eigene |
+| `GET /api/unterschriftenliste/:stweg.pdf` | Recht `wohnungsverwaltung:read` + `requireStwegWrite` |
+| `GET/PUT /api/unterschriftenliste/:hash/rueckläufe…` | lesen mit Zugang zur STWEG, schreiben mit `stwegSchreibErlaubt` |
+| `GET /api/stweg/:nr/kontakte`, `GET /api/kontakte/:stweg` | Gruppe dieser STWEG oder T/P; `PUT /api/kontakte` nur T/P |
+| `GET/POST/PUT/DELETE /api/verwaltungen…` | Ausschuss/T/P; Ausschuss liest eigene + STWEG-übergreifende, ändert nur eigene |
+| `GET /api/verwaltungen/kontakte` | angemeldet, gefiltert nach Sichtbarkeitsstufe und STWEG |
+| `POST /api/stweg-modules`, `/api/stweg-content/:stweg`, `/api/stweg-sections/:stweg/:section` | A🅢 oder T/P; Inhalte nur, wenn das Modul Seiten-Editor aktiv ist |
+| `GET /api/stweg/:stweg/events` | Gruppe dieser STWEG; `POST/DELETE` nur T/P |
+| `GET/POST /api/meg/einstellplaetze` | lesen angemeldet (fremde Plätze ohne Personendaten), schreiben MEG-Ausschuss oder T/P |
+| `/api/grundbuch/*` | angemeldet; Namen/Adressen nur Ausschuss/T/P oder wer erfasst hat; verifizieren Ausschuss/T/P; OCR 30 / Std. |
+| `/api/vollmachten*` | angemeldet: eigene; Ausschuss sieht seine STWEG; T/P/Verwaltung alle und für andere; Admin-Upload für alle Geber nur T/P mit `?als=admin` |
+
+### 4.5 Reparaturen, Waschküche, Zutritt
+
+| Route | Wer |
+|---|---|
+| `POST /api/reklamationen` | angemeldet, 5 / 10 Min. je Person |
+| `GET /api/reklamationen/meine…`, `POST …/:id/meine-archivieren` | angemeldet, eigene |
+| `GET /api/reklamationen`, `PUT /api/reklamationen/:id`, `…/:id/history`, `…/:id/foto`, `…/auto-assign`, `/api/reklamation-orte*` | Recht `reklamationen`; A🅢 sieht seine STWEG und Meldungen ohne STWEG; fremde `:id` → **404** |
+| `GET /api/reklamationen/uebersicht` | angemeldet, eigene STWEG(s) |
+| `/api/wasch/rooms`, `reservations`, `my/*`, `settings` | angemeldet; Räume und Reservationen nur eigener STWEG(s); Serien höchstens 1 Jahr; höchstens 120 offene Reservationen (429) |
+| `/api/wasch/admin/*`, `POST/PUT /api/wasch/rooms`, `PUT /api/wasch/settings` | T/P |
+| `/api/access/me/*` | angemeldet; Türen nach Policy, Öffnen 10 / 10 Min. (429), Protokoll in `access_tueroeffnungen`; NFC-Sitzungen nur der eigenen (10 / 10 Min.) |
+| `/api/access/*` (ohne `me`) | T/P |
+
+### 4.6 Finanzen, Projekte, Handwerker
+
+| Route | Wer |
+|---|---|
+| `GET/POST/PUT/DELETE /api/auslagen…`, Belege, Positionen, `scan-beleg` | Recht `auslagen:read`; sehen: Ersteller, A🅢, T/P (Entwürfe nur Ersteller und T/P); Status ändern A🅢/T/P, keine Selbstgenehmigung; „ausbezahlt“ T/P/Verwaltung bzw. Ersteller („erhalten“); Scan 30 / Std. |
+| `PUT/DELETE /api/auslagen-stundensatz` | Recht `auslagen-stundensatz:write` |
+| `/api/projects…` | lesen und kommentieren: Eigentümer; bearbeiten: Ausschuss (jede STWEG) oder T/P |
+| `/api/handwerker*`, `/api/handwerker-events`, `/api/handwerker-notfall` | Recht `handwerker` |
+| `GET /api/dashboard`, `POST /api/ki-search` (30 / Min.), `GET /api/telefonbuch` | angemeldet, Inhalt nach Rolle gefiltert |
+
+### 4.7 Mail und Dokumente
+
+| Route | Wer |
+|---|---|
+| `POST /api/mail-compose` | Recht `mail-compose:write`, 50 / Std.; immer über die Freigabe-Outbox |
+| `/api/verwaltung-mail-queue*` | T/P; `POST …/:id/freigeben` nach Freigabe-Regel (`mail_approval_config`), schon freigegeben → 409 |
+| `/api/mail-templates`, `/api/mail-approval-config` | T/P |
+| `/api/mail-empfänger` | Recht `mail-empfänger` |
+| `/api/verteiler*`, `POST /api/verteiler/send`, `POST /api/email/send`, `/api/email/log`, `/api/dmarc/reports`, `/api/email/quota` | T/P |
+| `GET /api/email-log` | T/P |
+| `/api/email-archive*` | Ausschuss (jede STWEG) oder T/P; Löschen nach 4-Augen-Prinzip, höchstens ein offener Antrag je Mail |
+| `GET /api/documents`, `GET /api/documents/:path` | angemeldet; `allgemein`, `scans`, eigene STWEG, `projekte` für Eigentümer; gesperrte Unterordner nur T/P |
+| `POST/PUT/DELETE /api/documents…`, `POST /api/documents/move` | Ausschuss (eigene STWEG, `allgemein`, `projekte`) oder T/P |
+| `GET /api/briefe`, `POST /api/briefe/upload` | Ausschuss oder T/P |
+
+### 4.8 Energie
+
+Kurzfassung (Details [`energie-api.md`](energie-api.md)):
+
+| Route | Wer |
+|---|---|
+| `GET /api/energy/{surplus,…,tariffs/current}` | offen |
+| `GET /api/energy/*` (alles andere), `GET /api/energie/meine-zaehler` | angemeldet; nur zugeordnete Zähler; voll für T/P und Recht `energie-config:read` |
+| `/api/energie-admin/*` | Recht `energie-config` (GET read, sonst write); 503 ohne `ENERGY_ADMIN_API_KEY` |
+| `GET /api/zaehler-technik` | Gruppe `technik`, `verwaltung` oder `stweg3-eigentuemer`; volle Sicht nur `isAdmin` oder `energie-config:read` |
+| `/api/zähler/*` | Recht `zähler` (`POST /api/zähler/benutzer` T/P) |
+
+### 4.9 Technik, Netz und Nebendienste
+
+| Bereich | Routen | Wer |
+|---|---|---|
+| ISP | `/api/isp/*` | angemeldet für eigene Einträge (Reverse-Proxy, Weiterleitungen, Mail-Relays, VPN, VLAN-Anträge, Postfächer); Freigaben und Verwaltung T/P (`ispIsAdmin`). Einträge von Nicht-Admins in eigenen Cloudflare-Zonen oder mit Überschneidung werden nie automatisch freigegeben ([`sicherheit.md`](sicherheit.md) 4.7). |
+| NOC | `/api/isp/noc/dashboard`, `/noc/unifi` | T/P (Token-Wandbild siehe `NOC_PUBLIC_TOKEN`) |
+| Proxmox, PVE | `/api/proxmox/*`, `GET/POST/DELETE /api/pve-messages…` | T/P |
+| PBX | `/api/pbx/ring-members`, `config`, `calls`, `trunk-status`, `test-call` | T/P |
+| WhatsApp | `/api/whatsapp/admin/*`, `qr.png`, `qr-status` | T/P |
+| MQTT, Anzeigen | `/api/mqtt/meters…`, `service-users`, `topic-rules`, `publish`, `user-*`; `/api/display/state`, `pdf`, `ankuendigungen`, `announce` | T/P (`requireMqttTechnik`) |
+| MQTT eigen | `POST /api/mqtt/token`, `GET /api/mqtt/my-access`, `/api/mqtt/my-app-passwords` | angemeldet (App-Passwörter nur Browser) |
+| SSH | `/api/ssh/me*` (Browser), `/api/ssh/sitzungen`, `hosts`, `matrix`, `dienste` (GET) | eigene Schlüssel angemeldet; Verwaltung T/P |
+| Stationen | `/api/stations/admin/*` | T/P |
+| TV | `/api/tv/channels`, `stream-url`, `extern/token*` | angemeldet |
+| Push | `/api/push/subscribe`, `unsubscribe`, `test` (5 / 10 Min.) | angemeldet |
+| Alarmpanel | `/api/alarmpanel/sensors`, `events` | lesen angemeldet; Sensoren anlegen, ändern, testen, Webhook ansehen T/P |
+| Doodle | `/api/doodle/*` | Doodle-Sitzung (Code) bzw. Mitglied; Einladungen 50 je Umfrage, 100 / Tag |
+| MCP | `POST /mcp`, `GET /api/mcp/aufrufe` | PAT (siehe [`mcp.md`](mcp.md)); Protokoll T/P |
+| Verbindungen | `/api/connections`, `/api/connections/stats` | T/P |
+
+---
+
+## 5. Fehlercodes
+
+Fehlerantworten sind JSON `{ "error": "<Text>" }`. Der Text ist für Menschen gedacht;
+interne Details (DB-Meldungen, Stacktraces) gehen nur ins Log (`fehlerFuerClient`).
+Unerwartete Fehler in Routen ergeben **500** „Interner Fehler“.
+
+| Code | Wann | Was tun |
+|---|---|---|
+| **400** | Eingabe ungültig (fehlendes Feld, falsches Format, ungültige STWEG-Nummer, ungültige Zähler-ID); falscher oder abgelaufener Einmal-Code; ungültiger OAuth-`state` oder fehlendes Bind-Cookie | Eingabe korrigieren; bei der Anmeldung neu beginnen |
+| **401** | kein `Authorization`-Header; Sitzung abgelaufen; PAT ungültig, abgelaufen oder widerrufen; Konto deaktiviert; Authentik-Token gehört nicht zur gebundenen Benutzerzeile; falsches Dienstgeheimnis bei PBX, WhatsApp, Scanner, eingehender Mail; ungültiges Stations-/App-/Einrichtungs-/Stream-Token | neu anmelden bzw. Token/Geheimnis prüfen. Die Webseiten melden sich nur bei 401 ab. |
+| **403** | angemeldet, aber nicht berechtigt: fehlendes Seitenrecht („Keine Berechtigung“), falsche Rolle („Nur für Technik oder Präsident“, „Nur für Ausschuss/Technik“), fremde STWEG („Schreiben nur für den Ausschuss dieser STWEG“), fremder Zähler; PAT-Scope fehlt oder Pfad für PATs gesperrt; Passwortwechsel ohne frische Anmeldung (`reauth: true`); E-Mail gehört einem anderen Konto; falsches Geheimnis bei Traefik, Tracker, PVE, Alarm, MQTT-Broker, SSH-Host; CORS-Herkunft nicht erlaubt | Rechte bei der Technik anfragen; Passwort: „Jetzt neu anmelden“ im Profil |
+| **404** | Datensatz gibt es nicht **oder** gehört nicht zum eigenen Bereich und soll nicht verraten werden (z. B. fremde Reklamation); unbekannter Pfad unter `/api/energy/` oder `/api/energie-admin/`; OTP-Login abgeschaltet | ID prüfen |
+| **409** | Konflikt: Benutzername oder E-Mail existiert schon (auch in anderer Gross-/Kleinschreibung); E-Mail/Telefon gehört einer anderen Person oder einem Konto; geschützte Person (eigenes Konto oder Wohnungen in anderer STWEG); Hostname/Domain/Redirect bereits vergeben; Mail nicht mehr im Status `pending` oder schon von dieser Person freigegeben; ZEV-Rechnung schon zugeordnet; Grundbuch-Anteil schon reserviert/erfasst | Daten prüfen; geschützte Personen ändert die Person selbst oder die Technik |
+| **413** | Anfragekörper zu gross | Datei verkleinern |
+| **429** | Grenzwert überschritten: Code-Anforderung/-Prüfung (API und nginx `rw_otp`), Passwortwechsel, Türöffnung, NFC, KI-Suche, Beleg-Scan, Grundbuch-OCR, Vollmacht-KI, Personensuche, Echtheitsprüfung, Mail-Composer, Verteiler-Versand, Postfach-Antrag (auch: ein anderer Antrag läuft noch), VPN-Konten, Stations-Tunnel, DNS-Prüfung, Push-Test, Waschküche (120 offene); falsche SSH-Host-Tokens | warten; Werte: [`sicherheit.md`](sicherheit.md) Abschnitt 5 |
+| **500** | unerwarteter Fehler; `CF_DDNS_TOKEN` fehlt | API-Log auf CT 128: `docker compose logs api` |
+| **502** | ein Nachbardienst antwortet nicht oder mit Fehler: Energy-Collector, Mailcow, UniFi Access, MQTT, Authentik-API | Dienst prüfen |
+| **503** | Funktion nicht konfiguriert (fail closed): `PBX_SHARED_SECRET`, `WHATSAPP_SHARED_SECRET`, `PVE_MSG_SECRET`, `SSH_HOST_TOKEN`, `ENERGY_ADMIN_API_KEY`, `WG_CONTROL_TOKEN`, `GOOGLE_CALENDAR_ICS_URL` fehlen, MQTT nicht konfiguriert; `/api/health`, wenn die DB nicht antwortet | Variable in `/opt/rosenweg-core/.env` setzen, API neu starten |
+
+---
+
+## 6. Grenzwerte
+
+Die API zählt Grenzwerte im Arbeitsspeicher (`rateLimitGuard`, je Person bzw. Quelle;
+nach einem Neustart beginnen sie neu) – ausser den Fehlversuchen der Einmal-Codes,
+die in `otp_codes.versuche` stehen. Davor drosselt nginx die Code-Routen (Zone
+`rw_otp`, 10 / Min. je Client-IP, Burst 10, Antwort 429). Vollständige Tabelle:
+[`sicherheit.md`](sicherheit.md) Abschnitt 5.
+
+---
+
+## 7. Umgebungsvariablen
+
+Alle **sicherheitsrelevanten** Variablen (Pflicht-Geheimnisse, Schalter wie
+`OTP_LOGIN_ENABLED`, `NOC_PUBLIC_OPEN`, TLS-Notausgänge) stehen mit ihrer Wirkung in
+[`sicherheit.md`](sicherheit.md) **Abschnitt 6**. Werte nie ins Repo; Geheimnisse
+stehen im Passwortmanager und in `/opt/rosenweg-core/.env`.
+
+Feste, nicht geheime Werte aus `backend-lxc/core/compose.yml`:
+
+| Variable | Wert | Zweck |
+|---|---|---|
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` | `postgres`, `5432`, `rosenweg`, `rosenweg` | Haupt-DB im Compose-Netz |
+| `ENERGY_DB_HOST`, `ENERGY_DB_PORT`, `ENERGY_DB_NAME`, `ENERGY_DB_USER` | `100.64.2.53`, `5432`, `energy`, `energy` | Energie-DB auf CT 129 |
+| `ENERGY_COLLECTOR_URL` | `http://100.64.2.53:3001` | Energy-Collector |
+| `AUTHENTIK_URL` | `http://100.64.2.37:9000` | Authentik intern (Server-zu-Server) |
+| `AUTHENTIK_EXTERNAL_URL` | `https://authentik.rosenweg4303.ch` | Browser-Umleitungen |
+| `SITE_URL` | `https://www.rosenweg4303.ch` | Basis für Links und CORS |
+| `SMTP_HOST`, `SMTP_PORT`, `MAIL_FROM` | `mail-eu.smtp2go.com`, `2525`, `noreply@rosenweg4303.ch` | Mailversand |
+| `PORT` | `3000` | Port der API |
+| `NODE_TLS_REJECT_UNAUTHORIZED` | `0` | **noch gesetzt**, soll ersetzt werden ([`sicherheit.md`](sicherheit.md) 6.2) |
+
+Weitere Einstellungen aus `.env` (Auswahl, ohne Geheimnisse): `DOCS_PATH`
+(Dokumentenablage, Standard `/documents`), `IMAP_HOST` (Standard `imap.gmail.com`),
+`IMAP_POLL_INTERVAL` (Sekunden, Standard 60), `IMAP_MAILBOXES` (Standard
+`INBOX,Junk`), `GOTENBERG_URL`, `GOTENBERG_MAX_CONCURRENT` (Standard 3), `PVE_API_URL`,
+`WG_CONTROL_URL`, `PRINT_API_URL`, `AD_PASSWORD_API_URL`, `MCP_HOST` (Standard
+`mcp.rosenweg4303.ch`), `VERTEILER_DOMAIN`. Geheimnisse wie `AUTHENTIK_CLIENT_SECRET`,
+`AUTHENTIK_API_TOKEN`, `SMTP_PASS`, `IMAP_PASS`, `MAILCOW_API_KEY`, `UNIFI_API_KEY`,
+`CLOUDFLARE_API_TOKEN`, `OPENROUTER_API_KEY` stehen nur in `.env`
+(`<im Passwortmanager>`).
+
+---
+
+## 8. E-Mail-Eingang (IMAP-Polling)
+
+- Die API fragt das Sammelpostfach (`IMAP_USER`) alle `IMAP_POLL_INTERVAL` Sekunden
+  ab, in den Ordnern `IMAP_MAILBOXES` (Standard `INBOX` und `Junk`).
+- Plus-Adressen werden auf Verteiler abgebildet
+  (`…+ausschuss@…` → Verteiler `ausschuss@rosenweg4303.ch`).
+- Sonderfälle: `dmarc@` → DMARC-Ordner, `archiv@` → E-Mail-Archiv (`email_archive`),
+  alles andere → Verteiler-Versand mit Protokoll in `email_log`.
+- Zertifikatsprüfung über `IMAP_SERVERNAME`; Notausgang `IMAP_TLS_INSECURE=1` nur
+  vorübergehend (siehe [`sicherheit.md`](sicherheit.md) 6.2).

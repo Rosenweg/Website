@@ -115,12 +115,20 @@ Oder:
 | Script läuft nicht | Kein Internet, oder Cert-Fehler | `Settings → System → Time & Region` prüfen, NTP muss sync sein für TLS |
 | Werte aktualisieren nicht | Component-ID stimmt nicht | im Component-View die echte ID lesen + im Skript anpassen |
 | `Shelly.call HTTP.GET error` | Falsche URL oder DNS | im Browser direkt aufrufen ob Endpoint antwortet |
-| Werte = 0 obwohl Solar läuft | Energy-Collector liefert noch keine Daten | `/api/energy/shelly` direkt testen |
+| Werte = 0 obwohl Solar läuft | Hauptzähler und SmartFox haben seit über zwei Minuten keinen Wert geliefert – die API meldet dann absichtlich 0 (sichere Richtung) | `/api/energy/shelly` im Browser aufrufen; bleiben alle Werte 0, Technik informieren (Collector-Log prüfen) |
+| `HTTP 401` | Falsche Route eingetragen (z. B. `/api/energy/live`), die seit 17.11.2026 eine Anmeldung braucht | nur `/api/energy/shelly`, `/surplus` oder `/surplus-available` verwenden |
 
 ## Sicherheit
 
 Der API-Endpoint ist read-only und liefert nur die aggregierten Überschuss-Werte —
-keine Einzel-Daten, keine Personenbezug. Kein Auth-Token nötig.
+keine Einzel-Daten, keinen Personenbezug. Kein Auth-Token nötig.
+
+Seit der Sicherheitsprüfung vom 17.11.2026 sind nur noch wenige Energie-Routen offen
+(`shelly`, `surplus`, `surplus-available`, `lametric`, `solar-live`, `tariffs`,
+`tariffs/current`). Verbrauchsdaten einzelner Wohnungen, Zählerlisten und Verläufe
+brauchen eine Anmeldung; die frühere Liste `consumers` (Leistung je Wohnung) ist aus
+den offenen Antworten entfernt. Dieses Skript ist davon nicht betroffen. Details:
+[`docs/energie-api.md`](../docs/energie-api.md).
 
 ## Variante B (Standalone-Emulator)
 

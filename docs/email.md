@@ -1,70 +1,121 @@
 # Email-System — Rosenweg
 
-## Übersicht
+Stand: 17.11.2026. Sicherheitsregeln (Mail-Composer, Druck per Mail,
+WhatsApp-Gateway) im Überblick: [`sicherheit.md`](sicherheit.md) Abschnitt 4.8.
+
+> **Bis Sommer 2026** lief der Mail-Eingang über Cloudflare Email Routing → Gmail
+> (`rosenweg4303@gmail.com`) → IMAP-Abruf der API, der Ausgang über SMTP2GO.
+> Heute sind **Mailcow** und **Proxmox Mail Gateway (PMG)** der Mailserver. Das
+> Gmail-Konto und sein App-Passwort gelten als kompromittiert und sind zu
+> ändern (`sicherheit.md` Abschnitt 7.1, Punkt 2), auch wenn das Konto nicht
+> mehr gebraucht wird.
+
+## Bestandteile
+
+| Teil | Wo | Aufgabe |
+|---|---|---|
+| Mailcow | CT 240 `mailcow`, `100.64.2.33` | Postfächer, Verteiler-Aliase (Mailcow verteilt selbst an die Mitglieder + `archiv@`), SOGo, IMAP |
+| PMG | CT 230 `pmg`, `100.64.2.31`, pve3 | Filter und Relay. Ausgehend primär über den eigenen VPS (`smtp-relay.rosenweg4303.ch`), Ausweichziel SMTP2GO; interne Ziele (z. B. WhatsApp-Gateway) über den Transport `intern` ohne Ausweichziel. Details: [`../pmg/README.md`](../pmg/README.md) |
+| API (IMAP-Abruf) | CT 128 | holt Mails aus Mailcow-Postfächern (unten) |
+| API (Versand) | CT 128 | `SMTP_HOST`/`SMTP_PORT` aus `backend-lxc/core/compose.yml` (heute `mail-eu.smtp2go.com:2525`), Absender `MAIL_FROM=noreply@rosenweg4303.ch`; ZEV-Mails über Mailcow (Port 587) |
+| WhatsApp-Gateway | CT 116, `100.64.2.39:2525` | Mail → WhatsApp für `*@whatsapp.rosenweg4303.ch`, nur über PMG (siehe [`../whatsapp-bot/README.md`](../whatsapp-bot/README.md)) |
+| Druck-API | CT 111 `cups-server`, `100.64.2.32:8080` | druckt PDFs auf `DruckerR9`/`DruckerR13` |
+
+## IMAP-Abruf der API
+
+Die API (CT 128) fragt alle `IMAP_POLL_INTERVAL` Sekunden (Standard 60) ab:
+
+| Postfach | Variablen | Wofür |
+|---|---|---|
+| Eingangspostfach `inbox@` | `IMAP_HOST`, `IMAP_PORT` (993), `IMAP_USER`, `IMAP_PASS`, `IMAP_MAILBOXES` (Standard `INBOX,Junk`) | Verteiler-Erkennung, Druck per Mail |
+| `archiv@` | `ARCHIV_IMAP_USER`, `ARCHIV_IMAP_PASS` | E-Mail-Archiv (`email-archiv.html`) |
+| `dmarc@` | `DMARC_IMAP_USER`, `DMARC_IMAP_PASS` | DMARC-Berichte (`/api/dmarc/reports`) |
+| `smartme@rosenweg9.ch` | `SMARTME_IMAP_USER`, `SMARTME_IMAP_PASS` | ZEV-Rechnungen |
+
+Ohne `IMAP_USER`/`IMAP_PASS` findet kein Abruf statt. Die Passwörter stehen nur
+in `/opt/rosenweg-core/.env`.
+
+**TLS:** Zertifikate werden geprüft. Weil die API Mailcow per IP anspricht,
+muss `IMAP_SERVERNAME` (bzw. `ZEV_IMAP_SERVERNAME`) auf einen Namen im
+Zertifikat gesetzt sein. Notausgang bei kaputtem Zertifikat, nur vorübergehend:
+`IMAP_TLS_INSECURE=1`, `ZEV_IMAP_TLS_INSECURE=1`, `DMARC_IMAP_TLS_INSECURE=1`.
+
+**Verteiler-Erkennung:** Massgeblich sind `X-Original-To`/`Delivered-To` (der
+Empfänger nach Alias-Auflösung in Mailcow, mit `+tag`), ergänzend `To`/`Cc`/`Bcc`.
+`inbox@` selbst ist nie ein Ziel. Mit `VERTEILER_NATIVE_FANOUT` (Standard an)
+verteilt Mailcow selbst; die API versendet Verteiler-Mails **nicht** nochmals.
+
+## Druck per Mail (`druckerr9@`, `druckerr13@`)
+
+Mails an `druckerr9@rosenweg4303.ch` bzw. `druckerr13@…` werden auf
+`DruckerR9` bzw. `DruckerR13` gedruckt; mit `+name` (z. B.
+`druckerr9+vorname.nachname@…`) bekommt der Ausdruck ein Deckblatt für diese
+Person samt QR-Code zur Abholbestätigung (`abholung.html`).
+
+Ablauf in der API, Schritt für Schritt. Jede Ablehnung markiert die Mail als
+gelesen und schreibt eine Zeile ins API-Log (`docker compose logs api | grep Print`):
+
+1. **Druck-API konfiguriert?** Ohne `PRINT_API_SECRET` wird nichts gedruckt
+   (`[Print] PRINT_API_SECRET fehlt — …`). Ziel: `PRINT_API_URL`
+   (Standard `http://100.64.2.32:8080`).
+2. **Absender bestimmen:** Die Adresse wird aus `<…>` im `From`-Kopf genommen,
+   **nicht** aus dem Anzeigenamen (`"chef@rosenweg4303.ch" <x@fremd.example>`
+   gilt als `x@fremd.example`). `+tag` wird entfernt.
+3. **Spam:** Mails aus dem Ordner `Junk`/`Spam`, mit `dmarc=fail` in einem
+   `Authentication-Results`-Kopf oder mit `X-Spam-Flag: YES` / `X-Spam: Yes`
+   werden nie gedruckt (`[Print] Rejected (spam=… authFehler=…)`).
+4. **Externe Absender** (nicht `@rosenweg4303.ch`) nur mit **positivem
+   DMARC-Befund des eigenen Mailservers**. Alle Bedingungen müssen erfüllt sein:
+   - Der **oberste** `Authentication-Results`-Kopf zählt (tiefere kann der
+     Absender selbst mitschicken).
+   - Seine authserv-id (erstes Wort nach `Authentication-Results:`) ist gleich
+     `PRINT_AR_AUTHSERV_ID` (ohne Gross/Klein).
+   - Er enthält `dmarc=pass` mit `header.from=` = Domain der Absenderadresse.
+   - Im `From`-Kopf steht genau eine Adresse.
+
+   Fehlt `PRINT_AR_AUTHSERV_ID`, wird **keine** Mail eines externen Absenders
+   gedruckt (`[Print] PRINT_AR_AUTHSERV_ID fehlt — …`). Sonst:
+   `[Print] Rejected (kein dmarc=pass) from=…`.
+5. **Systemmails** (`noreply@`, `mailer-daemon@`, `Auto-Submitted:
+   auto-generated|auto-replied`, `X-Rosenweg-No-Print: true`) werden übersprungen.
+6. **Berechtigung:** eigene Domäne, `EMAIL_ALLOWLIST`, ein Benutzer in der
+   Datenbank oder ein Authentik-Konto mit genau dieser Adresse. Sonst
+   `[Print] Rejected: <adresse> not whitelisted for <drucker>`.
+7. Doppelte Aufträge (gleiche Message-ID) werden übersprungen; dann Deckblatt
+   (Gotenberg) und Anhänge an die Druck-API.
+
+**`PRINT_AR_AUTHSERV_ID` richtig setzen (offener Punkt):** An einer echten, von
+aussen eingegangenen Mail im Postfach `inbox@` den **obersten**
+`Authentication-Results`-Kopf ansehen (Mailcow/SOGo: „Quelltext anzeigen“), das
+erste Wort danach ist die authserv-id, z. B.
 
 ```
-Absender
-    │
-    ▼
-Cloudflare Email Routing (MX)
-    │
-    ▼
-Gmail (rosenweg4303@gmail.com)
-    │
-    ▼ IMAP Polling (alle 60s)
-API Server
-    ├── Verteiler-Mails → DB + Weiterleitung via SMTP2GO
-    ├── DMARC Reports → Gmail DMARC-Ordner
-    └── Archiv-Mails → DB + Gmail Archiv-Ordner
+Authentication-Results: <authserv-id>; dkim=pass header.d=… ; spf=pass … ; dmarc=pass (p=…) header.from=example.ch
 ```
 
-## Inbound
+Den Wert in `/opt/rosenweg-core/.env` als `PRINT_AR_AUTHSERV_ID=<authserv-id>`
+eintragen, API neu starten, dann von einer externen Adresse mit DMARC-Eintrag
+einen Testdruck an `druckerr9+test@…` senden und im Log auf `[Print]` achten.
+Solange der Wert fehlt oder falsch ist, drucken nur Absender aus
+`@rosenweg4303.ch`.
 
-### Cloudflare Email Routing
-- **MX Records**: `route1/2/3.mx.cloudflare.net`
-- **Catch-All**: Weiterleitung an `rosenweg4303@gmail.com`
-- Cloudflare empfängt alle Mails an `*@rosenweg4303.ch`
+## Ausgang (SMTP2GO)
 
-### Gmail
-- **Konto**: `rosenweg4303@gmail.com`
-- **App-Passwort**: `<im Passwortmanager>`
-- **IMAP**: `imap.gmail.com:993` (TLS)
+- **Host**: `mail-eu.smtp2go.com`, **Port** 2525 (STARTTLS)
+- **Benutzer**: `rk-website` (`SMTP_USER`)
+- **Passwort**, **API-Key**: `<im Passwortmanager>` (in `.env` als `SMTP_PASS`
+  bzw. `SMTP2GO_API_KEY`); beide gelten als kompromittiert und sind zu ändern
+  (`sicherheit.md` Abschnitt 7.1, Punkt 3).
+- **Absender**: `noreply@rosenweg4303.ch`
+- Am 17.11.2026 schlug der Versand zeitweise mit SMTP 535 fehl (Anmeldung
+  abgelehnt, Ursache ausserhalb des Codes).
 
-### IMAP-Polling (API Server)
-Der API Server pollt Gmail alle 60 Sekunden und verarbeitet:
+Verwendung: Verteiler-Weiterleitung, Authentik-Benachrichtigungen,
+Systemmails. Der Mail-Composer der Website sendet **immer über die
+Freigabe-Outbox**; direkt nur an einen Stammempfänger mit „ohne Freigabe“, wenn
+alle Adressen unverändert sind (50 Mails pro Stunde).
 
-1. **Verteiler-Mails**: Erkennung via Plus-Tag (`rosenweg4303+ausschuss@gmail.com` → `ausschuss@rosenweg4303.ch`) oder `To:`-Header
-2. **DMARC-Reports**: `dmarc@rosenweg4303.ch` → In Gmail DMARC-Ordner verschieben
-3. **Archiv-Mails**: `archiv@rosenweg4303.ch` → In DB speichern + Gmail Archiv-Ordner
-
-### Gmail-Ordner
-| Ordner | Inhalt |
-|--------|--------|
-| INBOX | Unverarbeitete Mails |
-| DMARC | DMARC-Reports (107+ Mails) |
-| Archiv | Archivierte Mails |
-| Verteiler/ausschuss | Ausschuss-Mails |
-| Verteiler/technik | Technik-Mails |
-| Verteiler/praesident | Präsident-Mails |
-| Verteiler/_unbekannt | Unbekannte Verteiler |
-| Verteiler/_sonstige | Sonstige |
-
-## Outbound
-
-### SMTP2GO
-- **Host**: `mail-eu.smtp2go.com`
-- **Port**: 2525 (STARTTLS)
-- **User**: `rk-website`
-- **Passwort**: `<im Passwortmanager>`
-- **From**: `noreply@rosenweg4303.ch`
-- **API Key**: `<im Passwortmanager>`
-
-### Verwendung
-- Verteiler-Weiterleitung (API)
-- Authentik Benachrichtigungen (Passwort-Reset, etc.)
-- System-Mails (Registrierung, etc.)
-
-## DNS Records
+## DNS-Einträge (Stand der früheren Doku, nicht nachgemessen)
 
 | Record | Wert | Beschreibung |
 |--------|------|-------------|
@@ -73,15 +124,17 @@ Der API Server pollt Gmail alle 60 Sekunden und verarbeitet:
 | DKIM (CF) | `cf2024-1._domainkey` | Cloudflare DKIM |
 | DKIM (SMTP2GO) | `s1102430._domainkey → dkim.smtp2go.net` | SMTP2GO DKIM |
 | DKIM (Legacy) | `dkim._domainkey` | Alter DKIM Key |
-| Return Path | `em1102430 → return.smtp2go.net` | SMTP2GO Bounce-Handling |
+| Return Path | `em1102430 → return.smtp2go.net` | SMTP2GO Bounce-Handling (Absender-Subdomain, siehe `whatsapp-bot/lxc/gateway-data.md`) |
 | Tracking | `link → track.smtp2go.net` | SMTP2GO Link-Tracking |
+
+Mit dem Wechsel auf Mailcow/PMG/VPS-Relay müssen SPF und DKIM die neuen
+Absender enthalten; gegen die aktuelle Zone prüfen.
 
 ## DMARC-Reports
 
-- **107+ Reports** von Google und Microsoft
-- Werden automatisch in Gmail DMARC-Ordner verschoben
-- Abruf via `/api/dmarc/reports` (Admin)
-- Parsing: ZIP/GZ Attachments → XML → strukturierte Daten
+- Gehen an `dmarc@rosenweg4303.ch` (eigenes Mailcow-Postfach).
+- Abruf über `/api/dmarc/reports` (Admin), Anzeige in `dmarc.html`.
+- Parsing: ZIP/GZ-Anhänge → XML → strukturierte Daten.
 
 ## Verteiler-Adressen
 
@@ -92,10 +145,9 @@ Der API Server pollt Gmail alle 60 Sekunden und verarbeitet:
 | praesident@rosenweg4303.ch | Präsident |
 | dmarc@rosenweg4303.ch | DMARC-Reports (automatisch) |
 | archiv@rosenweg4303.ch | Email-Archiv (automatisch) |
+| druckerr9@, druckerr13@ | Druck per Mail (siehe oben) |
 
-## Geplant: Proxmox Mail Gateway + Mailcow
-
-Siehe [plans/proxmox-mail-gateway.md](plans/proxmox-mail-gateway.md)
+Pflege der Verteiler: `email-verteiler.html`.
 
 ## Von aussen ins Postfach — welche Namen funktionieren
 

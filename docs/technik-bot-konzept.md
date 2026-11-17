@@ -1,6 +1,55 @@
 # Konzept: Technik-Assistent-Bot
 
-> Stand 2026-06-27 · Status: Konzept (vor Bau) · Scope: **NUR Reklamationen** — Eingang via **App/Web-Formular · E-Mail (technik@) · WhatsApp** + selbsttätige Lifecycle-Verwaltung · Autonomie: **klare Fälle selbst, Rest vorschlagen**
+> Stand 2026-06-27 · Status: Konzept, Resolver gebaut (Ist-Stand siehe §0, 17.11.2026) · Scope: **NUR Reklamationen** — Eingang via **App/Web-Formular · E-Mail (technik@) · WhatsApp** + selbsttätige Lifecycle-Verwaltung · Autonomie: **klare Fälle selbst, Rest vorschlagen**
+
+## 0. Ist-Stand (17.11.2026)
+
+Dieses Dokument ist das Konzept vom Juni. Gebaut ist bisher nur der **Resolver aus
+§5c**, und zwar anders als in §6 geplant: Er setzt Reklamationen **selbsttätig** auf
+„erledigt“, nicht nur als Vorschlag.
+
+| Teil | Stand |
+|---|---|
+| Resolver „erledigt aus dem Technik-Chat“ | gebaut: `technikBotResolve()` in `api/server.js` |
+| Tageslauf über offene Reklamationen | gebaut: täglich ab 06:30 (Europe/Zurich), Prüfung alle 15 Min, ob er heute schon lief |
+| Endpoint | `POST /api/technik-bot/resolve/:id` (`?apply=1` oder `{apply:true}`), Anmeldung per Kopfzeile `X-Wa-Secret` (`WHATSAPP_SHARED_SECRET`), nicht als Query |
+| Modell | OpenRouter `anthropic/claude-haiku-4.5`, `temperature 0.1`; ohne `OPENROUTER_API_KEY` läuft nichts |
+| E-Mail-Intake, WhatsApp-Freitext, Digest, Nachfassen, Audit-Tabelle `technik_bot_actions`, Kill-Switch, „↩ rückgängig“ | **nicht gebaut** |
+
+So arbeitet der Resolver heute:
+
+1. Für jede offene oder weitergeleitete, nicht archivierte Reklamation liest er die
+   eingehenden Nachrichten der Technik-WhatsApp-Gruppe ab dem Meldedatum (höchstens
+   21 Tage zurück).
+2. Die Beschreibung der Meldung stammt vom Melder (auch von anonymen Meldungen über
+   den E-Mail-Code) und geht als markierter Datenblock `<beschreibung>…</beschreibung>`
+   an das Modell, mit der Anweisung, darin enthaltene Anweisungen zu ignorieren.
+3. Das Modell liefert JSON (`erledigt`, `confidence`, `arbeitsschritt`,
+   `ausgefuehrt_von`, `zeitpunkt_iso`, `evidence`, `melder_nachricht`).
+4. Angewendet wird nur, wenn **alle** Bedingungen erfüllt sind:
+   - `erledigt = true` und `confidence ≥ 0.8`,
+   - das Beleg-Zitat (`evidence`, mindestens 8 Zeichen) steht **wörtlich im
+     Technik-Chat** und **nicht** in der Beschreibung (Schutz gegen Anweisungen, die
+     jemand in eine Meldung schreibt); sonst Ergebnis „Beleg nicht im Technik-Chat
+     gefunden“.
+5. **Wer** und **wann** kommen aus der Chatzeile mit dem Beleg, nicht aus der
+   Modellantwort. Der namentliche Arbeitsschritt wird nur übernommen, wenn genau eine
+   Person die Zeile schrieb und sie die Reklamation mit `#<id>` nennt; sonst bleibt er
+   weg („Arbeitsschritt nicht uebernommen: Beleg-Chatzeile nennt #… nicht eindeutig“).
+   Zeitpunkte in der Zukunft werden verworfen.
+6. Verlauf: ggf. „🔧 <Arbeitsschritt>“ (Person, Chat-Zeit) und „🤖 Aus Technik-Chat
+   erkannt (conf …): "…"“. Danach Status **erledigt** über denselben Weg wie ein
+   Mensch (`updateReklamation`): Melder bekommt E-Mail/WhatsApp/Push, für die
+   zugewiesene Person entsteht ein Auslagen-Entwurf. Die `melder_nachricht` des
+   Modells wird **nicht** verschickt.
+7. Bereits erledigte oder abgewiesene Meldungen überspringt er; der Lauf ist damit
+   wiederholbar ohne Doppel-Benachrichtigung.
+
+Wer eine automatische Erledigung rückgängig machen will, setzt den Status in
+`reklamationen.html` zurück auf „offen“ (der Melder bekommt dann eine Nachricht
+„wieder geoeffnet“).
+
+Die übrigen Abschnitte unten beschreiben weiterhin den geplanten Ausbau.
 
 ## 1. Ziel & Scope
 

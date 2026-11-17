@@ -19,20 +19,35 @@ Die STWEG-Kooperation Rosenweg besteht aus 8 Stockwerkeigentümergemeinschaften 
 | Frontend | HTML, Tailwind CSS, Vanilla JavaScript |
 | Backend | Node.js API (api/server.js) |
 | Auth | Authentik SSO |
-| Hosting | Docker Swarm (3 Nodes, Traefik + Cloudflare) |
-| E-Mail Versand | SMTP2GO |
-| E-Mail Empfang | Cloudflare Forward → Gmail → IMAP Poll |
-| Datenbank | PostgreSQL |
+| Hosting | Proxmox-Cluster (pve1–3), ein LXC je Dienst; Frontends mit nginx, API in Docker Compose (CT 128) |
+| Reverse-Proxy | Traefik am Rand (CT 245), DNS bei Cloudflare |
+| E-Mail | Mailcow (CT 240) + Proxmox Mail Gateway (CT 230); API-Versand über SMTP2GO |
+| Datenbank | PostgreSQL (CT 128, Energie in CT 129) |
 
 ## Hauptfunktionen
 
 - **Bewohnerverwaltung** - Authentik-Benutzer verwalten, Gruppen/Rechte zuweisen
-- **E-Mail-Verteilerlisten** - Cloudflare → Gmail → IMAP → SMTP2GO Verteiler
+- **E-Mail-Verteilerlisten** - Mailcow-Aliase, Freigabe-Outbox, Archiv
 - **Waschküchen-Reservierung** - Online-Buchung mit Türschloss-Integration
 - **Energie-Monitor** - Solartarif/Netztarif Tracking
 - **IT & Netzwerk** - UniFi Dashboard
 - **Entsorgungskalender** - REWAG Entsorgungstermine
 - **Türschilder** - Druckbare A4-Schilder mit QR-Codes
+
+## Betrieb und Sicherheit
+
+- [Infrastruktur](infrastruktur.md) — wo welcher Dienst läuft, Einstieg für Techniker
+- [Sicherheit](sicherheit.md) — Vorfälle, Schutzregeln, Grenzwerte, Variablen, offene Punkte
+- [SSH-Zugang](ssh-zugang.md) — Schlüssel aus dem Profil, Konten, sudo
+
+## Anleitungen
+
+- [Bedienanleitung Ausschuss und Verwaltung](anleitung-ausschuss.md)
+- [Bedienanleitung Technik und Präsident](anleitung-technik.md)
+- [Objektverwaltung – Felder und Knöpfe](verwaltung-anleitung.md)
+- [Berechtigungen (Rechte-Matrix)](../wiki/berechtigungen.md)
+- [API-Übersicht](api.md) · [Energie-API](energie-api.md) · [MCP](mcp.md) · [Datenbank](datenbank.md)
+- Für Bewohner: Hilfe-Seite im Portal (`/hilfe.html`)
 
 ## Kontakt
 
