@@ -3,7 +3,7 @@ services:
     image: postgres:17-alpine
     environment:
       POSTGRES_USER: energy
-      POSTGRES_PASSWORD: ${ENERGY_DB_PASSWORD:-energy2026}
+      POSTGRES_PASSWORD: ${ENERGY_DB_PASSWORD:?ENERGY_DB_PASSWORD fehlt (kein Standardpasswort mehr)}
       POSTGRES_DB: energy
     ports: ["5432:5432"]
     volumes: [energydata:/var/lib/postgresql/data]
@@ -23,7 +23,7 @@ services:
       DB_PORT: "5432"
       DB_NAME: energy
       DB_USER: energy
-      DB_PASSWORD: ${ENERGY_DB_PASSWORD:-energy2026}
+      DB_PASSWORD: ${ENERGY_DB_PASSWORD:?ENERGY_DB_PASSWORD fehlt (kein Standardpasswort mehr)}
       MQTT_URL: "mqtt://100.64.2.51:1883"
       MQTT_USER: collector
       MQTT_PASS: ${MQTT_ENERGY_PASS}
@@ -37,6 +37,10 @@ services:
       METER_NETWORKS: "100.64.90.0/24"
       MODBUS_ALLOWED_PORTS: "502"
       FORBIDDEN_HOSTS: "100.64.2.53,100.64.2.52"
+      # Personenbezogene Lese-Routen nur fuer die Haupt-API (D-1). Erst setzen, wenn
+      # die nginx-Frontends /api/energy/ ueber die Haupt-API leiten, dann in .env:
+      # ENERGY_INTERN_LESER=100.64.2.52   (leer = wie bisher offen)
+      INTERN_LESER: "${ENERGY_INTERN_LESER:-}"
     ports: ["3001:3001"]
     depends_on:
       energy-db: {condition: service_healthy}

@@ -43,8 +43,11 @@ function verifyToken(token) {
   try {
     const [payload, sig] = String(token).split('.');
     if (!payload || !sig) return false;
+    // Laenge (16 Hex = 64 Bit) ist durch die Haupt-API vorgegeben (api/server.js
+    // erzeugt den Token) -> nur gemeinsam verlaengern. Vergleich zeitkonstant (D-11).
     const expected = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex').slice(0, 16);
-    if (sig !== expected) return false;
+    if (typeof sig !== 'string' || sig.length !== expected.length
+        || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return false;
     const obj = JSON.parse(Buffer.from(payload, 'base64url').toString());
     if (!obj.exp || obj.exp < Math.floor(Date.now() / 1000)) return false;
     return obj;
@@ -278,7 +281,11 @@ function sendJson(res, status, body) {
 }
 
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
+  // Feste Basis statt Host-Header: ein ungueltiger Host liess new URL werfen
+  // und brachte den ganzen Prozess zum Absturz (D-11).
+  let url;
+  try { url = new URL(req.url, 'http://localhost'); }
+  catch { res.writeHead(400); res.end(); return; }
   if (req.method === 'OPTIONS') {
     res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' });
     res.end();
