@@ -156,6 +156,8 @@
                         <span class="k muted">· Hochtarif (T1)</span><span class="v">${fmt(l.energy_export_t1_kwh, 1)} kWh</span>
                         <span class="k muted">· Niedertarif (T2)</span><span class="v">${fmt(l.energy_export_t2_kwh, 1)} kWh</span>
                     </div></div>`;
+            } else if (m.live_verborgen) {
+                body += `<div class="sect"><span class="muted">Live-Werte nur für eigene Zähler und Netz/Produktion.</span></div>`;
             } else {
                 body += `<div class="sect"><span class="muted">Keine Live-Daten — Zähler nicht erreichbar.</span></div>`;
             }
