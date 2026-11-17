@@ -1529,7 +1529,7 @@ app.put('/api/me/emails', authMiddleware, async (req, res) => {
   if (!email) return res.status(400).json({ error: 'Keine E-Mail' });
   const raw = Array.isArray(req.body?.emails) ? req.body.emails : [];
   // Validierung: nur korrekt aussehende Emails behalten
-  const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const emailRe = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/;
   const cleaned = [];
   for (const e of raw.slice(0, 10)) {
     const s = String(e || '').trim().toLowerCase();
@@ -4233,7 +4233,7 @@ app.post('/api/verteiler/send', authMiddleware, adminOnly, async (req, res) => {
   }
 
   // Validate all recipients are valid email addresses
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const emailRegex = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/;
   const validRecipients = recipients.filter(r => typeof r === 'string' && emailRegex.test(r));
   if (validRecipients.length === 0) {
     return res.status(400).json({ error: 'Keine gültigen E-Mail-Adressen im Verteiler' });
@@ -19654,7 +19654,7 @@ app.get('/api/reklamationen/:id/foto', authMiddleware, requirePermission('reklam
 // Schritt 1: Code anfordern (autorisiert gegen personen/users, Anti-Spam).
 app.post('/api/reklamationen/code', async (req, res) => {
   const email = normEmail(req.body?.email);
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Gültige E-Mail erforderlich' });
+  if (!/^[^@\s]+@[^@\s.]+(?:\.[^@\s.]+)+$/.test(email)) return res.status(400).json({ error: 'Gültige E-Mail erforderlich' });
   // Globales Limit vor der Antwort; Limit je Adresse erst nach der Personen-Pruefung (S4-2-1).
   if (!rateLimitGuard('otp-global', 'reklamation', 100, 10 * 60 * 1000).ok) return res.status(429).json({ error: 'Zu viele Anfragen. Bitte später erneut.' });
   // Immer dieselbe Antwort, und SOFORT: Pruefung, Code und Mail laufen danach im
@@ -22071,7 +22071,7 @@ function normalizeMitnutzerEmails(input, antragstellerEmail) {
   for (const raw of arr) {
     const e = String(raw || '').toLowerCase().trim();
     if (!e || e === ant) continue;
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) continue;
+    if (!/^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/.test(e)) continue;
     out.add(e);
   }
   return Array.from(out);

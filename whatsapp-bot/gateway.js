@@ -535,7 +535,7 @@ function startGateway(botCore) {
   app.post('/gateway/ui/smtp-senders', jsonBody, uiAuth, (req, res) => {
     let addr = String(req.body?.addr || '').trim().toLowerCase();
     // erlaubt: 'foo@bar.ch' | '@bar.ch' | 'bar.ch'
-    const ok = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr) || /^@?[^@\s]+\.[^@\s]+$/.test(addr);
+    const ok = /^[^@\s]+@[^@\s.]+(?:\.[^@\s.]+)+$/.test(addr) || /^@?[^@\s]+\.[^@\s]+$/.test(addr);
     if (!ok) return res.status(400).json({ error: 'Adresse (foo@bar.ch), @domain oder domain erforderlich' });
     q.senderAdd.run(addr, req.body?.note || null, req.uiUser.email, nowIso());
     res.json({ ok: true });
@@ -553,7 +553,7 @@ function startGateway(botCore) {
     const email = String(req.body?.email || '').trim().toLowerCase();
     if (!['group', 'number', 'jid'].includes(kind)) return res.status(400).json({ error: 'kind: group|number|jid' });
     if (!match_key) return res.status(400).json({ error: 'Quelle (Gruppenname/Nummer/JID) erforderlich' });
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Gueltige E-Mail-Adresse erforderlich' });
+    if (!/^[^@\s]+@[^@\s.]+(?:\.[^@\s.]+)+$/.test(email)) return res.status(400).json({ error: 'Gueltige E-Mail-Adresse erforderlich' });
     match_key = kind === 'number' ? match_key.replace(/\D/g, '') : match_key.toLowerCase();
     q.fwdAdd.run(match_key, kind, email, req.body?.note || null, req.uiUser.email, nowIso());
     res.json({ ok: true });
