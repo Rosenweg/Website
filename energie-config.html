@@ -610,10 +610,10 @@
 
         for (const meter of meters) {
             const [usersRes, groupsRes] = await Promise.all([
-                fetch(`${API}/meters/${meter.id}/users`),
+                AuthentikAuth.apiFetch(`${ADMIN_API}/meters/${encodeURIComponent(meter.id)}/users`),
                 fetch(`${API}/meters/${meter.id}/groups`)
             ]);
-            const users = await usersRes.json();
+            const users = usersRes.ok ? await usersRes.json() : [];
             const groups = await groupsRes.json();
             const hasAssignments = users.length > 0 || groups.length > 0;
             html += `

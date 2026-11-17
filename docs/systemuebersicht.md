@@ -66,7 +66,7 @@
 | Ueberschuss-Daten (Echtzeit) | Implementiert | `/api/energy/surplus` |
 | LaMetric-Integration | Implementiert | `/api/energy/lametric` |
 | Shelly-Steuerung (Surplus-basiert) | Implementiert | `scripts/shelly-surplus-switch.js` |
-| Zaehler-Benutzer-Mapping | Implementiert | `/api/energy/meters/:id/users` |
+| Zaehler-Benutzer-Mapping | Implementiert | `/api/energie-admin/meters/:id/users` (Login, energie-config); eigene Zaehler: `/api/energie/meine-zaehler` |
 | Export (CSV) | Implementiert | `/api/energy/export/:meterId` |
 | Vergleich & Projektion | Implementiert | `/api/energy/compare`, `/api/energy/projection` |
 
