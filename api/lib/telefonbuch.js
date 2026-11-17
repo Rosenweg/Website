@@ -15,7 +15,7 @@
 // ein Gerät, an dem sich der Reihe nach mehrere Leute anmelden. Wer sie im
 // Alltag braucht — Ausschuss und Verwaltung — bekommt sie.
 const { pool } = require('./db');
-const { isTechnik, isPraesident, isAusschussForAny, getUserStwegs } = require('./groups');
+const { isTechnik, isPraesident, isAusschussForAny, getUserStwegs, getAusschussStwegs } = require('./groups');
 
 function eintrag(kategorie, name, nummer, zusatz) {
   const sauber = String(nummer || '').replace(/[^\d+]/g, '');
@@ -83,7 +83,12 @@ async function telefonbuch(groups) {
   }
 
   // --- Bewohner und Eigentümer --------------------------------------------
-  if (darfBewohnerSehen(groups || [])) {
+  // Nur die STWEG, in denen die Person Ausschuss ist (Verwaltung: ihre
+  // STWEG-Gruppen). Vorher genuegte Ausschuss irgendwo, und man sah die
+  // Privatnummern jeder STWEG, in der man bloss wohnt.
+  const verwaltungsGruppe = (groups || []).some((g) => ['verwaltung', 'wohnungsverwaltung', 'bewohner-verwaltung'].includes(String(g).toLowerCase()));
+  const bewohnerStwegs = [...new Set([...getAusschussStwegs(groups || []), ...(verwaltungsGruppe ? stwegs : [])])];
+  if (darfBewohnerSehen(groups || []) && (alleStwegs || bewohnerStwegs.length)) {
     const w = await pool.query(
       alleStwegs
         ? `SELECT bezeichnung, stweg, eigentuemer_name, eigentuemer_telefon,
@@ -91,7 +96,7 @@ async function telefonbuch(groups) {
         : `SELECT bezeichnung, stweg, eigentuemer_name, eigentuemer_telefon,
                   mieter_name, mieter_telefon FROM wohnungen
             WHERE deleted_at IS NULL AND stweg = ANY($1)`,
-      alleStwegs ? [] : [stwegs]);
+      alleStwegs ? [] : [bewohnerStwegs]);
     for (const r of w.rows) {
       const ort = [r.bezeichnung, `STWEG ${r.stweg}`].filter(Boolean).join(' · ');
       dazu('Eigentümer', r.eigentuemer_name, r.eigentuemer_telefon, ort);
@@ -106,7 +111,7 @@ async function telefonbuch(groups) {
         : `SELECT k.name, k.telefon, k.mobile, k.rolle, w.bezeichnung, w.stweg
              FROM wohnungen_kontakte k JOIN wohnungen w ON w.id = k.wohnung_id
             WHERE k.deleted_at IS NULL AND k.archiviert_am IS NULL AND w.stweg = ANY($1)`,
-      alleStwegs ? [] : [stwegs]);
+      alleStwegs ? [] : [bewohnerStwegs]);
     for (const r of wk.rows) {
       const ort = [r.rolle, r.bezeichnung, `STWEG ${r.stweg}`].filter(Boolean).join(' · ');
       dazu('Bewohner', r.name, r.telefon, ort);

@@ -5,12 +5,16 @@
 const { Pool } = require('pg');
 const { AsyncLocalStorage } = require('async_hooks');
 
+// Kein Standardpasswort: DB_PASSWORD kommt aus der .env (dieselbe Variable
+// setzt POSTGRES_PASSWORD im Compose). Fehlt sie, scheitert die Verbindung
+// sichtbar statt still mit 'changeme' zu laufen.
+if (!process.env.DB_PASSWORD) console.error('[DB] ACHTUNG: DB_PASSWORD ist nicht gesetzt — Datenbankverbindung wird fehlschlagen.');
 const pool = new Pool({
   host: process.env.DB_HOST || 'postgres',
   port: process.env.DB_PORT || 5432,
   database: process.env.DB_NAME || 'rosenweg',
   user: process.env.DB_USER || 'rosenweg',
-  password: process.env.DB_PASSWORD || 'changeme',
+  password: process.env.DB_PASSWORD,
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
@@ -46,6 +50,12 @@ pool.query = async function (sqlOrCfg, params) {
 };
 
 // ─── Energy Database (for Waschküche billing) ──────────────────────
+// ENERGY_DB_PASSWORD steht in keinem Compose-File; ob die .env es setzt, ist
+// nicht belegt. Darum vorerst laut warnen statt abbrechen — der Rueckfall auf
+// das alte Standardpasswort faellt weg, sobald die Variable sicher gesetzt ist.
+if (!process.env.ENERGY_DB_PASSWORD) {
+  console.error('[EnergyDB] ACHTUNG: ENERGY_DB_PASSWORD ist nicht gesetzt — es wird das alte Standardpasswort benutzt. Variable setzen und Passwort wechseln!');
+}
 const energyPool = new Pool({
   host: process.env.ENERGY_DB_HOST || 'energy-db',
   port: process.env.ENERGY_DB_PORT || 5432,
