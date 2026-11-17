@@ -118,7 +118,7 @@
 | Authentik OAuth2 SSO | Implementiert | authentik.rosenweg4303.ch |
 | Active Directory (Samba DC) | Implementiert | CT 108 (100.64.2.30) |
 | LDAP-Outpost (Port 389/636) | Implementiert | Authentik Service |
-| OTP-Login (SMS/Email) | Implementiert | `/api/otp/send`, `/api/otp/verify` |
+| OTP-Login (E-Mail) | Abgeschaltet (nur mit OTP_LOGIN_ENABLED=1) | `/api/otp/send`, `/api/otp/verify` |
 | Token-Introspection (Cache 1min) | Implementiert | Bearer Token Validation |
 | Admin-Check (Technik/Praesident) | Implementiert | Middleware `adminOnly` |
 | STWEG-Zugriffssteuerung | Implementiert | Middleware `requireStwegAccess` |

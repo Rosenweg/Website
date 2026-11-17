@@ -3,7 +3,7 @@
 // Ressourcen sind die Dokumentation aus docs/ (im Image unter ./docs/).
 // Der Agent antwortet dann aus dem, was wirklich gilt, statt aus Vermutung.
 // Betriebsinterna (Netz, Adressen, Datenbank, SSH) sehen nur Technik und
-// Präsidium; der Rest steht jeder angemeldeten Person offen.
+// Präsidium; eine kleine Positivliste steht jeder angemeldeten Person offen.
 //
 // Prompts sind vorbereitete Abläufe: die richtigen Rückfragen in der
 // richtigen Reihenfolge, bevor ein Werkzeug gerufen wird.
@@ -13,11 +13,17 @@ const { z } = require('zod');
 
 const DOCS_DIR = path.join(__dirname, '..', 'docs');
 
-// Dokumente, die Betriebsinterna enthalten — nur Technik und Präsidium.
+// Positivliste statt Sperrliste: ausgeliefert wird nur, was hier steht.
+// Eine neue Datei in docs/ (oder eine mit Zugangsdaten wie email.md) landete
+// sonst automatisch bei jeder angemeldeten Person bzw. im Modell-Kontext.
+const FUER_ALLE = new Set([
+  'Home', 'README', 'verwaltung-anleitung', 'energie', 'pwa-konzept', 'aufwand-erfassung-konzept',
+]);
+// Betriebsinterna (Netz, Adressen, Datenbank, SSH) — nur Technik und Präsidium.
 const NUR_TECHNIK = new Set([
   'infrastruktur', 'ip-zuordnung', 'netzwerk', 'routing', 'unifi', 'active-directory', 'cloudflare',
   'datenbank', 'api', 'ssh-zugang', 'systemuebersicht', 'website', 'deswarm-plan', 'mqtt-authentik-login',
-  'technik-bot-konzept', 'energie-api', 'mcp',
+  'technik-bot-konzept', 'energie-api', 'mcp', 'email', 'mqtt-display',
 ]);
 
 const TITEL = {
@@ -31,7 +37,7 @@ function docsListe(technik) {
   try { dateien = fs.readdirSync(DOCS_DIR).filter(f => f.endsWith('.md')); } catch { return []; }
   return dateien
     .map(f => f.replace(/\.md$/, ''))
-    .filter(n => technik || !NUR_TECHNIK.has(n))
+    .filter(n => FUER_ALLE.has(n) || (technik && NUR_TECHNIK.has(n)))
     .sort()
     .map(n => ({ name: n, uri: `rosenweg://docs/${n}`, titel: TITEL[n] || n, datei: path.join(DOCS_DIR, n + '.md') }));
 }

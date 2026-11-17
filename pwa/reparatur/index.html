@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="/icons/icon-192-2.png">
   <link rel="icon" href="/logo-rosenweg.png" type="image/png">
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/authentik-auth.js?v=5"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
     body { font-family: 'Inter', sans-serif; }
@@ -109,7 +109,7 @@
     <section id="gate-code1" class="hidden">
       <button type="button" class="gate-back text-sky-700 text-sm font-medium mb-4 active:text-sky-900">← Zurück</button>
       <h2 class="text-xl font-bold mb-1">✉️ Ohne Konto melden</h2>
-      <p class="text-slate-500 mb-6 text-sm">Gib deine E-Mail-Adresse ein. Wir senden dir einen 6-stelligen Code.</p>
+      <p class="text-slate-500 mb-6 text-sm">Gib deine E-Mail-Adresse ein. Wir senden dir einen 8-stelligen Code.</p>
       <form id="codeReqForm" class="space-y-4">
         <div>
           <label for="codeEmail" class="block text-sm font-semibold mb-2">E-Mail-Adresse <span class="text-red-500">*</span></label>
@@ -170,9 +170,9 @@
         <!-- Code -->
         <div>
           <label for="pubCode" class="block text-sm font-semibold mb-2">Code aus der E-Mail <span class="text-red-500">*</span></label>
-          <input id="pubCode" type="text" required inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code"
+          <input id="pubCode" type="text" required inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="one-time-code"
             class="w-full rounded-xl border border-slate-300 px-3 py-3 text-center text-2xl tracking-[0.5em] font-semibold focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none"
-            placeholder="000000">
+            placeholder="00000000">
         </div>
         <!-- Senden -->
         <button type="submit" id="pubSubmitBtn"
@@ -419,6 +419,22 @@
       tx.onerror = () => reject(tx.error);
     });
   }
+  // Offline-Meldungen gehoeren dem angemeldeten Benutzer: nach Abmelden oder
+  // Benutzerwechsel auf demselben Geraet nicht unter fremdem Konto senden/anzeigen.
+  function ownerKey(u) { return String((u && (u.email || u.sub || u.username)) || '').toLowerCase(); }
+  async function queueClear() {
+    const d = await db();
+    return new Promise((resolve, reject) => {
+      const tx = d.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+  async function queuePurgeForeign(owner) {
+    // Eintraege ohne owner stammen aus der Version davor und bleiben beim aktuellen Benutzer
+    for (const it of await queueAll()) if (it.owner && it.owner !== owner) await queueDelete(it.localId);
+  }
 
   // =====================================================================
   //  Foto-Kompression (Canvas) — laengste Kante max 1600px, JPEG ~0.7
@@ -624,6 +640,7 @@
   async function enqueueAndNotify(payload) {
     const entry = {
       localId: 'q_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+      owner: ownerKey(currentUser),
       payload,
       created_at: new Date().toISOString(),
     };
@@ -643,12 +660,16 @@
     if (_flushing || !navigator.onLine) return;
     _flushing = true;
     try {
-      const items = await queueAll();
+      if (!currentUser) return;
+      // Nur eigene Meldungen senden; 401 (Sitzung abgelaufen) und 5xx behalten den Eintrag.
+      const items = (await queueAll()).filter(it => !it.owner || it.owner === ownerKey(currentUser));
       for (const item of items) {
         try {
           const res = await postReklamation(item.payload);
           if (res.ok) {
             await queueDelete(item.localId);
+          } else if (res.status === 401 || res.status >= 500) {
+            break;
           } else if (res.clientError) {
             // dauerhafter Fehler (4xx/429) → nicht endlos behalten, entfernen
             await queueDelete(item.localId);
@@ -732,7 +753,9 @@
         if (img) {
           try {
             const resp = await AuthentikAuth.apiFetch('/api/reklamationen/meine/' + r.id + '/foto', { cache: 'no-store' });
-            if (resp.ok) { const url = URL.createObjectURL(await resp.blob()); img.src = url; img.addEventListener('click', () => window.open(url)); }
+            // Nur Rasterbilder als Blob oeffnen: ein SVG/HTML-Blob liefe in window.open auf unserer Origin (XSS)
+            const blob = resp.ok ? await resp.blob() : null;
+            if (blob && ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/heic', 'image/heif'].includes(String(blob.type).split(';')[0].trim().toLowerCase())) { const url = URL.createObjectURL(blob); img.src = url; img.addEventListener('click', () => window.open(url)); }
             else img.alt = 'Foto nicht ladbar';
           } catch { img.alt = 'Foto-Fehler'; }
         }
@@ -1049,9 +1072,7 @@
         $('codeEmailLabel').textContent = email;
         resetPubForm();
         gateStep('code2');
-        showGateMsg('codeReqMsg', 'Code per E-Mail gesendet (gültig 10 Min).', 'ok');
-      } else if (r.status === 403) {
-        showGateMsg('codeReqMsg', 'Diese E-Mail ist nicht im Verzeichnis. Bitte mit Konto anmelden oder die Verwaltung kontaktieren.', 'err');
+        showGateMsg('codeReqMsg', 'Falls die Adresse im Verzeichnis steht, ist der Code unterwegs (gültig 10 Min).', 'ok');
       } else if (r.status === 429) {
         showGateMsg('codeReqMsg', 'Zu viele Anfragen, bitte später erneut versuchen.', 'warn');
       } else {
@@ -1064,6 +1085,37 @@
     } finally {
       btn.disabled = false; btn.textContent = old;
     }
+  }
+
+  // Neuen Code an dieselbe Adresse senden, ohne das ausgefuellte Formular zu verlieren.
+  function neuenCodeKnopf() {
+    const el = $('pubFormMsg');
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'block mt-2 w-full bg-white border border-red-300 text-red-700 font-semibold rounded-lg py-2 active:bg-red-50';
+    b.textContent = 'Neuen Code anfordern';
+    b.addEventListener('click', async () => {
+      if (!pubEmail) { gateStep('code1'); return; }
+      b.disabled = true;
+      try {
+        const r = await fetch('/api/reklamationen/code', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: pubEmail }),
+        });
+        if (r.ok) {
+          $('pubCode').value = '';
+          showGateMsg('pubFormMsg', 'Neuer Code ist unterwegs (gültig 10 Min). Bitte unten eingeben.', 'ok');
+        } else {
+          let msg = r.status === 429 ? 'Zu viele Anfragen, bitte später erneut versuchen.' : 'Fehler (HTTP ' + r.status + ').';
+          try { const j = await r.json(); if (j && j.error) msg = j.error; } catch {}
+          showGateMsg('pubFormMsg', msg, 'warn');
+        }
+      } catch (e) {
+        showGateMsg('pubFormMsg', 'Netzwerkfehler — bitte erneut versuchen.', 'err');
+        neuenCodeKnopf();
+      }
+    });
+    el.appendChild(b);
   }
 
   // Schritt 2 — oeffentlich melden (PLAIN fetch, keine Offline-Queue).
@@ -1099,17 +1151,17 @@
           ? `Deine Meldung #${id} ist eingegangen, die Technik kümmert sich darum.`
           : 'Deine Meldung ist eingegangen, die Technik kümmert sich darum.';
         gateStep('success');
-      } else if (r.status === 429) {
-        showGateMsg('pubFormMsg', 'Zu viele Anfragen, bitte später erneut versuchen.', 'warn');
       } else {
-        // 400: Fehlertext aus error. Bei Code-Problemen Weg zurück zu Schritt 1 anbieten.
-        let msg = 'Fehler (HTTP ' + r.status + ').';
+        // 400/429: Fehlertext aus error. 429 heisst auch "Code nach zu vielen
+        // Fehlversuchen gesperrt" — dann hilft nur ein neuer Code, nicht Warten.
+        let msg = r.status === 429 ? 'Zu viele Anfragen, bitte später erneut versuchen.' : 'Fehler (HTTP ' + r.status + ').';
         try { const j = await r.json(); if (j && j.error) msg = j.error; } catch {}
         const codeProblem = /code/i.test(msg);
         if (codeProblem) {
-          showGateMsg('pubFormMsg', msg + ' Bitte neuen Code anfordern.', 'err');
-        } else {
           showGateMsg('pubFormMsg', msg, 'err');
+          neuenCodeKnopf();
+        } else {
+          showGateMsg('pubFormMsg', msg, r.status === 429 ? 'warn' : 'err');
         }
       }
     } catch (e) {
@@ -1227,11 +1279,18 @@
 
     // Gate selbst steuern: KEIN Zwangslogin. Eingeloggt → voller App-Flow,
     // sonst → Auswahl-Gate (Konto-Login ODER E-Mail-Code).
+    // Kein Loeschen bei logout(): authentik-auth.js meldet auch bei abgelaufenem
+    // Token oder Serverfehlern ab — die Offline-Queue ginge sonst verloren.
+    // Fremde Meldungen verwirft queuePurgeForeign nach dem Login (Besitzerpruefung).
+
     currentUser = await AuthentikAuth.init({
       requireAuth: false,
       onLogout: () => showGate('choice'),
     });
-    if (!currentUser) { showGate('choice'); return; }
+    if (!currentUser) {
+      showGate('choice'); return;
+    }
+    await queuePurgeForeign(ownerKey(currentUser)).catch(() => {});
 
     // ── Eingeloggter Flow (unverändert) ──
     buildStwegSelect();

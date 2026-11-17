@@ -58,7 +58,21 @@ const ARCHIVE_ALL_GROUPS = (process.env.WA_ARCHIVE_ALL_GROUPS || '').trim().toLo
 const LOOP_HEADER = 'x-rosenweg-wa-gateway';
 const OWN_MAIL_HEADERS = { 'X-Rosenweg-WA-Gateway': '1', 'Auto-Submitted': 'auto-generated' };
 
+// Quell-IPs, ueber die auch Mail aus dem Internet kommt (PMG = oeffentlicher MX
+// fuer whatsapp.rosenweg4303.ch). Von dort reicht die IP allein NICHT: Absender
+// muss in smtp_senders stehen (PMG prueft SPF) und Empfaenger nur Aliase — sonst
+// koennte jeder per Mail in Gruppen posten oder beliebige Nummern anschreiben (D-2).
+const SMTP_STRENG_IPS = (process.env.GW_SMTP_STRENG_IPS || '100.64.2.31')
+  .split(',').map(s => s.trim().replace(/^::ffff:/i, '').toLowerCase()).filter(Boolean);
+
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
+// Zeitkonstanter Vergleich (Hash auf feste Laenge); leeres Geheimnis = nie gleich.
+function geheimnisGleich(eingabe, geheimnis) {
+  if (!geheimnis || typeof eingabe !== 'string') return false;
+  const a = crypto.createHash('sha256').update(eingabe).digest();
+  const b = crypto.createHash('sha256').update(String(geheimnis)).digest();
+  return crypto.timingSafeEqual(a, b);
+}
 const nowIso = () => new Date().toISOString();
 
 function startGateway(botCore) {
@@ -207,12 +221,45 @@ function startGateway(botCore) {
       return addr === e;                                // exact address
     });
   }
+  // Vertrauenswuerdige interne Quelle: IP in smtp_ips, aber keine "strenge"
+  // (Internet-)Quelle wie PMG. Nur von dort reicht die IP allein.
+  function smtpTrusted(remoteAddr) {
+    const ip = normIp(remoteAddr).toLowerCase();
+    return ipInList(remoteAddr) && !SMTP_STRENG_IPS.includes(ip);
+  }
   // Kombinierte Annahme-Entscheidung. Beide Listen leer -> offen (Warnung).
-  // Sonst: annehmen wenn Quell-IP ODER Absender gewhitelistet ist.
+  // Sonst: interne Quell-IP genuegt; jede andere Quelle (PMG, IPv6, unbekannt)
+  // braucht einen gewhitelisteten Absender.
   function smtpAccept(remoteAddr, from) {
     const ips = q.ipAll.all(), senders = q.senderAll.all();
     if (ips.length === 0 && senders.length === 0) return true; // nicht konfiguriert
-    return ipInList(remoteAddr) || senderInList(from);
+    return smtpTrusted(remoteAddr) || senderInList(from);
+  }
+  // Empfaenger: von nicht-internen Quellen nur konfigurierte Aliase (keine
+  // freien Nummern, Gruppennamen oder JIDs).
+  function rcptErlaubt(session, rcptAddr) {
+    if (session.user) return true;                 // SMTP-AUTH (eigene Zugangsdaten)
+    if (q.ipAll.all().length === 0 && q.senderAll.all().length === 0) return true; // nicht konfiguriert
+    if (smtpTrusted(session.remoteAddress)) return true;
+    const local = String(rcptAddr || '').split('@')[0].trim().toLowerCase();
+    if (local && q.aliasGet.get(local)) return true;
+    // Mail-Antwort auf eine WA->Mail-Weiterleitung (Reply-To nummer@REPLY_DOMAIN,
+    // R2-De): Nummer nur erlauben, wenn genau dieser Absender zuletzt per Mail an
+    // diese Nummer geschrieben hat (Bridge) und in smtp_senders steht. So bleibt
+    // das Anschreiben beliebiger Nummern aus dem Internet gesperrt (D-2).
+    if (/^\d{6,15}$/.test(local)) {
+      const absender = String(session.envelope?.mailFrom?.address || '').trim().toLowerCase();
+      const bridge = absender ? q.bridgeLookup.get(local + '@c.us') : null;
+      if (bridge && String(bridge.sender || '').trim().toLowerCase() === absender && senderInList(absender)) return true;
+      // Antwort auf eine Regel-Weiterleitung (wa_forwards, R3-Dd): Absender ist
+      // als Empfaenger einer Regel fuer genau diese Nummer/JID eingetragen.
+      if (absender && senderInList(absender)) {
+        const regel = [...q.fwdMatch.all('number', local), ...q.fwdMatch.all('jid', local + '@c.us')]
+          .some(r => String(r.email || '').trim().toLowerCase() === absender);
+        if (regel) return true;
+      }
+    }
+    return false;
   }
 
   // ── Ziel-Aufloesung (gemeinsam fuer JSON-API + SMTP-in) ──────────────────
@@ -248,7 +295,9 @@ function startGateway(botCore) {
         secure: NOTIFY_RELAY_PORT === 465,
         requireTLS: NOTIFY_RELAY_PORT === 587,
         auth: NOTIFY_RELAY_USER ? { user: NOTIFY_RELAY_USER, pass: NOTIFY_RELAY_PASS } : undefined,
-        tls: { rejectUnauthorized: false },
+        // Zertifikatspruefung nur per GW_NOTIFY_TLS_VERIFY=1: der Relay (PMG) wird
+        // per IP angesprochen, das Zertifikat passt dazu nicht (D-18, Vermerk).
+        tls: { rejectUnauthorized: process.env.GW_NOTIFY_TLS_VERIFY === '1' },
       })
     : null;
 
@@ -313,6 +362,28 @@ function startGateway(botCore) {
   // 1) Reverse-Proxy fuer /api/* -> Haupt-API (Authentik-Login + /api/me).
   //    MUSS vor express.json() stehen, sonst wird der Body konsumiert.
   if (MAIN_API_BASE) {
+    // Nur die Pfade, die public/ wirklich braucht (D-3-1): ein offener Proxy
+    // fuer alle /api/* umging die nginx-Drosseln der Haupt-API (rw_otp usw.),
+    // weil alle Anfragen von hier mit der Gateway-IP ankommen. Exakter Pfad,
+    // kodierte/verschleierte Pfade (%, \, ..) gar nicht erst weiterreichen.
+    const PROXY_ERLAUBT = {
+      '/api/auth/login': ['GET'],
+      '/api/auth/callback': ['GET'],
+      '/api/auth/logout': ['GET'],
+      '/api/auth/me': ['GET'],
+      '/api/whatsapp/admin/recipients': ['GET'],
+      '/api/whatsapp/admin/broadcast': ['POST'],
+    };
+    app.use('/api', (req, res, next) => {
+      const roh = String(req.originalUrl || '');
+      const pfad = roh.split('?')[0];
+      if (/[%\\]/.test(pfad) || pfad.split('/').some(s => s === '.' || s === '..')
+          || !Object.prototype.hasOwnProperty.call(PROXY_ERLAUBT, pfad)
+          || !PROXY_ERLAUBT[pfad].includes(req.method)) {
+        return res.status(404).json({ error: 'Nicht gefunden' });
+      }
+      next();
+    });
     app.use('/api', createProxyMiddleware({
       target: MAIN_API_BASE,
       changeOrigin: true,
@@ -348,6 +419,9 @@ function startGateway(botCore) {
     if (!MAIN_API_BASE) return res.status(503).json({ error: 'UI-Auth nicht konfiguriert (MAIN_API_BASE fehlt)' });
     const auth = req.headers.authorization || '';
     if (!auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Login erforderlich' });
+    // Nur Browser-Anmeldung: ein Zugangstoken (rw_pat_, evtl. nur me:read)
+    // bestuende /api/me und haette sonst volle Gateway-Rechte (D-18).
+    if (/^Bearer\s+rw_pat_/i.test(auth)) return res.status(403).json({ error: 'Zugangstoken hier nicht erlaubt — bitte im Browser anmelden' });
     try {
       const r = await fetch(`${MAIN_API_BASE}/api/me`, { headers: { Authorization: auth } });
       if (!r.ok) return res.status(401).json({ error: 'Ungueltige Session' });
@@ -490,7 +564,7 @@ function startGateway(botCore) {
   app.post('/gateway/ui/smtp-senders', jsonBody, uiAuth, (req, res) => {
     let addr = String(req.body?.addr || '').trim().toLowerCase();
     // erlaubt: 'foo@bar.ch' | '@bar.ch' | 'bar.ch'
-    const ok = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr) || /^@?[^@\s]+\.[^@\s]+$/.test(addr);
+    const ok = /^[^@\s]+@[^@\s.]+(?:\.[^@\s.]+)+$/.test(addr) || /^@?[^@\s]+\.[^@\s]+$/.test(addr);
     if (!ok) return res.status(400).json({ error: 'Adresse (foo@bar.ch), @domain oder domain erforderlich' });
     q.senderAdd.run(addr, req.body?.note || null, req.uiUser.email, nowIso());
     res.json({ ok: true });
@@ -508,7 +582,7 @@ function startGateway(botCore) {
     const email = String(req.body?.email || '').trim().toLowerCase();
     if (!['group', 'number', 'jid'].includes(kind)) return res.status(400).json({ error: 'kind: group|number|jid' });
     if (!match_key) return res.status(400).json({ error: 'Quelle (Gruppenname/Nummer/JID) erforderlich' });
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Gueltige E-Mail-Adresse erforderlich' });
+    if (!/^[^@\s]+@[^@\s.]+(?:\.[^@\s.]+)+$/.test(email)) return res.status(400).json({ error: 'Gueltige E-Mail-Adresse erforderlich' });
     match_key = kind === 'number' ? match_key.replace(/\D/g, '') : match_key.toLowerCase();
     q.fwdAdd.run(match_key, kind, email, req.body?.note || null, req.uiUser.email, nowIso());
     res.json({ ok: true });
@@ -556,8 +630,14 @@ function startGateway(botCore) {
       console.warn(`[Gateway-SMTP] abgewiesen (IP+Absender): ${session.remoteAddress} / ${address.address}`);
       const e = new Error('Quell-IP oder Absender nicht erlaubt'); e.responseCode = 554; return cb(e);
     },
+    // Empfaenger frueh pruefen: von PMG/Internet-Quellen nur Aliase (D-2).
+    onRcptTo(address, session, cb) {
+      if (rcptErlaubt(session, address.address)) return cb();
+      console.warn(`[Gateway-SMTP] Empfaenger abgewiesen (kein Alias): ${session.remoteAddress} / ${address.address}`);
+      const e = new Error('Empfaenger nicht erlaubt'); e.responseCode = 550; return cb(e);
+    },
     onAuth(auth, session, cb) {
-      if (SMTP_USER && auth.username === SMTP_USER && auth.password === SMTP_PASS) return cb(null, { user: auth.username });
+      if (SMTP_USER && geheimnisGleich(String(auth.username || ''), SMTP_USER) && geheimnisGleich(String(auth.password || ''), SMTP_PASS)) return cb(null, { user: auth.username });
       return cb(new Error('Ungueltige SMTP-Zugangsdaten'));
     },
     async onData(stream, session, cb) {
@@ -586,6 +666,8 @@ function startGateway(botCore) {
         let anySent = false; const errors = [];
         for (const rcpt of rcpts) {
           const local = rcpt.split('@')[0];
+          // Doppelt haelt besser: auch hier nur erlaubte Empfaenger (siehe onRcptTo).
+          if (!rcptErlaubt(session, rcpt)) { errors.push(`${rcpt}: nicht erlaubt`); continue; }
           try {
             await sendAndLog({ source: 'smtp-email', sender: from, to: local, title: subject, body, attachments });
             anySent = true;

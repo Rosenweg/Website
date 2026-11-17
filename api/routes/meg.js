@@ -29,11 +29,18 @@ router.get('/einstellplaetze/verfuegbar', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Fehler beim Laden' }); }
 });
 
-// Volle Liste — nur eingeloggt (Ausschuss/Eigentuemer sehen Zuordnungen).
+// Volle Liste — eingeloggt. Zuordnungen (Name, E-Mail, Wohnung, Notiz) sieht
+// nur, wer die Plaetze verwaltet; alle anderen nur Platz, Typ, Status und den
+// eigenen Platz. Vorher bekam jedes Konto jeder STWEG die ganze Tabelle.
 router.get('/einstellplaetze', authMiddleware, async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM meg_einstellplaetze ORDER BY typ, platz_nr');
-    res.json(r.rows);
+    const groups = req.user?.groups || [];
+    if (req.user?.isAdmin || getAusschussStwegs(groups).has(8)) return res.json(r.rows);
+    const me = String(req.user?.email || '').toLowerCase();
+    res.json(r.rows.map(p => (me && String(p.zugeordnet_email || '').toLowerCase() === me)
+      ? p
+      : { id: p.id, platz_nr: p.platz_nr, typ: p.typ, status: p.status }));
   } catch (err) { res.status(500).json({ error: 'Fehler beim Laden' }); }
 });
 

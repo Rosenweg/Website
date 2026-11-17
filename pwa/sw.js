@@ -16,7 +16,7 @@
  *  - Sonstige GETs: stale-while-revalidate.
  */
 
-const CACHE = 'rosenweg-launcher-v3';
+const CACHE = 'rosenweg-launcher-v4';
 
 // Launcher-App-Shell — nur das, was fuer den Offline-Start des Hubs noetig ist.
 const SHELL = [
@@ -26,6 +26,11 @@ const SHELL = [
   '/icons/icon-192-2.png',
   '/icons/icon-512-2.png',
 ];
+
+// Seiten und Dateien, die zum Launcher gehoeren (siehe pwa/index.html).
+const LAUNCHER_SEITEN = ['/', '/index.html'];
+const LAUNCHER_DATEIEN = [...SHELL, '/logo-rosenweg.png', '/js/pwa-install-hint.js'];
+const LAUNCHER_FREMD = ['https://cdn.tailwindcss.com'];
 
 // --- install: Shell precachen, sofort aktiv werden -------------------------
 self.addEventListener('install', (event) => {
@@ -41,7 +46,8 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
+      // Nur eigene alte Versionen loeschen: alle Apps teilen sich den Cache-Speicher der Origin.
+      Promise.all(keys.filter((k) => k.startsWith('rosenweg-launcher-') && k !== CACHE).map((k) => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
 });
@@ -59,6 +65,16 @@ self.addEventListener('fetch', (event) => {
   // Nur GET wird gecacht; alles andere durchreichen.
   if (req.method !== 'GET') return;
 
+  // Scope '/' umfasst auch Apps ohne eigenen SW (mqtt, zutritt, ...): nur die
+  // Launcher-Seite und ihre eigenen Dateien anfassen, sonst Browser-Standard.
+  // Sonst landete z.B. die MQTT-Seite als Offline-/index.html im Cache und
+  // fremde Skripte wuerden veraltet ausgeliefert.
+  if (req.mode === 'navigate') {
+    if (url.origin !== self.location.origin || !LAUNCHER_SEITEN.includes(url.pathname)) return;
+  } else if (!(url.origin === self.location.origin ? LAUNCHER_DATEIEN.includes(url.pathname) : LAUNCHER_FREMD.includes(url.origin))) {
+    return;
+  }
+
   // 2) Navigationen → network-first mit Cache-Fallback auf den Launcher.
   //    Hinweis: Navigationen ins /reparatur/-Scope werden i.d.R. vom
   //    Reparatur-SW behandelt (engstes Scope gewinnt); landet hier nur,
@@ -68,8 +84,11 @@ self.addEventListener('fetch', (event) => {
       fetch(req)
         .then((resp) => {
           // frische Launcher-Antwort fuer spaeter ablegen
-          const copy = resp.clone();
-          caches.open(CACHE).then((c) => c.put('/index.html', copy)).catch(() => {});
+          // nur echte eigene Seiten ablegen: keine Fehler-/Login-/Fremdantworten als Offline-Seite
+          if (resp && resp.ok && resp.type === 'basic') {
+            const copy = resp.clone();
+            caches.open(CACHE).then((c) => c.put('/index.html', copy)).catch(() => {});
+          }
           return resp;
         })
         .catch(() =>

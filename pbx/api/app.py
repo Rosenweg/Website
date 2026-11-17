@@ -15,8 +15,10 @@ Abhaengigkeit zur Haupt-API fuer den Betrieb. Zwei Auth-Welten:
 SIP-Telefone (LAN/VPN): aus der sip_extensions-Tabelle generiert die API
 /etc/asterisk/pjsip_phones.conf und triggert 'pjsip reload' via AMI.
 """
+import hmac
 import json
 import os
+import re
 import secrets as pysecrets
 from datetime import datetime, timedelta, timezone
 from xml.sax.saxutils import escape as xesc
@@ -107,7 +109,8 @@ def require_admin():
 
 def require_agi():
     provided = request.headers.get("X-PBX-Secret", "")
-    if not PBX_SHARED_SECRET or provided != PBX_SHARED_SECRET:
+    # zeitkonstant vergleichen (D-15)
+    if not PBX_SHARED_SECRET or not hmac.compare_digest(provided.encode(), PBX_SHARED_SECRET.encode()):
         return jsonify({"error": "Unauthorized"}), 401
     return None
 
@@ -335,23 +338,70 @@ def ring_members_list():
         conn.close()
 
 
+# Ziel-/Namenswerte landen in Dial-Strings, Call-Files und AGI-Befehlen der
+# Asterisk-Seite: dort waere ein Zeilenumbruch ein eigener Befehl (D-5). Darum
+# hier pruefen — fuer Anlegen UND Aendern (PUT nahm bisher alles ungeprueft).
+_STEUERZEICHEN = re.compile(r"[\x00-\x1f\x7f]")
+_DATUM = re.compile(r"^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}(:\d{2})?)?$")
+
+
+def _ring_member_pruefen(b, kind_bisher=None):
+    """Gibt (werte, None) oder (None, fehlertext). Nur uebergebene Felder."""
+    out = {}
+    if "name" in b:
+        name = str(b.get("name") or "").strip()
+        if not name or len(name) > 80 or _STEUERZEICHEN.search(name) or any(c in name for c in '"\\<>'):
+            return None, "name ungueltig (1-80 Zeichen, keine Steuerzeichen/Anfuehrungszeichen)"
+        out["name"] = name
+    kind = kind_bisher or "mobile"
+    if "kind" in b:
+        kind = "sip" if b.get("kind") == "sip" else "mobile"
+        out["kind"] = kind
+    if "phone" in b or "kind" in b:
+        phone = str(b.get("phone") if "phone" in b else (b.get("_phone_bisher") or "")).strip()
+        if kind == "sip":
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", phone):
+                return None, "SIP-Extension ungueltig"
+        else:
+            phone = "+" + phone[1:].replace(" ", "") if phone.startswith("+") else phone
+            if not re.fullmatch(r"\+[0-9]{6,20}", phone):
+                return None, "Telefonnummer im intl. Format (+41...)"
+        out["phone"] = phone
+    if "priority" in b:
+        try:
+            prio = int(b.get("priority") if b.get("priority") is not None else 100)
+        except (TypeError, ValueError):
+            return None, "priority muss eine Zahl sein"
+        if not 0 <= prio <= 10000:
+            return None, "priority muss 0-10000 sein"
+        out["priority"] = prio
+    if "valid_until" in b:
+        vu = b.get("valid_until")
+        if vu not in (None, "") and not _DATUM.match(str(vu)):
+            return None, "valid_until muss ein Datum sein (YYYY-MM-DD)"
+        out["valid_until"] = vu or None
+    if "notiz" in b:
+        notiz = b.get("notiz")
+        out["notiz"] = None if notiz is None else re.sub(r"[\x00-\x09\x0b-\x1f\x7f]", " ", str(notiz))[:500]
+    for f in ("bypass_hours", "enabled", "is_temporary"):
+        if f in b:
+            out[f] = 1 if b.get(f) else 0
+    return out, None
+
+
 @app.post("/api/pbx/ring-members")
 def ring_members_create():
     user, deny = require_admin()
     if deny:
         return deny
     b = request.get_json(silent=True) or {}
-    name, phone = (b.get("name") or "").strip(), (b.get("phone") or "").strip()
-    if not name or not phone:
+    if not (b.get("name") or "").strip() or not (b.get("phone") or "").strip():
         return jsonify({"error": "name + phone erforderlich"}), 400
-    kind = "sip" if b.get("kind") == "sip" else "mobile"
-    if kind == "sip":
-        if not phone.replace("_", "").replace("-", "").isalnum():
-            return jsonify({"error": "SIP-Extension ungueltig"}), 400
-    else:
-        if not phone.startswith("+") or not phone[1:].replace(" ", "").isdigit():
-            return jsonify({"error": "Telefonnummer im intl. Format (+41...)"}), 400
-        phone = "+" + phone[1:].replace(" ", "")
+    werte, fehler = _ring_member_pruefen({**b, "kind": b.get("kind") or "mobile"})
+    if fehler:
+        return jsonify({"error": fehler}), 400
+    name, phone, kind = werte["name"], werte["phone"], werte["kind"]
+    b = {**b, **werte}
     conn = db.connect()
     try:
         iext = db.next_ext(conn, "ring_members", "internal_ext", 1000)
@@ -375,19 +425,24 @@ def ring_members_update(mid):
         return deny
     b = request.get_json(silent=True) or {}
     allowed = ["name", "phone", "kind", "bypass_hours", "enabled", "is_temporary", "valid_until", "priority", "notiz"]
-    sets, params = [], []
-    for f in allowed:
-        if f in b:
-            val = b[f]
-            if f in ("bypass_hours", "enabled", "is_temporary"):
-                val = 1 if val else 0
-            sets.append(f"{f} = ?")
-            params.append(val)
-    if not sets:
-        return jsonify({"error": "Keine Aenderung"}), 400
-    params.append(mid)
     conn = db.connect()
     try:
+        bisher = conn.execute("SELECT kind, phone FROM ring_members WHERE id = ?", (mid,)).fetchone()
+        if not bisher:
+            return jsonify({"error": "Nicht gefunden"}), 404
+        werte, fehler = _ring_member_pruefen(
+            {**{f: b[f] for f in allowed if f in b}, "_phone_bisher": bisher["phone"]},
+            kind_bisher=bisher["kind"])
+        if fehler:
+            return jsonify({"error": fehler}), 400
+        sets, params = [], []
+        for f in allowed:
+            if f in werte:
+                sets.append(f"{f} = ?")
+                params.append(werte[f])
+        if not sets:
+            return jsonify({"error": "Keine Aenderung"}), 400
+        params.append(mid)
         conn.execute(f"UPDATE ring_members SET {', '.join(sets)}, updated_at = datetime('now') WHERE id = ?", params)
         conn.commit()
         row = conn.execute("SELECT * FROM ring_members WHERE id = ?", (mid,)).fetchone()
@@ -475,6 +530,10 @@ def calls_list():
 
 
 # ─── SIP-Extensions (interne Telefone, LAN/VPN) ─────────────────────────────
+# Kontexte, in die ein internes Telefon gehoeren darf (extensions.conf).
+SIP_KONTEXTE = {"internal"}
+
+
 def regenerate_phones_conf(conn):
     """Schreibt /etc/asterisk/pjsip_phones.conf aus der DB + triggert pjsip reload."""
     rows = conn.execute("SELECT ext, name, secret, context FROM sip_extensions WHERE enabled = 1 ORDER BY ext").fetchall()
@@ -485,6 +544,18 @@ def regenerate_phones_conf(conn):
     ]
     for r in rows:
         ext, name, secret, ctx = r["ext"], r["name"], r["secret"], r["context"]
+        # Altbestand absichern: nichts, was eine neue Zeile oder einen Abschnitt beginnt.
+        # Secret nur auf Zeilenumbruch/Steuerzeichen und [ ] pruefen (R2-Df): aeltere
+        # Secrets mit anderen Sonderzeichen sollen nicht still wegfallen; neue
+        # Secrets prueft sip_ext_create ohnehin streng. ';' leitet in Asterisk-
+        # Konfig einen Kommentar ein (R3-De): password=ab;cd ergaebe still "ab".
+        if not re.fullmatch(r"[0-9]{2,8}", str(ext)) or not re.fullmatch(r"[^\x00-\x1f\x7f\[\];]{1,128}", str(secret or "")) \
+                or ctx not in SIP_KONTEXTE:
+            # Laut melden statt still auslassen: sonst faellt ein Telefon ohne Hinweis aus.
+            print(f"[pbx-api] SIP-Extension {re.sub(r'[^0-9A-Za-z]', '?', str(ext))[:12]} "
+                  "nicht in pjsip_phones.conf geschrieben (ungueltige Extension/Secret/Kontext)", flush=True)
+            continue
+        name = re.sub(r'[\x00-\x1f\x7f"<>\[\];\\]', " ", str(name or ""))[:60]
         # Kanonisches PJSIP-Muster: endpoint/auth/aor TEILEN den Namen (= Extension).
         # PJSIP-Sorcery unterscheidet per type=; der Registrar findet die AOR ueber
         # den To-User (= Extension). Getrennte -aor/-auth-Namen -> "AOR '' not found".
@@ -554,10 +625,18 @@ def sip_ext_create():
     ext, name = str(b.get("ext", "")).strip(), str(b.get("name", "")).strip()
     if not name:
         return jsonify({"error": "name erforderlich"}), 400
-    if ext and not ext.isdigit():
+    if ext and not re.fullmatch(r"[0-9]{2,8}", ext):
         return jsonify({"error": "Extension muss numerisch sein"}), 400
+    # name/secret/context landen in pjsip_phones.conf: ein Zeilenumbruch oder
+    # "[" haette eigene Abschnitte (Endpunkte, Kontexte) einschleusen koennen (D-5).
+    if len(name) > 60 or _STEUERZEICHEN.search(name) or any(c in name for c in '"<>[];\\'):
+        return jsonify({"error": "name ungueltig (max. 60 Zeichen, keine Sonderzeichen wie [ ] < > ; \")"}), 400
     secret = str(b.get("secret") or "").strip() or pysecrets.token_urlsafe(12)
+    if not re.fullmatch(r"[A-Za-z0-9._~-]{8,64}", secret):
+        return jsonify({"error": "secret: 8-64 Zeichen aus A-Z a-z 0-9 . _ ~ -"}), 400
     ctx = str(b.get("context") or "internal").strip()
+    if ctx not in SIP_KONTEXTE:
+        return jsonify({"error": "context nicht erlaubt"}), 400
     conn = db.connect()
     try:
         if not ext:
@@ -712,8 +791,13 @@ def prov_fetch(token):
         if not row or row["used_at"] or row["expires_at"] < jetzt or row["secret"] is None:
             # Bewusst dieselbe Antwort fuer unbekannt/abgelaufen/verbraucht.
             return jsonify({"error": "Link ungueltig oder abgelaufen"}), 404
-        conn.execute("UPDATE prov_tokens SET used_at = ? WHERE token = ?", (jetzt, token))
+        # Atomar verbrauchen: zwei gleichzeitige Abrufe duerfen nicht beide das
+        # SIP-Passwort bekommen (D-19) — nur wer die Zeile wirklich umschreibt.
+        cur = conn.execute("UPDATE prov_tokens SET used_at = ? WHERE token = ? AND used_at IS NULL AND expires_at >= ?",
+                           (jetzt, token, jetzt))
         conn.commit()
+        if cur.rowcount != 1:
+            return jsonify({"error": "Link ungueltig oder abgelaufen"}), 404
         xml = _prov_xml(row["ext"], row["name"], row["secret"])
     finally:
         conn.close()
@@ -741,7 +825,10 @@ PROXY_PREFIXES = ("/api/auth", "/api/me")
 def proxy_main_api(subpath):
     """Nicht-eigene /api/*-Pfade (Login/Callback/Userinfo) an die Haupt-API."""
     full = "/api/" + subpath
-    if not full.startswith(PROXY_PREFIXES):
+    # Segmentgrenze statt startswith: "/api/meg…" oder "/api/authx" sind nicht gemeint;
+    # keine Punkt-Segmente/Kodierungen, die upstream anders aufgeloest werden (D-19).
+    if not any(full == p or full.startswith(p + "/") for p in PROXY_PREFIXES) \
+            or ".." in full or "%" in full or "\\" in full:
         return jsonify({"error": "Not found"}), 404
     url = f"{MAIN_API_BASE}{full}"
     headers = {k: v for k, v in request.headers if k.lower() not in ("host", "content-length")}

@@ -5,8 +5,34 @@
 .env.*
 *.md
 docs/
-# … ausser der Dokumentation: sie wird als MCP-Ressourcen ins API-Image kopiert (api/mcp/erweiterungen.js)
-!docs/*.md
+# … ausser einer Positivliste geheimnisfreier Dokumente: sie gehen als MCP-Ressourcen
+# ins API-Image (api/mcp/erweiterungen.js). Keine Wildcard, damit neue Dateien mit
+# Zugangsdaten nicht ungeprueft ins Image wandern (Liste = api/Dockerfile).
+!docs/Home.md
+!docs/README.md
+!docs/verwaltung-anleitung.md
+!docs/email.md
+!docs/energie.md
+!docs/pwa-konzept.md
+!docs/mqtt-display.md
+!docs/aufwand-erfassung-konzept.md
+!docs/mcp.md
+!docs/energie-api.md
+!docs/datenbank.md
+!docs/ssh-zugang.md
+!docs/netzwerk.md
+!docs/routing.md
+!docs/ip-zuordnung.md
+!docs/systemuebersicht.md
+!docs/website.md
+!docs/deswarm-plan.md
+!docs/mqtt-authentik-login.md
+!docs/technik-bot-konzept.md
+!docs/api.md
+!docs/infrastruktur.md
+!docs/active-directory.md
+!docs/cloudflare.md
+!docs/unifi.md
 node_modules/
 api/node_modules/
 energy-collector/node_modules/

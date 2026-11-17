@@ -8,7 +8,7 @@
     <link rel="manifest" href="/zaehler/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/icons/icon-192-2.png">
     <link rel="icon" href="/logo-rosenweg.png" type="image/png">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.6.1/dist/chart.umd.min.js" integrity="sha384-Emf5ZVIUiarAdhkgtqK+5/Z5qIvM6QoVrS+qAVtfyZVuD5lIHrac0me485+Antp0" crossorigin="anonymous"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -174,7 +174,7 @@
         </div>
     </div>
 
-    <script src="/js/authentik-auth.js?v=2"></script>
+    <script src="/js/authentik-auth.js?v=5"></script>
     <script>
     const API = '/api/energy';
     let USER = null, METERS = [], CURRENT = null, CHART = null, PHASE_CHART = null, LIVE_TIMER = null, CUR_RANGE = '24h', TODAY_TICK = 0;
@@ -185,7 +185,7 @@
     function fetchT(url, ms = 22000) {
         const ac = new AbortController();
         const t = setTimeout(() => ac.abort(), ms);
-        return fetch(url, { signal: ac.signal }).finally(() => clearTimeout(t));
+        return AuthentikAuth.apiFetch(url, { signal: ac.signal }).finally(() => clearTimeout(t));
     }
 
     // ── Zahlformatierung ────────────────────────────────────────────
@@ -242,7 +242,7 @@
     // Live-Werte in den Auswahl-Chips (leichtgewichtig, alle Zähler auf einmal)
     async function refreshChipLive() {
         try {
-            const r = await fetch(`${API}/live`);
+            const r = await AuthentikAuth.apiFetch(`${API}/live`);
             if (!r.ok) return;
             const all = await r.json(); // erwartet Map/Array je Zähler
             const map = Array.isArray(all) ? Object.fromEntries(all.map(x => [x.meter_id || x.id, x])) : all;
@@ -285,7 +285,7 @@
     async function pollLive() {
         if (!CURRENT) return;
         try {
-            const r = await fetch(`${API}/live/${encodeURIComponent(CURRENT.id)}`);
+            const r = await AuthentikAuth.apiFetch(`${API}/live/${encodeURIComponent(CURRENT.id)}`);
             if (!r.ok) { $('dPower').textContent = 'offline'; return; }
             const d = await r.json();
             $('dPower').textContent = Number.isFinite(d.power_w) ? fmtW(d.power_w) : 'offline';

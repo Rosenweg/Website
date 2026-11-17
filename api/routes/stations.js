@@ -218,9 +218,24 @@ function ereignis(stationId, art, wer, text) {
   ).catch((e) => console.error('[stations] Ereignis nicht geschrieben:', e.message));
 }
 
+// Der erste Eintrag in X-Forwarded-For ist frei waehlbar: wer am Edge vorbei
+// eine Frontend-nginx oder die API direkt erreicht, schreibt "10.0.0.5" hinein
+// und gilt als Hausnetz (persist-key). Deshalb von rechts lesen und nur die
+// eigenen Proxy-Hops ueberspringen; der erste fremde Eintrag ist der Client.
+const PROXY_NETZE = (process.env.STATION_PROXY_NETZE
+  || '100.64.2.0/24,172.16.0.0/12,127.0.0.0/8,::1')
+  .split(',').map((s) => s.trim()).filter(Boolean);
+
 function clientIp(req) {
-  return req.headers['x-forwarded-for']?.split(',')[0]?.trim()
-    || req.ip || req.socket?.remoteAddress || null;
+  const kette = String(req.headers['x-forwarded-for'] || '')
+    .split(',').map((s) => s.trim()).filter(Boolean);
+  const direkt = req.socket?.remoteAddress || req.ip || null;
+  if (direkt) kette.push(direkt);
+  for (let i = kette.length - 1; i >= 0; i -= 1) {
+    if (!PROXY_NETZE.some((netz) => ipInNetz(kette[i], netz))) return kette[i];
+  }
+  // Nur Proxy-Adressen: die Anfrage kam von innen ohne fremden Hop.
+  return kette[0] || null;
 }
 
 // ─── Token-Prüfungen ────────────────────────────────────────────────
@@ -315,16 +330,48 @@ function nurTechnik(req, res, next) {
 // Fehlversuche beim AD-Passwort-Login (Stationen + App): ohne Grenze liessen sich
 // Passwoerter beliebig oft durchprobieren, auch fuer Technik-Konten.
 const AD_FEHL_FENSTER_MS = 15 * 60 * 1000;
-// Nur pro Benutzername: hinter dem Proxy ist req.ip fuer alle gleich (kein trust proxy),
-// eine IP-Grenze wuerde nach ein paar Tippfehlern im ganzen Haus alle aussperren.
-const adFehlversuche = new Map(); // 'u:<name>' -> [zeitpunkte]
+// Pro Benutzername 10 Versuche. Dazu eine Grenze je Absender-IP (clientIp, von
+// rechts gelesen) gegen das Durchprobieren vieler Namen. Frueher war das eine
+// globale Grenze — wer 100 falsche Logins schickte, sperrte alle aus.
+const adFehlversuche = new Map(); // 'u:<name>' / 'ip:<adresse>' -> [zeitpunkte]
+// Der Zaehler haengt am normalisierten Namen: " Stefan", "stefan@ad.rosenweg4303.ch"
+// und "AD\\stefan" sind fuer das AD dasselbe Konto, haetten aber je eigene
+// 10 Versuche bekommen. Die IP-Grenze ist hoch genug, dass ein paar
+// Tippfehler im Haus (gemeinsame oeffentliche Adresse) niemanden aussperren.
+const AD_FEHL_JE_IP = 50;
+function adNameKey(username) {
+  let n = String(username || '').trim().toLowerCase();
+  if (n.includes('\\')) n = n.slice(n.lastIndexOf('\\') + 1);
+  if (n.includes('@')) n = n.slice(0, n.indexOf('@'));
+  return 'u:' + n.trim();
+}
+function adIpKey(req) {
+  return 'ip:' + (clientIp(req) || 'unbekannt');
+}
 function adGesperrt(req, username) {
   const jetzt = Date.now();
-  return (adFehlversuche.get('u:' + String(username).toLowerCase()) || []).filter(t => jetzt - t < AD_FEHL_FENSTER_MS).length >= 10;
+  const zaehle = (k) => (adFehlversuche.get(k) || []).filter(t => jetzt - t < AD_FEHL_FENSTER_MS).length;
+  return zaehle(adNameKey(username)) >= 10 || zaehle(adIpKey(req)) >= AD_FEHL_JE_IP;
 }
-function adFehlversuch(req, username) {
-  const jetzt = Date.now(), k = 'u:' + String(username).toLowerCase();
-  adFehlversuche.set(k, [...(adFehlversuche.get(k) || []).filter(t => jetzt - t < AD_FEHL_FENSTER_MS), jetzt]);
+// Versuch VOR dem AD-Aufruf vormerken: sonst laufen beliebig viele parallele
+// Anfragen durch die Pruefung, bevor die erste ihren Fehlschlag eintraegt.
+// Bei Erfolg (oder AD nicht erreichbar) wird der Eintrag wieder entfernt.
+function adVersuchVormerken(req, username) {
+  const jetzt = Date.now();
+  const keys = [adNameKey(username), adIpKey(req)];
+  for (const k of keys) {
+    adFehlversuche.set(k, [...(adFehlversuche.get(k) || []).filter(t => jetzt - t < AD_FEHL_FENSTER_MS), jetzt]);
+  }
+  return { keys, t: jetzt };
+}
+function adVersuchZuruecknehmen(v) {
+  for (const k of v.keys) {
+    const liste = adFehlversuche.get(k);
+    if (!liste) continue;
+    const i = liste.indexOf(v.t);
+    if (i >= 0) liste.splice(i, 1);
+    if (!liste.length) adFehlversuche.delete(k);
+  }
 }
 setInterval(() => {
   const jetzt = Date.now();
@@ -335,16 +382,19 @@ router.post('/login', a(async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'Benutzer und Passwort nötig' });
   if (adGesperrt(req, username)) return res.status(429).json({ error: 'Zu viele Fehlversuche — bitte in 15 Minuten erneut versuchen' });
+  const versuch = adVersuchVormerken(req, username);
 
   let user;
   try {
     user = await authenticateAD(username, password);
   } catch (e) {
+    adVersuchZuruecknehmen(versuch);
     console.error('[stations] AD nicht erreichbar:', e.message);
     return res.status(503).json({ error: 'Verzeichnisdienst nicht erreichbar' });
   }
-  if (!user) { adFehlversuch(req, username); return res.status(401).json({ error: 'Benutzer oder Passwort stimmt nicht' }); }
-  adFehlversuche.delete('u:' + String(username).toLowerCase());
+  if (!user) return res.status(401).json({ error: 'Benutzer oder Passwort stimmt nicht' });
+  adVersuchZuruecknehmen(versuch);
+  adFehlversuche.delete(adNameKey(username));
 
   const fehlt = missingSecrets();
   if (fehlt.length) {
@@ -375,8 +425,10 @@ router.get('/types', setupSession, (req, res) => res.json({ types: STATION_TYPES
 
 // POST /api/stations/os — neue Version veroeffentlichen (Technik).
 // Der Tarball kommt roh im Koerper; Version und Kanal als Kopfzeilen.
-router.post('/os', express.raw({ type: '*/*', limit: '64mb' }),
-  appSession, darfOsVeroeffentlichen, a(async (req, res) => {
+// Erst Sitzung und Recht pruefen, dann den Koerper puffern: sonst liest jeder
+// Anonyme 64 MB in den Speicher, bevor er mit 401 abgewiesen wird.
+router.post('/os', appSession, darfOsVeroeffentlichen, express.raw({ type: '*/*', limit: '64mb' }),
+  a(async (req, res) => {
     const version = String(req.headers['x-version'] || '').trim();
     const kanal = String(req.headers['x-kanal'] || 'main').trim();
     // Node liest Kopfzeilen als latin-1 — ein "ü" in der Notiz kam deshalb als
@@ -896,6 +948,12 @@ async function appSession(req, res, next) {
       [sha256(token)],
     );
     if (r.rows.length === 0) return res.status(401).json({ error: 'Anmeldung abgelaufen' });
+    // Die Sitzung lebt 30 Tage mit den Gruppen vom Anmeldezeitpunkt. Ein im
+    // Portal deaktiviertes Konto soll nicht bis zum Ablauf weiterlaufen.
+    if (r.rows[0].email) {
+      const u = await pool.query('SELECT 1 FROM users WHERE LOWER(email) = LOWER($1) AND active IS FALSE LIMIT 1', [r.rows[0].email]);
+      if (u.rows.length) return res.status(401).json({ error: 'Konto deaktiviert' });
+    }
     req.appUser = r.rows[0];
     pool.query('UPDATE station_app_sessions SET last_used_at = NOW() WHERE token_hash = $1',
       [sha256(token)]).catch(() => {});
@@ -908,16 +966,19 @@ router.post('/app-login', a(async (req, res) => {
   const { username, password, station_id } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'Benutzer und Passwort nötig' });
   if (adGesperrt(req, username)) return res.status(429).json({ error: 'Zu viele Fehlversuche — bitte in 15 Minuten erneut versuchen' });
+  const versuch = adVersuchVormerken(req, username);
 
   let user;
   try {
     user = await authenticateAD(username, password);
   } catch (e) {
+    adVersuchZuruecknehmen(versuch);
     console.error('[stations] AD nicht erreichbar:', e.message);
     return res.status(503).json({ error: 'Verzeichnisdienst nicht erreichbar' });
   }
-  if (!user) { adFehlversuch(req, username); return res.status(401).json({ error: 'Benutzer oder Passwort stimmt nicht' }); }
-  adFehlversuche.delete('u:' + String(username).toLowerCase());
+  if (!user) return res.status(401).json({ error: 'Benutzer oder Passwort stimmt nicht' });
+  adVersuchZuruecknehmen(versuch);
+  adFehlversuche.delete(adNameKey(username));
 
   await ensureSchema();
   const token = newToken(APP_PREFIX);
@@ -996,6 +1057,12 @@ router.post('/register', setupSession, a(async (req, res) => {
   // bleibt der reguläre Weg offen (erst entsperren oder gleich hier neu
   // zuordnen), und für alle anderen ist Schluss. Wer die Platte tauscht,
   // umgeht das; dagegen hilft Verschlüsselung, nicht diese Prüfung.
+  // Inventar ist ein paar hundert Byte; mehr landet nur als Ballast in der
+  // Tabelle (der Body-Parser liesse 10 MB durch).
+  if (hardware !== undefined && hardware !== null
+      && (typeof hardware !== 'object' || Array.isArray(hardware) || JSON.stringify(hardware).length > 32 * 1024)) {
+    return res.status(400).json({ error: 'hardware ungültig oder zu gross' });
+  }
   const hw = hardware && typeof hardware === 'object' ? hardware : {};
   const seriennummer = String(hw.seriennummer || '').trim();
   const macs = Object.values(hw.macs || {})
@@ -1006,6 +1073,8 @@ router.post('/register', setupSession, a(async (req, res) => {
     const gesperrt = await pool.query(
       `SELECT id, sperr_grund, gesperrt_am FROM stations
         WHERE status = 'gesperrt'
+          -- Eine nur auf Freigabe wartende Station ist keine Sperre der Hardware.
+          AND COALESCE(gesperrt_von, '') <> 'registrierung'
           AND ( ($1 <> '' AND lower(hardware->>'seriennummer') = lower($1))
              OR EXISTS (SELECT 1
                           FROM jsonb_each_text(COALESCE(hardware->'macs', '{}'::jsonb)) AS m
@@ -1032,6 +1101,15 @@ router.post('/register', setupSession, a(async (req, res) => {
     }
   }
 
+  // Geheimnisse (AD-Join-Passwort, root-Hash, MQTT, Admin-SSH-Schlüssel und
+  // über /config der WLAN-Schlüssel) gehen nur an Stationen, die Technik
+  // eingerichtet oder freigegeben hat. Richtet jemand anderes ein, entsteht
+  // die Station gesperrt mit Vermerk; die Freigabe ist das bestehende
+  // "Entsperren" in der Verwaltung, danach holt sich die Station ihre Config.
+  let setupGruppen = [];
+  try { setupGruppen = JSON.parse(req.setupUser?.groups_json || '[]'); } catch { setupGruppen = []; }
+  const vonTechnik = isTechnik(setupGruppen) || isPraesident(setupGruppen);
+
   const token = newToken(STATION_PREFIX);
   const row = {
     id,
@@ -1049,15 +1127,16 @@ router.post('/register', setupSession, a(async (req, res) => {
   // überschreiben — die hat die Dublettenprüfung oben schon abgefangen.
   const eingefuegt = await pool.query(
     `INSERT INTO stations (id, role, hostname, standort, notiz, haus, token_hash, hardware,
-                           registered_by, last_seen_ip)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                           registered_by, last_seen_ip, status, sperr_grund, gesperrt_von, gesperrt_am)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
      ON CONFLICT (id) DO UPDATE SET
        role = EXCLUDED.role, hostname = EXCLUDED.hostname,
        standort = EXCLUDED.standort, notiz = EXCLUDED.notiz, haus = EXCLUDED.haus,
        token_hash = EXCLUDED.token_hash, hardware = EXCLUDED.hardware,
        registered_by = EXCLUDED.registered_by, last_seen_ip = EXCLUDED.last_seen_ip,
-       registered_at = NOW(), revoked_at = NULL, status = 'aktiv',
-       sperr_grund = NULL, gesperrt_von = NULL, gesperrt_am = NULL,
+       registered_at = NOW(), revoked_at = NULL, status = EXCLUDED.status,
+       sperr_grund = EXCLUDED.sperr_grund, gesperrt_von = EXCLUDED.gesperrt_von,
+       gesperrt_am = EXCLUDED.gesperrt_am,
        -- Offene Auftraege verfallen mit der alten Identitaet.
        --
        -- Am 11. August 2026 fehlte das: eine Station wurde zurueckgesetzt, neu
@@ -1070,7 +1149,11 @@ router.post('/register', setupSession, a(async (req, res) => {
      WHERE stations.revoked_at IS NOT NULL
      RETURNING id`,
     [row.id, row.role, row.hostname, row.standort, row.notiz, row.haus, sha256(token),
-      JSON.stringify(hardware || {}), req.setupUser.username, clientIp(req)],
+      JSON.stringify(hardware || {}), req.setupUser.username, clientIp(req),
+      vonTechnik ? 'aktiv' : 'gesperrt',
+      vonTechnik ? null : 'Wartet auf Freigabe durch Technik',
+      vonTechnik ? null : 'registrierung',
+      vonTechnik ? null : new Date()],
   );
   if (!eingefuegt.rows.length) {
     return res.status(409).json({ error: `Station '${id}' gibt es schon` });
@@ -1078,6 +1161,20 @@ router.post('/register', setupSession, a(async (req, res) => {
   await ereignis(id, 'registriert', req.setupUser.username, `${type} · ${row.standort}`);
 
   console.log(`[stations] '${id}' (${type}) registriert von ${req.setupUser.username}`);
+  if (!vonTechnik) {
+    await ereignis(id, 'freigabe-noetig', req.setupUser.username, 'Eingerichtet ohne Gruppe technik — Geheimnisse erst nach Entsperren');
+    const cfg = buildConfig(row);
+    // Gerüst ohne Geheimnisse: die Station kennt Kennung und Rolle, aber
+    // nichts, womit sie ins AD, an den Broker oder als root käme.
+    if (cfg.system) cfg.system.root_password_hash = '';
+    if (cfg.domain) cfg.domain.join_password = '';
+    if (cfg.admin) { cfg.admin.ssh_authorized_keys = []; cfg.admin.ssh_enabled = false; }
+    if (cfg.mqtt) cfg.mqtt.password = '';
+    return res.status(202).json({
+      station_id: id, station_token: token, config: cfg, freigabe_noetig: true,
+      hinweis: 'Station angelegt, wartet auf Freigabe durch die Gruppe technik. Danach holt sie ihre Konfiguration selbst.',
+    });
+  }
   res.status(201).json({ station_id: id, station_token: token, config: buildConfig(row) });
 }));
 

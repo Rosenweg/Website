@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Auslagen / Vorschüsse — Rosenweg</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/authentik-auth.js?v=5"></script>
   <script src="/js/nav.js?v=3"></script>
   <script src="/js/modal-helpers.js?v=1"></script>
   <script src="/js/excel-export.js?v=1"></script>
@@ -224,7 +224,7 @@
   </div>
 
   <script>
-  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   const fmtCHF = n => 'CHF ' + Number(n).toLocaleString('de-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtDate = s => s ? new Date(s).toLocaleDateString('de-CH') : '';
 
@@ -630,12 +630,12 @@
       return `<div class="grid grid-cols-12 gap-2 items-center text-xs ${isZeit ? 'bg-purple-50 p-2 rounded' : ''}">
         <input type="text" placeholder="${isZeit ? 'Tätigkeit' : 'Beschreibung'}" value="${esc(p.beschreibung || '')}"
                oninput="POSITIONEN[${i}].beschreibung=this.value" class="col-span-5 border rounded px-2 py-1">
-        <input type="number" step="0.01" min="0" placeholder="Menge" value="${p.menge ?? ''}"
+        <input type="number" step="0.01" min="0" placeholder="Menge" value="${esc(p.menge ?? '')}"
                oninput="POSITIONEN[${i}].menge=parseFloat(this.value)||0; recalcPos(${i})" class="col-span-1 border rounded px-2 py-1">
-        <span class="col-span-1 text-gray-500">${einheitLabel}</span>
-        <input type="number" step="0.01" min="0" placeholder="${isZeit ? 'CHF/h' : 'CHF/Stk'}" value="${p.einzelpreis_chf ?? ''}"
+        <span class="col-span-1 text-gray-500">${esc(einheitLabel)}</span>
+        <input type="number" step="0.01" min="0" placeholder="${isZeit ? 'CHF/h' : 'CHF/Stk'}" value="${esc(p.einzelpreis_chf ?? '')}"
                oninput="POSITIONEN[${i}].einzelpreis_chf=parseFloat(this.value)||null; recalcPos(${i})" class="col-span-2 border rounded px-2 py-1">
-        <input type="number" step="0.01" min="0" placeholder="Total CHF" value="${p.gesamt_chf ?? 0}"
+        <input type="number" step="0.01" min="0" placeholder="Total CHF" value="${esc(p.gesamt_chf ?? 0)}"
                oninput="POSITIONEN[${i}].gesamt_chf=parseFloat(this.value)||0; updatePosTotal()" class="col-span-2 border rounded px-2 py-1 font-medium">
         <button type="button" onclick="POSITIONEN.splice(${i},1); renderPositionen()" class="col-span-1 text-red-600">×</button>
       </div>`;
@@ -884,6 +884,8 @@
     const payload = {
       status: action,
       bemerkung_ausschuss: document.getElementById('r-bemerkung').value.trim() || null,
+      // Server lehnt ab (409), wenn die Auslage seit dem Laden geaendert wurde
+      expected_updated_at: (STATE.auslagen.find(x => x.id === REVIEW_ID) || {}).updated_at || undefined,
     };
     if (action === 'ausbezahlt') payload.ausbezahlt_am = document.getElementById('r-paid-date').value;
     try {

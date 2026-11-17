@@ -72,8 +72,13 @@ unser() {
 # uebrigen holten stillschweigend nichts, und niemand merkte es.
 hole() {
   if command -v curl >/dev/null 2>&1; then
-    curl -fsS --max-time 20 \
-         -H "X-Host-Token: $HOST_TOKEN" -H "X-Host-Name: $HOST_NAME" "$1"
+    # Token ueber stdin: als Argument stuende er in der Prozessliste.
+    # -K - (Konfig "header = ...") statt -H @-, das erst curl >= 7.55 kennt
+    # (R3-Ie). In "..." muessen \ und " maskiert sein.
+    printf 'header = "X-Host-Token: %s"\nheader = "X-Host-Name: %s"\n' \
+        "$(printf '%s' "$HOST_TOKEN" | sed 's/[\\"]/\\&/g')" \
+        "$(printf '%s' "$HOST_NAME" | sed 's/[\\"]/\\&/g')" | \
+      curl -fsS --max-time 20 -K - "$1"
   elif command -v wget >/dev/null 2>&1; then
     wget -q -O - -T 20 \
          --header="X-Host-Token: $HOST_TOKEN" --header="X-Host-Name: $HOST_NAME" "$1"
@@ -223,6 +228,13 @@ trap 'rm -f "$TMP"' EXIT
       [ "$sudo_ja" = "ja" ] || continue
       tabu "$login" && continue
       if id -u "$login" >/dev/null 2>&1; then
+        # Regeln 1 und 2 auch fuer sudo: nur eigene Konten, nie Systemkonten.
+        # Sonst machte ein Eintrag "www-data" oder ein fremdes Konto in der
+        # gelieferten Liste dieses zum passwortlosen root.
+        if [ "$(id -u "$login")" -lt 1000 ] || ! unser "$login"; then
+          echo "rw-konten-sync: sudo fuer $login nicht gesetzt — kein von uns verwaltetes Benutzerkonto" >&2
+          continue
+        fi
         echo "$login ALL=(ALL) NOPASSWD: ALL"
         eintraege=$((eintraege + 1))
       fi

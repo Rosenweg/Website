@@ -28,7 +28,8 @@
 
 REPO_DIR=/mnt/cephfs-stage
 LOG=/var/log/doc-github-backup.log
-LOCK=/tmp/doc-github-backup.lock
+# /run statt /tmp: nur root schreibt dort, kein vorab angelegter Symlink moeglich.
+LOCK=/run/doc-github-backup.lock
 ALERT_TO="technik@rosenweg4303.ch"
 # Absender technik@ und nicht noreply@: mailcow kennt noreply@ nicht und weist
 # es ab —
@@ -51,6 +52,26 @@ RELAY="100.64.2.31"
 RELAY_PORT="26"
 MODE="diff"
 [ "$1" = "--full" ] && MODE="full"
+
+# Das Arbeitsverzeichnis ist zugleich eine Samba-Freigabe. Wer dort .git/
+# beschreiben kann (Hooks, core.fsmonitor, gpg.program, credential.helper …),
+# liesse sonst Befehle als root ausfuehren. Diese Optionen ueberstimmen die
+# Repo-Konfiguration bei jedem Aufruf. Vollstaendig schuetzt nur, .git/ in Samba
+# zu sperren (veto files) oder das Git-Verzeichnis ausserhalb der Freigabe zu
+# halten — siehe Sicherheitspruefung 17.11.2026 (I-9).
+git() {
+  command git \
+    -c core.hooksPath=/dev/null \
+    -c core.fsmonitor=false \
+    -c core.pager=cat \
+    -c core.sshCommand=ssh \
+    -c commit.gpgsign=false \
+    -c tag.gpgsign=false \
+    -c protocol.ext.allow=never \
+    -c protocol.file.allow=never \
+    -c credential.helper= -c credential.helper=store \
+    "$@"
+}
 
 send_alert() {
   local subject="$1"
@@ -131,7 +152,9 @@ done > "$FEHLEND"
 if [ -s "$FEHLEND" ]; then
   ANZAHL=$(tr -cd "\0" < "$FEHLEND" | wc -c)
   echo "$(date) [$MODE]: $ANZAHL Datei(en) von GitHub zurueckgeholt, die hier fehlten" >> $LOG
-  xargs -0 -r git checkout origin/main -- < "$FEHLEND" >> $LOG 2>&1
+  # Ueber die git()-Funktion statt xargs: xargs ruft das git-Programm direkt
+  # auf und umginge damit die Schutzoptionen oben (I-9).
+  git checkout origin/main --pathspec-from-file="$FEHLEND" --pathspec-file-nul >> $LOG 2>&1
 fi
 rm -f "$FEHLEND"
 

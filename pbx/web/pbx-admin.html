@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PBX-Admin — Rosenweg</title>
 <link rel="icon" href="https://www.rosenweg4303.ch/logo-rosenweg.png" type="image/png">
-<script src="https://www.rosenweg4303.ch/js/authentik-auth.js?v=2"></script>
+<script src="https://www.rosenweg4303.ch/js/authentik-auth.js?v=5"></script>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
   body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#f1f5f9; color:#1f2937; }
@@ -206,8 +206,8 @@ async function loadMembers(){
     <td>${esc(m.name)}</td>
     <td class="mono">${esc(m.phone)}</td>
     <td><span class="tag">${m.kind==='sip'?'SIP':'Mobil'}</span></td>
-    <td class="mono">${m.internal_ext||'—'}</td>
-    <td>${m.priority}</td>
+    <td class="mono">${esc(m.internal_ext||'—')}</td>
+    <td>${esc(m.priority)}</td>
     <td><label style="display:inline-flex;align-items:center;gap:.4rem;cursor:pointer" title="angehakt = nur in Geschäftszeit (Zeitsperre); aus = klingelt immer">
       <input type="checkbox" ${m.bypass_hours?'':'checked'} onchange="toggleZeitsperre(${m.id},this.checked)">
       <span style="font-size:.78rem" class="${m.bypass_hours?'':'muted'}">${m.bypass_hours?'klingelt immer':'Zeitsperre'}</span></label></td>
@@ -303,6 +303,8 @@ function gate(){ $('content').style.display='none'; $('gate').style.display='blo
 async function start(){
   // Token aus dem #auth=-Fragment nach dem Authentik-Redirect in localStorage schreiben.
   AuthentikAuth.handleCallback();
+  // Nach dem Callback ist der Nutzer erst bekannt, wenn /api/auth/me geantwortet hat
+  if (AuthentikAuth.ready) await AuthentikAuth.ready;
   if(!AuthentikAuth.isLoggedIn()){ gate(); return; }
   const u = AuthentikAuth.getUser();
   $('who').textContent = u?.name || u?.email || '';

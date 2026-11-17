@@ -45,6 +45,18 @@ const AuthentikAuth = {
   SSO_PROBE_MS: 2500,
   SSO_PAUSE_KEY: 'rosenweg_sso_pause',
   SSO_PAUSE_MS: 6 * 60 * 60 * 1000,
+  // Merker "Anmeldung in diesem Browser gestartet": ein #auth=-Fragment ohne
+  // vorherigen login() stammt aus einem fremden Link (Anmeldung unter fremdem
+  // Konto unterschieben) und wird verworfen.
+  LOGIN_MARKER_KEY: 'rosenweg_login_gestartet',
+  LOGIN_MARKER_MS: 15 * 60 * 1000,
+  // Schleifensperre: automatische Login-Starts (init ohne Sitzung, 401) je Tab
+  // zaehlen. Wird ein Ruecksprung verworfen oder lehnt der Server das Token
+  // gleich wieder ab, liefe die Seite sonst endlos zwischen Authentik und hier
+  // hin und her (und in die Login-Drossel des Servers).
+  AUTO_LOGIN_KEY: 'rosenweg_auto_login',
+  AUTO_LOGIN_MAX: 2,
+  AUTO_LOGIN_FENSTER_MS: 2 * 60 * 1000,
 
   async _ssoVersuch() {
     let uhr = null;
@@ -74,31 +86,121 @@ const AuthentikAuth = {
     }
   },
 
-  /** Start login - redirect to Authentik via API */
-  async login(redirectPath) {
+  /**
+   * Start login - redirect to Authentik via API.
+   * opts.reauth: Authentik fragt erneut nach dem Ausweis (Passwortwechsel).
+   * opts.auto:   automatischer Start (nicht vom Nutzer geklickt) -> Schleifensperre.
+   * Aufruf auch als login({ reauth: true }) moeglich.
+   */
+  async login(redirectPath, opts = {}) {
+    if (redirectPath && typeof redirectPath === 'object') { opts = redirectPath; redirectPath = null; }
+    opts = opts || {};
+    if (opts.auto && !this._autoLoginErlaubt()) {
+      this._meldung('Die automatische Anmeldung wurde angehalten, weil sie mehrmals hintereinander nicht geklappt hat.', true);
+      return false;
+    }
     const redirect = redirectPath || window.location.pathname;
-    await this._ssoVersuch();
-    window.location.href = `/api/auth/login?redirect=${encodeURIComponent(redirect)}`;
+    // Merker auch fuer reauth noetig, sonst wird der Ruecksprung verworfen
+    try { localStorage.setItem(this.LOGIN_MARKER_KEY, String(Date.now())); } catch (_) {}
+    // Bei reauth kein stiller Kerberos-Versuch: es soll ja neu gefragt werden
+    if (!opts.reauth) await this._ssoVersuch();
+    window.location.href = `/api/auth/login?${opts.reauth ? 'reauth=1&' : ''}redirect=${encodeURIComponent(redirect)}`;
+    return true;
+  },
+
+  // Hoechstens AUTO_LOGIN_MAX automatische Starts je AUTO_LOGIN_FENSTER_MS (je Tab)
+  _autoLoginErlaubt() {
+    try {
+      const jetzt = Date.now();
+      let liste = [];
+      try { liste = JSON.parse(sessionStorage.getItem(this.AUTO_LOGIN_KEY) || '[]'); } catch (_) {}
+      if (!Array.isArray(liste)) liste = [];
+      liste = liste.filter(t => typeof t === 'number' && jetzt - t >= 0 && jetzt - t < this.AUTO_LOGIN_FENSTER_MS);
+      if (liste.length >= this.AUTO_LOGIN_MAX) return false;
+      liste.push(jetzt);
+      sessionStorage.setItem(this.AUTO_LOGIN_KEY, JSON.stringify(liste));
+    } catch (_) { /* ohne sessionStorage keine Sperre */ }
+    return true;
+  },
+
+  // Sichtbare Meldung statt stiller Schleife; mitKnopf = Anmelden von Hand anbieten
+  _meldung(text, mitKnopf) {
+    try {
+      if (typeof document === 'undefined' || !document.createElement) return;
+      const zeigen = () => {
+        let box = document.getElementById('authentik-auth-meldung');
+        if (!box) {
+          box = document.createElement('div');
+          box.id = 'authentik-auth-meldung';
+          box.setAttribute('role', 'alert');
+          box.style.cssText = 'position:fixed;left:50%;top:1rem;transform:translateX(-50%);z-index:99999;max-width:36rem;background:#fef3c7;color:#92400e;border:1px solid #f59e0b;border-radius:.5rem;padding:.75rem 1rem;font:14px/1.4 system-ui,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.15)';
+          document.body.appendChild(box);
+        }
+        box.textContent = text + ' ';
+        if (mitKnopf) {
+          const b = document.createElement('button');
+          b.textContent = 'Jetzt anmelden';
+          b.style.cssText = 'margin-left:.5rem;background:#2563eb;color:#fff;border:none;border-radius:.35rem;padding:.3rem .8rem;cursor:pointer;font-weight:600';
+          b.onclick = () => this.login();
+          box.appendChild(b);
+        }
+      };
+      if (document.body) zeigen();
+      else document.addEventListener('DOMContentLoaded', zeigen);
+    } catch (_) {}
+  },
+
+  // ready aufloesen + Event 'authentik-auth-ready' auf window (nur einmal)
+  _fertig(user) {
+    if (this._readyErledigt) return;
+    this._readyErledigt = true;
+    if (this._readyResolve) this._readyResolve(user || null);
+    try {
+      window.dispatchEvent(new CustomEvent('authentik-auth-ready', { detail: { user: user || null } }));
+    } catch (_) {}
   },
 
   /** Process auth callback from URL hash (after Authentik redirect) */
+  // Aus dem Fragment wird nur das Token genommen, und nur wenn die Anmeldung in
+  // diesem Browser begonnen wurde. Das Nutzerobjekt im Fragment ist ungeprueft
+  // (Rechte/isAdmin frei faelschbar) -> es zaehlt nur, was /api/auth/me liefert.
+  // Die Pruefung laeuft im Hintergrund; init() wartet auf _callbackPruefung.
+  // Ohne init() (Seiten, die nur handleCallback() rufen) loest ready nach der
+  // Pruefung auf, ohne Fragment sofort.
   handleCallback() {
-    const hash = window.location.hash;
-    if (!hash.startsWith('#auth=')) return false;
+    const hash = window.location.hash || '';
+    if (!hash.startsWith('#auth=')) {
+      if (!this._inInit) this._fertig(this.getUser());
+      return false;
+    }
+    // Fragment sofort entfernen, egal ob gueltig (Token nicht in Verlauf/Lesezeichen)
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+
+    let gestartet = 0;
+    try {
+      gestartet = Number(localStorage.getItem(this.LOGIN_MARKER_KEY) || 0);
+      localStorage.removeItem(this.LOGIN_MARKER_KEY);
+    } catch (_) {}
+    if (!gestartet || Date.now() - gestartet > this.LOGIN_MARKER_MS) {
+      console.warn('Auth-Callback ohne eigene Anmeldung verworfen');
+      if (!this._inInit) this._fertig(this.getUser());
+      return false;
+    }
 
     try {
       const data = JSON.parse(decodeURIComponent(hash.substring(6)));
-      if (data.token && data.user) {
+      if (data.token && typeof data.token === 'string') {
         localStorage.setItem(this.SESSION_KEY, data.token);
-        localStorage.setItem(this.USER_KEY, JSON.stringify(data.user));
+        localStorage.removeItem(this.USER_KEY);
         this._setSharedToken(data.token);
-        // Clean URL hash
-        history.replaceState(null, '', window.location.pathname + window.location.search);
+        this._callbackPruefung = this.validateSession();
+        if (!this._inInit) this._callbackPruefung.then(() => this._fertig(this.getUser()));
         return true;
       }
     } catch (e) {
       console.error('Auth callback parse error:', e);
     }
+    if (!this._inInit) this._fertig(this.getUser());
     return false;
   },
 
@@ -138,7 +240,8 @@ const AuthentikAuth = {
   },
   _clearSharedToken() {
     const dom = this._cookieDomain();
-    if (dom) document.cookie = `${this.SESSION_KEY}=; domain=${dom}; path=/; max-age=0`;
+    const secure = location.protocol === 'https:' ? '; secure' : '';
+    if (dom) document.cookie = `${this.SESSION_KEY}=; domain=${dom}; path=/; max-age=0; samesite=lax${secure}`;
   },
 
   /** Check if current user is admin */
@@ -180,7 +283,11 @@ const AuthentikAuth = {
     }
   },
 
-  /** Validate session against server */
+  /**
+   * Validate session against server.
+   * true = gueltig, false = abgelehnt (401, Sitzung geloescht),
+   * null = nicht pruefbar (5xx/Netz) -> Sitzung bleibt, kein Logout.
+   */
   async validateSession() {
     const token = this.getToken();
     if (!token) return false;
@@ -191,28 +298,45 @@ const AuthentikAuth = {
       });
       if (resp.ok) {
         const data = await resp.json();
+        if (!data || !data.user) return null;
         localStorage.setItem(this.USER_KEY, JSON.stringify(data.user));
         if (!localStorage.getItem(this.SESSION_KEY)) localStorage.setItem(this.SESSION_KEY, token);
         this._setSharedToken(token); // Cookie-Ablauf mitschieben (Sliding-Session)
         return true;
       }
-      this.logout(false);
-      return false;
+      // Nur ein klares 401 beendet die Sitzung; ein Serverfehler darf nicht
+      // abmelden (sonst login() -> Callback -> 5xx -> Logout -> Schleife).
+      if (resp.status === 401) {
+        this.logout(false);
+        return false;
+      }
+      return null;
     } catch {
-      return false;
+      return null;
     }
   },
 
   /** Make authenticated API call */
   async apiFetch(url, options = {}) {
     const token = this.getToken();
-    const headers = { ...options.headers };
-    if (token) headers.Authorization = `Bearer ${token}`;
-    if (options.body && typeof options.body === 'object' && !(options.body instanceof FormData) && !(options.body instanceof ArrayBuffer) && !(options.body instanceof Uint8Array)) {
-      headers['Content-Type'] = 'application/json';
-      options.body = JSON.stringify(options.body);
+    // Headers-Objekt statt Spread: nimmt auch Headers-Instanzen/Paarlisten an
+    // und prueft Content-Type ohne Gross/Klein.
+    const headers = new Headers(options.headers || {});
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    let body = options.body;
+    // Nur reine Objekte/Arrays werden JSON. Blob/File, FormData, ArrayBuffer,
+    // Typed Arrays, URLSearchParams, ReadableStream und Strings gehen
+    // unveraendert raus (sonst wird z.B. ein PDF-Upload zu "{}").
+    const istReinesObjekt = body !== null && typeof body === 'object'
+      && (Array.isArray(body) || Object.prototype.toString.call(body) === '[object Object]');
+    if (istReinesObjekt) {
+      body = JSON.stringify(body);
+      // Einen vom Aufrufer gesetzten Content-Type nie ueberschreiben.
+      if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
     }
-    const resp = await fetch(url, { ...options, headers });
+    const fetchOpts = { ...options, headers };
+    if (body !== undefined) fetchOpts.body = body;
+    const resp = await fetch(url, fetchOpts);
     // Session abgelaufen kann sich auf zwei Arten zeigen:
     //   a) API antwortet direkt mit 401 (sauberer Fall)
     //   b) fetch() folgt einem 302 zur Authentik-Login-Seite → resp.url
@@ -232,32 +356,57 @@ const AuthentikAuth = {
    * If requireAuth is true, redirects to login automatically.
    * If requireAdmin is true, shows error for non-admins.
    */
-  async init({ requireAuth = true, requireAdmin = false, onLogin, onLogout } = {}) {
-    // Handle OAuth callback
+  async init(opts = {}) {
+    // Mehrere init()-Aufrufe (nav.js + Seite) teilen sich ready; der erste
+    // Abschluss loest auf.
+    let user = null;
+    this._inInit = (this._inInit || 0) + 1;
+    try {
+      user = await this._initIntern(opts);
+    } finally {
+      this._inInit -= 1;
+    }
+    this._fertig(user);
+    return user;
+  },
+
+  async _initIntern({ requireAuth = true, requireAdmin = false, onLogin, onLogout } = {}) {
+    // Handle OAuth callback (Token wird gegen /api/auth/me geprueft)
+    let status = false;
     if (this.handleCallback()) {
-      if (onLogin) onLogin(this.getUser());
-      return this.getUser();
+      status = await this._callbackPruefung;
+    } else if (this.isLoggedIn()) {
+      // Check existing session
+      status = await this.validateSession();
     }
 
-    // Check existing session
-    if (this.isLoggedIn()) {
-      const valid = await this.validateSession();
-      if (valid) {
-        const user = this.getUser();
-        if (requireAdmin && !user.isAdmin) {
-          if (onLogout) onLogout('no-admin');
-          return null;
-        }
-        if (onLogin) onLogin(user);
-        return user;
+    if (status === null) {
+      // Server/Netz gestoert: Sitzung behalten. Mit bekanntem Nutzer weiterarbeiten,
+      // sonst Meldung statt erneuter Anmeldung (die wuerde nichts aendern).
+      if (this.getUser() && this.isLoggedIn()) {
+        status = true;
+      } else {
+        this._meldung('Die Anmeldung kann gerade nicht geprüft werden (Serverfehler). Bitte die Seite später neu laden.', false);
+        if (onLogout) onLogout('server-error');
+        return null;
       }
+    }
+
+    if (status === true) {
+      const user = this.getUser();
+      if (requireAdmin && !user?.isAdmin) {
+        if (onLogout) onLogout('no-admin');
+        return null;
+      }
+      if (onLogin) onLogin(user);
+      return user;
     }
 
     // Not logged in
     if (requireAuth) {
       if (onLogout) onLogout('not-logged-in');
-      // Auto-redirect to Authentik login
-      this.login();
+      // Auto-redirect to Authentik login (mit Schleifensperre)
+      this.login(null, { auto: true });
       return null;
     }
     return null;
@@ -285,3 +434,11 @@ const AuthentikAuth = {
     `;
   },
 };
+
+// AuthentikAuth.ready: loest mit dem Nutzer (oder null) auf, sobald die
+// Anmeldung geprueft ist (init() fertig bzw. Callback gegen /api/auth/me
+// geprueft). Seiten, die getUser() lesen, warten darauf statt auf Zeitgeber.
+AuthentikAuth.ready = new Promise((resolve) => { AuthentikAuth._readyResolve = resolve; });
+// Notnagel: ruft eine Seite weder init() noch handleCallback(), haengt ready
+// nicht ewig, sondern loest mit dem gespeicherten Stand auf.
+setTimeout(() => AuthentikAuth._fertig(AuthentikAuth.getUser()), 15000);

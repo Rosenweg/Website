@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Brief-Tracking — Rosenweg</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="/js/authentik-auth.js?v=2"></script>
+    <script src="/js/authentik-auth.js?v=5"></script>
     <script src="/js/nav.js?v=3"></script>
     <script src="/js/excel-export.js?v=1"></script>
     <link rel="icon" href="/logo-rosenweg.png">
@@ -70,7 +70,34 @@
     </main>
 
     <script>
-    const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+
+    // Datei mit Bearer-Token holen: ein direkter Link schickt keinen Token mit (-> 401).
+    // Nur harmlose Typen im Browser oeffnen; alles andere (z.B. SVG/HTML) herunterladen,
+    // denn eine Blob-URL laeuft mit der Herkunft dieser Seite.
+    async function dateiOeffnen(url, filename) {
+        const win = window.open('', '_blank'); // synchron oeffnen, sonst greift der Popup-Blocker
+        if (win) win.opener = null;
+        try {
+            const r = await AuthentikAuth.apiFetch(url);
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const blob = await r.blob();
+            const typ = (blob.type || '').split(';')[0].trim().toLowerCase();
+            const href = URL.createObjectURL(blob);
+            setTimeout(() => URL.revokeObjectURL(href), 60000);
+            if (win && ['application/pdf', 'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'text/plain'].includes(typ)) {
+                win.location.href = href;
+                return;
+            }
+            if (win) win.close();
+            const a = document.createElement('a');
+            a.href = href; a.download = filename || 'datei';
+            document.body.appendChild(a); a.click(); a.remove();
+        } catch (e) {
+            if (win) win.close();
+            alert('Datei konnte nicht geladen werden: ' + e.message);
+        }
+    }
 
     document.addEventListener('DOMContentLoaded', async () => {
         const user = await AuthentikAuth.init({ requireAuth: true });
@@ -93,18 +120,22 @@
                 tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">Noch keine Briefe erfasst.</td></tr>';
                 return;
             }
-            tbody.innerHTML = briefe.map(b => {
+            tbody.innerHTML = briefe.map((b, idx) => {
                 const date = b.mtime ? new Date(b.mtime).toLocaleDateString('de-CH') : '–';
                 const photoUrl = `/api/documents/${data.dir}/${encodeURIComponent(b.filename)}`;
-                const trackUrl = `https://service.post.ch/ekp-web/ui/entry/search/${b.trackingDotted}`;
+                const trackUrl = `https://service.post.ch/ekp-web/ui/entry/search/${encodeURIComponent(b.trackingDotted || '')}`;
                 return `<tr class="hover:bg-gray-50">
                     <td class="px-4 py-2 font-medium text-gray-900">${esc(b.name)}</td>
                     <td class="px-4 py-2 font-mono text-xs text-gray-700">${esc(b.trackingDotted)}</td>
                     <td class="px-4 py-2 text-gray-600">${esc(date)}</td>
-                    <td class="px-4 py-2"><a href="${photoUrl}" target="_blank" class="text-blue-600 hover:underline">Anzeigen</a></td>
-                    <td class="px-4 py-2"><a href="${trackUrl}" target="_blank" class="inline-flex items-center gap-1 px-2 py-1 bg-yellow-400 hover:bg-yellow-500 text-yellow-900 rounded text-xs font-semibold">Swiss-Post-Status &nbsp;↗</a></td>
+                    <td class="px-4 py-2"><a href="#" data-foto="${esc(photoUrl)}" data-name="${esc(b.filename)}" class="text-blue-600 hover:underline">Anzeigen</a></td>
+                    <td class="px-4 py-2"><a href="${esc(trackUrl)}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 px-2 py-1 bg-yellow-400 hover:bg-yellow-500 text-yellow-900 rounded text-xs font-semibold">Swiss-Post-Status &nbsp;↗</a></td>
                 </tr>`;
             }).join('');
+            tbody.querySelectorAll('a[data-foto]').forEach(a => a.addEventListener('click', ev => {
+                ev.preventDefault();
+                dateiOeffnen(a.dataset.foto, a.dataset.name);
+            }));
         } catch (e) {
             tbody.innerHTML = `<tr><td colspan="5" class="px-4 py-6 text-center text-red-600">Fehler beim Laden: ${esc(e.message)}</td></tr>`;
         }

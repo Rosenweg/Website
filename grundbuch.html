@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Grundbuch-Erfassung — Rosenweg</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="/js/authentik-auth.js?v=2"></script>
+    <script src="/js/authentik-auth.js?v=5"></script>
     <script src="/js/nav.js?v=3"></script>
     <script src="/js/excel-export.js?v=1"></script>
     <link rel="icon" href="/logo-rosenweg.png">
@@ -176,7 +176,7 @@
     </div>
 
     <script>
-    const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
     let me = null, anteileCache = [], current = null;
 
     document.addEventListener('DOMContentLoaded', async () => {
@@ -201,7 +201,7 @@
             const pct = Math.round(((parseInt(s.erfasst) + parseInt(s.freigegeben)) / parseInt(s.total)) * 100);
             document.getElementById('progress-pct').textContent = pct + '%';
             document.getElementById('progress-bar').style.width = pct + '%';
-            const top = data.top_contributors.slice(0, 5).map(c => `${esc(c.user)} (${c.anzahl})`).join(' · ');
+            const top = data.top_contributors.slice(0, 5).map(c => `${c.user ? esc(c.user) : 'anonym'} (${c.anzahl})`).join(' · ');
             document.getElementById('contributors').textContent = top ? `Top-Beiträge: ${top}` : '';
         } catch (e) { console.error('stats', e); }
     }
@@ -253,7 +253,7 @@
             erfasst: 'bg-emerald-100 text-emerald-700',
             freigegeben: 'bg-purple-100 text-purple-700',
         };
-        return `<span class="text-xs ${map[s]||'bg-gray-100'} px-2 py-0.5 rounded">${s}</span>`;
+        return `<span class="text-xs ${Object.prototype.hasOwnProperty.call(map, s) ? map[s] : 'bg-gray-100'} px-2 py-0.5 rounded">${esc(s)}</span>`;
     }
 
     function renderAnteile() {
@@ -264,20 +264,22 @@
             return;
         }
         tbody.innerHTML = anteileCache.map(a => {
-            const eig = (Array.isArray(a.eigentuemer) ? a.eigentuemer.join(', ') : '') || '<span class="text-gray-300">–</span>';
-            const adr = (Array.isArray(a.wohnadressen) ? a.wohnadressen.join('; ') : '') || '<span class="text-gray-300">–</span>';
-            const erf = a.erfasst_von ? esc(a.erfasst_von) : (a.reserviert_von ? `<span class="text-blue-600">res: ${esc(a.reserviert_von)}</span>` : '');
+            // Eigentuemer/Adressen sind Freitext aus der Erfassung -> escapen (gespeichertes XSS)
+            const eig = (Array.isArray(a.eigentuemer) ? esc(a.eigentuemer.join(', ')) : '') || '<span class="text-gray-300">–</span>';
+            const adr = (Array.isArray(a.wohnadressen) ? esc(a.wohnadressen.join('; ')) : '') || '<span class="text-gray-300">–</span>';
+            // Fremde Erfasser/Reservierer liefert der Server ohne Namen (null).
+            const erf = a.erfasst_von ? esc(a.erfasst_von) : (a.reserviert_von ? `<span class="text-blue-600">res: ${esc(a.reserviert_von)}</span>` : (a.status === 'reserviert' ? '<span class="text-blue-600">reserviert</span>' : ''));
             const cta = a.status === 'offen' ? 'Erfassen' : (a.status === 'reserviert' ? (a.reserviert_von === me?.email ? 'Fortsetzen' : 'Reserviert') : 'Bearbeiten');
             const disabled = a.status === 'reserviert' && a.reserviert_von !== me?.email;
             return `<tr class="hover:bg-gray-50">
-                <td class="px-3 py-2 font-mono text-xs">${a.anteil_typ} ${a.parzelle}-${a.sub_id} · ${a.anteil_z}/${a.anteil_n}</td>
+                <td class="px-3 py-2 font-mono text-xs">${esc(a.anteil_typ)} ${esc(a.parzelle)}-${esc(a.sub_id)} · ${esc(a.anteil_z)}/${esc(a.anteil_n)}</td>
                 <td class="px-3 py-2">${eig}</td>
                 <td class="px-3 py-2">${adr}</td>
                 <td class="px-3 py-2">${statusBadge(a.status)}</td>
                 <td class="px-3 py-2 text-xs text-gray-500">${erf}</td>
                 <td class="px-3 py-2 text-right">
-                    ${a.bild_path ? `<a href="javascript:void(0)" onclick="openBild(${a.parzelle}, ${a.sub_id})" class="text-blue-600 text-xs mr-2 hover:underline">Bild</a>` : ''}
-                    <button onclick="openAnteil(${a.parzelle},${a.sub_id})" ${disabled?'disabled':''} class="px-2 py-1 text-xs ${disabled?'bg-gray-100 text-gray-400 cursor-not-allowed':'bg-blue-600 text-white hover:bg-blue-700'} rounded">${cta}</button>
+                    ${a.bild_path ? `<a href="javascript:void(0)" onclick="openBild(${Number(a.parzelle)}, ${Number(a.sub_id)})" class="text-blue-600 text-xs mr-2 hover:underline">Bild</a>` : ''}
+                    <button onclick="openAnteil(${Number(a.parzelle)},${Number(a.sub_id)})" ${disabled?'disabled':''} class="px-2 py-1 text-xs ${disabled?'bg-gray-100 text-gray-400 cursor-not-allowed':'bg-blue-600 text-white hover:bg-blue-700'} rounded">${cta}</button>
                 </td>
             </tr>`;
         }).join('');

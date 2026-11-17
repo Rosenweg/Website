@@ -6,7 +6,7 @@
     <title>Rosenweg ISP — Internet & Mail-Dienste</title>
     <link rel="icon" href="/logo-rosenweg-isp.png">
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="/js/authentik-auth.js?v=4"></script>
+    <script src="/js/authentik-auth.js?v=5"></script>
     <script src="/js/site-config.js"></script>
     <script src="/js/qrious.min.js"></script>
     <style>
@@ -439,7 +439,7 @@ async function loadWlan() {
                 <div class="text-[10px] text-slate-500 uppercase">Passwort</div>
                 <div class="flex items-center gap-2">
                   <span class="font-mono font-semibold text-slate-900 break-all">${esc(w.password)}</span>
-                  <button class="text-xs bg-slate-100 hover:bg-slate-200 px-2 py-0.5 rounded shrink-0" onclick="copyWlan(this, '${esc(w.password)}')">Kopieren</button>
+                  <button class="text-xs bg-slate-100 hover:bg-slate-200 px-2 py-0.5 rounded shrink-0" data-pw-idx="${idx}">Kopieren</button>
                 </div>
               </div>
               ${w.vlan ? `<div class="text-[10px] text-slate-500">VLAN ${esc(w.vlan)} · ${esc(w.network || '')}</div>` : ''}
@@ -451,6 +451,11 @@ async function loadWlan() {
           </div>`;
         }).join('');
         wrap.classList.remove('hidden');
+        // Kopieren per addEventListener statt Inline-Handler (Passwort nicht in JS-String)
+        wrap.querySelectorAll('button[data-pw-idx]').forEach(btn => {
+            const w = sortedWlans[Number(btn.dataset.pwIdx)];
+            btn.addEventListener('click', () => copyWlan(btn, w ? w.password : ''));
+        });
         // QR-Codes rendern (gleiche Reihenfolge wie das HTML oben)
         sortedWlans.forEach((w, idx) => {
             const canvas = document.getElementById('qr-wlan-' + idx);
@@ -470,7 +475,7 @@ function copyWlan(btn, pw) {
 }
 
 function esc(s) {
-    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 async function loadMeinAnschluss(user) {

@@ -11,6 +11,7 @@ const crypto = require('crypto');
 const { pool } = require('./db');
 const { queueWhatsappMessage, resolveTechnikWhatsappGroupId } = require('./whatsapp');
 const { loggedSendMail } = require('./mail');
+const { fehlerFuerClient } = require('./utils');
 
 const WEBHOOK_BASE = process.env.ALARM_WEBHOOK_BASE || 'https://www.rosenweg4303.ch';
 const webhookUrl = (t, ev) => `${WEBHOOK_BASE}/api/alarmpanel/webhook?token=${t}&event=${ev || 'alarm'}`;
@@ -79,8 +80,17 @@ function authHeaders(s) {
   if (!s.auth_user) return {};
   return { Authorization: 'Basic ' + Buffer.from(`${s.auth_user}:${s.auth_pass || ''}`).toString('base64') };
 }
+// Nur ein nackter Host (IPv4, Name oder [IPv6]) mit optionalem Port: kein
+// Pfad, kein "user@", kein Schema. Sonst bestimmte das Feld frei, wohin die
+// API (mit Basic-Auth) Anfragen schickt.
+const HOST_MUSTER = /^(\[[0-9a-fA-F:]+\]|[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?)(:\d{1,5})?$/;
+function hostGueltig(h) { return typeof h === 'string' && HOST_MUSTER.test(h); }
+
 async function readSensor(s) {
-  const opt = { signal: AbortSignal.timeout(3000), headers: authHeaders(s) };
+  if (!hostGueltig(s.host)) throw new Error('ungültiger Host');
+  // Keine Weiterleitungen folgen: ein Geraet (oder wer sich dafuer ausgibt)
+  // koennte die Anfrage samt Basic-Auth sonst an ein anderes Ziel lenken.
+  const opt = { signal: AbortSignal.timeout(3000), headers: authHeaders(s), redirect: 'error' };
   if (s.device_type === 'smoke') {
     const r = await fetch(`http://${s.host}/rpc/Shelly.GetStatus`, opt);
     if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -180,10 +190,19 @@ function mountAlarmpanel({ app, authMiddleware, requireManage, resolveBroadcastR
     '(auth_user IS NOT NULL) AS has_auth', '(webhook_token IS NOT NULL) AS has_webhook',
     'status', 'in_alarm', 'battery_low', 'battery_percent', 'last_value', 'last_ok_at', 'last_alarm_at'].join(',');
 
+  // Darf die Person verwalten? requireManage als Middleware fragen, ohne
+  // dass eine Ablehnung schon die Antwort schreibt.
+  const darfVerwalten = (req) => new Promise((resolve) => {
+    const stub = { status() { return stub; }, json() { resolve(false); return stub; }, send() { resolve(false); return stub; }, end() { resolve(false); return stub; } };
+    try { Promise.resolve(requireManage(req, stub, () => resolve(true))).catch(() => resolve(false)); } catch { resolve(false); }
+  });
+
   // Liste + Live-Status
   app.get('/api/alarmpanel/sensors', authMiddleware, async (req, res) => {
     try {
       const { rows } = await pool.query(`SELECT ${VIEW} FROM alarm_sensors ORDER BY device_type, name`);
+      // Geraeteadressen im Hausnetz sind nur fuer die Verwaltung.
+      if (!(await darfVerwalten(req))) rows.forEach(r => { delete r.host; delete r.has_auth; });
       const agg = rows.reduce((a, s) => {
         if (!s.active) return a;
         if (s.in_alarm) a.alarm++;
@@ -193,7 +212,7 @@ function mountAlarmpanel({ app, authMiddleware, requireManage, resolveBroadcastR
         return a;
       }, { ok: 0, alarm: 0, offline: 0, unknown: 0 });
       res.json({ sensors: rows, summary: agg, poll_ms: POLL_MS });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
   });
 
   // Aufschalten — conn='poll' (netzbetrieben, host nötig, optional auth) oder
@@ -206,6 +225,7 @@ function mountAlarmpanel({ app, authMiddleware, requireManage, resolveBroadcastR
     const host = String(b.host || '').trim();
     if (!name || !['smoke', 'gas'].includes(device_type)) return res.status(400).json({ error: 'name + device_type (smoke|gas) erforderlich' });
     if (conn === 'poll' && !host) return res.status(400).json({ error: 'host erforderlich (Polling)' });
+    if (conn === 'poll' && !hostGueltig(host)) return res.status(400).json({ error: 'host: nur IP oder Hostname, optional :Port' });
     const token = conn === 'webhook' ? 'wh_' + crypto.randomBytes(18).toString('hex') : null;
     try {
       const { rows } = await pool.query(
@@ -217,7 +237,7 @@ function mountAlarmpanel({ app, authMiddleware, requireManage, resolveBroadcastR
          conn === 'poll' && b.auth_pass ? String(b.auth_pass) : null,
          token, device_type === 'gas' ? (parseInt(b.gas_threshold_ppm, 10) || null) : null, req.user?.email || null]);
       res.json({ ok: true, id: rows[0].id, webhook_url: token ? webhookUrl(token) : null, webhook_clear_url: token ? webhookUrl(token, 'clear') : null });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
   });
 
   // Manager: Webhook-URLs eines Geräts (zum Eintragen in die Shelly-Action)
@@ -227,7 +247,7 @@ function mountAlarmpanel({ app, authMiddleware, requireManage, resolveBroadcastR
       const t = rows[0]?.webhook_token;
       if (!t) return res.status(404).json({ error: 'kein Webhook-Gerät' });
       res.json({ alarm_url: webhookUrl(t, 'alarm'), clear_url: webhookUrl(t, 'clear') });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
   });
 
   // Webhook fuer Batterie-Geräte (Shelly Action). Auth = Token, KEIN Authentik.
@@ -249,11 +269,13 @@ function mountAlarmpanel({ app, authMiddleware, requireManage, resolveBroadcastR
         if (!was) await escalate(s, { value: 'Alarm (Push)' }, false);
       }
       res.json({ ok: true });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
   });
 
   app.put('/api/alarmpanel/sensors/:id', authMiddleware, requireManage, async (req, res) => {
     const b = req.body || {};
+    if (b.host != null && b.host !== '' && !hostGueltig(String(b.host).trim())) return res.status(400).json({ error: 'host: nur IP oder Hostname, optional :Port' });
+    if (typeof b.host === 'string') b.host = b.host.trim() || null;
     try {
       await pool.query(
         `UPDATE alarm_sensors SET name=COALESCE($1,name), location=$2, host=COALESCE($3,host),
@@ -264,12 +286,12 @@ function mountAlarmpanel({ app, authMiddleware, requireManage, resolveBroadcastR
          typeof b.active === 'boolean' ? b.active : null, parseInt(req.params.id, 10),
          b.auth_user ?? null, (b.auth_pass !== undefined && b.auth_pass !== '') ? b.auth_pass : null]);
       res.json({ ok: true });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
   });
 
   app.delete('/api/alarmpanel/sensors/:id', authMiddleware, requireManage, async (req, res) => {
     try { await pool.query(`DELETE FROM alarm_sensors WHERE id=$1`, [parseInt(req.params.id, 10)]); res.json({ ok: true }); }
-    catch (e) { res.status(500).json({ error: e.message }); }
+    catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
   });
 
   // Alarm-Historie
@@ -277,7 +299,7 @@ function mountAlarmpanel({ app, authMiddleware, requireManage, resolveBroadcastR
     try {
       const { rows } = await pool.query(`SELECT id,sensor_name,device_type,event,detail,notified,created_at FROM alarm_events ORDER BY id DESC LIMIT 100`);
       res.json({ events: rows });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
   });
 
   // Test-Alarm (nur Technik-Benachrichtigung, NICHT an Bewohner)
@@ -287,7 +309,7 @@ function mountAlarmpanel({ app, authMiddleware, requireManage, resolveBroadcastR
       if (!rows[0]) return res.status(404).json({ error: 'Sensor nicht gefunden' });
       const notified = await escalate(rows[0], { value: 'TEST-Auslösung' }, true);
       res.json({ ok: true, notified });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
   });
 }
 

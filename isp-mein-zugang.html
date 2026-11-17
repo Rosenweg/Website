@@ -6,7 +6,7 @@
   <title>Mein Zugang — Rosenweg ISP</title>
   <link rel="icon" href="/logo-rosenweg-isp.png">
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="/js/authentik-auth.js?v=4"></script>
+  <script src="/js/authentik-auth.js?v=5"></script>
   <script src="/js/nav.js?v=isp4"></script>
   <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'); body { font-family: 'Inter', sans-serif; }</style>
 </head>
@@ -95,7 +95,7 @@
   </main>
 
   <script>
-  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   const fmtDt = s => s ? new Date(s).toLocaleString('de-CH') : '—';
   let vpnAccounts = [], vlanRequests = [], rpRoutes = [], mailRelays = [];
 
@@ -152,7 +152,7 @@
               <p class="text-gray-600 mb-2">Wer sein Gerät von Hand einrichtet statt per DHCP, trägt das hier ein:</p>
               <dl class="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1 font-mono">
                 <dt class="text-gray-500 font-sans">IP-Adresse</dt><dd>${esc(st.ip || a.reserviert_ip)}</dd>
-                <dt class="text-gray-500 font-sans">Subnetzmaske</dt><dd>${esc(st.maske || '')}${st.praefix ? ` (/${st.praefix})` : ''}</dd>
+                <dt class="text-gray-500 font-sans">Subnetzmaske</dt><dd>${esc(st.maske || '')}${st.praefix ? ` (/${esc(st.praefix)})` : ''}</dd>
                 <dt class="text-gray-500 font-sans">Gateway</dt><dd>${esc(st.gateway || '')}</dd>
                 <dt class="text-gray-500 font-sans">DNS</dt><dd>${esc((st.dns || []).join(', '))}</dd>
                 ${st.domain ? `<dt class="text-gray-500 font-sans">Domäne</dt><dd>${esc(st.domain)}</dd>` : ''}
@@ -400,10 +400,10 @@
     const optHtml = opts.length === 0
       ? `<p class="text-xs text-red-600 italic">Keine zugewiesene Wohnung/Hobbyraum/Parkplatz in der Objektverwaltung gefunden. Bitte Verwalter kontaktieren.</p>`
       : opts.length === 1
-        ? `<p class="text-xs text-gray-500 italic">Heim-Netz: ${kindIcon[opts[0].kind]||''} ${esc(opts[0].bezeichnung)} (VLAN ${opts[0].vlan})</p><input type="hidden" id="v-vlan" value="${opts[0].vlan}">`
+        ? `<p class="text-xs text-gray-500 italic">Heim-Netz: ${kindIcon[opts[0].kind]||''} ${esc(opts[0].bezeichnung)} (VLAN ${esc(opts[0].vlan)})</p><input type="hidden" id="v-vlan" value="${esc(opts[0].vlan)}">`
         : `<div><label class="block text-xs text-gray-600">Heim-Netz auswaehlen (Wohnung > Hobbyraum > Parkplatz)</label>
             <select id="v-vlan" class="w-full border rounded px-2 py-1">
-              ${opts.map((o,i) => `<option value="${o.vlan}"${i===0?' selected':''}>${kindIcon[o.kind]||''} ${esc(o.bezeichnung)} — ${kindLabel[o.kind]||o.kind} (VLAN ${o.vlan})</option>`).join('')}
+              ${opts.map((o,i) => `<option value="${esc(o.vlan)}"${i===0?' selected':''}>${kindIcon[o.kind]||''} ${esc(o.bezeichnung)} — ${kindLabel[o.kind]||esc(o.kind)} (VLAN ${esc(o.vlan)})</option>`).join('')}
             </select></div>`;
     const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
       <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5">
@@ -472,7 +472,7 @@
         </div>
         <p class="text-sm mb-1">${esc(v.zweck)}</p>
         <div class="text-xs text-gray-600">
-          ${v.vlan_id ? `<span class="font-mono">VLAN ${v.vlan_id}</span>` : ''}
+          ${v.vlan_id ? `<span class="font-mono">VLAN ${esc(v.vlan_id)}</span>` : ''}
           ${v.subnet_v4 ? ` · <span class="font-mono">${esc(v.subnet_v4)}</span>` : ''}
           ${v.ablehnung_grund ? ` · <span class="text-red-700">Ablehnung: ${esc(v.ablehnung_grund)}</span>` : ''}
         </div>
@@ -509,7 +509,7 @@
       ? `<p class="text-xs text-red-600 italic">Keine zugewiesene Einheit gefunden. Bitte Verwalter kontaktieren.</p>`
       : `<div><label class="block text-xs text-gray-600">Objekt-Zuordnung *</label>
           <select id="vl-wohnung" class="w-full border rounded px-2 py-1">
-            ${opts.map((o,i) => `<option value="${o.wohnung_id}" data-haus="${o.kind==='wohnung'?(o.vlan/10|0):''}"${i===0?' selected':''}>${kindIcon[o.kind]||''} ${esc(o.bezeichnung)} — ${kindLabel[o.kind]||o.kind}</option>`).join('')}
+            ${opts.map((o,i) => `<option value="${esc(o.wohnung_id)}" data-haus="${o.kind==='wohnung'?(o.vlan/10|0):''}"${i===0?' selected':''}>${kindIcon[o.kind]||''} ${esc(o.bezeichnung)} — ${kindLabel[o.kind]||esc(o.kind)}</option>`).join('')}
           </select>
           <p class="text-xs text-gray-500 mt-1">VLAN-ID wird im Schema dieses Objekts vergeben.</p>
         </div>`;
@@ -539,7 +539,7 @@
             <label class="flex items-center gap-2 text-sm"><input id="vl-wlan" type="checkbox" class="rounded"> WLAN-Passwort für dieses Netz</label>
             <p class="text-xs text-gray-500 mt-0.5 ml-6">An: ein PPSK wird im 'Rosenweg'-WLAN angelegt, Geräte die's tippen landen in deinem Netz. Aus: nur Kabel/Switch-Port.</p>
           </div>
-          <div><label class="block text-xs font-medium text-gray-700">Wunsch-Name</label><input id="vl-name" placeholder="z.B. Smart-Home" class="w-full border rounded px-2 py-1"></div>
+          <div><label class="block text-xs font-medium text-gray-700">Wunsch-Name</label><input id="vl-name" placeholder="z.B. Smart-Home" maxlength="32" pattern="[A-Za-z0-9 ._\\-]{1,32}" class="w-full border rounded px-2 py-1"><p class="text-xs text-gray-500 mt-0.5">Max. 32 Zeichen: Buchstaben (ohne Umlaute), Ziffern, Leerzeichen und . _ -</p></div>
           <div><label class="block text-xs font-medium text-gray-700">Zweck *</label><textarea id="vl-zweck" rows="2" placeholder="Wofür wird das Netz gebraucht?" class="w-full border rounded px-2 py-1"></textarea></div>
           <div class="grid grid-cols-2 gap-2">
             <div><label class="block text-xs font-medium text-gray-700">Groesse</label><select id="vl-grosse" class="w-full border rounded px-2 py-1">
@@ -575,7 +575,7 @@
       : [];
     const body = {
       wohnung_id: wohnungEl ? parseInt(wohnungEl.value, 10) || null : null,
-      gewuenschter_name: get('vl-name').value || null,
+      gewuenschter_name: get('vl-name').value.trim() || null,
       zweck: get('vl-zweck').value.trim(),
       gewuenschte_groesse: get('vl-grosse').value || null,
       geraete_anzahl: parseInt(get('vl-anz').value, 10) || null,
@@ -586,6 +586,10 @@
       mitnutzer_emails: mitnutzer,
     };
     if (!body.zweck) { alert('Zweck Pflicht.'); return; }
+    // Gleiche Regel wie der Server (VLAN_NAME_RE) — sonst kommt nur ein 400 zurueck.
+    if (body.gewuenschter_name && !/^[A-Za-z0-9 ._-]{1,32}$/.test(body.gewuenschter_name)) {
+      alert('Wunsch-Name: max. 32 Zeichen, nur Buchstaben (ohne Umlaute), Ziffern, Leerzeichen und . _ -'); return;
+    }
     try {
       const r = await AuthentikAuth.apiFetch('/api/isp/vlan-requests', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
       if (!r.ok) throw new Error(await r.text());
@@ -632,13 +636,15 @@
             ${r.public ? '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded ml-1">public</span>' : '<span class="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded ml-1">intern</span>'}
             ${r.ssl ? '<span class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded ml-1">SSL</span>' : ''}
             ${r.auth_required ? '<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded ml-1">auth</span>' : ''}
+            ${r.fremd ? '<span class="text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded ml-1">fremd</span>' : ''}
           </div>
-          <div class="flex gap-1">
-            ${r.approval_status === 'pending_dns' ? `<button onclick="recheckRp(${r.id})" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">DNS prüfen</button>` : ''}
+          <!-- Fremde oeffentliche Routen: nur anzeigen, keine Knoepfe (Server lehnt ab) und kein Ziel (kommt leer). -->
+          ${r.fremd ? '' : `<div class="flex gap-1">
+            ${(r.approval_status === 'pending_dns' || (r.approval_status === 'approved' && !r.dns_verified_at)) ? `<button onclick="recheckRp(${r.id})" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">DNS prüfen</button>` : ''}
             <button onclick="delRp(${r.id})" class="text-xs text-red-600 hover:underline">Löschen</button>
-          </div>
+          </div>`}
         </div>
-        <div class="text-xs text-gray-600">→ <span class="font-mono">${esc(r.backend_url)}</span></div>
+        ${r.fremd ? '' : `<div class="text-xs text-gray-600">→ <span class="font-mono">${esc(r.backend_url)}</span></div>`}
         ${r.approval_reason ? `<div class="text-xs text-gray-500 mt-1 italic">${esc(r.approval_reason)}</div>` : ''}
       </div>`).join('');
     const redirRows = redirects.map(r => `
@@ -649,7 +655,7 @@
             <span class="font-mono text-sm">${esc(r.source_host)}${esc(r.source_path === '/' ? '' : r.source_path)}</span>
             <span class="mx-2 text-gray-400">→</span>
             <span class="font-mono text-sm">${esc(r.target_url)}</span>
-            <span class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded ml-2">${r.http_code}</span>
+            <span class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded ml-2">${esc(r.http_code)}</span>
           </div>
           <button onclick="delRedir(${r.id})" class="text-xs text-red-600 hover:underline">Löschen</button>
         </div>
@@ -737,12 +743,12 @@
         <h2 class="font-bold mb-3">Reverse-Proxy-Route</h2>
         <div class="bg-blue-50 border border-blue-200 rounded p-3 mb-3 text-xs space-y-1">
           <p class="font-semibold text-blue-900">📋 DNS-Eintrag bei deinem Provider:</p>
-          ${dnsInfo.cname_target ? `<p><strong>Empfohlen — CNAME auf</strong> <code class="bg-white px-1 rounded">${dnsInfo.cname_target}</code></p>
+          ${dnsInfo.cname_target ? `<p><strong>Empfohlen — CNAME auf</strong> <code class="bg-white px-1 rounded">${esc(dnsInfo.cname_target)}</code></p>
           <p class="text-blue-700">Unsere öffentliche Adresse ist dynamisch. Ein CNAME folgt ihr von selbst; feste Einträge musst du bei jedem Wechsel einzeln nachziehen.</p>` : ''}
           <details class="pt-1"><summary class="cursor-pointer text-blue-800">Nur wenn kein CNAME möglich ist (z. B. Zonenwurzel)</summary>
             <div class="pt-1 space-y-0.5">
-              ${dnsInfo.public_ipv4 ? `<p><strong>A:</strong> <code class="bg-white px-1 rounded">${dnsInfo.public_ipv4}</code></p>` : ''}
-              ${dnsInfo.public_ipv6 ? `<p><strong>AAAA:</strong> <code class="bg-white px-1 rounded">${dnsInfo.public_ipv6}</code></p>` : ''}
+              ${dnsInfo.public_ipv4 ? `<p><strong>A:</strong> <code class="bg-white px-1 rounded">${esc(dnsInfo.public_ipv4)}</code></p>` : ''}
+              ${dnsInfo.public_ipv6 ? `<p><strong>AAAA:</strong> <code class="bg-white px-1 rounded">${esc(dnsInfo.public_ipv6)}</code></p>` : ''}
               <p class="text-blue-700">Diese Adressen können sich ändern — dann trägt sie niemand automatisch nach.</p>
             </div>
           </details>
@@ -806,7 +812,9 @@
   }
   async function delRp(id) {
     if (!confirm('Route löschen?')) return;
-    await AuthentikAuth.apiFetch('/api/isp/reverse-proxy/' + id, { method: 'DELETE' });
+    const r = await AuthentikAuth.apiFetch('/api/isp/reverse-proxy/' + id, { method: 'DELETE' });
+    // Fehler (z. B. 403 bei fremder Route) melden statt still neu zu laden.
+    if (!r.ok) { const d = await r.json().catch(() => ({})); alert('Fehler: ' + (d.error || 'HTTP ' + r.status)); }
     await loadRp();
   }
 
@@ -931,7 +939,7 @@
             <button onclick="delRelay(${m.id})" class="text-xs text-red-600 hover:underline">Löschen</button>
           </div>
         </div>
-        <div class="text-xs text-gray-600">→ <span class="font-mono">${esc(m.target_host)}:${m.target_port || 25}</span>${m.target_use_mx ? ' <span class="bg-blue-100 text-blue-700 px-1 rounded">MX-Lookup</span>' : ''}</div>
+        <div class="text-xs text-gray-600">→ <span class="font-mono">${esc(m.target_host)}:${esc(m.target_port || 25)}</span>${m.target_use_mx ? ' <span class="bg-blue-100 text-blue-700 px-1 rounded">MX-Lookup</span>' : ''}</div>
         ${m.approval_reason ? `<div class="text-xs text-gray-500 italic mt-1">${esc(m.approval_reason)}</div>` : ''}
         ${shBlock}
       </div>`;
@@ -1035,7 +1043,7 @@
     try {
       const r = await AuthentikAuth.apiFetch('/api/isp/mail-relays/' + id + '/recheck-dns', { method: 'POST' });
       const d = await r.json();
-      if (d.matches) alert('✓ MX verifiziert — Relay ist jetzt aktiv.');
+      if (d.matches) alert(d.updated?.active ? '✓ MX verifiziert — Relay ist jetzt aktiv.' : '✓ MX verifiziert — wartet noch auf Freigabe durch die Technik.');
       else alert('⚠ MX zeigt nicht auf PMG.\n\nMX: ' + JSON.stringify(d.mx) + '\nErwartet: ' + d.target);
       await loadRelays();
     } catch (e) { alert('Fehler: ' + e.message); }
@@ -1112,7 +1120,7 @@
             ${m.status === 'pending' ? `<button onclick="delMailboxReq(${m.id})" class="text-xs text-red-600 hover:underline px-2">Zuruecknehmen</button>` : ''}
           </div>
         </div>
-        <div class="text-xs text-gray-600">Quota: ${m.quota_mb || 1024} MB${m.approval_reason ? ` · ${esc(m.approval_reason)}` : ''}</div>
+        <div class="text-xs text-gray-600">Quota: ${esc(m.quota_mb || 1024)} MB${m.approval_reason ? ` · ${esc(m.approval_reason)}` : ''}</div>
         ${pwBlock}
         ${einrichtung}
       </div>`;
@@ -1126,7 +1134,7 @@
     } catch {}
     const relayOpts = relays.length === 0
       ? `<p class="text-xs text-red-600 italic">Keine von Rosenweg verwaltete Mail-Domain verfuegbar. (Wenn dies falsch ist, Admin kontaktieren.)</p>`
-      : `<select id="mb-relay" class="w-full border rounded px-2 py-1">${relays.map(r => `<option value="${r.id}">@${esc(r.domain)}</option>`).join('')}</select>`;
+      : `<select id="mb-relay" class="w-full border rounded px-2 py-1">${relays.map(r => `<option value="${esc(r.id)}">@${esc(r.domain)}</option>`).join('')}</select>`;
     // Vor-/Nachname aus Authentik vorbelegen, Local-Part-Vorschlag daraus ableiten.
     const u = AuthentikAuth.getUser() || {};
     const fullNameDefault = u.name || '';

@@ -16,6 +16,8 @@ services:
       WA_RECONNECT_MS: "30000"
       WA_GATEWAY_PORT: "8090"
       GW_SMTP_PORT: "2525"
+      # Quellen mit Internet-Mail (PMG): Absender muss in smtp_senders stehen, Empfaenger nur Aliase.
+      GW_SMTP_STRENG_IPS: "100.64.2.31"
       GW_PUBLIC_HOST: whatsapp.rosenweg4303.ch
       GW_NOTIFY_RELAY_HOST: "100.64.2.31"        # PMG -> SMTP2GO
       GW_NOTIFY_RELAY_PORT: "25"

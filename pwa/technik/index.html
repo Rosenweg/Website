@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="/icons/icon-192-2.png">
   <link rel="icon" href="/logo-rosenweg.png" type="image/png">
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/authentik-auth.js?v=5"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
     body { font-family: 'Inter', sans-serif; }
@@ -420,7 +420,10 @@
       try {
         const resp = await AuthentikAuth.apiFetch('/api/reklamationen/' + encodeURIComponent(r.id) + '/foto', { cache: 'no-store' });
         if (!resp.ok) { imgEl.alt = 'Foto nicht ladbar'; continue; }
-        const url = URL.createObjectURL(await resp.blob());
+        // Nur Rasterbilder als Blob-URL verwenden (SVG/HTML-Blob waere auf unserer Origin aktiv)
+        const blob = await resp.blob();
+        if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/heic', 'image/heif'].includes(String(blob.type).split(';')[0].trim().toLowerCase())) { imgEl.alt = 'Foto nicht ladbar'; continue; }
+        const url = URL.createObjectURL(blob);
         fotoUrls.set(String(r.id), url);
         imgEl.src = url;
       } catch { imgEl.alt = 'Foto-Fehler'; }

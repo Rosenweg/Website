@@ -19,7 +19,7 @@
 import { createServer } from 'node:http';
 import { execFileSync, execSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash, timingSafeEqual } from 'node:crypto';
 
 const PORT             = parseInt(process.env.WG_CONTROL_PORT || '3001', 10);
 const TOKEN            = process.env.WG_CONTROL_TOKEN || '';
@@ -114,6 +114,13 @@ function ensureServerKeys() {
     saveState(state);
   }
 }
+// Name landet als Kommentarzeile in wg0.conf: ein Zeilenumbruch darin haette
+// eigene [Peer]-Bloecke einschleusen koennen (D-3). Deshalb nur eine Positivliste
+// an Zeichen; alles andere wird zu Leerzeichen. Auch beim Rendern angewendet,
+// damit Altbestand im State nichts mehr anrichten kann.
+function sauberName(v) {
+  return String(v ?? '').replace(/[^\p{L}\p{N} ._@+()'-]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+}
 function renderWgConf() {
   const lines = [
     '[Interface]',
@@ -123,7 +130,7 @@ function renderWgConf() {
     '',
   ];
   for (const p of state.peers) {
-    lines.push(`# ${p.id} | ${p.name} | vlan=${p.vlan}`);
+    lines.push(`# ${p.id} | ${sauberName(p.name)} | vlan=${parseInt(p.vlan, 10)}`);
     lines.push('[Peer]');
     lines.push(`PublicKey = ${p.public_key}`);
     if (p.preshared_key) lines.push(`PresharedKey = ${p.preshared_key}`);
@@ -325,6 +332,13 @@ async function readBody(req) {
   });
 }
 
+// Zeitkonstanter Token-Vergleich (D-15).
+const TOKEN_DIGEST = createHash('sha256').update(`Bearer ${TOKEN}`).digest();
+function tokenOk(header) {
+  if (typeof header !== 'string') return false;
+  return timingSafeEqual(createHash('sha256').update(header).digest(), TOKEN_DIGEST);
+}
+
 function routeMatch(req, method, pattern) {
   if (req.method !== method) return null;
   const re = new RegExp('^' + pattern.replace(/:[^/]+/g, '([^/]+)') + '$');
@@ -340,7 +354,7 @@ const server = createServer(async (req, res) => {
       return send(res, 200, { ok: true, peers: state.peers.length, listen_port: WG_LISTEN_PORT });
     }
     // Auth
-    if ((req.headers.authorization || '') !== `Bearer ${TOKEN}`) {
+    if (!tokenOk(req.headers.authorization)) {
       return send(res, 401, { error: 'unauthorized' });
     }
 
@@ -381,7 +395,11 @@ const server = createServer(async (req, res) => {
     if (req.method === 'POST' && req.url === '/peers') {
       const body = JSON.parse((await readBody(req)) || '{}');
       const { name, email, vlan, allowed_ips, public_key } = body;
-      if (!name) return send(res, 400, { error: 'name required' });
+      const nameSauber = sauberName(name);
+      if (!nameSauber) return send(res, 400, { error: 'name required' });
+      if (email && !/^[^@\s]{1,64}@[^@\s]{1,190}$/.test(String(email))) return send(res, 400, { error: 'email ungueltig' });
+      // allowed_ips landet in der Client-Konfiguration: nur Adressen/Praefixe, keine Zeilenumbrueche.
+      if (allowed_ips && !/^[0-9A-Fa-f:.\/, ]{1,200}$/.test(String(allowed_ips))) return send(res, 400, { error: 'allowed_ips ungueltig' });
       if (!VLAN_TO_IFACE[vlan]) return send(res, 400, { error: `unknown vlan ${vlan}` });
 
       // Bringt die Gegenstelle ihren eigenen oeffentlichen Schluessel mit,
@@ -414,7 +432,7 @@ const server = createServer(async (req, res) => {
 
       const peer = {
         id: randomUUID(),
-        name: String(name).slice(0, 80),
+        name: nameSauber,
         email: email ? String(email).toLowerCase() : null,
         vlan: parseInt(vlan, 10),
         assigned_ip: nextFreeIp(),
@@ -457,6 +475,7 @@ const server = createServer(async (req, res) => {
 });
 
 applyAll();
-server.listen(PORT, '0.0.0.0', () => {
+// WG_CONTROL_BIND: nur auf der LAN-Adresse lauschen (z. B. 100.64.2.34); Default wie bisher alle.
+server.listen(PORT, process.env.WG_CONTROL_BIND || '0.0.0.0', () => {
   console.log(`wg-control listening on :${PORT} | endpoint=${WG_ENDPOINT_HOST}:${WG_LISTEN_PORT} | peers=${state.peers.length}`);
 });
