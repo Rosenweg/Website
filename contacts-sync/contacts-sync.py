@@ -27,7 +27,7 @@ verw=jq("SELECT COALESCE(json_agg(json_build_object('firma',firma_name,'tel',tel
 vkont=jq("SELECT COALESCE(json_agg(json_build_object('firma',v.firma_name,'name',k.name,'funktion',k.funktion,'email',k.email,'tel',k.telefon)),'[]'::json) FROM verwaltungs_kontakte k JOIN verwaltungen v ON v.id=k.verwaltung_id WHERE v.aktiv")
 def esc(s):
     # \r zuerst: ein CR im Namen haette sonst eine eigene vCard-Zeile begonnen (D-16).
-    s=(s or "").replace("\r\n","\n").replace("\r","\n"); return s.replace("\\","\\\\").replace("\n","\\n").replace(",","\\,").replace(";","\;")
+    s=(s or "").replace("\r\n","\n").replace("\r","\n"); return s.replace("\\","\\\\").replace("\n","\\n").replace(",","\\,").replace(";","\\;")
 def teltype(n):
     d=n.replace(" ","").replace("-",""); return "CELL" if re.search(r"(\+41|^0|^)7[5-9]\d{7}",d) else "VOICE"
 def slug(s): return re.sub(r"[^a-z0-9]+","-",(s or "").lower()).strip("-")
