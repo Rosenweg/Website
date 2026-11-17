@@ -12,7 +12,7 @@
 //   NocCockpit.starten(ziel, { modus: 'eingebettet', intervallMs: 30000 })
 //
 // Wege zu den Zahlen — dieselbe Wahl wie bisher im Wandbild:
-//   Token (?token=… oder Option)  → oeffentliche Endpunkte mit X-Noc-Token
+//   Token (#token=…, Rueckfall ?token=…, oder Option)  → oeffentliche Endpunkte mit X-Noc-Token
 //   angemeldet                    → geschuetzte Endpunkte ueber Authentik
 //   sonst                         → oeffentliche Endpunkte ohne Ausweis
 // Der Token wandert aus der Adresszeile, sobald er gelesen ist: sonst steht
@@ -228,9 +228,17 @@
     const intervallMs = o.intervallMs || (modus === 'wandbild' ? 5000 : 30000);
     cssEinmal();
 
+    // Token bevorzugt aus dem #Fragment (geht nicht in Server-/Proxy-Logs und Referer);
+    // ?token= bleibt als Rueckfall fuer bestehende Wandbild-Links. Danach aus der URL entfernen.
     const params = new URLSearchParams(location.search);
-    let token = o.token || params.get('token') || '';
-    if (params.get('token')) { try { history.replaceState(null, '', location.pathname); } catch (e) { /* egal */ } }
+    const hashParams = new URLSearchParams((location.hash || '').replace(/^#/, ''));
+    const urlToken = hashParams.get('token') || params.get('token') || '';
+    let token = o.token || urlToken;
+    if (urlToken) {
+      params.delete('token');
+      const rest = params.toString();
+      try { history.replaceState(null, '', location.pathname + (rest ? '?' + rest : '')); } catch (e) { /* egal */ }
+    }
 
     ziel.className = 'noc-cockpit' + (modus === 'wandbild' ? ' noc-wandbild' : '') + ' sm:rounded-2xl ' + (ziel.className || '');
     ziel.innerHTML = `<div class="noc-inner">${KOPF(modus)}${MAIL}${UNIFI}</div>`;

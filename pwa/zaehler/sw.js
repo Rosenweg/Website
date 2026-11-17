@@ -9,7 +9,7 @@
  *  - Sonstige GETs (Assets, CDN): stale-while-revalidate.
  */
 
-const CACHE = 'rosenweg-zaehler-v3';
+const CACHE = 'rosenweg-zaehler-v4';
 
 // App-Shell — alles was fuer den Offline-Start noetig ist.
 const SHELL = [
@@ -55,8 +55,11 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(req)
         .then((resp) => {
-          const copy = resp.clone();
-          caches.open(CACHE).then((c) => c.put('/zaehler/index.html', copy)).catch(() => {});
+          // nur echte eigene Seiten ablegen: keine Fehler-/Login-/Fremdantworten als Offline-Seite
+          if (resp && resp.ok && resp.type === 'basic') {
+            const copy = resp.clone();
+            caches.open(CACHE).then((c) => c.put('/zaehler/index.html', copy)).catch(() => {});
+          }
           return resp;
         })
         .catch(() =>

@@ -7,7 +7,7 @@
   <link rel="icon" href="/logo-rosenweg-isp.png">
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="/js/authentik-auth.js?v=4"></script>
-  <script src="/js/noc-cockpit.js?v=1"></script>
+  <script src="/js/noc-cockpit.js?v=2"></script>
   <script src="/js/nav.js?v=isp4"></script>
   <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'); body { font-family: 'Inter', sans-serif; }</style>
 </head>
@@ -153,7 +153,7 @@
   <div id="modal-host"></div>
 
   <script>
-  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   const fmtDt = s => s ? new Date(s).toLocaleString('de-CH') : '—';
 
   let user = null;
@@ -271,7 +271,7 @@
       switch_not_found: ['bg-gray-100 text-gray-500',    '? Switch fehlt'],
       port_not_found:   ['bg-gray-100 text-gray-500',    '? Port fehlt'],
     };
-    const [cls, lbl] = M[live.state] || ['bg-gray-100 text-gray-500', live.state];
+    const [cls, lbl] = M[live.state] || ['bg-gray-100 text-gray-500', esc(live.state)];
     const tip = [
       live.port_up != null ? 'Port ' + (live.port_up ? 'up' : 'down') : '',
       live.connected_mac ? 'MAC ' + live.connected_mac + (live.mac_ok === false ? ' (≠Soll)' : live.mac_ok ? ' ✓' : '') : '',
@@ -294,12 +294,12 @@
       <tbody class="divide-y">
         ${subscribers.map(s => `
           <tr>
-            <td class="px-3 py-2">${esc(s.wohnung_bezeichnung || '?')} <span class="text-xs text-gray-400">STWEG ${s.stweg}</span></td>
+            <td class="px-3 py-2">${esc(s.wohnung_bezeichnung || '?')} <span class="text-xs text-gray-400">STWEG ${esc(s.stweg)}</span></td>
             <td class="px-3 py-2"><span class="text-xs ${s.status === 'aktiv' ? 'bg-green-100 text-green-800' : s.status === 'geplant' ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-700'} px-2 py-0.5 rounded" title="Soll-Status (manuell)">${esc(s.status)}</span>${liveBadge(s.live)}</td>
             <td class="px-3 py-2">${esc(s.anschluss_typ || '—')}</td>
             <td class="px-3 py-2 text-xs font-mono">${esc(s.switch_name || '—')}${s.switch_port ? ' :' + esc(s.switch_port) : ''}</td>
-            <td class="px-3 py-2">${s.vlan ?? '—'}</td>
-            <td class="px-3 py-2 text-xs">${s.bandbreite_down_mbps ? s.bandbreite_down_mbps + '↓' : ''} ${s.bandbreite_up_mbps ? s.bandbreite_up_mbps + '↑' : ''}</td>
+            <td class="px-3 py-2">${esc(s.vlan ?? '—')}</td>
+            <td class="px-3 py-2 text-xs">${s.bandbreite_down_mbps ? esc(s.bandbreite_down_mbps) + '↓' : ''} ${s.bandbreite_up_mbps ? esc(s.bandbreite_up_mbps) + '↑' : ''}</td>
             <td class="px-3 py-2 text-xs">${s.eigenleistung_chf ? 'CHF ' + Number(s.eigenleistung_chf).toFixed(2) : '—'}</td>
             <td class="px-3 py-2 text-right whitespace-nowrap"><button onclick="editSub(${s.id})" class="text-xs text-blue-600 hover:underline">Bearbeiten</button> <button onclick="delSub(${s.id})" class="text-xs text-red-600 hover:underline">Löschen</button></td>
           </tr>`).join('')}
@@ -346,7 +346,7 @@
     if ((ufi.vlans || []).length) {
       vlanOptsLines.push('<optgroup label="VLAN-Tag (Native VLAN)">');
       for (const v of ufi.vlans) {
-        vlanOptsLines.push(`<option value="vlan:${v.vlan}" ${currentSel === `vlan:${v.vlan}` ? 'selected' : ''}>VLAN ${v.vlan} — ${esc(v.name)}</option>`);
+        vlanOptsLines.push(`<option value="vlan:${esc(v.vlan)}" ${currentSel === `vlan:${v.vlan}` ? 'selected' : ''}>VLAN ${esc(v.vlan)} — ${esc(v.name)}</option>`);
       }
       vlanOptsLines.push('</optgroup>');
     }
@@ -393,12 +393,12 @@
             <div><label class="block text-xs text-gray-600">VLAN</label>
               <select id="s-vlan" class="w-full border rounded px-2 py-1">${vlanOpts}</select>
             </div>
-            <div><label class="block text-xs text-gray-600">Down (Mbps)</label><input id="s-down" type="number" value="${s.bandbreite_down_mbps || ''}" class="w-full border rounded px-2 py-1"></div>
-            <div><label class="block text-xs text-gray-600">Up (Mbps)</label><input id="s-up" type="number" value="${s.bandbreite_up_mbps || ''}" class="w-full border rounded px-2 py-1"></div>
+            <div><label class="block text-xs text-gray-600">Down (Mbps)</label><input id="s-down" type="number" value="${esc(s.bandbreite_down_mbps || '')}" class="w-full border rounded px-2 py-1"></div>
+            <div><label class="block text-xs text-gray-600">Up (Mbps)</label><input id="s-up" type="number" value="${esc(s.bandbreite_up_mbps || '')}" class="w-full border rounded px-2 py-1"></div>
           </div>
           <div class="grid grid-cols-2 gap-2">
-            <div><label class="block text-xs text-gray-600">Eigenleistung CHF</label><input id="s-eig" type="number" step="0.01" value="${s.eigenleistung_chf || ''}" class="w-full border rounded px-2 py-1"></div>
-            <div><label class="block text-xs text-gray-600">Datum</label><input id="s-eig-d" type="date" value="${s.eigenleistung_datum ? s.eigenleistung_datum.slice(0,10) : ''}" class="w-full border rounded px-2 py-1"></div>
+            <div><label class="block text-xs text-gray-600">Eigenleistung CHF</label><input id="s-eig" type="number" step="0.01" value="${esc(s.eigenleistung_chf || '')}" class="w-full border rounded px-2 py-1"></div>
+            <div><label class="block text-xs text-gray-600">Datum</label><input id="s-eig-d" type="date" value="${esc(s.eigenleistung_datum ? String(s.eigenleistung_datum).slice(0,10) : '')}" class="w-full border rounded px-2 py-1"></div>
           </div>
           <div class="grid grid-cols-2 gap-2">
             <div>
@@ -527,18 +527,18 @@
           </div>
         </div>
         <div class="flex flex-wrap gap-1 mb-1">
-          <span class="text-xs bg-${(v.kind||'vlan')==='subnet'?'indigo':'gray'}-100 text-${(v.kind||'vlan')==='subnet'?'indigo':'gray'}-800 px-2 py-0.5 rounded font-semibold">${(v.kind||'vlan').toUpperCase()}</span>
+          <span class="text-xs bg-${(v.kind||'vlan')==='subnet'?'indigo':'gray'}-100 text-${(v.kind||'vlan')==='subnet'?'indigo':'gray'}-800 px-2 py-0.5 rounded font-semibold">${esc(String(v.kind||'vlan').toUpperCase())}</span>
           ${v.with_wlan ? '<span class="text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded">📶 WLAN</span>' : ''}
           ${v.assigned_router_id ? `<span class="text-xs bg-sky-100 text-sky-800 px-2 py-0.5 rounded" title="Client-VLAN ${esc(v.router_client_vlan_id||'?')}, LXC ${esc(v.router_lxc_id||'?')}">🛣 ${esc(v.router_bezeichnung || ('Router #'+v.assigned_router_id))}</span>` : (v.status === 'approved' || v.status === 'deployed' ? '<span class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded">⚠ kein Router</span>' : '')}
           ${(v.status === 'pending' || v.status === 'approved') ? `<button onclick="vlanAssignRouter(${v.id})" class="text-[10px] text-sky-700 hover:underline">Router zuweisen…</button>` : ''}
         </div>
         <p class="text-sm mb-1"><strong>Zweck:</strong> ${esc(v.zweck)}</p>
         <div class="text-xs text-gray-600 grid sm:grid-cols-3 gap-2">
-          ${v.wohnung_bezeichnung ? `<div>Wohnung: ${esc(v.wohnung_bezeichnung)} (STWEG ${v.stweg})</div>` : ''}
+          ${v.wohnung_bezeichnung ? `<div>Wohnung: ${esc(v.wohnung_bezeichnung)} (STWEG ${esc(v.stweg)})</div>` : ''}
           ${v.gewuenschte_groesse ? `<div>Groesse: ${esc(v.gewuenschte_groesse)}</div>` : ''}
-          ${v.geraete_anzahl ? `<div>Geräte: ${v.geraete_anzahl}</div>` : ''}
+          ${v.geraete_anzahl ? `<div>Geräte: ${esc(v.geraete_anzahl)}</div>` : ''}
           <div>Internet: ${v.internet_zugriff ? 'ja' : 'nein'}</div>
-          ${v.vlan_id ? `<div>VLAN-ID: ${v.vlan_id}</div>` : ''}
+          ${v.vlan_id ? `<div>VLAN-ID: ${esc(v.vlan_id)}</div>` : ''}
           ${v.subnet_v4 ? `<div>Subnet: ${esc(v.subnet_v4)}</div>` : ''}
           ${v.dhcp_gateway ? `<div>DHCP-GW: ${esc(v.dhcp_gateway)}</div>` : ''}
           ${v.unifi_network_id ? `<div>UniFi-Net: <span class="font-mono">${esc(v.unifi_network_id.slice(-8))}</span></div>` : ''}
@@ -574,7 +574,7 @@
     const kind = prefill.kind || req.kind || 'vlan';
     const routerOptions = clientVlanRouters.filter(r => r.active);
     const routerOptsHtml = ['<option value="">— kein Router (nur VLAN-only) —</option>',
-      ...routerOptions.map(r => `<option value="${r.id}" ${prefill.assigned_router_id === r.id ? 'selected' : ''}>Client-VLAN ${r.client_vlan_id} / LXC ${r.lxc_id}${r.bezeichnung ? ' — '+esc(r.bezeichnung) : ''}</option>`)
+      ...routerOptions.map(r => `<option value="${esc(r.id)}" ${prefill.assigned_router_id === r.id ? 'selected' : ''}>Client-VLAN ${esc(r.client_vlan_id)} / LXC ${esc(r.lxc_id)}${r.bezeichnung ? ' — '+esc(r.bezeichnung) : ''}</option>`)
     ].join('');
     const alloc = prefill.allocation || {};
     const allocErr = prefill.allocation_error ? `<p class="text-xs text-red-700">⚠ Subnet-Allokation: ${esc(prefill.allocation_error)}</p>` : '';
@@ -802,7 +802,7 @@
       <tbody class="divide-y">${fixedIps.map(ip => `
         <tr><td class="px-3 py-2 font-mono">${esc(ip.ip_address)}</td>
           <td class="px-3 py-2"><span class="text-xs bg-gray-100 px-2 py-0.5 rounded">${esc(ip.ip_typ)}</span></td>
-          <td class="px-3 py-2 text-xs">${ip.wohnung_bezeichnung ? esc(ip.wohnung_bezeichnung) + ' (STWEG ' + ip.stweg + ')' : (ip.service_name ? 'Service: ' + esc(ip.service_name) : '—')}</td>
+          <td class="px-3 py-2 text-xs">${ip.wohnung_bezeichnung ? esc(ip.wohnung_bezeichnung) + ' (STWEG ' + esc(ip.stweg) + ')' : (ip.service_name ? 'Service: ' + esc(ip.service_name) : '—')}</td>
           <td class="px-3 py-2 text-xs">${esc(ip.hostname || '—')}</td>
           <td class="px-3 py-2 text-xs">${esc(ip.zweck || '—')}</td>
           <td class="px-3 py-2 text-right"><button onclick="delIp(${ip.id})" class="text-xs text-red-600 hover:underline">Löschen</button></td>
@@ -1043,11 +1043,11 @@
             <div class="text-xs text-gray-500 mt-2">Kanäle: ${channels.join(' + ') || '—'} · gesendet: ${sent.join(', ') || 'noch nichts'}</div>
           </div>
           <div class="flex flex-col gap-1">
-            <button onclick='openMaintModal(${JSON.stringify(m).replace(/'/g, "&apos;")})' class="text-xs text-blue-600 hover:underline">Bearbeiten</button>
-            <button onclick='maintNotify(${m.id}, "pre")' class="text-xs text-amber-700 hover:underline">📢 Vorab senden</button>
-            <button onclick='maintNotify(${m.id}, "start")' class="text-xs text-red-700 hover:underline">📢 Start senden</button>
-            <button onclick='maintNotify(${m.id}, "end")' class="text-xs text-emerald-700 hover:underline">📢 Ende senden</button>
-            <button onclick='delMaint(${m.id})' class="text-xs text-red-600 hover:underline">Löschen</button>
+            <button onclick='openMaintModal(maintList.find(x => x.id === ${Number(m.id)}) || {})' class="text-xs text-blue-600 hover:underline">Bearbeiten</button>
+            <button onclick='maintNotify(${Number(m.id)}, "pre")' class="text-xs text-amber-700 hover:underline">📢 Vorab senden</button>
+            <button onclick='maintNotify(${Number(m.id)}, "start")' class="text-xs text-red-700 hover:underline">📢 Start senden</button>
+            <button onclick='maintNotify(${Number(m.id)}, "end")' class="text-xs text-emerald-700 hover:underline">📢 Ende senden</button>
+            <button onclick='delMaint(${Number(m.id)})' class="text-xs text-red-600 hover:underline">Löschen</button>
           </div>
         </div>
       </div>`;
@@ -1233,7 +1233,7 @@
             <span class="font-mono text-sm">${esc(r.source_host)}${esc(r.source_path === '/' ? '' : r.source_path)}</span>
             <span class="mx-2 text-gray-400">→</span>
             <span class="font-mono text-sm">${esc(r.target_url)}</span>
-            <span class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded ml-2">${r.http_code}</span>
+            <span class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded ml-2">${esc(r.http_code)}</span>
             ${r.preserve_path ? '<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded ml-1">preserve-path</span>' : ''}
             ${!r.active ? '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded ml-1">inaktiv</span>' : ''}
           </div>
@@ -1264,7 +1264,7 @@
           </div>
         </div>
         <div class="text-xs text-gray-600">→ <span class="font-mono">${esc(r.backend_url)}</span></div>
-        <div class="text-xs text-gray-500 mt-1">${esc(r.owner_email || 'system')}${r.wohnung_bezeichnung ? ' · ' + esc(r.wohnung_bezeichnung) : ''}${r.rate_limit_per_min ? ' · ' + r.rate_limit_per_min + '/min' : ''}</div>
+        <div class="text-xs text-gray-500 mt-1">${esc(r.owner_email || 'system')}${r.wohnung_bezeichnung ? ' · ' + esc(r.wohnung_bezeichnung) : ''}${r.rate_limit_per_min ? ' · ' + esc(r.rate_limit_per_min) + '/min' : ''}</div>
       </div>`;
     }).join('');
     wrap.innerHTML = rpRows + redirRows;
@@ -1305,10 +1305,10 @@
               <option value="cf"${(r.cert_resolver||'cf')==='cf'?' selected':''}>cf (Cloudflare DNS-01)</option>
               <option value="">(kein, manual cert)</option>
             </select></div>
-            <div><label class="block text-xs text-gray-600">Read-Timeout (s, 0=Stream)</label><input id="rp-timeout" type="number" class="w-full border rounded px-2 py-1" value="${r.read_timeout_s||0}"></div>
+            <div><label class="block text-xs text-gray-600">Read-Timeout (s, 0=Stream)</label><input id="rp-timeout" type="number" class="w-full border rounded px-2 py-1" value="${esc(r.read_timeout_s||0)}"></div>
           </div>
           <div><label class="block text-xs text-gray-600">Strip-Prefix <span class="text-gray-400">(optional, z.B. /api)</span></label><input id="rp-strip" class="w-full border rounded px-2 py-1" value="${esc(r.strip_prefix||'')}"></div>
-          <div><label class="block text-xs text-gray-600">Rate-Limit /min</label><input id="rp-rate" type="number" class="w-full border rounded px-2 py-1" value="${r.rate_limit_per_min||''}"></div>
+          <div><label class="block text-xs text-gray-600">Rate-Limit /min</label><input id="rp-rate" type="number" class="w-full border rounded px-2 py-1" value="${esc(r.rate_limit_per_min||'')}"></div>
           <div><label class="block text-xs text-gray-600">Notizen</label><textarea id="rp-notiz" rows="2" class="w-full border rounded px-2 py-1">${esc(r.notizen||'')}</textarea></div>
         </div>
         <div class="flex justify-end gap-2 mt-3">
@@ -1409,7 +1409,7 @@
             <span class="font-mono text-sm">${esc(r.source_host)}${esc(r.source_path === '/' ? '' : r.source_path)}</span>
             <span class="mx-2 text-gray-400">→</span>
             <span class="font-mono text-sm">${esc(r.target_url)}</span>
-            <span class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded ml-2">${r.http_code}</span>
+            <span class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded ml-2">${esc(r.http_code)}</span>
             ${r.preserve_path ? '<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded ml-1">preserve-path</span>' : ''}
             ${!r.active ? '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded ml-1">inaktiv</span>' : ''}
           </div>
@@ -1660,8 +1660,8 @@
     })[s] || '';
     wrap.innerHTML = mailRelays.map(m => {
       const tcpInfo = [];
-      if (m.imap_sni_hostname) tcpInfo.push(`IMAPS <code>${esc(m.imap_sni_hostname)}</code> → <code>${esc(m.imap_host)}:${m.imap_port || 993}</code>`);
-      if (m.smtps_sni_hostname) tcpInfo.push(`SMTPS <code>${esc(m.smtps_sni_hostname)}</code> → <code>${esc(m.smtps_host)}:${m.smtps_port || 465}</code>`);
+      if (m.imap_sni_hostname) tcpInfo.push(`IMAPS <code>${esc(m.imap_sni_hostname)}</code> → <code>${esc(m.imap_host)}:${esc(m.imap_port || 993)}</code>`);
+      if (m.smtps_sni_hostname) tcpInfo.push(`SMTPS <code>${esc(m.smtps_sni_hostname)}</code> → <code>${esc(m.smtps_host)}:${esc(m.smtps_port || 465)}</code>`);
       // Smarthost-Status
       let shBlock = '';
       if (m.outbound_via_smarthost) {
@@ -1706,7 +1706,7 @@
             <button onclick="delRelay(${m.id})" class="text-xs text-red-600 hover:underline px-2">Löschen</button>
           </div>
         </div>
-        <div class="text-xs text-gray-600">→ <span class="font-mono">${esc(m.target_host)}:${m.target_port || 25}</span>${m.target_use_mx ? ' <span class="bg-blue-100 text-blue-700 px-1 rounded">MX-Lookup</span>' : ''}</div>
+        <div class="text-xs text-gray-600">→ <span class="font-mono">${esc(m.target_host)}:${esc(m.target_port || 25)}</span>${m.target_use_mx ? ' <span class="bg-blue-100 text-blue-700 px-1 rounded">MX-Lookup</span>' : ''}</div>
         ${m.dkim_selector ? `<div class="text-xs text-gray-500">DKIM-Selector: <code>${esc(m.dkim_selector)}</code></div>` : ''}
         ${tcpInfo.length ? `<div class="text-xs text-gray-500 mt-1">${tcpInfo.join(' · ')}</div>` : ''}
         ${(m.allowed_groups && m.allowed_groups.length) ? `<div class="text-xs text-gray-500 mt-1">Erlaubte Gruppen: ${m.allowed_groups.map(g => `<code class="bg-gray-100 px-1 rounded">${esc(g)}</code>`).join(' ')}</div>` : ''}
@@ -1752,7 +1752,7 @@
           <div><label class="block text-xs text-gray-600">Domain *</label><input id="rel-dom" value="${esc(m.domain || '')}" ${isEdit && !user?.isAdmin ? 'disabled' : ''} placeholder="meinedomain.ch" class="w-full border rounded px-2 py-1"></div>
           <div class="grid grid-cols-3 gap-2">
             <div class="col-span-2"><label class="block text-xs text-gray-600">Ziel-Host *</label><input id="rel-host" value="${esc(m.target_host || '')}" placeholder="mail.meinedomain.ch" class="w-full border rounded px-2 py-1"></div>
-            <div><label class="block text-xs text-gray-600">Port</label><input id="rel-port" type="number" value="${m.target_port || 25}" class="w-full border rounded px-2 py-1"></div>
+            <div><label class="block text-xs text-gray-600">Port</label><input id="rel-port" type="number" value="${esc(m.target_port || 25)}" class="w-full border rounded px-2 py-1"></div>
           </div>
           <div><label class="flex items-center gap-2 text-sm"><input id="rel-mx" type="checkbox" class="rounded"${m.target_use_mx ? ' checked' : ''}> MX-Lookup statt Direct-Host</label></div>
           <div><label class="block text-xs text-gray-600">DKIM-Selector <span class="text-gray-400">(optional)</span></label><input id="rel-dkim" value="${esc(m.dkim_selector || '')}" placeholder="default" class="w-full border rounded px-2 py-1"></div>
@@ -1766,12 +1766,12 @@
               <p class="text-xs text-gray-500">Traefik routet :993/:465 per SNI-Passthrough an deinen Ziel-Host. Felder leer → kein TCP-Routing.</p>
               <div class="grid grid-cols-3 gap-2">
                 <div class="col-span-2"><label class="block text-xs text-gray-600">IMAPS SNI-Hostname</label><input id="rel-imap-sni" value="${esc(m.imap_sni_hostname || '')}" placeholder="imap.meinedomain.ch" class="w-full border rounded px-2 py-1 text-xs"></div>
-                <div><label class="block text-xs text-gray-600">Port</label><input id="rel-imap-port" type="number" value="${m.imap_port || 993}" class="w-full border rounded px-2 py-1 text-xs"></div>
+                <div><label class="block text-xs text-gray-600">Port</label><input id="rel-imap-port" type="number" value="${esc(m.imap_port || 993)}" class="w-full border rounded px-2 py-1 text-xs"></div>
               </div>
               <div><label class="block text-xs text-gray-600">IMAPS Ziel-Host</label><input id="rel-imap-host" value="${esc(m.imap_host || '')}" placeholder="100.64.2.33" class="w-full border rounded px-2 py-1 text-xs"></div>
               <div class="grid grid-cols-3 gap-2">
                 <div class="col-span-2"><label class="block text-xs text-gray-600">SMTPS SNI-Hostname</label><input id="rel-smtps-sni" value="${esc(m.smtps_sni_hostname || '')}" placeholder="smtp.meinedomain.ch" class="w-full border rounded px-2 py-1 text-xs"></div>
-                <div><label class="block text-xs text-gray-600">Port</label><input id="rel-smtps-port" type="number" value="${m.smtps_port || 465}" class="w-full border rounded px-2 py-1 text-xs"></div>
+                <div><label class="block text-xs text-gray-600">Port</label><input id="rel-smtps-port" type="number" value="${esc(m.smtps_port || 465)}" class="w-full border rounded px-2 py-1 text-xs"></div>
               </div>
               <div><label class="block text-xs text-gray-600">SMTPS Ziel-Host</label><input id="rel-smtps-host" value="${esc(m.smtps_host || '')}" placeholder="100.64.2.33" class="w-full border rounded px-2 py-1 text-xs"></div>
               <hr class="my-2">
@@ -1903,7 +1903,7 @@
           </div>
         </div>
         <div class="text-xs text-gray-600">
-          ${m.full_name ? `Name: ${esc(m.full_name)} · ` : ''}Quota: ${m.quota_mb || 1024} MB
+          ${m.full_name ? `Name: ${esc(m.full_name)} · ` : ''}Quota: ${esc(m.quota_mb || 1024)} MB
           ${m.approved_by ? ` · Bearbeitet: ${esc(m.approved_by)}` : ''}
           ${m.notizen ? `<div class="italic">${esc(m.notizen)}</div>` : ''}
           ${m.approval_reason ? `<div class="italic text-red-700">Grund: ${esc(m.approval_reason)}</div>` : ''}
@@ -2002,10 +2002,13 @@
         const users = (await r.json()).users || [];
         if (users.length === 0) { list.classList.add('hidden'); return; }
         list.innerHTML = users.map(u =>
-          `<button type="button" onmousedown="event.preventDefault();acmUserPick('${esc(u.email)}')" class="w-full text-left px-2 py-1 hover:bg-blue-50 border-b last:border-b-0">
+          `<button type="button" data-email="${esc(u.email)}" class="w-full text-left px-2 py-1 hover:bg-blue-50 border-b last:border-b-0">
             <div class="text-xs">${esc(u.name || '—')}</div>
             <div class="text-xs text-gray-500 font-mono">${esc(u.email)}</div>
           </button>`).join('');
+        list.querySelectorAll('button[data-email]').forEach(b => b.addEventListener('mousedown', (ev) => {
+          ev.preventDefault(); acmUserPick(b.dataset.email);
+        }));
         list.classList.remove('hidden');
       } catch { list.classList.add('hidden'); }
     }, 200);
