@@ -381,7 +381,8 @@
             list.innerHTML = '<div class="bg-white rounded-xl shadow-md p-8 text-center text-gray-400">Noch keine Zähler konfiguriert</div>';
             return;
         }
-        list.innerHTML = meters.map(m => `
+        angezeigt.zaehler = meters;
+        list.innerHTML = meters.map((m, i) => `
             <div class="bg-white rounded-xl shadow-md p-5 flex flex-col md:flex-row md:items-center justify-between gap-3">
                 <div class="flex-1">
                     <div class="flex items-center gap-2 flex-wrap">
@@ -392,12 +393,12 @@
                         <span class="text-xs text-gray-400">(${esc(m.id)})</span>
                         ${!m.active ? '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">Inaktiv</span>' : ''}
                     </div>
-                    <p class="text-sm text-gray-500 mt-1">${esc(m.host)}:${m.port} ${m.type === 'modbus' ? '(Unit ' + m.unit_id + ')' : ''}${m.location ? ' · <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">' + esc(locationLabels[m.location] || m.location) + '</span>' : ''}</p>
+                    <p class="text-sm text-gray-500 mt-1">${esc(m.host)}:${esc(m.port)} ${m.type === 'modbus' ? '(Unit ' + esc(m.unit_id) + ')' : ''}${m.location ? ' · <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">' + esc(locationLabels[m.location] || m.location) + '</span>' : ''}</p>
                 </div>
                 <div class="flex items-center gap-2">
-                    <button onclick="toggleMeter('${esc(m.id)}', ${m.active})" class="px-3 py-1 text-xs rounded-md ${m.active ? 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100' : 'bg-green-50 text-green-700 hover:bg-green-100'}">${m.active ? 'Deaktivieren' : 'Aktivieren'}</button>
-                    <button onclick='showMeterForm(${JSON.stringify(m)})' class="px-3 py-1 text-xs rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200">Bearbeiten</button>
-                    <button onclick="deleteMeter('${esc(m.id)}')" class="px-3 py-1 text-xs rounded-md bg-red-50 text-red-700 hover:bg-red-100">Löschen</button>
+                    <button data-aktion="toggle-meter" data-i="${i}" class="px-3 py-1 text-xs rounded-md ${m.active ? 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100' : 'bg-green-50 text-green-700 hover:bg-green-100'}">${m.active ? 'Deaktivieren' : 'Aktivieren'}</button>
+                    <button data-aktion="edit-meter" data-i="${i}" class="px-3 py-1 text-xs rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200">Bearbeiten</button>
+                    <button data-aktion="delete-meter" data-i="${i}" class="px-3 py-1 text-xs rounded-md bg-red-50 text-red-700 hover:bg-red-100">Löschen</button>
                 </div>
             </div>
         `).join('');
@@ -460,7 +461,8 @@
             list.innerHTML = '<div class="bg-white rounded-xl shadow-md p-8 text-center text-gray-400">Noch keine Tarife konfiguriert</div>';
             return;
         }
-        list.innerHTML = tariffs.map(t => {
+        angezeigt.tarife = tariffs;
+        list.innerHTML = tariffs.map((t, i) => {
             const today = new Date().toISOString().substring(0, 10);
             const from = t.valid_from ? t.valid_from.substring(0, 10) : null;
             const to = t.valid_to ? t.valid_to.substring(0, 10) : null;
@@ -482,7 +484,7 @@
                     <p class="text-xs text-gray-400 mt-0.5">${dateLabel}</p>
                 </div>
                 <div class="flex items-center gap-2">
-                    <button onclick='showTariffForm(${JSON.stringify(t)})' class="px-3 py-1 text-xs rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200">Bearbeiten</button>
+                    <button data-aktion="edit-tariff" data-i="${i}" class="px-3 py-1 text-xs rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200">Bearbeiten</button>
                     <button onclick="deleteTariff(${t.id})" class="px-3 py-1 text-xs rounded-md bg-red-50 text-red-700 hover:bg-red-100">Löschen</button>
                 </div>
             </div>`;
@@ -560,13 +562,14 @@
             if (matches.length === 0) {
                 dropdown.innerHTML = '<div class="px-4 py-3 text-sm text-gray-400">Keine Benutzer gefunden</div>';
             } else {
-                dropdown.innerHTML = matches.map(u => `
-                    <div class="px-4 py-2 hover:bg-blue-50 cursor-pointer flex items-center justify-between" onclick="selectUser('${esc(u.email)}', '${esc(u.name)}', '${esc(u.username)}')">
+                angezeigt.benutzer = matches;
+                dropdown.innerHTML = matches.map((u, i) => `
+                    <div class="px-4 py-2 hover:bg-blue-50 cursor-pointer flex items-center justify-between" data-aktion="select-user" data-i="${i}">
                         <div>
                             <span class="text-sm font-medium text-gray-800">${esc(u.name || u.username)}</span>
                             <span class="text-xs text-gray-400 ml-2">${esc(u.email)}</span>
                         </div>
-                        ${u.groups_obj?.length ? `<span class="text-xs text-gray-400">${u.groups_obj.map(g => g.name).join(', ')}</span>` : ''}
+                        ${u.groups_obj?.length ? `<span class="text-xs text-gray-400">${esc(u.groups_obj.map(g => g.name).join(', '))}</span>` : ''}
                     </div>
                 `).join('');
             }
@@ -626,7 +629,7 @@
                                     <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700 mr-2">Gruppe</span>
                                     <span class="text-sm text-gray-700">${esc(g.group_name)}</span>
                                 </div>
-                                <button onclick="removeGroup('${esc(meter.id)}', '${esc(g.group_name)}')" class="text-xs text-red-500 hover:text-red-700">Entfernen</button>
+                                <button data-aktion="remove-group" data-meter="${esc(meter.id)}" data-wert="${esc(g.group_name)}" class="text-xs text-red-500 hover:text-red-700">Entfernen</button>
                             </div>
                         `).join('')}
                         ${users.map(u => `
@@ -636,7 +639,7 @@
                                     <span class="text-sm text-gray-700">${esc(u.user_name || u.user_email)}</span>
                                     <span class="text-xs text-gray-400 ml-2">${esc(u.user_email)}</span>
                                 </div>
-                                <button onclick="removeUser('${esc(meter.id)}', '${esc(u.user_email)}')" class="text-xs text-red-500 hover:text-red-700">Entfernen</button>
+                                <button data-aktion="remove-user" data-meter="${esc(meter.id)}" data-wert="${esc(u.user_email)}" class="text-xs text-red-500 hover:text-red-700">Entfernen</button>
                             </div>
                         `).join('')}
                     </div>`}
@@ -651,11 +654,27 @@
         return m.group_id ? m.group_id + '-' + m.name : m.name;
     }
 
+    // Vollstaendig escapen: textContent->innerHTML liess " und ' durch (Attribute)
     function esc(s) {
-        const div = document.createElement('div');
-        div.textContent = s || '';
-        return div.innerHTML;
+        return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
     }
+
+    // Knoepfe in Listen: Daten ueber data-Attribute/Index statt in onclick-Strings (XSS)
+    const angezeigt = { zaehler: [], tarife: [], benutzer: [] };
+    document.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-aktion]');
+        if (!b) return;
+        const i = Number(b.dataset.i);
+        switch (b.dataset.aktion) {
+            case 'toggle-meter': { const m = angezeigt.zaehler[i]; if (m) toggleMeter(m.id, m.active); break; }
+            case 'edit-meter': { const m = angezeigt.zaehler[i]; if (m) showMeterForm(m); break; }
+            case 'delete-meter': { const m = angezeigt.zaehler[i]; if (m) deleteMeter(m.id); break; }
+            case 'edit-tariff': { const t = angezeigt.tarife[i]; if (t) showTariffForm(t); break; }
+            case 'select-user': { const u = angezeigt.benutzer[i]; if (u) selectUser(u.email, u.name, u.username); break; }
+            case 'remove-group': removeGroup(b.dataset.meter, b.dataset.wert); break;
+            case 'remove-user': removeUser(b.dataset.meter, b.dataset.wert); break;
+        }
+    });
 
     function formatDate(dateStr) {
         if (!dateStr) return '';

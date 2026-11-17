@@ -157,7 +157,7 @@
     let currentEmailId = null;
     let searchTimer = null;
 
-    const esc = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : '';
+    const esc = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;') : '';
 
     function formatDate(d) {
         if (!d) return '-';
@@ -228,9 +228,12 @@
             if (!resp.ok) throw new Error('Download fehlgeschlagen');
             const blob = await resp.blob();
             const url = URL.createObjectURL(blob);
-            // PDFs and images: open in new tab; everything else: download
-            if (blob.type === 'application/pdf' || blob.type.startsWith('image/')) {
-                window.open(url, '_blank');
+            // Nur unbedenkliche Typen im Browser oeffnen; SVG/HTML usw. aus fremden Mails
+            // liefen sonst als Blob auf unserer Origin (XSS) -> alles andere nur herunterladen
+            const typ = String(blob.type || '').split(';')[0].trim().toLowerCase();
+            if (['application/pdf', 'image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(typ)) {
+                window.open(url, '_blank', 'noopener');
+                setTimeout(() => URL.revokeObjectURL(url), 60_000);
             } else {
                 const a = document.createElement('a');
                 a.href = url;
@@ -344,6 +347,56 @@
         loadArchive();
     }
 
+    // ── Mail-HTML anzeigen ──
+    // Vorab bereinigt: Links nur http(s)/mailto/tel mit noopener (Popups verlassen die Sandbox,
+    // javascript:/data:-Links liefen dort mit unserer Origin); CSP sperrt externe Bilder/CSS
+    // (Tracking, IP-Leck) bis der Nutzer sie ausdruecklich laedt.
+    function mailHtmlAnzeigen(bodyDiv, html, externeBilder) {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        doc.querySelectorAll('script, meta, base, iframe, frame, object, embed').forEach(n => n.remove());
+        doc.querySelectorAll('a, area').forEach(a => {
+            const href = (a.getAttribute('href') || '').trim();
+            a.removeAttribute('xlink:href');
+            if (/^(https?:|mailto:|tel:)/i.test(href)) {
+                a.setAttribute('target', '_blank');
+                a.setAttribute('rel', 'noopener noreferrer');
+            } else {
+                a.removeAttribute('href');
+            }
+        });
+        doc.querySelectorAll('form').forEach(f => { f.removeAttribute('action'); f.removeAttribute('target'); });
+        const hatExterne = !!doc.querySelector('img[src^="http" i], img[srcset], [background], link[rel~="stylesheet" i]') || /url\(\s*['"]?https?:/i.test(html);
+        const csp = "default-src 'none'; style-src 'unsafe-inline'" + (externeBilder ? ' https:' : '')
+            + "; img-src data: cid:" + (externeBilder ? ' https: http:' : '') + "; font-src data:";
+        const kopf = doc.createElement('meta');
+        kopf.setAttribute('http-equiv', 'Content-Security-Policy');
+        kopf.setAttribute('content', csp);
+        doc.head.prepend(kopf);
+        const stil = doc.createElement('style');
+        stil.textContent = 'body{font-family:system-ui,sans-serif;font-size:14px;margin:0;word-wrap:break-word}img{max-width:100%;height:auto}';
+        kopf.after(stil);
+        bodyDiv.innerHTML = '';
+        if (hatExterne && !externeBilder) {
+            const leiste = document.createElement('div');
+            leiste.className = 'text-xs text-gray-500 mb-2 flex items-center gap-2';
+            leiste.textContent = 'Externe Bilder wurden blockiert.';
+            const knopf = document.createElement('button');
+            knopf.type = 'button';
+            knopf.className = 'text-blue-600 hover:underline';
+            knopf.textContent = 'Externe Bilder laden';
+            knopf.addEventListener('click', () => mailHtmlAnzeigen(bodyDiv, html, true));
+            leiste.appendChild(knopf);
+            bodyDiv.appendChild(leiste);
+        }
+        const frame = document.createElement('iframe');
+        frame.setAttribute('sandbox', 'allow-same-origin allow-popups allow-popups-to-escape-sandbox');
+        frame.setAttribute('referrerpolicy', 'no-referrer');
+        frame.style.cssText = 'width:100%;border:0;min-height:100px;';
+        frame.srcdoc = '<!doctype html>' + doc.documentElement.outerHTML;
+        frame.onload = () => { try { frame.style.height = (frame.contentDocument.documentElement.scrollHeight + 8) + 'px'; } catch (e) {} };
+        bodyDiv.appendChild(frame);
+    }
+
     // ── Email Detail ──
     async function openEmail(id) {
         currentEmailId = id;
@@ -363,16 +416,7 @@
             // nur, die Hoehe von aussen zu lesen.
             const bodyDiv = document.getElementById('detail-body');
             if (email.html_body) {
-                bodyDiv.innerHTML = '';
-                const frame = document.createElement('iframe');
-                frame.setAttribute('sandbox', 'allow-same-origin allow-popups allow-popups-to-escape-sandbox');
-                frame.setAttribute('referrerpolicy', 'no-referrer');
-                frame.style.cssText = 'width:100%;border:0;min-height:100px;';
-                frame.srcdoc = '<!doctype html><meta charset="utf-8"><base target="_blank">'
-                    + '<style>body{font-family:system-ui,sans-serif;font-size:14px;margin:0;word-wrap:break-word}img{max-width:100%;height:auto}</style>'
-                    + email.html_body;
-                frame.onload = () => { try { frame.style.height = (frame.contentDocument.documentElement.scrollHeight + 8) + 'px'; } catch (e) {} };
-                bodyDiv.appendChild(frame);
+                mailHtmlAnzeigen(bodyDiv, email.html_body, false);
             } else {
                 bodyDiv.innerHTML = `<pre style="font-family:inherit;white-space:pre-wrap;margin:0;">${esc(email.text_body || '')}</pre>`;
             }

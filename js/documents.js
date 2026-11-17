@@ -370,7 +370,7 @@ const RosenwegDocs = {
       }
     }
     const folders = folderOptions
-      .map(o => `<option value="${o.value}"${prefillPath && prefillPath.startsWith(o.value) ? ' selected' : ''}>${this._escapeHtml(o.label)}</option>`)
+      .map(o => `<option value="${this._escapeHtml(o.value)}"${prefillPath && prefillPath.startsWith(o.value) ? ' selected' : ''}>${this._escapeHtml(o.label)}</option>`)
       .join('');
 
     const modal = document.createElement('div');
@@ -605,7 +605,7 @@ const RosenwegDocs = {
       }
     }
     const options = folderOptions
-      .map(o => `<option value="${o.value}"${o.value === currentFolder ? ' selected' : ''}>${this._escapeHtml(o.label)}</option>`)
+      .map(o => `<option value="${this._escapeHtml(o.value)}"${o.value === currentFolder ? ' selected' : ''}>${this._escapeHtml(o.label)}</option>`)
       .join('');
 
     const modal = document.createElement('div');
@@ -866,6 +866,11 @@ const RosenwegDocs = {
         blob = await resp.blob();
       }
 
+      // Typ fest nach Endung setzen: ein als .pdf/.png hochgeladenes HTML/SVG darf im
+      // Viewer nicht als Dokument unserer Origin laufen
+      if (ext === 'pdf' || isOffice) blob = new Blob([blob], { type: 'application/pdf' });
+      else if (ext === 'png') blob = new Blob([blob], { type: 'image/png' });
+      else if (ext === 'jpg' || ext === 'jpeg') blob = new Blob([blob], { type: 'image/jpeg' });
       const blobUrl = URL.createObjectURL(blob);
       const contentArea = modal.querySelector('.flex-1');
 
@@ -873,7 +878,7 @@ const RosenwegDocs = {
         contentArea.innerHTML = `<iframe src="${blobUrl}" class="w-full h-full rounded" style="min-height: 80vh;"></iframe>`;
         contentArea.className = 'flex-1 p-4';
       } else if (['png', 'jpg', 'jpeg'].includes(ext)) {
-        contentArea.innerHTML = `<img src="${blobUrl}" class="max-w-full max-h-full object-contain rounded shadow-lg" alt="${fileName}">`;
+        contentArea.innerHTML = `<img src="${blobUrl}" class="max-w-full max-h-full object-contain rounded shadow-lg" alt="${this._escapeHtml(fileName)}">`;
       } else if (['txt', 'csv'].includes(ext)) {
         const text = await blob.text();
         contentArea.innerHTML = `<pre class="bg-white text-gray-800 rounded-lg p-6 max-w-4xl w-full max-h-[80vh] overflow-auto text-sm font-mono whitespace-pre-wrap">${text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`;

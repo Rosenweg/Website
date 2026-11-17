@@ -192,9 +192,12 @@
             } catch (err) {
                 console.error('Load error:', err);
                 document.getElementById('main-content').innerHTML =
-                    `<div class="bg-red-50 border-l-4 border-red-500 p-4 rounded"><p class="text-red-800">Fehler: ${err.message}</p></div>`;
+                    `<div class="bg-red-50 border-l-4 border-red-500 p-4 rounded"><p class="text-red-800">Fehler: ${esc(err.message)}</p></div>`;
             }
         }
+
+        // Vollstaendiges HTML-Escape fuer Proxmox-/Authentik-Werte
+        function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
         function vmName(vmid) {
             const vm = resources.find(r => r.vmid === vmid);
@@ -208,11 +211,11 @@
                 const typeLabel = r.type === 'qemu' ? 'VM' : 'CT';
                 const typeBg = r.type === 'qemu' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700';
                 return `<tr class="border-b hover:bg-gray-50">
-                    <td class="py-2 font-mono">${r.vmid}</td>
-                    <td class="py-2">${r.name || '-'}</td>
+                    <td class="py-2 font-mono">${esc(r.vmid)}</td>
+                    <td class="py-2">${esc(r.name || '-')}</td>
                     <td class="py-2"><span class="px-2 py-0.5 rounded text-xs font-medium ${typeBg}">${typeLabel}</span></td>
-                    <td class="py-2 text-gray-600">${r.node}</td>
-                    <td class="py-2 ${statusColor} font-medium">${r.status}</td>
+                    <td class="py-2 text-gray-600">${esc(r.node)}</td>
+                    <td class="py-2 ${statusColor} font-medium">${esc(r.status)}</td>
                 </tr>`;
             }).join('');
         }
@@ -233,15 +236,17 @@
             tbody.innerHTML = acls.map(a => {
                 const vmid = a.path.replace('/vms/', '');
                 return `<tr class="border-b hover:bg-gray-50">
-                    <td class="py-2">${a.ugid}</td>
-                    <td class="py-2 font-mono">${vmName(parseInt(vmid))}</td>
-                    <td class="py-2"><span class="px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">${a.roleid}</span></td>
+                    <td class="py-2">${esc(a.ugid)}</td>
+                    <td class="py-2 font-mono">${esc(vmName(parseInt(vmid)))}</td>
+                    <td class="py-2"><span class="px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">${esc(a.roleid)}</span></td>
                     <td class="py-2">
-                        <button onclick="revokeAccess('${a.path}', '${a.ugid}', '${a.roleid}')"
+                        <button data-pfad="${esc(a.path)}" data-ugid="${esc(a.ugid)}" data-rolle="${esc(a.roleid)}"
                             class="text-red-600 hover:text-red-800 text-sm font-medium">Entziehen</button>
                     </td>
                 </tr>`;
             }).join('');
+            // Entziehen: Werte aus data-Attributen statt aus onclick-String (XSS)
+            tbody.querySelectorAll('button[data-pfad]').forEach(b => b.addEventListener('click', () => revokeAccess(b.dataset.pfad, b.dataset.ugid, b.dataset.rolle)));
         }
 
         function populateSelects() {

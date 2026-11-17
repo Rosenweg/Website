@@ -729,14 +729,14 @@
         const groupChips = (Array.isArray(groups) ? groups : []).map(g => `
             <span class="inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-xs px-2 py-1 rounded-full">
                 ${esc(g.group_name)}
-                <button onclick="removeGroup('${esc(id)}', this.dataset.g)" data-g="${esc(g.group_name)}"
+                <button onclick="removeGroup(this.dataset.id, this.dataset.g)" data-id="${esc(id)}" data-g="${esc(g.group_name)}"
                         class="text-blue-400 hover:text-blue-700" title="entfernen">&times;</button>
             </span>`).join('') || '<span class="text-xs text-gray-400">keine</span>';
 
         const userChips = (Array.isArray(users) ? users : []).map(u => `
             <span class="inline-flex items-center gap-1 bg-gray-100 text-gray-700 text-xs px-2 py-1 rounded-full">
                 ${esc(u.user_email)}${u.role ? ` <span class="text-gray-400">(${esc(u.role)})</span>` : ''}
-                <button onclick="removeUser('${esc(id)}', this.dataset.u)" data-u="${esc(u.user_email)}"
+                <button onclick="removeUser(this.dataset.id, this.dataset.u)" data-id="${esc(id)}" data-u="${esc(u.user_email)}"
                         class="text-gray-400 hover:text-gray-700" title="entfernen">&times;</button>
             </span>`).join('') || '<span class="text-xs text-gray-400">keine</span>';
 
@@ -747,7 +747,7 @@
                 <div class="flex gap-2">
                     <input list="knownGroups" placeholder="Gruppe…" data-addgroup="${esc(id)}"
                            class="flex-1 px-2.5 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none">
-                    <button onclick="addGroup('${esc(id)}')"
+                    <button onclick="addGroup(this.dataset.id)" data-id="${esc(id)}"
                             class="px-3 py-1.5 text-sm rounded-lg bg-blue-700 text-white hover:bg-blue-800">+</button>
                 </div>
             </div>
@@ -761,7 +761,7 @@
                            class="flex-1 min-w-[120px] px-2.5 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none">
                     <input type="text" placeholder="Rolle (optional)" data-adduser-role="${esc(id)}"
                            class="w-28 px-2.5 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none">
-                    <button onclick="addUser('${esc(id)}')"
+                    <button onclick="addUser(this.dataset.id)" data-id="${esc(id)}"
                             class="px-3 py-1.5 text-sm rounded-lg bg-gray-700 text-white hover:bg-gray-800">+</button>
                 </div>
             </div>
@@ -853,7 +853,7 @@
                     ${u.description ? `<span class="text-xs text-gray-400 truncate max-w-[180px]">${esc(u.description)}</span>` : ''}
                     <span class="ml-auto flex items-center gap-3">
                         <button onclick="editServiceUser(${i})" class="text-xs text-blue-600 hover:text-blue-800">bearbeiten</button>
-                        <button onclick="deleteServiceUser('${esc(u.username)}')" class="text-xs text-red-500 hover:text-red-700">löschen</button>
+                        <button onclick="deleteServiceUser(this.dataset.u)" data-u="${esc(u.username)}" class="text-xs text-red-500 hover:text-red-700">löschen</button>
                     </span>
                 </div>`).join('');
         } catch (e) { el.innerHTML = `<p class="text-sm text-red-600">${esc(e.message)}</p>`; }
@@ -972,8 +972,9 @@
             if (!Array.isArray(users) || users.length === 0) {
                 res.innerHTML = '<p class="text-gray-400 text-sm">Keine Treffer.</p>'; return;
             }
+            // Werte nur in data-Attributen: &#39; wuerde im onclick-String wieder zu ' (XSS)
             res.innerHTML = users.map(u => `
-                <button type="button" onclick="uapSelect('${esc(u.email)}')"
+                <button type="button" onclick="uapSelect(this.dataset.mail)" data-mail="${esc(u.email)}"
                         class="w-full text-left border rounded-lg px-3 py-2 text-sm hover:bg-gray-50 flex flex-wrap items-center gap-2">
                     <span class="font-medium text-gray-800">${esc(u.name || u.username)}</span>
                     <span class="text-xs text-gray-500">${esc(u.email)}</span>
@@ -1009,7 +1010,7 @@
                 <div class="flex flex-wrap items-center gap-3 text-sm border rounded-lg px-3 py-2">
                     <span class="text-gray-800">${esc(p.label || '(ohne Bezeichnung)')}</span>
                     ${p.expires ? `<span class="text-xs text-gray-400">gültig bis ${esc(p.expires)}</span>` : ''}
-                    <button onclick="uapRevoke('${esc(String(p.id))}')" class="ml-auto text-xs text-red-500 hover:text-red-700">widerrufen</button>
+                    <button onclick="uapRevoke(this.dataset.id)" data-id="${esc(String(p.id))}" class="ml-auto text-xs text-red-500 hover:text-red-700">widerrufen</button>
                 </div>`).join('')
             : '<p class="text-gray-400 text-sm">Noch keine App-Passwörter.</p>';
 

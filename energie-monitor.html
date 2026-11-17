@@ -298,7 +298,7 @@
     </main>
 
     <script>
-    function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
     // ─── Config ─────────────────────────────────────────────────────
     const API = '/api/energy';
     const POLL_INTERVAL = 5000;
@@ -1144,8 +1144,8 @@
                     const statusDot = isOnline
                         ? '<span class="w-2 h-2 bg-green-500 rounded-full inline-block"></span>'
                         : '<span class="w-2 h-2 bg-red-400 rounded-full inline-block"></span>';
-                    return `<tr class="border-b border-gray-50 hover:bg-gray-50 cursor-pointer" onclick="switchView('meter');document.getElementById('meter-select').value='${m.id}';currentMeter='${m.id}';resolveRefMeters();refreshAll();">
-                        <td class="py-2 px-3 flex items-center gap-2">${statusDot} ${meterDisplayName(m)} ${catBadge}</td>
+                    return `<tr class="border-b border-gray-50 hover:bg-gray-50 cursor-pointer" data-meter-id="${esc(m.id)}">
+                        <td class="py-2 px-3 flex items-center gap-2">${statusDot} ${esc(meterDisplayName(m))} ${catBadge}</td>
                         <td class="py-2 px-3 text-right font-mono">${power}</td>
                         <td class="py-2 px-3 text-right font-mono">${consumption}</td>
                     </tr>`;
@@ -1158,8 +1158,8 @@
 
                 return `<div class="bg-white rounded-xl shadow-md overflow-hidden">
                     <div class="bg-gradient-to-r from-blue-50 to-indigo-50 px-5 py-3 border-b flex items-center justify-between">
-                        <h3 class="font-semibold text-gray-800">${g.id.toUpperCase()}</h3>
-                        <span class="text-xs text-gray-500">${g.meters.length} Zähler</span>
+                        <h3 class="font-semibold text-gray-800">${esc(String(g.id).toUpperCase())}</h3>
+                        <span class="text-xs text-gray-500">${esc(g.meters.length)} Zähler</span>
                     </div>
                     <div class="grid grid-cols-2 md:grid-cols-5 gap-3 p-4 bg-gray-50 border-b text-center text-sm">
                         <div>
@@ -1196,6 +1196,14 @@
                     </div>
                 </div>`;
             }).join('');
+            // Zeilenklick: Zaehler-ID aus data-Attribut statt aus onclick-String (XSS ueber Zaehlernamen/-IDs)
+            container.querySelectorAll('tr[data-meter-id]').forEach(tr => tr.addEventListener('click', () => {
+                switchView('meter');
+                document.getElementById('meter-select').value = tr.dataset.meterId;
+                currentMeter = tr.dataset.meterId;
+                resolveRefMeters();
+                refreshAll();
+            }));
         } catch (err) {
             container.innerHTML = `<p class="text-red-500 text-sm">Fehler: ${esc(err.message)}</p>`;
         }
@@ -1208,8 +1216,8 @@
         const consumers = allMeters.filter(m => m.category === 'consumer');
         container.innerHTML = consumers.map(m => `
             <label class="flex items-center gap-1 px-2 py-1 rounded border border-gray-200 hover:bg-gray-50 cursor-pointer">
-                <input type="checkbox" value="${m.id}" class="compare-cb rounded text-blue-600" onchange="toggleCompare(this)">
-                <span>${meterDisplayName(m)}</span>
+                <input type="checkbox" value="${esc(m.id)}" class="compare-cb rounded text-blue-600" onchange="toggleCompare(this)">
+                <span>${esc(meterDisplayName(m))}</span>
             </label>
         `).join('');
         if (!compareChart) {
@@ -1285,7 +1293,7 @@
                 return `<div class="flex items-center gap-2">
                     <span class="w-3 h-3 rounded-sm flex-shrink-0" style="background:${color}"></span>
                     <div>
-                        <p class="font-medium text-gray-800">${meter ? meterDisplayName(meter) : id}</p>
+                        <p class="font-medium text-gray-800">${esc(meter ? meterDisplayName(meter) : id)}</p>
                         <p class="text-xs text-gray-500">Total: ${total.toFixed(1)} kWh | Ø ${avg.toFixed(1)} kWh/Tag</p>
                     </div>
                 </div>`;
@@ -1341,8 +1349,8 @@
                 const bg = a.severity === 'warning' ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-blue-50 border-blue-200 text-blue-800';
                 return `<div class="flex items-center gap-2 px-3 py-2 rounded-lg border ${bg} text-sm mb-1">
                     ${icon}
-                    <span class="font-medium">${a.meter_name}:</span>
-                    <span>${a.message}</span>
+                    <span class="font-medium">${esc(a.meter_name)}:</span>
+                    <span>${esc(a.message)}</span>
                 </div>`;
             }).join('');
         } catch (err) { /* silent */ }

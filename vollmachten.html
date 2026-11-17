@@ -226,7 +226,7 @@
   </div>
 
   <script>
-  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   const fmtD = s => s ? new Date(s).toLocaleDateString('de-CH') : '—';
   const fmtDt = s => s ? new Date(s).toLocaleString('de-CH') : '—';
 
@@ -405,7 +405,7 @@
       widerrufen: ['bg-red-100 text-red-800', 'Widerrufen'],
       abgelaufen: ['bg-amber-100 text-amber-800', 'Abgelaufen'],
     }[s] || ['bg-gray-100 text-gray-700', s];
-    return `<span class="text-xs ${map[0]} px-2 py-0.5 rounded">${map[1]}</span>`;
+    return `<span class="text-xs ${map[0]} px-2 py-0.5 rounded">${esc(map[1])}</span>`;
   }
 
   function artLabel(a) {
@@ -435,14 +435,14 @@
           <div class="flex-1 min-w-0">
             <div class="flex flex-wrap items-center gap-2 mb-1">
               ${statusBadge(v.status)}
-              <span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">${artLabel(v.art)}</span>
+              <span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">${esc(artLabel(v.art))}</span>
               <span class="text-xs text-gray-500 font-mono">${esc(v.doc_hash || '#' + v.id)}</span>
             </div>
             <p class="text-sm">
               <strong>${esc(v.vollmachtgeber_name)}</strong>
               <span class="text-gray-500">bevollmaechtigt</span>
               <strong>${esc(v.bevollmaechtigter_name)}</strong>
-              <span class="text-gray-400">(${typLabel(v.bevollmaechtigter_typ)})</span>
+              <span class="text-gray-400">(${esc(typLabel(v.bevollmaechtigter_typ))})</span>
             </p>
             ${v.geltungsbereich ? `<p class="text-xs text-gray-600 mt-1 line-clamp-2">${esc(v.geltungsbereich)}</p>` : ''}
             <div class="text-xs text-gray-500 mt-2 flex flex-wrap gap-x-4 gap-y-1">
@@ -516,17 +516,19 @@
       }
       const roleLabels = { eigentuemer: 'Miteigentuemer', mieter: 'Mieter', verwalter: 'Verwalter', bewohner: 'Bewohner' };
       const roleColors = { eigentuemer: 'bg-blue-100 text-blue-800', mieter: 'bg-amber-100 text-amber-800', verwalter: 'bg-purple-100 text-purple-800', bewohner: 'bg-green-100 text-green-800' };
-      wrap.innerHTML = kontakte.map(k => {
+      // Kontakt per Index aus data-Attribut, nicht als JSON im onclick (XSS ueber Namen)
+      wrap.innerHTML = kontakte.map((k, i) => {
         const alreadyAdded = vgList.some(v => (v.email || '').toLowerCase() === (k.email || '').toLowerCase());
-        return `<button type="button" ${alreadyAdded ? 'disabled' : ''} onclick='addVgFromKontakt(${JSON.stringify(k).replace(/'/g, "&apos;")})' class="block w-full text-left p-2 bg-white border border-blue-100 rounded ${alreadyAdded ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-100'} transition">
+        return `<button type="button" ${alreadyAdded ? 'disabled' : ''} data-idx="${i}" class="block w-full text-left p-2 bg-white border border-blue-100 rounded ${alreadyAdded ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-100'} transition">
           <div class="flex items-center justify-between gap-2">
             <div class="font-medium">${esc(k.name)}${alreadyAdded ? ' <span class="text-xs text-gray-400">(bereits hinzugefuegt)</span>' : ''}</div>
-            <span class="text-xs px-2 py-0.5 rounded ${roleColors[k.rolle] || 'bg-gray-100 text-gray-700'} flex-shrink-0">${roleLabels[k.rolle] || k.rolle}</span>
+            <span class="text-xs px-2 py-0.5 rounded ${roleColors[k.rolle] || 'bg-gray-100 text-gray-700'} flex-shrink-0">${esc(roleLabels[k.rolle] || k.rolle)}</span>
           </div>
           <div class="text-gray-500 text-xs">${esc(k.email || '')}</div>
-          <div class="text-gray-400 text-xs">aus ${esc(k.wohnung_bezeichnung || 'Wohnung #' + k.wohnung_id)} (STWEG ${k.stweg})</div>
+          <div class="text-gray-400 text-xs">aus ${esc(k.wohnung_bezeichnung || 'Wohnung #' + k.wohnung_id)} (STWEG ${esc(k.stweg)})</div>
         </button>`;
       }).join('');
+      wrap.querySelectorAll('button[data-idx]').forEach(b => b.addEventListener('click', () => addVgFromKontakt(kontakte[Number(b.dataset.idx)])));
     } catch (e) { wrap.innerHTML = '<div class="text-red-500 p-1">Fehler: ' + esc(e.message) + '</div>'; }
   }
 
@@ -625,18 +627,20 @@
       }
       const roleLabels = { eigentuemer: 'Miteigentuemer', mieter: 'Mieter', verwalter: 'Verwalter', bewohner: 'Bewohner' };
       const roleColors = { eigentuemer: 'bg-blue-100 text-blue-800', mieter: 'bg-amber-100 text-amber-800', verwalter: 'bg-purple-100 text-purple-800', bewohner: 'bg-green-100 text-green-800' };
-      wrap.innerHTML = kontakte.map(k => {
-        const rolleLabel = roleLabels[k.rolle] || k.rolle;
+      // Kontakt per Index aus data-Attribut, nicht als JSON im onclick (XSS ueber Namen)
+      wrap.innerHTML = kontakte.map((k, i) => {
+        const rolleLabel = esc(roleLabels[k.rolle] || k.rolle);
         const rolleClass = roleColors[k.rolle] || 'bg-gray-100 text-gray-700';
-        return `<button type="button" onclick='pickKontakt(${JSON.stringify(k).replace(/'/g, "&apos;")})' class="block w-full text-left p-2 bg-white border border-blue-100 rounded hover:bg-blue-100 transition">
+        return `<button type="button" data-idx="${i}" class="block w-full text-left p-2 bg-white border border-blue-100 rounded hover:bg-blue-100 transition">
           <div class="flex items-center justify-between gap-2">
             <div class="font-medium">${esc(k.name)}</div>
             <span class="text-xs px-2 py-0.5 rounded ${rolleClass} flex-shrink-0">${rolleLabel}</span>
           </div>
           <div class="text-gray-500 text-xs">${esc(k.email || '')}${k.telefon ? ' · ' + esc(k.telefon) : ''}</div>
-          <div class="text-gray-400 text-xs">aus ${esc(k.wohnung_bezeichnung || 'Wohnung #' + k.wohnung_id)} (STWEG ${k.stweg})</div>
+          <div class="text-gray-400 text-xs">aus ${esc(k.wohnung_bezeichnung || 'Wohnung #' + k.wohnung_id)} (STWEG ${esc(k.stweg)})</div>
         </button>`;
       }).join('');
+      wrap.querySelectorAll('button[data-idx]').forEach(b => b.addEventListener('click', () => pickKontakt(kontakte[Number(b.dataset.idx)])));
     } catch (e) { wrap.innerHTML = '<div class="text-red-500 p-1">Fehler: ' + esc(e.message) + '</div>'; }
   }
 
@@ -694,7 +698,9 @@
           if (list.length === 0) {
             results.innerHTML = '<div class="p-2 text-gray-400 italic">Keine Treffer</div>';
           } else {
-            results.innerHTML = list.map(p => `<div class="p-2 hover:bg-blue-50 cursor-pointer border-b last:border-b-0" onclick='pickPerson(${JSON.stringify(p).replace(/'/g, "&apos;")})'><strong>${esc(p.name)}</strong><br><span class="text-gray-500">${esc(p.email || '—')}</span></div>`).join('');
+            // Person per Index aus data-Attribut, nicht als JSON im onclick (XSS ueber Namen)
+            results.innerHTML = list.map((p, i) => `<div class="p-2 hover:bg-blue-50 cursor-pointer border-b last:border-b-0" data-idx="${i}"><strong>${esc(p.name)}</strong><br><span class="text-gray-500">${esc(p.email || '—')}</span></div>`).join('');
+            results.querySelectorAll('[data-idx]').forEach(el => el.addEventListener('click', () => pickPerson(list[Number(el.dataset.idx)])));
           }
           results.classList.remove('hidden');
         } catch (e) { console.warn('Person-Search:', e.message); }
@@ -883,7 +889,7 @@
               </div>
               <div class="bg-gray-50 p-3 rounded">
                 <div class="text-xs text-gray-500 mb-1">Unterschriften-Indikatoren</div>
-                <div class="font-semibold">${d.unterschriften_indikatoren ?? '—'}</div>
+                <div class="font-semibold">${esc(d.unterschriften_indikatoren ?? '—')}</div>
               </div>
             </div>
             ${(d.fehlende_namen || []).length ? `<div class="bg-red-50 p-3 rounded"><div class="text-xs font-semibold text-red-800 mb-1">Fehlende Namen:</div><ul class="list-disc list-inside text-xs">${d.fehlende_namen.map(n => `<li>${esc(n)}</li>`).join('')}</ul></div>` : ''}
