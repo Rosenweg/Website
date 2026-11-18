@@ -1,0 +1,8 @@
+# Syslog-Eingang fuer Meldungen anderer Hosts (Authentik-Fehlanmeldungen).
+# Nur intern gebunden; nft (Tabelle inet rw_crowdsec_syslog) laesst nur die
+# freigegebenen Absender zu.
+source: syslog
+listen_addr: 100.64.2.40
+listen_port: 4514
+labels:
+  type: syslog

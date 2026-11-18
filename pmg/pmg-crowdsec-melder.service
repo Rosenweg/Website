@@ -1,0 +1,11 @@
+[Unit]
+Description=PMG: SASL-Fehlanmeldungen an CrowdSec (Edge) melden
+After=rsyslog.service
+
+[Service]
+ExecStart=/usr/local/sbin/pmg-crowdsec-melder.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

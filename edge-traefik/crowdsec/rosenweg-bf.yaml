@@ -1,0 +1,82 @@
+# Rosenweg: eigene Szenarien gegen Raten von Codes und Passwoertern, die die
+# Standard-Szenarien nicht erkennen (Fehler kommen als 400/401/429 an
+# Anwendungs-Endpunkten). Datei: /etc/crowdsec/scenarios/rosenweg-bf.yaml
+#
+# 1) Einmal-Codes raten: falscher Code = 400, gesperrt = 429. Die API laesst
+#    5 Versuche je Code und 20 Code-Pruefungen je IP in 10 min zu; wer darueber
+#    hinaus weiterprobiert, ist kein Mensch, der sich vertippt hat.
+type: leaky
+name: rosenweg/einmalcode-raten
+description: "Wiederholt falsche Einmal-Codes (Portal, Reklamation, Doodle)"
+filter: >-
+  evt.Meta.log_type == 'http_access-log' &&
+  evt.Meta.http_verb == 'POST' &&
+  evt.Meta.http_status in ['400', '429'] &&
+  (evt.Meta.http_path startsWith '/api/otp/verify' ||
+   evt.Meta.http_path startsWith '/api/reklamationen/oeffentlich' ||
+   evt.Meta.http_path startsWith '/api/doodle/verify')
+groupby: evt.Meta.source_ip
+capacity: 15
+leakspeed: 1m
+blackhole: 10m
+labels:
+  service: http
+  remediation: true
+  confidence: 3
+  spoofable: 0
+  classification:
+    - attack.T1110
+  behavior: "http:bruteforce"
+  label: "Einmal-Codes raten"
+---
+# 2) Dauerfeuer in die Drossel: 429 auf Code-Anforderung und -Pruefung
+#    (nginx-Zone rw_otp bzw. API-Limits), z. B. Massen-Versand von Codes.
+type: leaky
+name: rosenweg/code-drossel-flut
+description: "Wiederholt gedrosselt (429) bei Code-Endpunkten"
+filter: >-
+  evt.Meta.log_type == 'http_access-log' &&
+  evt.Meta.http_status == '429' &&
+  (evt.Meta.http_path startsWith '/api/otp/' ||
+   evt.Meta.http_path startsWith '/api/reklamationen/' ||
+   evt.Meta.http_path startsWith '/api/doodle/' ||
+   evt.Meta.http_path startsWith '/api/auth/')
+groupby: evt.Meta.source_ip
+capacity: 30
+leakspeed: 20s
+blackhole: 10m
+labels:
+  service: http
+  remediation: true
+  confidence: 3
+  spoofable: 0
+  classification:
+    - attack.T1110
+  behavior: "http:bruteforce"
+  label: "Code-Endpunkte fluten"
+---
+# 3) Z-Push / Kontakte (ActiveSync): falsches Passwort = 401. Ein Telefon mit
+#    altem Passwort fragt alle paar Minuten nach - erst ein deutlich schnelleres
+#    Muster (20 Fehler, je 1 pro Minute abgebaut) gilt als Raten.
+type: leaky
+name: rosenweg/activesync-bf
+description: "Passwort-Raten gegen Z-Push (ActiveSync)"
+filter: >-
+  evt.Meta.log_type == 'http_access-log' &&
+  evt.Meta.http_status == '401' &&
+  evt.Unmarshaled.traefik != nil &&
+  evt.Unmarshaled.traefik.RequestHost == 'contacts.rosenweg4303.ch' &&
+  evt.Meta.http_path startsWith '/Microsoft-Server-ActiveSync'
+groupby: evt.Meta.source_ip
+capacity: 20
+leakspeed: 1m
+blackhole: 10m
+labels:
+  service: http
+  remediation: true
+  confidence: 3
+  spoofable: 0
+  classification:
+    - attack.T1110
+  behavior: "http:bruteforce"
+  label: "ActiveSync Passwort-Raten"

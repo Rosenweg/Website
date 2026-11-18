@@ -17,7 +17,7 @@ WAN :80/:443/:465/:587/:993/:25/:8883 ─DNAT─▶ 100.64.2.40
                ├─ extra-routes.yml  ◀── von Hand aus dem Repo
                └─ static.yml        ◀── dynamic-static.yml (deploy.sh)
                                                 ▼
-                  Frontend-LXCs (HTTP), Dienste in CTs, TCP-SNI-Passthrough (Mail, Kontakte)
+                  Frontend-LXCs (HTTP), Dienste in CTs, TCP-SNI-Passthrough (Mail, Personen)
 ```
 
 ## Dateien
@@ -26,10 +26,23 @@ WAN :80/:443/:465/:587/:993/:25/:8883 ─DNAT─▶ 100.64.2.40
 |---|---|---|
 | `traefik.yml` | `/etc/traefik/traefik.yml` | statische Konfiguration: Entrypoints (`web` 80 → Umleitung auf https, `websecure` 443, `smtps` 465, `imaps` 993, `submission` 587, `smtp` 25, `mqtts` 8883, Metriken 127.0.0.1:8082), File-Provider, ACME |
 | `dynamic-static.yml` | `/etc/traefik/dynamic/static.yml` | Notfall-Routen (Dashboard, Header) |
-| `extra-routes.yml` | `/etc/traefik/dynamic/extra-routes.yml` | feste Routen: www/apex → CT 118, rosenweg9 → CT 122, pwa → CT 130, Nextcloud, Authentik, MQTT, Heizung (ioBroker), TV, Kontakte-/Personen-Passthrough |
+| `extra-routes.yml` | `/etc/traefik/dynamic/extra-routes.yml` | feste Routen: www/apex → CT 118, rosenweg9 → CT 122, pwa → CT 130, Nextcloud, Authentik, MQTT, Heizung (ioBroker), TV, Kontakte (Z-Push, TLS hier), Personen-Passthrough |
 | `traefik.service` | `/etc/systemd/system/` | Traefik, `EnvironmentFile=/etc/default/traefik` |
 | `traefik-sync.sh` | `/usr/local/sbin/traefik-sync.sh` | holt die Datenbank-Routen von der API und schreibt `routes.yml` |
 | `traefik-sync.service`, `.timer` | `/etc/systemd/system/` | alle 15 s, `EnvironmentFile=-/etc/default/traefik-sync` |
+| `crowdsec.yml` | `/etc/traefik/dynamic/crowdsec.yml` | CrowdSec-Bouncer-Middleware (Plugin), hängt über `traefik.yml` an `websecure` |
+| `crowdsec/acquis-traefik.yaml` | `/etc/crowdsec/acquis.d/traefik.yaml` | CrowdSec liest das Zugriffsprotokoll |
+| `crowdsec/rosenweg-cf-echte-ip.yaml` | `/etc/crowdsec/parsers/s02-enrich/` | echte Client-IP aus `Cf-Connecting-Ip`, nur bei Cloudflare-Verbindungen |
+| `crowdsec/rosenweg-intern.yaml` | `/etc/crowdsec/postoverflows/s01-whitelist/` | eigene Netze nie sperren |
+| `echteip.yml` | `/etc/traefik/dynamic/echteip.yml` | Middleware `echteip`: echte Client-IP in `X-Forwarded-For`/`X-Real-Ip` |
+| `plugins/echteip/` | `/plugins-local/src/github.com/rosenweg/echteip/` | eigenes Traefik-Plugin dazu (Go, von Traefik interpretiert) |
+| `crowdsec/rosenweg-bf.yaml` | `/etc/crowdsec/scenarios/` | Szenarien: Einmal-Codes raten, Code-Drossel fluten, ActiveSync-Passwort-Raten |
+| `crowdsec/acquis-syslog.yaml` | `/etc/crowdsec/acquis.d/syslog.yaml` | Syslog-Eingang 100.64.2.40:4514 (Meldungen anderer Hosts) |
+| `crowdsec/rosenweg-authentik-*.yaml` | `/etc/crowdsec/parsers/s01-parse/`, `/etc/crowdsec/scenarios/` | Authentik-Fehlanmeldungen (vom Melder auf dem Authentik-CT) |
+| `crowdsec/rosenweg-mail-*.yaml` | `/etc/crowdsec/parsers/s01-parse/`, `/etc/crowdsec/scenarios/` | Mailcow-Fehlanmeldungen (vom Melder auf Mailcow) |
+| `rw-crowdsec-syslog.nft`, `.service` | `/etc/rosenweg/`, `/etc/systemd/system/` | Syslog-Eingang nur für freigegebene Hosts (Authentik .37, Mailcow .33, PMG .31) |
+| `rw-crowdsec-lapi.nft`, `.service` | `/etc/rosenweg/`, `/etc/systemd/system/` | CrowdSec-API 8080 nur für localhost und PMG |
+| `logrotate-stuendlich.conf` | `/etc/systemd/system/logrotate.timer.d/stuendlich.conf` | logrotate stündlich, damit `maxsize 100M` greift |
 | `deploy.sh` | läuft vom Arbeitsplatz | kopiert alles ausser `extra-routes.yml` und startet die Dienste |
 
 Geheimnisse (nie im Repo):
@@ -40,6 +53,7 @@ Geheimnisse (nie im Repo):
 | `/etc/default/traefik-sync` (0600) | `TRAEFIK_CONFIG_SECRET` | Header `X-Traefik-Secret` für `/api/traefik/dynamic`; derselbe Wert steht in `/opt/rosenweg-core/.env` (CT 128). Fehlt er, antwortet die API 403 und der Sync behält die letzte Konfiguration. |
 | `/etc/traefik/.htpasswd` | – | BasicAuth für das Dashboard |
 | `/var/lib/traefik/acme.json` (0600) | – | Zertifikate |
+| `/etc/traefik/crowdsec-bouncer.key` (0600) | – | LAPI-Schlüssel des Traefik-Bouncers (`cscli bouncers add traefik-bouncer -o raw`, ohne Zeilenumbruch speichern) |
 
 ## Was die Datenbank-Routen liefern
 
@@ -148,15 +162,102 @@ curl -sI https://heizung.rosenweg4303.ch/vis-2/ | grep -iE '^(HTTP|location)'
 - Datenbank-Routen: in `isp-admin.html` bearbeiten; der Sync übernimmt sie
   innerhalb von 15 s.
 
+## CrowdSec (seit 18.11.2026)
+
+Erkennen: CrowdSec 1.8 (Paketquelle packagecloud, `bookworm`) liest
+`access.log` (Collection `crowdsecurity/traefik`) sowie sshd/postfix. Über
+Cloudflare geleitete Anfragen werden der echten Client-IP zugeordnet
+(`Cf-Connecting-Ip`, nur von Cloudflare-Adressen ausgewertet).
+
+Sperren, zweistufig:
+- **nftables** (`crowdsec-firewall-bouncer-nftables`, Tabellen `ip crowdsec`,
+  `ip6 crowdsec6`): verwirft direkte Verbindungen gesperrter Adressen auf allen
+  Ports, auch Mail und MQTT. Cloudflare-Adressen werden nie gesperrt
+  (Whitelist `crowdsecurity/cdn-whitelist`).
+- **Traefik-Plugin** (`crowdsec-bouncer-traefik-plugin` v1.8.2, lokal unter
+  `/plugins-local/src/github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin`):
+  antwortet gesperrten Clients hinter Cloudflare mit 403. Fällt CrowdSec aus,
+  lässt es alles durch (`updateMaxFailure: -1`).
+
+Nie gesperrt: 100.64.0.0/10, private Netze, `2a02:16a:1400::/48`,
+37.17.232.133 und .136.
+
+Bedienen:
+
+```bash
+cscli decisions list                 # aktuelle Sperren
+cscli alerts list                    # was erkannt wurde
+cscli decisions delete --ip <IP>     # Sperre aufheben
+cscli metrics                        # gelesene/geparste Zeilen, Bouncer-Abrufe
+cscli bouncers list                  # beide Bouncer müssen regelmässig abrufen
+```
+
+Plugin aktualisieren: Tarball des neuen Tags nach `/plugins-local/src/...`
+entpacken, zuerst mit einer Testinstanz auf 127.0.0.1 prüfen, dann
+`systemctl restart traefik`. Zurückbauen: `traefik.yml.vor-crowdsec-2026-11-18`
+zurückkopieren, `dynamic/crowdsec.yml` löschen, Traefik neu starten;
+`apt purge crowdsec-firewall-bouncer-nftables` entfernt die nft-Sperren.
+
+Eigene Szenarien (`crowdsec/rosenweg-bf.yaml`, `rosenweg-authentik-bf.yaml`):
+falsche Einmal-Codes (400/429 an `/api/otp/verify`, `/api/reklamationen/oeffentlich`,
+`/api/doodle/verify`), Dauerfeuer in die Code-Drossel, ActiveSync-Passwort-Raten
+(401 auf contacts), Authentik-Fehlanmeldungen. Authentik schreibt diese nur in
+seine Datenbank; `authentik-ct/authentik-crowdsec-melder` meldet jede Minute die
+IP (ohne Benutzername) per Syslog an den Edge.
+
+### Echte Client-IP (seit 18.11.2026)
+
+Hinter Cloudflare sahen API, Frontends und Authentik nur die Adresse des
+Cloudflare-Knotens: die Code-Limits je IP galten für alle Nutzer desselben
+Knotens gemeinsam, Authentik verbuchte Fehlanmeldungen auf Cloudflare. Das
+Plugin `echteip` setzt `X-Forwarded-For`/`X-Real-Ip` auf `Cf-Connecting-Ip` —
+nur wenn die Verbindung aus einem Cloudflare-Netz kommt; sonst die
+Verbindungsadresse, gefälschte `Cf-*`-Köpfe werden entfernt. Der Kopf wird
+überschrieben, nicht ergänzt (Cloudflare hängt an einen vom Client gesetzten
+Kopf nur an). Cloudflare-Netze in `echteip.yml` und `crowdsec.yml` gleich halten.
+
+### Mail (seit 18.11.2026)
+
+- **IMAPS** läuft mit PROXY-Protokoll: Router `imaps-mailcow-proxy` in
+  `extra-routes.yml` (Priorität 10000, überdeckt die Datenbank-Routen) →
+  Mailcow `100.64.2.33:10993` (Mailcows eingebauter `imaps_haproxy`-Listener).
+  Mailcow nimmt PROXY-Köpfe nur von 100.64.2.40 an
+  (`data/conf/dovecot/extra.conf`: `haproxy_trusted_networks`), Port in
+  `docker-compose.override.yml`. Dovecot sieht so die echte Client-IP.
+- Mailcows eigene Sperre (netfilter) sperrt auf CT 240 — bei proxierten
+  Verbindungen kommen die Pakete aber vom Edge, dort greift sie nicht. Darum
+  meldet `mailcow/mailcow-crowdsec-melder.py` (Dienst auf CT 240) jede
+  Fehlanmeldung (Dovecot, SASL, SOGo; nur IP) per Syslog an den Edge,
+  Szenario `rosenweg/mail-bf` sperrt dort.
+- 100.64.2.40 steht in Mailcows Sperr-Whitelist (`F2B_WHITELIST`), damit
+  Fehlversuche über noch nicht proxierte Wege (Webmail 443, SMTPS über PMG)
+  nicht den Edge und damit alle sperren.
+- **SMTPS** (`smtp.rosenweg4303.ch`, `smtp.rosenweg9.ch`,
+  `smtp.personen.rosenweg4303.ch`) läuft mit PROXY-Protokoll zu PMG
+  `100.64.2.31:10465` (Router `smtps-pmg-proxy`); `mail.rosenweg4303.ch` bleibt
+  bei Mailcow (Zertifikat). Siehe `../pmg/README.md`.
+- PMG meldet SASL-Fehlanmeldungen (587, 465) ebenfalls an CrowdSec und hat
+  einen eigenen Bouncer (`pmg-bouncer`), weil Submission 587 direkt vom UDM zum
+  PMG geht. Dafür lauscht die CrowdSec-API auf `0.0.0.0:8080`, per
+  `rw-crowdsec-lapi.nft` nur für localhost und PMG offen.
+- Offen: Webmail/Mailcow-Oberfläche (443, SNI-Durchleitung aus der Datenbank)
+  sieht weiter nur die Edge-IP.
+
+fail2ban ist bewusst nicht installiert: CrowdSec deckt sshd ab, ein zweites
+Sperrsystem würde nur doppelt zählen.
+
 ## Logs
 
 - `/var/log/traefik/traefik.log` — Traefik selbst
-- `/var/log/traefik/access.log` — Anfragen (JSON). Hinter Cloudflare steht dort
-  die Adresse des Cloudflare-Knotens, nicht die des Clients.
+- `/var/log/traefik/access.log` — Anfragen (JSON). Hinter Cloudflare steht in
+  `ClientHost` die Adresse des Cloudflare-Knotens; die echte Adresse steht in
+  `request_Cf-Connecting-Ip`. Rotation stündlich ab 100 MB (das Shelly-Polling
+  schreibt mehrere hundert MB pro Stunde). `copytruncate` braucht freien Platz
+  in Grösse des Logs; ist das Log zu gross geworden:
+  `gzip -c access.log > access.log.1.gz && truncate -s 0 access.log`.
+- `/var/log/crowdsec.log` — CrowdSec
 - `journalctl -u traefik -f`, `journalctl -u traefik-sync`
 
 ## Offen
 
-- CrowdSec/fail2ban sind auf dem Edge nicht installiert (`sicherheit.md`
-  Abschnitt 7.2).
 - `deploy.sh` verweist auf pve1 statt pve3 (siehe oben).

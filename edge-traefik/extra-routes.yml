@@ -12,6 +12,18 @@ http:
       rule: Host(`www.rosenweg9.ch`) || Host(`rosenweg9.ch`)
       service: rw9-lxc-svc
       tls: { certResolver: cf }
+    # Kontakte-Sync (Z-Push, CT 115): TLS endet hier (Zertifikat ueber den
+    # Traefik-Resolver, erneuert sich mit allen anderen). Bis 18.11.2026 lief das
+    # als SNI-Passthrough mit eigenem certbot auf CT 115 - dessen Cloudflare-Token
+    # war ungueltig, das Zertifikat seit 16.09. abgelaufen.
+    contacts-rw4303:
+      entryPoints: [websecure]
+      rule: Host(`contacts.rosenweg4303.ch`)
+      service: contacts-zpush-svc
+      tls:
+        certResolver: cf
+        domains:
+          - main: contacts.rosenweg4303.ch
     nextcloud-rw4303:
       entryPoints: [websecure]
       rule: Host(`nextcloud.rosenweg4303.ch`)
@@ -294,6 +306,11 @@ http:
         passHostHeader: true
         servers:
           - url: http://100.64.2.45
+    contacts-zpush-svc:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: http://100.64.2.38
     nextcloud-lxc-svc:
       loadBalancer:
         passHostHeader: true
@@ -330,10 +347,27 @@ http:
           - url: http://100.64.90.50:8082
 tcp:
   routers:
-    contacts-rw4303-passthrough:
-      entryPoints: [websecure]
-      rule: HostSNI(`contacts.rosenweg4303.ch`)
-      service: contacts-rw4303-svc
+    # IMAPS mit PROXY-Protokoll (18.11.2026): Dovecot sieht so die echte
+    # Client-IP (Sperre/CrowdSec je Angreifer statt fuer den Edge). Ueberdeckt
+    # per Prioritaet die gleichnamigen Datenbank-Routen (routes.yml), die weiter
+    # auf 993 zeigen - Router loeschen = alter Weg. Mailcow-Port 10993 ist
+    # Mailcows eingebauter haproxy-Listener; PROXY-Koepfe nur von 100.64.2.40
+    # (data/conf/dovecot/extra.conf).
+    # SMTPS zu PMG mit PROXY-Protokoll (18.11.2026): PMG-Port 10465 sieht die
+    # echte Client-IP (nur der Edge darf dorthin, nft auf PMG). Ueberdeckt die
+    # Datenbank-Routen auf 465. Auch mail.rosenweg4303.ch: PMG ist Eingang fuer
+    # alles SMTP (PMG-Zertifikat enthaelt den Namen seit 18.11.2026).
+    smtps-pmg-proxy:
+      entryPoints: [smtps]
+      rule: HostSNI(`smtp.rosenweg4303.ch`) || HostSNI(`smtp.rosenweg9.ch`) || HostSNI(`smtp.personen.rosenweg4303.ch`) || HostSNI(`mail.rosenweg4303.ch`)
+      priority: 10000
+      service: smtps-pmg-proxy-svc
+      tls: { passthrough: true }
+    imaps-mailcow-proxy:
+      entryPoints: [imaps]
+      rule: HostSNI(`imap.rosenweg4303.ch`) || HostSNI(`mail.rosenweg4303.ch`) || HostSNI(`imap.rosenweg9.ch`) || HostSNI(`imap.personen.rosenweg4303.ch`)
+      priority: 10000
+      service: imaps-mailcow-proxy-svc
       tls: { passthrough: true }
     personen-rw4303-passthrough:
       entryPoints: [websecure]
@@ -352,11 +386,23 @@ tcp:
         certResolver: cf
         domains:
           - main: mqtt.rosenweg4303.ch
+  # PROXY-Protokoll v2 zum Ziel (Traefik >= 3.5: ueber serversTransport,
+  # nicht mehr direkt am loadBalancer).
+  serversTransports:
+    proxy-v2:
+      proxyProtocol:
+        version: 2
   services:
-    contacts-rw4303-svc:
+    smtps-pmg-proxy-svc:
       loadBalancer:
+        serversTransport: proxy-v2
         servers:
-          - address: 100.64.2.38:443
+          - address: 100.64.2.31:10465
+    imaps-mailcow-proxy-svc:
+      loadBalancer:
+        serversTransport: proxy-v2
+        servers:
+          - address: 100.64.2.33:10993
     personen-rw4303-svc:
       loadBalancer:
         servers:

@@ -414,10 +414,10 @@ ins Repo:
   Unterschriftenlisten-Rückläufe, Zähler-Daten) waren schon vor dem 17.11. nie
   erreichbar (Express vergleicht den kodierten Pfad) – Behebung in PR #24.
 
-- Zertifikat `contacts.rosenweg4303.ch` ist abgelaufen.
+- ~~Zertifikat `contacts.rosenweg4303.ch` abgelaufen~~ — seit 18.11.2026 endet TLS am Edge, das Zertifikat erneuert sich dort automatisch (`zpush/README.md`).
 - `PRINT_AR_AUTHSERV_ID` an einer echten Mail prüfen (oberster
   `Authentication-Results`-Kopf).
-- CrowdSec/fail2ban auf dem Edge-Proxy sind nicht installiert.
+- ~~CrowdSec/fail2ban auf dem Edge-Proxy fehlen~~ — seit 18.11.2026 CrowdSec mit nftables- und Traefik-Bouncer, siehe `edge-traefik/README.md`.
 - ioBroker läuft mit `auth=false` (nur noch hinter Authentik erreichbar).
 - Kiosk: Änderungen wirken erst nach erneutem `setup-kiosk.sh`; `root_password`
   in der Kiosk-Konfiguration setzen.

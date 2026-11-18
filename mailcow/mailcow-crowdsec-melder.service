@@ -1,0 +1,12 @@
+[Unit]
+Description=Mailcow-Fehlanmeldungen an CrowdSec (Edge) melden
+After=docker.service
+Requires=docker.service
+
+[Service]
+ExecStart=/usr/local/sbin/mailcow-crowdsec-melder.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

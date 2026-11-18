@@ -1,0 +1,10 @@
+[Unit]
+Description=Authentik-Fehlanmeldungen jede Minute an CrowdSec melden
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target

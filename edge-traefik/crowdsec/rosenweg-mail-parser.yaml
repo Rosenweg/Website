@@ -1,0 +1,16 @@
+# Zeilen vom Melder auf Mailcow (mailcow/mailcow-crowdsec-melder.py):
+#   programm "mail-melder", "mail_auth_failed ip=<adresse> dienst=<imap|sasl|sogo>"
+name: rosenweg/mail-melder
+description: "Mailcow-Fehlanmeldungen (vom Melder per Syslog)"
+filter: "evt.Parsed.program == 'mail-melder'"
+onsuccess: next_stage
+grok:
+  pattern: '^mail_auth_failed ip=%{IP:client_ip} dienst=%{WORD:dienst}$'
+  apply_on: message
+statics:
+  - meta: log_type
+    value: mail_auth_failed
+  - meta: service
+    expression: "'mail-' + evt.Parsed.dienst"
+  - meta: source_ip
+    expression: evt.Parsed.client_ip
