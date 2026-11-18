@@ -10,9 +10,9 @@
 # taugt dafuer nicht, der darf nur abliefern:
 #
 #   # auf dem Fileserver nachsehen, welche es gibt:
-#   ssh root@<pve2> 'pct exec 106 -- ls -la /mnt/cephfs-stage/archiv/whatsapp-bot-session/'
+#   ssh root@<pve2> 'pct exec 106 -- ls -la /var/backups/wa-session/'
 #   # gewuenschtes Archiv nach CT 116 bringen:
-#   ssh root@<pve2> 'pct exec 106 -- cat /mnt/cephfs-stage/archiv/whatsapp-bot-session/<datei>' > /tmp/<datei>
+#   ssh root@<pve2> 'pct exec 106 -- cat /var/backups/wa-session/<datei>' > /tmp/<datei>
 #   scp -o 'ProxyJump root@<pve1>' /tmp/<datei> root@<pve3-cluster-ip>:/tmp/
 #   ssh -J root@<pve1> root@<pve3-cluster-ip> 'pct push 116 /tmp/<datei> /tmp/<datei>'
 #
