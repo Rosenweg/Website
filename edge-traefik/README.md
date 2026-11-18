@@ -39,7 +39,8 @@ WAN :80/:443/:465/:587/:993/:25/:8883 ─DNAT─▶ 100.64.2.40
 | `crowdsec/rosenweg-bf.yaml` | `/etc/crowdsec/scenarios/` | Szenarien: Einmal-Codes raten, Code-Drossel fluten, ActiveSync-Passwort-Raten |
 | `crowdsec/acquis-syslog.yaml` | `/etc/crowdsec/acquis.d/syslog.yaml` | Syslog-Eingang 100.64.2.40:4514 (Meldungen anderer Hosts) |
 | `crowdsec/rosenweg-authentik-*.yaml` | `/etc/crowdsec/parsers/s01-parse/`, `/etc/crowdsec/scenarios/` | Authentik-Fehlanmeldungen (vom Melder auf dem Authentik-CT) |
-| `rw-crowdsec-syslog.nft`, `.service` | `/etc/rosenweg/`, `/etc/systemd/system/` | Syslog-Eingang nur für freigegebene Hosts (Authentik 100.64.2.37) |
+| `crowdsec/rosenweg-mail-*.yaml` | `/etc/crowdsec/parsers/s01-parse/`, `/etc/crowdsec/scenarios/` | Mailcow-Fehlanmeldungen (vom Melder auf Mailcow) |
+| `rw-crowdsec-syslog.nft`, `.service` | `/etc/rosenweg/`, `/etc/systemd/system/` | Syslog-Eingang nur für freigegebene Hosts (Authentik 100.64.2.37, Mailcow 100.64.2.33) |
 | `logrotate-stuendlich.conf` | `/etc/systemd/system/logrotate.timer.d/stuendlich.conf` | logrotate stündlich, damit `maxsize 100M` greift |
 | `deploy.sh` | läuft vom Arbeitsplatz | kopiert alles ausser `extra-routes.yml` und startet die Dienste |
 
@@ -213,6 +214,26 @@ nur wenn die Verbindung aus einem Cloudflare-Netz kommt; sonst die
 Verbindungsadresse, gefälschte `Cf-*`-Köpfe werden entfernt. Der Kopf wird
 überschrieben, nicht ergänzt (Cloudflare hängt an einen vom Client gesetzten
 Kopf nur an). Cloudflare-Netze in `echteip.yml` und `crowdsec.yml` gleich halten.
+
+### Mail (seit 18.11.2026)
+
+- **IMAPS** läuft mit PROXY-Protokoll: Router `imaps-mailcow-proxy` in
+  `extra-routes.yml` (Priorität 10000, überdeckt die Datenbank-Routen) →
+  Mailcow `100.64.2.33:10993` (Mailcows eingebauter `imaps_haproxy`-Listener).
+  Mailcow nimmt PROXY-Köpfe nur von 100.64.2.40 an
+  (`data/conf/dovecot/extra.conf`: `haproxy_trusted_networks`), Port in
+  `docker-compose.override.yml`. Dovecot sieht so die echte Client-IP.
+- Mailcows eigene Sperre (netfilter) sperrt auf CT 240 — bei proxierten
+  Verbindungen kommen die Pakete aber vom Edge, dort greift sie nicht. Darum
+  meldet `mailcow/mailcow-crowdsec-melder.py` (Dienst auf CT 240) jede
+  Fehlanmeldung (Dovecot, SASL, SOGo; nur IP) per Syslog an den Edge,
+  Szenario `rosenweg/mail-bf` sperrt dort.
+- 100.64.2.40 steht in Mailcows Sperr-Whitelist (`F2B_WHITELIST`), damit
+  Fehlversuche über noch nicht proxierte Wege (Webmail 443, SMTPS über PMG)
+  nicht den Edge und damit alle sperren.
+- Offen: Webmail/Mailcow-Oberfläche (443, SNI-Durchleitung aus der Datenbank)
+  und SMTPS (PMG prüft Passwörter über Dovecot-Port 10001) sehen weiter nur
+  die Edge-IP.
 
 fail2ban ist bewusst nicht installiert: CrowdSec deckt sshd ab, ein zweites
 Sperrsystem würde nur doppelt zählen.
