@@ -75,30 +75,22 @@ php-fpm-Pool (`/etc/php/8.4/fpm/pool.d/www.conf`, danach
 Outpost. Dann muss dessen Zertifikat gültig und in `/etc/ldap/ldap.conf`
 (`TLS_CACERT`) bekannt sein. Ohne Variable: `ldap://100.64.2.37:389`.
 
-## Routing (kein ACME am Edge)
+## Routing (TLS endet am Edge, seit 18.11.2026)
 
 - DNS `contacts.rosenweg4303.ch` → A `37.17.232.133` (DNS-only, nicht über
   Cloudflare-Proxy).
-- **edge-traefik** (CT 245): TCP-SNI-Passthrough `HostSNI(contacts.rosenweg4303.ch)`
-  → `100.64.2.38:443` (siehe `../edge-traefik/extra-routes.yml`, Router
-  `contacts-rw4303-passthrough`).
-- CT 115 hat ein **eigenes** Zertifikat:
-  `certbot certonly --dns-cloudflare -d contacts.rosenweg4303.ch`
-  (der Edge-ACME für diesen Namen war früher rate-limitiert).
-
-> **Offener Punkt (17.11.2026): Das Zertifikat `contacts.rosenweg4303.ch` ist
-> abgelaufen.** Telefone verweigern dann die Synchronisation oder zeigen eine
-> Zertifikatswarnung. Ursache (z. B. abgelaufener oder rotierter
-> Cloudflare-Token in der certbot-Konfiguration, fehlender `certbot.timer`) ist
-> noch nicht geklärt. Prüfen und erneuern:
->
-> ```bash
-> ssh root@100.64.2.22 'pct exec 115 -- sh -c "certbot certificates; systemctl status certbot.timer --no-pager; certbot renew --dry-run"'
-> ssh root@100.64.2.22 'pct exec 115 -- sh -c "certbot renew && systemctl reload nginx"'
-> ```
->
-> Nach dem Rotieren des Cloudflare-Tokens (`sicherheit.md` Abschnitt 7.1) muss
-> auch die certbot-Zugangsdatei in CT 115 den neuen Token bekommen.
+- **edge-traefik** (CT 245): HTTP-Router `contacts-rw4303` mit Zertifikat über
+  den Traefik-Resolver `cf` → `http://100.64.2.38` (siehe
+  `../edge-traefik/extra-routes.yml`). Das Zertifikat erneuert sich mit allen
+  anderen Edge-Zertifikaten; auf CT 115 gibt es **kein** certbot und **kein**
+  Cloudflare-Token mehr.
+- CT 115 nimmt Port 80 nur von 100.64.2.40 an (`$realip_remote_addr`), die
+  echte Client-Adresse kommt per `X-Forwarded-For` (`real_ip`). Damit wirken
+  `limit_req` und die Fehlversuch-Sperre in `backend-rosenweg.php` je Client.
+  `fastcgi_param HTTPS on`, weil Clients immer über HTTPS kommen.
+- Vorher (bis 18.11.2026): SNI-Passthrough auf `:443` mit eigenem certbot auf
+  CT 115. Dessen Cloudflare-Token war seit Sommer ungültig, das Zertifikat seit
+  16.09.2026 abgelaufen, 186 Erneuerungsläufe scheiterten unbemerkt.
 
 ## Ausrollen
 
