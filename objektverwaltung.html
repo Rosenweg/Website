@@ -112,7 +112,7 @@
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                             CSV
                         </button>
-                        <button id="btn-import" onclick="importKontakte()" class="hidden bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition flex items-center gap-2" title="Aus kontakte.json importieren">
+                        <button id="btn-import" onclick="importKontakte()" class="hidden bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition flex items-center gap-2" title="Aus einer kontakte.json-Datei importieren">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
                             Import
                         </button>
@@ -308,12 +308,8 @@
             <div id="panel-gruppen" class="hidden">
                 <div class="flex justify-between items-center mb-4">
                     <h2 class="text-lg font-semibold text-gray-700" id="groups-title">Gruppen</h2>
-                    <button id="btn-new-group" onclick="openNewGroupModal()" class="hidden bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm font-medium flex items-center gap-2">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-                        </svg>
-                        Neue Gruppe
-                    </button>
+                    <!-- Kein "Neue Gruppe": Gruppen bestimmen Rechte (Elterngruppen erben) und
+                         werden in Authentik angelegt; die API hat bewusst keine Anlege-Route. -->
                 </div>
                 <div id="groups-list" class="space-y-1"></div>
             </div>
@@ -504,8 +500,6 @@
             { value: 'sonstige', label: 'Sonstige', color: 'gray' },
         ];
 
-        const STWEG_TO_ROSENWEG = { 1: [17,18], 2: [13,14,16], 3: [9], 4: [10,12], 5: [5,6,8], 6: [1], 7: [2,4] };
-
         // ── Wohnungen State ──
         let allWohnungen = [];
         let stwegList = [];
@@ -518,8 +512,11 @@
         let allGroups = [];
         let canWriteBewohner = false;
         let seesAll = false;
-        let userStweg = null;
-        let userGroupPrefix = null;
+        // Gruppen aendern/Konten loeschen darf der Server nur Technik/Praesident;
+        // Ausschuss nur Bewohner-/Eigentuemer-Gruppen der eigenen STWEG(s).
+        let istGruppenAdmin = false;
+        let eigeneStwegGruppen = new Set();   // alle Gruppen der Ausschuss-STWEG(s)
+        let vergebbareGruppenNamen = new Set(); // davon bewohner/eigentuemer
         let bewohnerLoaded = false;
         let eigentuemerLoaded = false;
         let eigentuemerData = []; // grouped: [{ name, email, telefon, objects: [...] }]
@@ -575,16 +572,20 @@
             canWriteBewohner = accessBewohner === 'write' || accessVerwaltung === 'write';
             seesAll = isTechnik || isVerwaltung;
 
-            // Determine STWEG for non-admin users (Bewohner tab)
+            istGruppenAdmin = isTechnik;
+
+            // Ausschuss: Gruppen der eigenen STWEG(s) wie der Server (STWEG_GROUPS =
+            // site-config.json) – nicht ueber ein Hausnummer-Praefix r<N>-: STWEG 1,2,4,5,7
+            // und MEG heissen stwegN-/meg-…, deren Liste blieb sonst leer.
             if (!seesAll) {
-                const ausschussGroup = groups.find(g => g.match(/stweg\d+-ausschuss/i));
-                if (ausschussGroup) {
-                    const match = ausschussGroup.match(/stweg(\d+)/i);
-                    if (match) {
-                        userStweg = parseInt(match[1]);
-                        const rwNrs = STWEG_TO_ROSENWEG[userStweg] || [];
-                        userGroupPrefix = rwNrs.map(n => `r${n}-`);
-                    }
+                let cfgStwegs = [];
+                try { cfgStwegs = (await (await fetch('/site-config.json')).json()).stwegen || []; } catch {}
+                const lg = groups.map(g => g.toLowerCase());
+                for (const s of cfgStwegs) {
+                    const sg = s.groups || {};
+                    if (!sg.ausschuss || !lg.includes(String(sg.ausschuss).toLowerCase())) continue;
+                    Object.values(sg).forEach(n => eigeneStwegGruppen.add(String(n).toLowerCase()));
+                    ['bewohner', 'eigentuemer'].forEach(k => { if (sg[k]) vergebbareGruppenNamen.add(String(sg[k]).toLowerCase()); });
                 }
             }
 
@@ -600,7 +601,6 @@
                     document.getElementById('main-tab-gruppen').classList.remove('hidden');
                     document.getElementById('btn-add-user').classList.remove('hidden');
                     if (seesAll) {
-                        document.getElementById('btn-new-group').classList.remove('hidden');
                         document.getElementById('groups-title').textContent = 'Alle Gruppen';
                     }
                 }
@@ -1147,15 +1147,29 @@
             }
         }
 
-        async function importKontakte() {
-            if (!confirm(`Kontakte-Daten für STWEG ${currentStweg} importieren? Vorhandene Daten werden aktualisiert.`)) return;
-            try {
-                const path = `/stweg${currentStweg}/data/kontakte.json`;
-                const configRes = await fetch(path);
-                if (!configRes.ok) throw new Error(`kontakte.json nicht gefunden unter ${path}`);
-                const data = await configRes.json();
+        // Die oeffentliche /stwegN/data/kontakte.json gibt es nicht mehr (Personendaten,
+        // F-4/I-7) -> Datei lokal auswaehlen und an dieselbe Import-Route schicken.
+        function kontakteDateiWaehlen() {
+            return new Promise(resolve => {
+                const inp = document.createElement('input');
+                inp.type = 'file';
+                inp.accept = '.json,application/json';
+                inp.onchange = () => resolve(inp.files && inp.files[0] ? inp.files[0] : null);
+                inp.click();
+            });
+        }
 
-                const res = await AuthentikAuth.apiFetch(`/api/wohnungen/${currentStweg}/import`, {
+        async function importKontakte() {
+            const stweg = currentStweg;
+            const datei = await kontakteDateiWaehlen();
+            if (!datei) return;
+            if (!confirm(`Kontakte-Daten aus "${datei.name}" für STWEG ${stweg} importieren? Vorhandene Daten werden aktualisiert.`)) return;
+            try {
+                let data;
+                try { data = JSON.parse(await datei.text()); } catch { throw new Error('Datei ist kein gültiges JSON'); }
+                if (!data || typeof data !== 'object' || !data.wohnungen) throw new Error('Datei enthält keine "wohnungen"');
+
+                const res = await AuthentikAuth.apiFetch(`/api/wohnungen/${stweg}/import`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(data),
@@ -1614,24 +1628,14 @@
 
         function getVisibleGroups() {
             if (seesAll) return allGroups;
-            if (!userGroupPrefix) return [];
-            const stwegAusschuss = userStweg ? `stweg${userStweg}-ausschuss` : '';
-            return allGroups.filter(g => {
-                const n = g.name.toLowerCase();
-                return userGroupPrefix.some(prefix => n.startsWith(prefix)) || n === stwegAusschuss;
-            });
+            return allGroups.filter(g => eigeneStwegGruppen.has(g.name.toLowerCase()));
         }
 
         function getFilteredUsers() {
             let users = allUsers;
-            if (userStweg && userGroupPrefix) {
-                const stwegAusschuss = `stweg${userStweg}-ausschuss`;
-                users = users.filter(u => {
-                    const uGroups = (u.groups_obj || []).map(g => g.name.toLowerCase());
-                    return uGroups.some(g =>
-                        userGroupPrefix.some(prefix => g.startsWith(prefix)) || g === stwegAusschuss
-                    );
-                });
+            // Der Server liefert dem Ausschuss ohnehin nur Konten der eigenen STWEG(s).
+            if (!seesAll) {
+                users = users.filter(u => (u.groups_obj || []).some(g => eigeneStwegGruppen.has(g.name.toLowerCase())));
             }
             const q = (document.getElementById('user-search')?.value || '').toLowerCase();
             if (q) {
@@ -1677,9 +1681,9 @@
                         <button onclick="editUser(${u.pk})" class="p-2 text-gray-400 hover:text-blue-600 rounded-lg hover:bg-blue-50 transition" title="Bearbeiten">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
                         </button>
-                        <button data-aktion="removeUser" data-pk="${esc(u.pk)}" data-name="${esc(u.name || u.username)}" class="p-2 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition" title="Entfernen">
+                        ${istGruppenAdmin ? `<button data-aktion="removeUser" data-pk="${esc(u.pk)}" data-name="${esc(u.name || u.username)}" class="p-2 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition" title="Konto löschen">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                        </button>
+                        </button>` : ''}
                     </div>` : '';
 
                 return `
@@ -1743,6 +1747,8 @@
             const container = document.getElementById('f-groups');
             const relevantGroups = allGroups.filter(g => {
                 const n = g.name.toLowerCase();
+                // Ausschuss darf nur Bewohner-/Eigentuemer-Gruppen der eigenen STWEG vergeben (Server-Regel)
+                if (!istGruppenAdmin) return vergebbareGruppenNamen.has(n);
                 return n.includes('ausschuss') || n.includes('bewohner') || n.includes('eigentuemer') || n === 'technik';
             });
 
@@ -1781,7 +1787,29 @@
 
             try {
                 let res;
-                if (pk) {
+                if (pk && !istGruppenAdmin) {
+                    // Ausschuss: PUT /api/admin/users ohne groups (sonst 403), Gruppen
+                    // einzeln ueber add_user/remove_user (nur vergebbare Gruppen).
+                    res = await AuthentikAuth.apiFetch(`/api/admin/users/${pk}`, {
+                        method: 'PUT',
+                        body: { name, email },
+                    });
+                    if (res.ok) {
+                        const u = allUsers.find(x => String(x.pk) === String(pk));
+                        const bisher = new Set((u?.groups_obj || []).map(g => g.pk));
+                        const gewuenscht = new Set(groups);
+                        const vergebbar = allGroups.filter(g => vergebbareGruppenNamen.has(g.name.toLowerCase())).map(g => g.pk);
+                        for (const gpk of vergebbar) {
+                            const aktion = gewuenscht.has(gpk) && !bisher.has(gpk) ? 'add_user'
+                                : !gewuenscht.has(gpk) && bisher.has(gpk) ? 'remove_user' : null;
+                            if (!aktion) continue;
+                            res = await AuthentikAuth.apiFetch(`/api/admin/groups/${encodeURIComponent(gpk)}/${aktion}`, {
+                                method: 'PUT', body: { pk: Number(pk) },
+                            });
+                            if (!res.ok) break;
+                        }
+                    }
+                } else if (pk) {
                     res = await AuthentikAuth.apiFetch(`/api/admin/users/${pk}`, {
                         method: 'PUT',
                         body: { name, email, is_active: true, groups },
@@ -1829,9 +1857,14 @@
             if (b) removeUser(Number(b.dataset.pk), b.dataset.name);
         });
         async function removeUser(pk, name) {
-            if (!confirm(`"${name}" wirklich entfernen?\n\nDer Benutzer wird deaktiviert.`)) return;
+            // Der Server loescht das Konto endgueltig (Authentik DELETE), nicht nur deaktivieren.
+            if (!confirm(`Konto "${name}" wirklich löschen?\n\nDas Konto wird endgültig gelöscht (Anmeldung, Sitzungen und Zugangstoken).`)) return;
             try {
-                await AuthentikAuth.apiFetch(`/api/admin/users/${pk}`, { method: 'DELETE' });
+                const res = await AuthentikAuth.apiFetch(`/api/admin/users/${pk}`, { method: 'DELETE' });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error(data.error || `HTTP ${res.status}`);
+                }
                 await loadUsers();
             } catch (err) {
                 alert('Fehler: ' + err.message);
@@ -1982,6 +2015,19 @@
             `);
         }
 
+        // Technik/Praesident: PUT users mit ganzer Gruppenliste (loest Elterngruppen auf).
+        // Ausschuss: dort sind groups verboten (403) -> add_user/remove_user je Gruppe.
+        async function gruppeAendern(user, groupId, hinzufuegen) {
+            const userId = user.pk || user.id;
+            if (!istGruppenAdmin) {
+                return AuthentikAuth.apiFetch(`/api/admin/groups/${encodeURIComponent(groupId)}/${hinzufuegen ? 'add_user' : 'remove_user'}`,
+                    { method: 'PUT', body: { pk: Number(userId) } });
+            }
+            const currentGroups = (user.groups || user.groups_obj || []).map(g => typeof g === 'object' ? (g.pk || g.id) : g);
+            const newGroups = hinzufuegen ? [...new Set([...currentGroups, groupId])] : currentGroups.filter(gid => gid !== groupId);
+            return AuthentikAuth.apiFetch(`/api/admin/users/${userId}`, { method: 'PUT', body: { groups: newGroups } });
+        }
+
         async function addUserToGroup(groupId) {
             const select = document.getElementById('add-user-select');
             const userId = select.value;
@@ -1990,13 +2036,11 @@
             try {
                 const user = allUsers.find(u => (u.pk || u.id) == userId);
                 if (!user) return;
-                const currentGroups = (user.groups || user.groups_obj || []).map(g => typeof g === 'object' ? (g.pk || g.id) : g);
-                const newGroups = [...new Set([...currentGroups, groupId])];
-                const resp = await AuthentikAuth.apiFetch(`/api/admin/users/${userId}`, { method: 'PUT', body: { groups: newGroups } });
+                const resp = await gruppeAendern(user, groupId, true);
                 if (resp.ok) { await Promise.all([loadUsers(), loadGroups()]); openGroupDetail(groupId); }
                 else {
                     const err = await resp.json().catch(() => ({}));
-                    msg.textContent = 'Fehler: ' + (err.detail || err.message || `HTTP ${resp.status}`);
+                    msg.textContent = 'Fehler: ' + (err.error || err.detail || err.message || `HTTP ${resp.status}`);
                     msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700 mt-3'; msg.classList.remove('hidden');
                 }
             } catch (e) {
@@ -2008,74 +2052,20 @@
         async function removeUserFromGroup(userId, groupId) {
             const msg = document.getElementById('group-detail-msg');
             try {
-                const user = allUsers.find(u => (u.pk || u.id) === userId);
+                let user = allUsers.find(u => (u.pk || u.id) === userId);
+                // Ausschuss braucht nur die pk (remove_user); der Server prueft das Konto selbst
+                if (!user && !istGruppenAdmin) user = { pk: userId };
                 if (!user) return;
-                const currentGroups = (user.groups || user.groups_obj || []).map(g => typeof g === 'object' ? (g.pk || g.id) : g);
-                const newGroups = currentGroups.filter(gid => gid !== groupId);
-                const resp = await AuthentikAuth.apiFetch(`/api/admin/users/${userId}`, { method: 'PUT', body: { groups: newGroups } });
+                const resp = await gruppeAendern(user, groupId, false);
                 if (resp.ok) { await Promise.all([loadUsers(), loadGroups()]); openGroupDetail(groupId); }
                 else {
                     const err = await resp.json().catch(() => ({}));
-                    msg.textContent = 'Fehler: ' + (err.detail || err.message || `HTTP ${resp.status}`);
+                    msg.textContent = 'Fehler: ' + (err.error || err.detail || err.message || `HTTP ${resp.status}`);
                     msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700 mt-3'; msg.classList.remove('hidden');
                 }
             } catch (e) {
                 msg.textContent = 'Netzwerkfehler: ' + e.message;
                 msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700 mt-3'; msg.classList.remove('hidden');
-            }
-        }
-
-        function openNewGroupModal() {
-            openGroupModal(`
-                <div class="p-6">
-                    <div class="flex justify-between items-center mb-5">
-                        <h3 class="text-lg font-semibold text-gray-800">Neue Gruppe</h3>
-                        <button onclick="closeGroupModal()" class="text-gray-400 hover:text-gray-600">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                            </svg>
-                        </button>
-                    </div>
-                    <form id="new-group-form" onsubmit="createGroup(event)" class="space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-                            <input type="text" id="new-group-name" required
-                                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Elterngruppe</label>
-                            <select id="new-group-parent" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-                                <option value="">-- Keine --</option>
-                                ${allGroups.map(g => `<option value="${g.pk || g.id}">${esc(g.name)}</option>`).join('')}
-                            </select>
-                        </div>
-                        <div id="new-group-msg" class="hidden text-sm p-3 rounded-lg"></div>
-                        <div class="flex justify-end gap-3 pt-2">
-                            <button type="button" onclick="closeGroupModal()" class="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition">Abbrechen</button>
-                            <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition font-medium">Erstellen</button>
-                        </div>
-                    </form>
-                </div>
-            `);
-        }
-
-        async function createGroup(e) {
-            e.preventDefault();
-            const msg = document.getElementById('new-group-msg');
-            const body = { name: document.getElementById('new-group-name').value.trim() };
-            const parent = document.getElementById('new-group-parent').value;
-            if (parent) body.parent = parent;
-            try {
-                const resp = await AuthentikAuth.apiFetch('/api/admin/groups', { method: 'POST', body });
-                if (resp.ok) {
-                    msg.textContent = 'Gruppe erstellt.'; msg.className = 'text-sm p-3 rounded-lg bg-green-100 text-green-700'; msg.classList.remove('hidden');
-                    setTimeout(() => { closeGroupModal(); loadGroups(); }, 1000);
-                } else {
-                    const err = await resp.json().catch(() => ({}));
-                    msg.textContent = 'Fehler: ' + (err.detail || err.message); msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700'; msg.classList.remove('hidden');
-                }
-            } catch (e) {
-                msg.textContent = 'Netzwerkfehler: ' + e.message; msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700'; msg.classList.remove('hidden');
             }
         }
     </script>

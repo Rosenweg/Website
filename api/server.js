@@ -7339,8 +7339,8 @@ setTimeout(sendPickupReminder, 10 * 60 * 1000); // initial run nach 10min
 // archiviert. Ohne Markierung nichts: frueher fiel so jede zweite Eigentuemerin mit Datum
 // ueber den ersten Eigentuemer her. Die Markierung gilt einmal und wird danach geloescht,
 // sonst wuerde ein spaeter ergaenzter Miteigentuemer gleich wieder archiviert.
-// Authentik-Zugang bleibt unveraendert (wird beim Anlegen schon vergeben und bei
-// Archivierung über trackRemovedKontakte verzoegert deaktiviert).
+// Authentik-Zugang des Vorgaengers: wie beim Entfernen im Formular ueber
+// trackRemovedKontakte zur verzoegerten Loeschung vormerken (vorher fehlte das hier).
 async function autoArchiveSupersededKontakte() {
   try {
     // Kontakte, die heute (oder früher) effektiv geworden sind und noch keinen
@@ -7362,11 +7362,23 @@ async function autoArchiveSupersededKontakte() {
          AND alt.id <> neu.id
          AND alt.archiviert_am IS NULL
          AND (alt.gueltig_ab IS NULL OR alt.gueltig_ab < neu.gueltig_ab)
-      RETURNING alt.id, alt.wohnung_id, alt.rolle, alt.email
+      RETURNING alt.id, alt.wohnung_id, alt.rolle, alt.email, alt.name
     `;
     const r = await pool.query(sql);
     if (r.rowCount > 0) {
       console.log(`[KontakteCron] ${r.rowCount} Vorgaenger archiviert (durch vorgemerkte Eintraege superseded)`);
+    }
+    // Mieterwechsel per Gueltig-ab: Konto des Vorgaengers vormerken. Ist die Adresse
+    // noch anderswo aktiv, ueberspringt trackRemovedKontakte bzw. storniert
+    // nochAktiverKontakt die Vormerkung vor dem Loeschen.
+    for (const alt of r.rows) {
+      if (!alt.email) continue;
+      try {
+        const w = await pool.query('SELECT stweg FROM wohnungen WHERE id = $1', [alt.wohnung_id]);
+        if (w.rows[0]?.stweg) await trackRemovedKontakte(alt.wohnung_id, w.rows[0].stweg, [alt], []);
+      } catch (e) {
+        console.error(`[KontakteCron] Vormerkung ${alt.email} fehlgeschlagen:`, e.message);
+      }
     }
     await pool.query(`UPDATE wohnungen_kontakte SET ersetzt_vorgaenger = false
                        WHERE ersetzt_vorgaenger AND gueltig_ab <= CURRENT_DATE`);
@@ -17449,18 +17461,20 @@ app.post('/api/stweg-sections/:stweg/:section', authMiddleware, async (req, res)
 function requireZaehlerTechnik(req, res, next) {
   const groups = req.user?.groups || [];
   const gl = groups.map(g => String(g).toLowerCase());
-  const ok = isTechnik(groups)
+  // Praesident wie ueberall gleich Technik (zaehlerTechnikVoll gibt ihm volle Sicht,
+  // bisher kam er aber gar nicht bis dorthin).
+  const ok = isTechnik(groups) || isPraesident(groups)
     || gl.includes('verwaltung')
     || gl.includes('stweg3-eigentuemer');
   if (ok) return next();
-  return res.status(403).json({ error: 'Nur für Technik, Verwaltung oder Rosenweg-9-Eigentümer' });
+  return res.status(403).json({ error: 'Nur für Technik, Präsident, Verwaltung oder Rosenweg-9-Eigentümer' });
 }
 
 // Volle Technik-Sicht (IP/Port/Seriennummer, Live-Werte aller Wohnungen): Technik/
 // Praesident oder Recht energie-config:read (wie api/routes/energie-lesen.js).
 // requirePermission ist Middleware -> mit Ersatz-Antwort als Ja/Nein-Abfrage.
 function zaehlerTechnikVoll(req) {
-  if (req.user?.isAdmin) return Promise.resolve(true);
+  if (req.user?.isAdmin || isPraesident(req.user?.groups || [])) return Promise.resolve(true);
   return new Promise((resolve) => {
     const ersatz = { status() { return ersatz; }, json() { resolve(false); return ersatz; } };
     requirePermission('energie-config', 'read')(req, ersatz, () => resolve(true));
@@ -19467,6 +19481,8 @@ app.get('/api/reklamationen', authMiddleware, requirePermission('reklamationen',
         WHERE ${where} ORDER BY r.created_at DESC LIMIT 500`,
       params,
     );
+    // Wer nur eigene Meldungen sieht, ist der Melder: interne Notiz nicht mitgeben.
+    if (!isAdmin && ausschussStwegs.length === 0) r.rows.forEach(x => { delete x.notiz; });
     res.json({ reklamationen: r.rows });
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err, 'Reklamationen konnten nicht geladen werden') }); }
 });
@@ -19601,9 +19617,12 @@ async function updateReklamation(id, fields, actor) {
   if (b.zugewiesen_an !== undefined && b.zugewiesen_an && b.zugewiesen_an !== before.zugewiesen_an) {
     notifyReklAssignee(updated, b.zugewiesen_an).catch(() => {});
   }
-  // Melder-Benachrichtigung bei Status-WECHSEL (E-Mail/WhatsApp/Push).
+  // Melder-Benachrichtigung bei Status-WECHSEL (E-Mail/WhatsApp/Push). Die Notiz ist
+  // intern (Triage) und geht nie an den Melder; eine Bemerkung fuer ihn nur ausdruecklich
+  // ueber melder_bemerkung (z. B. Arbeitsschritt des Technik-Bots).
   if (b.status !== undefined && b.status !== before.status && updated.person_id) {
-    notifyMelderStatus(updated, b.status, b.notiz || '').catch((e) => console.warn('[reklamation] Status-Mail:', e.message));
+    const bemerkung = typeof b.melder_bemerkung === 'string' ? b.melder_bemerkung.slice(0, 500) : '';
+    notifyMelderStatus(updated, b.status, bemerkung).catch((e) => console.warn('[reklamation] Status-Mail:', e.message));
   }
   // Aufwandentschaedigung: beim Wechsel auf 'erledigt' Entwurf fuer die zugewiesene Technik anlegen.
   if (b.status === 'erledigt' && before.status !== 'erledigt') {
@@ -19950,7 +19969,7 @@ app.get('/api/reklamationen/meine', authMiddleware, async (req, res) => {
   try {
     const email = String(req.user?.email || '').toLowerCase();
     const r = await pool.query(
-      `SELECT id, kategorie, beschreibung, status, standort, (bild_pfad IS NOT NULL) AS has_bild, created_at, erledigt_am, notiz, COALESCE(melder_archiviert, FALSE) AS melder_archiviert
+      `SELECT id, kategorie, beschreibung, status, standort, (bild_pfad IS NOT NULL) AS has_bild, created_at, erledigt_am, COALESCE(melder_archiviert, FALSE) AS melder_archiviert
          FROM reklamationen
         WHERE person_id = (SELECT id FROM personen WHERE LOWER(email) = $1 LIMIT 1)
         ORDER BY created_at DESC LIMIT 100`, [email]);
@@ -20118,7 +20137,7 @@ async function technikBotResolve(reklId, apply) {
     await pool.query("INSERT INTO reklamation_events (reklamation_id, who, event) VALUES ($1,'Technik-Bot',$2)",
       [reklId, `🤖 Aus Technik-Chat erkannt (conf ${v.confidence}): "${(v.evidence || '').slice(0, 120)}"`]);
     // Status erledigt ueber DENSELBEN Pfad wie ein Mensch -> Verlauf + Melder-Notify automatisch.
-    await updateReklamation(reklId, { status: 'erledigt', notiz: v.arbeitsschritt || null }, 'Technik-Bot');
+    await updateReklamation(reklId, { status: 'erledigt', notiz: v.arbeitsschritt || null, melder_bemerkung: v.arbeitsschritt || '' }, 'Technik-Bot');
     out.applied = true;
   }
   return out;
