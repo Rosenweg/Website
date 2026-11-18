@@ -225,7 +225,7 @@ import urllib.request
 
 CDP_URL = "http://localhost:9222"
 SITE_URL = "${KIOSK_URL}"
-LOGOUT_URL = SITE_URL + "/api/auth/logout"
+LOGOUT_URL = "https://www.rosenweg4303.ch/api/auth/logout"
 SESSION_KEY = "rosenweg_session"
 # Herkuenfte, deren Cookies/Speicher immer geloescht werden — auch wenn kein
 # Token gefunden wurde (z. B. Anmeldung haengt nur noch im Authentik-Cookie).
@@ -378,15 +378,25 @@ def main():
         print("Cannot connect to CDP WebSocket.")
         sys.exit(0)
 
+    def browser_call(cid, method, params=None):
+        # Browserweite CDP-Befehle ueber irgendeinen Tab: haengt einer (Timeout),
+        # den naechsten nehmen; ein Fehler darf das Aufraeumen nie abbrechen.
+        for s_ in socks:
+            try:
+                return ws_call(s_, cid, method, params) if params is not None else ws_call(s_, cid, method)
+            except (OSError, ConnectionError):
+                continue
+        return {}
+
     try:
         haupt = socks[0]
         # Den Sitzungstoken selbst holen: die API-Sitzung muss serverseitig enden,
         # nicht nur im Browser. Quelle 1: geteiltes Cookie (.rosenweg4303.ch) —
         # browserweit, unabhaengig davon, welche Seite gerade offen ist.
-        r = ws_call(haupt, 1, "Network.getAllCookies")
+        r = browser_call(1, "Network.getAllCookies")
         cookies = r.get("result", {}).get("cookies")
         if cookies is None:
-            r = ws_call(haupt, 2, "Storage.getCookies")
+            r = browser_call(2, "Storage.getCookies")
             cookies = r.get("result", {}).get("cookies") or []
         for c in cookies:
             if c.get("name") == SESSION_KEY and c.get("value"):
@@ -411,14 +421,14 @@ def main():
                 ws_call(s, 100 + i, "Runtime.evaluate", {"expression": LS_LEEREN})
             except (OSError, ConnectionError):
                 pass
-        ws_call(haupt, 200, "Network.clearBrowserCookies")
+        browser_call(200, "Network.clearBrowserCookies")
         for i, o in enumerate(ORIGINS):
-            ws_call(haupt, 210 + i, "Storage.clearDataForOrigin",
+            browser_call(210 + i, "Storage.clearDataForOrigin",
                     {"origin": o, "storageTypes": "all"})
-        ws_call(haupt, 230, "Network.clearBrowserCache")
+        browser_call(230, "Network.clearBrowserCache")
 
         # Zurueck zum Login-Bildschirm
-        ws_call(haupt, 240, "Page.navigate", {"url": SITE_URL})
+        browser_call(240, "Page.navigate", {"url": SITE_URL})
         print("Logout complete. Login screen should appear.")
     finally:
         for s in socks:
