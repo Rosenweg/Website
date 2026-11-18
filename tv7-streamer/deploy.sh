@@ -9,18 +9,18 @@ SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Secret bestimmen: existierendes /etc/default/tv7-streamer im CT behalten,
 # sonst aus $TV7_HMAC_SECRET (env) oder neu erzeugen.
-EXISTING_SECRET=$(ssh "$PVE" "pct exec $CT -- bash -c 'test -f /etc/default/tv7-streamer && cat /etc/default/tv7-streamer' 2>/dev/null" || true)
-if [ -n "$EXISTING_SECRET" ]; then
+# Das Geheimnis wird weder ausgegeben noch als Befehlszeile uebergeben
+# (Terminal-/CI-Log, ps auf dem PVE-Knoten): nur Existenz pruefen, Inhalt per stdin.
+if ssh "$PVE" "pct exec $CT -- test -s /etc/default/tv7-streamer" 2>/dev/null; then
   echo "[deploy] /etc/default/tv7-streamer existiert — behalten"
 else
   SECRET="${TV7_HMAC_SECRET:-$(openssl rand -hex 32)}"
   echo "[deploy] schreibe /etc/default/tv7-streamer mit neuem Secret"
-  ssh "$PVE" "pct exec $CT -- bash -c 'cat > /etc/default/tv7-streamer << EOF
-TV7_HMAC_SECRET=$SECRET
-PORT=3000
-EOF
-chmod 600 /etc/default/tv7-streamer'"
-  echo "[deploy] >>> setze TV7_HMAC_SECRET=$SECRET im rosenweg_api als env-var <<<"
+  printf 'TV7_HMAC_SECRET=%s\nPORT=3000\n' "$SECRET" \
+    | ssh "$PVE" "pct exec $CT -- bash -c 'umask 077; cat > /etc/default/tv7-streamer; chmod 600 /etc/default/tv7-streamer'"
+  unset SECRET
+  echo "[deploy] >>> denselben TV7_HMAC_SECRET im rosenweg_api als env-var setzen. Wert lesen mit:"
+  echo "[deploy]     ssh $PVE 'pct exec $CT -- cat /etc/default/tv7-streamer'"
 fi
 
 # Stelle sicher dass /opt/tv7-streamer existiert

@@ -128,17 +128,29 @@ for zeile in sys.stdin:
 print(json.dumps({"knoten": sys.argv[1], "befunde": befunde}))
 ' "$HOST_NAME" < "$BERICHT")
 
+# Token nie als Programmargument: das ist fuer jeden lokalen Nutzer in
+# ps / /proc/<pid>/cmdline lesbar. curl liest ihn per -K - von stdin, wget
+# aus einer nur fuer root lesbaren Konfigdatei.
 melden() {
+  local tok="${HOST_TOKEN//\\/\\\\}"
+  tok="${tok//\"/\\\"}"
   if command -v curl >/dev/null 2>&1; then
-    curl -fsS --max-time 20 -X POST \
-      -H "X-Host-Token: $HOST_TOKEN" -H "X-Host-Name: $HOST_NAME" \
+    printf 'header = "X-Host-Token: %s"\n' "$tok" \
+    | curl -fsS --max-time 20 -X POST -K - \
+      -H "X-Host-Name: $HOST_NAME" \
       -H "Content-Type: application/json" --data "$KOERPER" \
       "$API_BASE/api/ssh/dienste"
   elif command -v wget >/dev/null 2>&1; then
-    wget -q -O - -T 20 --method=POST \
-      --header="X-Host-Token: $HOST_TOKEN" --header="X-Host-Name: $HOST_NAME" \
+    local rc wgetrc
+    wgetrc=$(umask 077; mktemp) || return 1
+    printf 'header = X-Host-Token: %s\n' "$HOST_TOKEN" > "$wgetrc"
+    wget --config="$wgetrc" -q -O - -T 20 --method=POST \
+      --header="X-Host-Name: $HOST_NAME" \
       --header="Content-Type: application/json" --body-data="$KOERPER" \
       "$API_BASE/api/ssh/dienste"
+    rc=$?
+    rm -f "$wgetrc"
+    return $rc
   else
     echo "rw-dienstwacht: weder curl noch wget" >&2; return 127
   fi

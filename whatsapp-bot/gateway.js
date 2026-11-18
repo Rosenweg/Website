@@ -148,6 +148,12 @@ function startGateway(botCore) {
       note TEXT, created_by TEXT, created_at TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_fwd_match ON wa_forwards(kind, match_key);
+    -- Welche Nummer wurde per Regel an welche Adresse weitergeleitet (R3-Dd, @lid):
+    -- nur genau diese Paare duerfen per Mail-Antwort zurueckschreiben.
+    CREATE TABLE IF NOT EXISTS wa_fwd_replies (
+      num TEXT NOT NULL, email TEXT NOT NULL, created_at TEXT,
+      PRIMARY KEY (num, email)
+    );
   `);
   // Migration: ACK-Status-Spalten (Zustell-/Lesebestaetigung aus WhatsApp).
   {
@@ -198,6 +204,9 @@ function startGateway(botCore) {
       WHERE source='smtp-email' AND direction='outbound' AND target=?
       ORDER BY id DESC LIMIT 1`),
     fwdMatch: db.prepare(`SELECT email FROM wa_forwards WHERE kind=? AND match_key=?`),
+    fwdReplyMerk: db.prepare(`INSERT INTO wa_fwd_replies (num,email,created_at) VALUES (?,?,?)
+      ON CONFLICT(num,email) DO UPDATE SET created_at=excluded.created_at`),
+    fwdReplyGet: db.prepare(`SELECT 1 FROM wa_fwd_replies WHERE num=? AND email=? AND created_at >= ?`),
     fwdList: db.prepare(`SELECT id,match_key,kind,email,note,created_by,created_at FROM wa_forwards ORDER BY kind,match_key,email`),
     fwdAdd: db.prepare(`INSERT INTO wa_forwards (match_key,kind,email,note,created_by,created_at) VALUES (?,?,?,?,?,?)`),
     fwdDel: db.prepare(`DELETE FROM wa_forwards WHERE id=?`),
@@ -257,6 +266,10 @@ function startGateway(botCore) {
         const regel = [...q.fwdMatch.all('number', local), ...q.fwdMatch.all('jid', local + '@c.us')]
           .some(r => String(r.email || '').trim().toLowerCase() === absender);
         if (regel) return true;
+        // Regeln auf eine @lid-JID kennen die Nummer nicht: erlaubt ist die Antwort, wenn
+        // genau diese Nummer in den letzten 30 Tagen per Regel an diesen Absender ging.
+        const seit = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+        if (q.fwdReplyGet.get(local, absender, seit)) return true;
       }
     }
     return false;
@@ -741,7 +754,13 @@ function startGateway(botCore) {
       seen.add(ARCHIVE_ALL_GROUPS); emails.push(ARCHIVE_ALL_GROUPS);
     }
     if (!emails.length) return;
-    const num = isGroup ? null : ((phone ? phone.replace(/\D/g, '') : '') || String(chatId || '').split('@')[0].replace(/\D/g, ''));
+    // Ohne echte Nummer bei @lid keine Antwortadresse: die LID-Ziffern als Nummer
+    // (…@c.us) wuerden einen fremden bzw. falschen Chat treffen (R3-Dd).
+    const lidOhneNr = !phone && /@lid$/i.test(String(chatId || ''));
+    const num = (isGroup || lidOhneNr) ? null : ((phone ? phone.replace(/\D/g, '') : '') || String(chatId || '').split('@')[0].replace(/\D/g, ''));
+    if (num && /^\d{6,15}$/.test(num)) {
+      for (const to of emails) { try { q.fwdReplyMerk.run(num, to, nowIso()); } catch (e) { console.warn('[Gateway] fwd-reply merken:', e.message); } }
+    }
     const subject = isGroup
       ? `WhatsApp [${groupName || 'Gruppe'}] von ${phone || chatId}`
       : `WhatsApp von ${num || chatId}`;

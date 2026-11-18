@@ -19,8 +19,13 @@ TRAEFIK_CONFIG_SECRET="${TRAEFIK_CONFIG_SECRET:-}"
 
 trap 'rm -f "$TMP_JSON" "$TMP_YML"' EXIT
 
-HTTP_CODE=$(curl -sk --max-time 10 -o "$TMP_JSON" -w '%{http_code}' \
-  -H "Host: $HOST" -H "X-Traefik-Secret: $TRAEFIK_CONFIG_SECRET" "$ENDPOINT" || true)
+# Geheimnis per curl -K - (stdin) statt als Argument: Argumente sind fuer
+# jeden lokalen Nutzer in ps / /proc/<pid>/cmdline sichtbar.
+SECRET_ESC="${TRAEFIK_CONFIG_SECRET//\\/\\\\}"
+SECRET_ESC="${SECRET_ESC//\"/\\\"}"
+HTTP_CODE=$(printf 'header = "X-Traefik-Secret: %s"\n' "$SECRET_ESC" \
+  | curl -sk --max-time 10 -K - -o "$TMP_JSON" -w '%{http_code}' \
+      -H "Host: $HOST" "$ENDPOINT" || true)
 
 if [ "$HTTP_CODE" != "200" ]; then
   echo "[traefik-sync] HTTP $HTTP_CODE — keep previous config" >&2

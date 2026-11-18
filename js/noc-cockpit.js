@@ -233,7 +233,17 @@
     const params = new URLSearchParams(location.search);
     const hashParams = new URLSearchParams((location.hash || '').replace(/^#/, ''));
     const urlToken = hashParams.get('token') || params.get('token') || '';
-    let token = o.token || urlToken;
+    // Fuer F5/Neuladen im Wandbild: Token pro Tab in sessionStorage merken (die URL ist
+    // danach leer). Nur im Wandbild-Modus – eingebettet zaehlt die Anmeldung.
+    const SPEICHER = 'noc_wandbild_token';
+    let gemerkt = '';
+    if (modus === 'wandbild') {
+      try {
+        if (urlToken) sessionStorage.setItem(SPEICHER, urlToken);
+        gemerkt = sessionStorage.getItem(SPEICHER) || '';
+      } catch (e) { /* Speicher gesperrt: dann wie bisher nur aus der URL */ }
+    }
+    let token = o.token || urlToken || gemerkt;
     if (urlToken) {
       params.delete('token');
       const rest = params.toString();

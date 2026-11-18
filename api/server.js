@@ -332,7 +332,7 @@ function oauthBindPasst(req, b) {
   return oauthBindWerte(req).some(w => { const ist = Buffer.from(w); return ist.length === soll.length && crypto.timingSafeEqual(ist, soll); });
 }
 function oauthBindCookie(wert, maxAge) {
-  return `${OAUTH_BIND_COOKIE}=${wert}; HttpOnly; Secure; SameSite=Lax; Path=/api/auth/callback; Max-Age=${maxAge}`;
+  return `${OAUTH_BIND_COOKIE}=${wert}; HttpOnly; Secure; SameSite=Lax; Path=/api/auth; Max-Age=${maxAge}`;
 }
 
 app.get('/api/auth/login', (req, res) => {
@@ -447,15 +447,20 @@ app.get('/api/auth/callback', async (req, res) => {
   if (!storedState) return res.status(400).send('Ungültiger oder abgelaufener State-Parameter (CSRF-Schutz)');
   // Browser-Bindung (R3-Fa): Login muss in DIESEM Browser gestartet worden sein.
   // Kein automatischer Neustart (sonst Endlos-Login), sondern eine Seite mit Link.
+  // Cookie NICHT loeschen: ein zweiter, parallel gestarteter Login (anderer Tab) nutzt
+  // denselben Wert und liefe sonst ins Leere. Es verfaellt nach Max-Age (600 s).
   const bindOk = oauthBindPasst(req, storedState.b);
-  res.append('Set-Cookie', oauthBindCookie('', 0));
   if (!bindOk) {
     console.warn('[oauth] Callback ohne passendes Bind-Cookie abgewiesen');
+    // Link auf das signierte Ziel (relativ = derselbe Host wie der Login, z. B. pbx.),
+    // aber nur echte Pfade: kein //, kein /\ (Browser lesen das als fremden Host).
+    const zurueck = (typeof storedState.redirect === 'string' && /^\/(?![\/\\])/.test(storedState.redirect)
+      && !hatSteuerzeichen(storedState.redirect)) ? storedState.redirect : '/';
     return res.status(400).type('html').send('<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Anmeldung abgebrochen</title></head>'
       + '<body style="font-family:sans-serif;max-width:32rem;margin:3rem auto;padding:0 1rem">'
       + '<h1>Anmeldung abgebrochen</h1><p>Die Anmeldung wurde nicht in diesem Browser gestartet oder hat zu lange gedauert. '
       + 'Aus Sicherheitsgründen wurde sie nicht abgeschlossen.</p><p>Bitte melden Sie sich erneut an.</p>'
-      + '<p><a href="/">Zur Startseite</a></p></body></html>');
+      + '<p><a href="' + escapeHtml(zurueck) + '">Zurück</a></p></body></html>');
   }
 
   // Sanitize redirect path: must be a relative path starting with /, prevent open redirect
@@ -680,7 +685,9 @@ function canWriteDocPath(filePath, groups) {
   if (!isAusschuss) return false;
   // Ausschuss members can write to their own stweg + allgemein + projekte
   if (folder === 'allgemein' || folder === 'projekte') return true;
-  const stwegs = getUserStwegs(groups);
+  // Schreiben nur im Ordner der STWEG, in deren Ausschuss man ist — nicht in jeder STWEG,
+  // in der man (z. B. als Eigentuemer/Bewohner) sonst Mitglied ist.
+  const stwegs = getAusschussStwegs(groups);
   const nr = folderStwegNr(folder);
   return nr !== null && stwegs.has(nr);
 }
@@ -1128,13 +1135,15 @@ function emailFormatOk(v) {
 async function fremdeKennung(db, { email, telefon, eigeneIds = [], ichEmail = '' }) {
   const ids = eigeneIds.map(Number).filter(Number.isInteger);
   const e = String(email || '').trim().toLowerCase();
-  if (e && e !== ichEmail) {
+  // Eigene Konto-Adresse: das eigene Konto ist kein Konflikt, eine ANDERE Person mit dieser
+  // Adresse schon (sonst zweite Person mit der eigenen Kennung, R4b-S1d) -> nur users-Teil auslassen.
+  if (e) {
     const r = await db.query(
-      `SELECT 1 WHERE EXISTS (SELECT 1 FROM users u WHERE LOWER(u.email) = $1)
+      `SELECT 1 WHERE ($3 AND EXISTS (SELECT 1 FROM users u WHERE LOWER(u.email) = $1))
           OR EXISTS (SELECT 1 FROM personen p WHERE NOT (p.id = ANY($2::int[]))
                        AND (LOWER(p.email) = $1
                             OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(p.emails,'[]'::jsonb)) x WHERE LOWER(x) = $1)))`,
-      [e, ids]);
+      [e, ids, e !== ichEmail]);
     if (r.rows.length) return 'Diese E-Mail-Adresse gehört bereits zu einem Konto oder einer anderen Person. Bitte bei der Verwaltung melden.';
   }
   const ziffern = String(telefon || '').replace(/\D/g, '');
@@ -1294,6 +1303,8 @@ async function meWohnungPersonenAbgleichen(client, wohnungId, bisherWerte, ichEm
       WHERE k.wohnung_id = $1 AND k.archiviert_am IS NULL`, [wohnungId])).rows;
   const istIch = (mail) => !!ichEmail && String(mail || '').toLowerCase() === ichEmail;
   const meineIds = await meinePersonenIds(client, ichEmail);
+  // In diesem Speichern neu angelegte Personen zaehlen nicht als "bisher eigene" (R4b-S1d)
+  const neuIds = new Set(nachher.filter(r => r.person_neu && r.person_id).map(r => r.person_id));
   // R3-S1d: Personen, die schon an einem aktiven Kontakt DIESER Wohnung hingen (Miteigentuemer,
   // Mieter). Kommt ein solcher Kontakt als neue Zeile zurueck (Frontend ohne id, Zeile ersetzt),
   // bleibt die Verknuepfung — eine fremde Person kommt so nicht herein.
@@ -1307,6 +1318,15 @@ async function meWohnungPersonenAbgleichen(client, wohnungId, bisherWerte, ichEm
         alt = bisherPersonen.get(n.person_id); // weiter unten wie ein bestehender Kontakt behandeln
       } else {
         if (n.person_neu) {
+          // R4b-S1d: Neue Karte mit der EIGENEN E-Mail (aber anderem Namen) hat eine zweite
+          // Person mit der eigenen Kennung angelegt -> an die bestehende eigene Person haengen.
+          const meineAlt = meineIds.filter(id => !neuIds.has(id)).sort((x, y) => x - y);
+          if (istIch(n.email) && meineAlt.length) {
+            await client.query('UPDATE wohnungen_kontakte SET person_id = $1 WHERE person_id = $2 AND wohnung_id = $3', [meineAlt[0], n.person_id, wohnungId]);
+            await client.query('DELETE FROM personen WHERE id = $1 AND created_at >= NOW()', [n.person_id]);
+            neuIds.delete(n.person_id);
+            continue;
+          }
           // R3-S1b: Die neue Person traegt E-Mail/Telefon, die der Eigentuemer eingegeben hat.
           // Gehoeren sie einem Konto oder einer anderen Person, die neue Person wieder entfernen
           // (Kontakt bleibt ohne Verknuepfung gespeichert) — sonst zwei Personen mit derselben
@@ -1411,6 +1431,10 @@ app.put('/api/me/wohnung/:id', authMiddleware, async (req, res) => {
       for (const f of ['name', 'telefon', 'adresse', 'rolle']) {
         if (k[f] != null && k[f] !== alt[f] && (typeof k[f] !== 'string' || k[f].length > 300 || /[<>]/.test(k[f]) || hatSteuerzeichen(k[f]))) return res.status(400).json({ error: `Ungültiger Wert bei einem Kontakt: ${f}` });
       }
+      // R4b-S1c: unbekannte Rolle nicht stillschweigend zu 'eigentuemer' machen (gaebe
+      // Bewohner/Sonstigen Eigentuemer-Rechte). Fehlt sie, bleibt die bisherige Rolle.
+      if (k.rolle == null || k.rolle === '') { if (alt.rolle) k.rolle = alt.rolle; }
+      else if (!['eigentuemer', 'mieter', 'verwalter', 'bewohner', 'sonstige'].includes(k.rolle) && k.rolle !== alt.rolle) return res.status(400).json({ error: 'Ungültige Rolle bei einem Kontakt' });
       if (k.id && bisher.has(Number(k.id))) k.person_id = bisher.get(Number(k.id)); else delete k.person_id;
     }
     await client.query('BEGIN');
@@ -4222,8 +4246,13 @@ async function syncAuthentikUserRechte() {
     // Konto gebunden waren (authentik_sub gesetzt), dessen E-Mail es nicht mehr
     // gibt, deaktivieren -> Sitzungen und PATs greifen nicht mehr. Reine E-Mail-
     // Code-Konten haben kein authentik_sub und bleiben unberuehrt.
+    // Abgleich vor allem ueber die gebundene Kennung (sub = uid, bzw. username je nach
+    // sub-Modus): Konten ohne E-Mail in Authentik (users.email = sub) waeren sonst alle
+    // 10 min deaktiviert worden. E-Mail-Treffer zaehlt weiter als "vorhanden" (fail-safe).
+    const kennungen = new Set();
+    for (const au of liste) { if (au.uid) kennungen.add(String(au.uid)); if (au.username) kennungen.add(String(au.username)); }
     for (const u of lokal.values()) {
-      if (!u.authentik_sub || u.active === false || proEmail.has(u.email)) continue;
+      if (!u.authentik_sub || u.active === false || proEmail.has(u.email) || kennungen.has(String(u.authentik_sub))) continue;
       await pool.query('UPDATE users SET active = false, updated_at = NOW() WHERE id = $1', [u.id]);
       await pool.query('DELETE FROM sessions WHERE user_id = $1', [u.id]);
       console.log(`[authentik-sync] ${u.email}: Authentik-Konto nicht mehr vorhanden, deaktiviert`);
@@ -6353,7 +6382,10 @@ async function saveKontakte(client, wohnungId, kontakte, stweg) {
   for (let i = 0; i < incoming.length; i++) {
     const k = incoming[i];
     if (!k.name && !k.email) continue;
-    const rolle = VALID_ROLLEN.includes(k.rolle) ? k.rolle : 'eigentuemer';
+    // Unbekannte Rolle: bestehender Kontakt behaelt seine Rolle (R4b-S1c), nur neue Kontakte
+    // ohne Rolle werden wie bisher Eigentuemer.
+    const altKontakt = k.id ? oldKontakte.find(o => o.id === k.id) : null;
+    const rolle = VALID_ROLLEN.includes(k.rolle) ? k.rolle : (altKontakt?.rolle || 'eigentuemer');
     const authentikZugang = k.authentik_zugang !== undefined ? k.authentik_zugang
       : (rolle === 'eigentuemer' || rolle === 'verwalter') ? true : null;
     let email = k.email || null;
@@ -6572,10 +6604,23 @@ async function syncKontakteToAuthentik(stweg, kontakte, bewohntVon) {
 
       if (!user) {
         // Create user in Authentik
-        const username = email.split('@')[0].replace(/[^a-z0-9._-]/gi, '').substring(0, 50);
-        // Check if username already taken
-        const existingByName = existingUsers.find(u => u.username === username);
-        const finalUsername = existingByName ? `${username}-${Date.now().toString(36).slice(-4)}` : username;
+        const username = email.split('@')[0].replace(/[^a-z0-9._-]/gi, '').substring(0, 50).toLowerCase() || 'konto';
+        // Benutzername ist auf Knoten/Diensten die Kennung (Unix-Konto, sudo, Dateien):
+        // keine System-/Dienstnamen und keinen schon vergebenen Namen (auch Gross-/Klein-
+        // schreibung, auch jenseits der ersten Ergebnisseite) uebernehmen -> sonst Zusatz.
+        const RESERVIERT = new Set(['root', 'admin', 'administrator', 'akadmin', 'ansible', 'github', 'claude', 'nobody', 'daemon', 'postmaster', 'www-data', 'backup', 'guest', 'gast']);
+        const belegt = async (n) => existingUsers.some(u => String(u.username || '').toLowerCase() === n)
+          || ((await authentikAPI('GET', `/core/users/?username=${encodeURIComponent(n)}`)).results || []).length > 0;
+        let finalUsername = username;
+        try {
+          if (RESERVIERT.has(username) || await belegt(username)) {
+            finalUsername = `${username.slice(0, 43)}-${crypto.randomBytes(3).toString('hex')}`;
+            if (await belegt(finalUsername)) throw new Error('Benutzername belegt');
+          }
+        } catch (err) {
+          console.error(`[Authentik] Benutzername fuer ${email} nicht pruefbar/frei:`, err.message);
+          continue;
+        }
 
         try {
           user = await authentikAPI('POST', '/core/users/', {
@@ -6671,7 +6716,8 @@ async function trackRemovedKontakte(wohnungId, stweg, oldKontakte, newKontakte) 
     // Print-to-Mail-Adressen — keine echten User-Accounts → niemals scheduling.
     if (/^druckerr\d+\+/i.test(email)) continue;
     const stillExists = await pool.query(
-      `SELECT COUNT(*) as cnt FROM wohnungen_kontakte WHERE LOWER(email) = $1 AND wohnung_id != $2`,
+      // Nur aktive Kontakte: ein archivierter Alt-Eintrag haelt das Konto sonst ewig am Leben
+      `SELECT COUNT(*) as cnt FROM wohnungen_kontakte WHERE LOWER(email) = $1 AND wohnung_id != $2 AND archiviert_am IS NULL`,
       [email, wohnungId]
     );
     if (parseInt(stillExists.rows[0].cnt) > 0) continue; // Still assigned elsewhere
@@ -7293,8 +7339,8 @@ setTimeout(sendPickupReminder, 10 * 60 * 1000); // initial run nach 10min
 // archiviert. Ohne Markierung nichts: frueher fiel so jede zweite Eigentuemerin mit Datum
 // ueber den ersten Eigentuemer her. Die Markierung gilt einmal und wird danach geloescht,
 // sonst wuerde ein spaeter ergaenzter Miteigentuemer gleich wieder archiviert.
-// Authentik-Zugang bleibt unveraendert (wird beim Anlegen schon vergeben und bei
-// Archivierung über trackRemovedKontakte verzoegert deaktiviert).
+// Authentik-Zugang des Vorgaengers: wie beim Entfernen im Formular ueber
+// trackRemovedKontakte zur verzoegerten Loeschung vormerken (vorher fehlte das hier).
 async function autoArchiveSupersededKontakte() {
   try {
     // Kontakte, die heute (oder früher) effektiv geworden sind und noch keinen
@@ -7316,11 +7362,26 @@ async function autoArchiveSupersededKontakte() {
          AND alt.id <> neu.id
          AND alt.archiviert_am IS NULL
          AND (alt.gueltig_ab IS NULL OR alt.gueltig_ab < neu.gueltig_ab)
-      RETURNING alt.id, alt.wohnung_id, alt.rolle, alt.email
+      RETURNING alt.id, alt.wohnung_id, alt.rolle, alt.email, alt.name
     `;
     const r = await pool.query(sql);
     if (r.rowCount > 0) {
       console.log(`[KontakteCron] ${r.rowCount} Vorgaenger archiviert (durch vorgemerkte Eintraege superseded)`);
+    }
+    // Mieterwechsel per Gueltig-ab: Konto des Vorgaengers vormerken. Ist die Adresse
+    // noch anderswo aktiv, ueberspringt trackRemovedKontakte bzw. storniert
+    // nochAktiverKontakt die Vormerkung vor dem Loeschen.
+    for (const alt of r.rows) {
+      if (!alt.email) continue;
+      try {
+        const w = await pool.query('SELECT stweg FROM wohnungen WHERE id = $1', [alt.wohnung_id]);
+        // Aktive Kontakte derselben Wohnung (z. B. neu erfasster Eigentuemer mit gleicher
+        // E-Mail) als "neu" mitgeben, sonst wird ein weiter aktives Konto vorgemerkt.
+        const aktiv = await pool.query('SELECT email FROM wohnungen_kontakte WHERE wohnung_id = $1 AND archiviert_am IS NULL', [alt.wohnung_id]);
+        if (w.rows[0]?.stweg) await trackRemovedKontakte(alt.wohnung_id, w.rows[0].stweg, [alt], aktiv.rows);
+      } catch (e) {
+        console.error(`[KontakteCron] Vormerkung ${alt.email} fehlgeschlagen:`, e.message);
+      }
     }
     await pool.query(`UPDATE wohnungen_kontakte SET ersetzt_vorgaenger = false
                        WHERE ersetzt_vorgaenger AND gueltig_ab <= CURRENT_DATE`);
@@ -9025,8 +9086,9 @@ app.get('/api/unterschriftenliste/verify', async (req, res) => {
 // (deaktiviert) Alte server-rendered Verify-HTML — bleibt für historische Snapshots als Fallback
 app.get('/api/unterschriftenliste/verify-legacy', async (req, res) => {
   try {
-    const claimedHash = (req.query.hash || '').toUpperCase();
-    if (!claimedHash) return res.status(400).send('<h1>Ungültige Verify-Anfrage</h1>');
+    const claimedHash = String(req.query.hash || '').toUpperCase();
+    if (!/^[A-F0-9]{12}$/.test(claimedHash)) return res.status(400).send('<h1>Ungültige Verify-Anfrage</h1>');
+    if (!ulHashDrossel(req, res)) return;
     const snap = await pool.query(
       'SELECT * FROM unterschriftenliste_snapshots WHERE hash = $1',
       [claimedHash]
@@ -9104,11 +9166,26 @@ ${zeichnerHtml ? `<h2>Zeichnungsberechtigte</h2><table><thead><tr><th>Funktion</
   }
 });
 
+// Oeffentliche Hash-Routen (PDF, Legacy-Pruefseite): gleiche Drossel je Client wie
+// verify-json (gemeinsamer Topf), damit niemand Hashes durchprobiert. Der Inhalt ist
+// derselbe, den verify-json ohnehin zeigt (Echtheitspruefung durch Dritte, z. B. Amt).
+function ulHashDrossel(req, res) {
+  const cfIp = String(req.headers['cf-connecting-ip'] || '').trim();
+  const client = (require('net').isIP(cfIp) ? cfIp : '')
+    || String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.ip || 'unbekannt';
+  const rl = rateLimitGuard('ul-verify', client, 30, 10 * 60 * 1000);
+  if (rl.ok) return true;
+  res.setHeader('Retry-After', String(rl.retryAfter || 60));
+  res.status(429).send('Zu viele Anfragen – bitte später erneut versuchen.');
+  return false;
+}
+
 // GET /api/unterschriftenliste/snapshot/:hash.pdf — Gespeichertes Original-PDF ausliefern (öffentlich, Hash dient als Token)
 app.get('/api/unterschriftenliste/snapshot/:hash.pdf', async (req, res) => {
   try {
     const hash = req.params.hash.toUpperCase();
     if (!/^[A-F0-9]{12}$/.test(hash)) return res.status(400).json({ error: 'Ungültiger Hash' });
+    if (!ulHashDrossel(req, res)) return;
     const snap = await pool.query('SELECT stweg, datum, pdf_path FROM unterschriftenliste_snapshots WHERE hash = $1', [hash]);
     if (snap.rows.length === 0 || !snap.rows[0].pdf_path) return res.status(404).json({ error: 'PDF nicht gefunden' });
     const s = snap.rows[0];
@@ -17387,18 +17464,20 @@ app.post('/api/stweg-sections/:stweg/:section', authMiddleware, async (req, res)
 function requireZaehlerTechnik(req, res, next) {
   const groups = req.user?.groups || [];
   const gl = groups.map(g => String(g).toLowerCase());
-  const ok = isTechnik(groups)
+  // Praesident wie ueberall gleich Technik (zaehlerTechnikVoll gibt ihm volle Sicht,
+  // bisher kam er aber gar nicht bis dorthin).
+  const ok = isTechnik(groups) || isPraesident(groups)
     || gl.includes('verwaltung')
     || gl.includes('stweg3-eigentuemer');
   if (ok) return next();
-  return res.status(403).json({ error: 'Nur für Technik, Verwaltung oder Rosenweg-9-Eigentümer' });
+  return res.status(403).json({ error: 'Nur für Technik, Präsident, Verwaltung oder Rosenweg-9-Eigentümer' });
 }
 
 // Volle Technik-Sicht (IP/Port/Seriennummer, Live-Werte aller Wohnungen): Technik/
 // Praesident oder Recht energie-config:read (wie api/routes/energie-lesen.js).
 // requirePermission ist Middleware -> mit Ersatz-Antwort als Ja/Nein-Abfrage.
 function zaehlerTechnikVoll(req) {
-  if (req.user?.isAdmin) return Promise.resolve(true);
+  if (req.user?.isAdmin || isPraesident(req.user?.groups || [])) return Promise.resolve(true);
   return new Promise((resolve) => {
     const ersatz = { status() { return ersatz; }, json() { resolve(false); return ersatz; } };
     requirePermission('energie-config', 'read')(req, ersatz, () => resolve(true));
@@ -19405,6 +19484,8 @@ app.get('/api/reklamationen', authMiddleware, requirePermission('reklamationen',
         WHERE ${where} ORDER BY r.created_at DESC LIMIT 500`,
       params,
     );
+    // Wer nur eigene Meldungen sieht, ist der Melder: interne Notiz nicht mitgeben.
+    if (!isAdmin && ausschussStwegs.length === 0) r.rows.forEach(x => { delete x.notiz; });
     res.json({ reklamationen: r.rows });
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err, 'Reklamationen konnten nicht geladen werden') }); }
 });
@@ -19539,9 +19620,12 @@ async function updateReklamation(id, fields, actor) {
   if (b.zugewiesen_an !== undefined && b.zugewiesen_an && b.zugewiesen_an !== before.zugewiesen_an) {
     notifyReklAssignee(updated, b.zugewiesen_an).catch(() => {});
   }
-  // Melder-Benachrichtigung bei Status-WECHSEL (E-Mail/WhatsApp/Push).
+  // Melder-Benachrichtigung bei Status-WECHSEL (E-Mail/WhatsApp/Push). Die Notiz ist
+  // intern (Triage) und geht nie an den Melder; eine Bemerkung fuer ihn nur ausdruecklich
+  // ueber melder_bemerkung (z. B. Arbeitsschritt des Technik-Bots).
   if (b.status !== undefined && b.status !== before.status && updated.person_id) {
-    notifyMelderStatus(updated, b.status, b.notiz || '').catch((e) => console.warn('[reklamation] Status-Mail:', e.message));
+    const bemerkung = typeof b.melder_bemerkung === 'string' ? b.melder_bemerkung.slice(0, 500) : '';
+    notifyMelderStatus(updated, b.status, bemerkung).catch((e) => console.warn('[reklamation] Status-Mail:', e.message));
   }
   // Aufwandentschaedigung: beim Wechsel auf 'erledigt' Entwurf fuer die zugewiesene Technik anlegen.
   if (b.status === 'erledigt' && before.status !== 'erledigt') {
@@ -19552,6 +19636,12 @@ async function updateReklamation(id, fields, actor) {
 // Darf der Nutzer diese einzelne Reklamation sehen/bearbeiten? Gleiche Regel wie die
 // Liste GET /api/reklamationen: Technik/Praesident alles, Ausschuss die eigene(n)
 // STWEG(s) plus Meldungen ohne STWEG, sonst nur eigene Meldungen.
+// Wer weder Technik/Praesident noch Ausschuss ist, sieht nur eigene Meldungen (Melder).
+function reklNurMelder(user) {
+  const groups = user?.groups || [];
+  return !(isTechnik(groups) || isPraesident(groups)) && getAusschussStwegs(groups).size === 0;
+}
+
 async function darfReklamation(user, id) {
   if (!Number.isFinite(id)) return false;
   const groups = user.groups || [];
@@ -19570,7 +19660,11 @@ app.put('/api/reklamationen/:id', authMiddleware, requirePermission('reklamation
   try {
     if (!(await darfReklamation(req.user, parseInt(req.params.id, 10)))) return res.status(404).json({ error: 'Nicht gefunden' });
     const who = req.user.name || req.user.email || 'unbekannt';
-    const out = await updateReklamation(parseInt(req.params.id, 10), req.body || {}, who);
+    const felder = { ...(req.body || {}) };
+    // Der Melder bekommt die Notiz nicht geliefert; ein mitgeschicktes leeres Feld
+    // wuerde sie sonst loeschen.
+    if (reklNurMelder(req.user)) delete felder.notiz;
+    const out = await updateReklamation(parseInt(req.params.id, 10), felder, who);
     if (out.error) return res.status(out.status || 500).json({ error: out.error });
     res.json(out.reklamation);
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err, 'Reklamation konnte nicht gespeichert werden') }); }
@@ -19643,7 +19737,9 @@ app.get('/api/reklamationen/:id/history', authMiddleware, requirePermission('rek
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
     if (!(await darfReklamation(req.user, id))) return res.status(404).json({ error: 'Nicht gefunden' });
     const r = await pool.query('SELECT created_at, who, event FROM reklamation_events WHERE reklamation_id = $1 ORDER BY created_at ASC, id ASC', [id]);
-    res.json({ events: r.rows });
+    // Melder (weder Admin noch Ausschuss) sieht keine Eintraege zur internen Notiz.
+    const events = reklNurMelder(req.user) ? r.rows.filter(e => !/^Notiz geändert/i.test(e.event || '')) : r.rows;
+    res.json({ events });
   } catch (e) { console.error('[reklamation-history]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 
@@ -19888,7 +19984,7 @@ app.get('/api/reklamationen/meine', authMiddleware, async (req, res) => {
   try {
     const email = String(req.user?.email || '').toLowerCase();
     const r = await pool.query(
-      `SELECT id, kategorie, beschreibung, status, standort, (bild_pfad IS NOT NULL) AS has_bild, created_at, erledigt_am, notiz, COALESCE(melder_archiviert, FALSE) AS melder_archiviert
+      `SELECT id, kategorie, beschreibung, status, standort, (bild_pfad IS NOT NULL) AS has_bild, created_at, erledigt_am, COALESCE(melder_archiviert, FALSE) AS melder_archiviert
          FROM reklamationen
         WHERE person_id = (SELECT id FROM personen WHERE LOWER(email) = $1 LIMIT 1)
         ORDER BY created_at DESC LIMIT 100`, [email]);
@@ -20056,7 +20152,7 @@ async function technikBotResolve(reklId, apply) {
     await pool.query("INSERT INTO reklamation_events (reklamation_id, who, event) VALUES ($1,'Technik-Bot',$2)",
       [reklId, `🤖 Aus Technik-Chat erkannt (conf ${v.confidence}): "${(v.evidence || '').slice(0, 120)}"`]);
     // Status erledigt ueber DENSELBEN Pfad wie ein Mensch -> Verlauf + Melder-Notify automatisch.
-    await updateReklamation(reklId, { status: 'erledigt', notiz: v.arbeitsschritt || null }, 'Technik-Bot');
+    await updateReklamation(reklId, { status: 'erledigt', notiz: v.arbeitsschritt || null, melder_bemerkung: v.arbeitsschritt || '' }, 'Technik-Bot');
     out.applied = true;
   }
   return out;
@@ -26536,7 +26632,7 @@ function vmNamePasst(eingabe, konto) {
 async function vmKontoNamen(req) {
   const email = (req.user.email || '').toLowerCase();
   if (!email) return [];
-  const p = await pool.query('SELECT name FROM personen WHERE LOWER(email) = $1 AND name IS NOT NULL LIMIT 1', [email]);
+  const p = await pool.query('SELECT name FROM personen WHERE LOWER(email) = $1 AND name IS NOT NULL ORDER BY id LIMIT 1', [email]);
   const u = await pool.query(
     `SELECT name FROM users WHERE LOWER(email) = $1 AND name IS NOT NULL AND name_selbst_geaendert_am IS NULL LIMIT 1`,
     [email]).catch(() => ({ rows: [] }));

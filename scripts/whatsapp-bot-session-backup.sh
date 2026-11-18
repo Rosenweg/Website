@@ -23,9 +23,12 @@
 # Jetzt gibt es einen eigenen Schluessel (/root/.ssh/wa-backup), und auf der
 # Gegenseite haengt daran ein erzwungener Befehl: der Schluessel kann genau
 # ein Archiv abliefern, sonst nichts. Dateiname, Ablageort und Aufbewahrung
-# entscheidet der Fileserver — siehe dort /usr/local/bin/wa-session-empfangen.
+# entscheidet der Fileserver — siehe dort /usr/local/bin/wa-session-empfangen
+# (Ablage /var/backups/wa-session, nur root lesbar, nicht auf der Samba-Freigabe).
 
 set -euo pipefail
+# Kopie der Sitzung in $TMP nur fuer root lesbar
+umask 077
 
 VOL_PATH=/var/lib/docker/volumes/whatsapp-bot_whatsapp-data/_data
 ZIEL_HOST=100.64.2.28

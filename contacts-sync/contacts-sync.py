@@ -17,7 +17,24 @@ NC_BASE=ENV.get("NC_BASE","http://100.64.2.36/remote.php/dav/addressbooks/users/
 NC_HOST=ENV.get("NC_HOST","nextcloud.rosenweg9.ch")
 SOGO_BASE=ENV.get("SOGO_BASE","https://100.64.2.33/SOGo/dav/")
 SOGO_HOST=ENV.get("SOGO_HOST","mailcow.rosenweg9.ch")
-PGC=subprocess.check_output("docker ps -q -f name=rosenweg_postgres | head -1",shell=True).decode().strip()
+# Datenbank-Container finden. Frueher Swarm-Dienst rosenweg_postgres; heute
+# Compose-Projekt rosenweg-core auf CT 128 (Container rosenweg-core-postgres-1).
+# Erst per Compose-Label suchen (unabhaengig vom Namensschema), Name nur als
+# Rueckfall. PG_CONTAINER in der env-Datei ueberschreibt alles.
+def finde_pg_container():
+    if ENV.get("PG_CONTAINER"):
+        return ENV["PG_CONTAINER"]
+    for filt in (["label=com.docker.compose.project=rosenweg-core", "label=com.docker.compose.service=postgres"],
+                 ["label=com.docker.compose.service=postgres"],
+                 ["label=com.docker.swarm.service.name=rosenweg_postgres"],
+                 ["name=rosenweg-core-postgres"],
+                 ["name=rosenweg_postgres"]):
+        cmd=["docker","ps","-q"]
+        for f in filt: cmd+=["--filter",f]
+        ids=subprocess.check_output(cmd).decode().split()
+        if ids: return ids[0]
+    raise SystemExit("contacts-sync: kein Postgres-Container gefunden (PG_CONTAINER in /root/.contacts-sync.env setzen)")
+PGC=finde_pg_container()
 def psql(sql):
     return subprocess.check_output(["docker","exec",PGC,"sh","-c","psql -U $POSTGRES_USER -d $POSTGRES_DB -t -A -c \""+sql+"\""]).decode().strip()
 def jq(sql):
