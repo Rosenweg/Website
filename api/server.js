@@ -7375,7 +7375,10 @@ async function autoArchiveSupersededKontakte() {
       if (!alt.email) continue;
       try {
         const w = await pool.query('SELECT stweg FROM wohnungen WHERE id = $1', [alt.wohnung_id]);
-        if (w.rows[0]?.stweg) await trackRemovedKontakte(alt.wohnung_id, w.rows[0].stweg, [alt], []);
+        // Aktive Kontakte derselben Wohnung (z. B. neu erfasster Eigentuemer mit gleicher
+        // E-Mail) als "neu" mitgeben, sonst wird ein weiter aktives Konto vorgemerkt.
+        const aktiv = await pool.query('SELECT email FROM wohnungen_kontakte WHERE wohnung_id = $1 AND archiviert_am IS NULL', [alt.wohnung_id]);
+        if (w.rows[0]?.stweg) await trackRemovedKontakte(alt.wohnung_id, w.rows[0].stweg, [alt], aktiv.rows);
       } catch (e) {
         console.error(`[KontakteCron] Vormerkung ${alt.email} fehlgeschlagen:`, e.message);
       }
@@ -19633,6 +19636,12 @@ async function updateReklamation(id, fields, actor) {
 // Darf der Nutzer diese einzelne Reklamation sehen/bearbeiten? Gleiche Regel wie die
 // Liste GET /api/reklamationen: Technik/Praesident alles, Ausschuss die eigene(n)
 // STWEG(s) plus Meldungen ohne STWEG, sonst nur eigene Meldungen.
+// Wer weder Technik/Praesident noch Ausschuss ist, sieht nur eigene Meldungen (Melder).
+function reklNurMelder(user) {
+  const groups = user?.groups || [];
+  return !(isTechnik(groups) || isPraesident(groups)) && getAusschussStwegs(groups).size === 0;
+}
+
 async function darfReklamation(user, id) {
   if (!Number.isFinite(id)) return false;
   const groups = user.groups || [];
@@ -19651,7 +19660,11 @@ app.put('/api/reklamationen/:id', authMiddleware, requirePermission('reklamation
   try {
     if (!(await darfReklamation(req.user, parseInt(req.params.id, 10)))) return res.status(404).json({ error: 'Nicht gefunden' });
     const who = req.user.name || req.user.email || 'unbekannt';
-    const out = await updateReklamation(parseInt(req.params.id, 10), req.body || {}, who);
+    const felder = { ...(req.body || {}) };
+    // Der Melder bekommt die Notiz nicht geliefert; ein mitgeschicktes leeres Feld
+    // wuerde sie sonst loeschen.
+    if (reklNurMelder(req.user)) delete felder.notiz;
+    const out = await updateReklamation(parseInt(req.params.id, 10), felder, who);
     if (out.error) return res.status(out.status || 500).json({ error: out.error });
     res.json(out.reklamation);
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err, 'Reklamation konnte nicht gespeichert werden') }); }
@@ -19724,7 +19737,9 @@ app.get('/api/reklamationen/:id/history', authMiddleware, requirePermission('rek
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
     if (!(await darfReklamation(req.user, id))) return res.status(404).json({ error: 'Nicht gefunden' });
     const r = await pool.query('SELECT created_at, who, event FROM reklamation_events WHERE reklamation_id = $1 ORDER BY created_at ASC, id ASC', [id]);
-    res.json({ events: r.rows });
+    // Melder (weder Admin noch Ausschuss) sieht keine Eintraege zur internen Notiz.
+    const events = reklNurMelder(req.user) ? r.rows.filter(e => !/^Notiz geändert/i.test(e.event || '')) : r.rows;
+    res.json({ events });
   } catch (e) { console.error('[reklamation-history]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 
