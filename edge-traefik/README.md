@@ -67,10 +67,11 @@ Anmeldung zu ioBroker, das selbst mit `auth=false` läuft.
 
 ## Ausrollen
 
-> `deploy.sh` setzt den Knoten fest auf `PVE=root@100.64.2.20` (pve1). CT 245
-> läuft auf **pve3**; `pct` funktioniert nur auf dem Knoten, der den Container
-> hat. Bis das Skript angepasst ist, die Schritte von Hand über pve3 ausführen
-> (unten) oder im Skript `PVE=root@100.64.2.22` setzen.
+> `deploy.sh` zielt standardmässig auf pve3 (`PVE=root@100.64.2.22`), wo CT 245
+> läuft; `pct` funktioniert nur auf dem Knoten, der den Container hat. Liegt der
+> CT woanders (HA-Migration), bricht das Skript ab und nennt den Knoten; dann
+> `PVE=root@<knoten-ip> ./deploy.sh`. `extra-routes.yml` deployt es nicht —
+> dafür die Schritte unten.
 
 ### `extra-routes.yml` (häufigster Fall)
 

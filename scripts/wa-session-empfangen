@@ -11,14 +11,24 @@
 #
 # Zeitstempel und Aufbewahrung entscheidet diese Seite — der Client bestimmt
 # weder Dateinamen noch Ablageort.
+#
+# Ablage NICHT unter /mnt/cephfs-stage: das ist die Samba-Freigabe
+# "dokumente" (alle Mitglieder von rosenweg, gruppen-schreibbar). Ein
+# Sitzungsarchiv genuegt, um den WhatsApp-Zugang des Hauses zu uebernehmen —
+# es gehoert nur root. Daher eigenes Verzeichnis 0700, Dateien 0600.
 
 set -euo pipefail
+umask 077
 
-ZIEL=/mnt/cephfs-stage/archiv/whatsapp-bot-session
+ZIEL=/var/backups/wa-session
 TAGE=14
 LOG=/var/log/wa-session-empfangen.log
 
-install -d -m 2775 -g rosenweg "$ZIEL"
+install -d -m 0700 -o root -g root "$ZIEL"
+# install -d aendert die Rechte eines schon vorhandenen Verzeichnisses nicht
+# in jedem Fall zuverlaessig — ausdruecklich nachziehen.
+chown root:root "$ZIEL"
+chmod 0700 "$ZIEL"
 DATEI="$ZIEL/wa-session-$(date +%Y%m%d-%H%M%S).tar.gz"
 
 # Erst daneben schreiben, dann umbenennen: ein abgebrochener Transfer soll
@@ -31,9 +41,8 @@ if ! gzip -t "$TMP" 2>/dev/null; then
   echo "FEHLER: kein gueltiges gzip empfangen" >&2
   exit 1
 fi
+chmod 600 "$TMP"
 mv "$TMP" "$DATEI"
-chgrp rosenweg "$DATEI" 2>/dev/null || true
-chmod 664 "$DATEI"
 
 find "$ZIEL" -name 'wa-session-*.tar.gz' -mtime +$TAGE -delete 2>/dev/null || true
 find "$ZIEL" -name 'wa-session-*.tar.gz.teil' -mtime +1 -delete 2>/dev/null || true

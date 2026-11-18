@@ -16,11 +16,20 @@ Mechanik (rspamd):
         ROSENWEG_FROM_OK      (Absender-Domain ODER -Adresse erlaubt)
   - composite (local.d/composites.conf, Marker-Block):
         ROSENWEG_GATED_RCPT & !ROSENWEG_FROM_OK  -> Score 9999 -> Reject
+  Envelope-From allein ist frei waehlbar. Daher zusaetzlich (I-4-3):
+        ROSENWEG_GATE_UNBELEGT (Score 0, nur Markierung in der rspamd-Historie):
+          erlaubter Absender, aber weder SMTP-authentifiziert, noch SPF-pass
+          fuer den Envelope-Absender, noch DMARC-pass fuer einen erlaubten
+          Header-From.
+        Mit GATE_ABSENDER_PRUEFEN=1 wird genau dieser Fall auch abgewiesen.
+        Standard ist nur Markieren: erst in der Historie pruefen, dass keine
+        berechtigte Einlieferung (Weiterleitungen, Relays) betroffen ist.
 Beide Marker-Bloecke werden idempotent neu geschrieben (self-healing nach
 Mailcow-Update/Migration). Vor jedem rspamd-Reload laeuft `rspamadm configtest`;
 schlaegt er fehl, werden die Bloecke zurueckgerollt und NICHT reloaded.
 
-Config: /etc/default/mailcow-verteiler-gate  (API_URL, GATE_SHARED_SECRET)
+Config: /etc/default/mailcow-verteiler-gate  (API_URL, GATE_SHARED_SECRET,
+        GATE_ABSENDER_PRUEFEN=0|1)
 """
 import json
 import os
@@ -42,6 +51,7 @@ API_URL = CONF.get("API_URL", "https://www.rosenweg4303.ch/api/verteiler/mailcow
 SECRET = CONF.get("GATE_SHARED_SECRET", "")
 MAILCOW_DIR = CONF.get("MAILCOW_DIR", "/opt/mailcow-dockerized")
 RSPAMD_CONTAINER = CONF.get("RSPAMD_CONTAINER", "mailcowdockerized-rspamd-mailcow-1")
+ABSENDER_PRUEFEN = CONF.get("GATE_ABSENDER_PRUEFEN", "0") == "1"
 
 RSPAMD_DIR = os.path.join(MAILCOW_DIR, "data/conf/rspamd")
 CUSTOM_DIR = os.path.join(RSPAMD_DIR, "custom")
@@ -71,17 +81,62 @@ ROSENWEG_FROM_OK_EMAIL {
   symbol = "ROSENWEG_FROM_OK_EMAIL";
   score = 0.0;
 }
-%s
-""" % (BEGIN, END)
-
-COMPOSITE_BLOCK = """%s
-ROSENWEG_VERTEILER_GATE_REJECT {
-  expression = "ROSENWEG_GATED_RCPT & !ROSENWEG_FROM_OK_DOMAIN & !ROSENWEG_FROM_OK_EMAIL";
-  score = 9999.0;
-  policy = "leave";
+# Header-From (das, was DMARC prueft) gegen dieselben Listen
+ROSENWEG_HDR_OK_DOMAIN {
+  type = "header";
+  header = "From";
+  filter = "email:domain";
+  map = "/etc/rspamd/custom/rosenweg_allowed_domains.map";
+  symbol = "ROSENWEG_HDR_OK_DOMAIN";
+  score = 0.0;
+}
+ROSENWEG_HDR_OK_EMAIL {
+  type = "header";
+  header = "From";
+  filter = "email:addr";
+  map = "/etc/rspamd/custom/rosenweg_allowed_emails.map";
+  symbol = "ROSENWEG_HDR_OK_EMAIL";
+  score = 0.0;
+}
+# SMTP-authentifizierte Einlieferung (Submission): rspamd prueft dort weder
+# SPF noch DMARC, also braucht es ein eigenes Merkmal. Map = "irgendein Nutzer".
+ROSENWEG_AUTHED {
+  type = "selector";
+  selector = "user";
+  regexp = true;
+  map = "/etc/rspamd/custom/rosenweg_authed.map";
+  symbol = "ROSENWEG_AUTHED";
+  score = 0.0;
 }
 %s
 """ % (BEGIN, END)
+
+# Absender "belegt": Envelope-From erlaubt UND (authentifiziert ODER SPF-pass),
+# oder Header-From erlaubt UND DMARC-pass. DMARC allein reicht nicht fuer den
+# Envelope-Treffer, weil es sich auf den Header-From bezieht.
+BELEGT = ("((ROSENWEG_FROM_OK_DOMAIN | ROSENWEG_FROM_OK_EMAIL) & (ROSENWEG_AUTHED | R_SPF_ALLOW))"
+          " | ((ROSENWEG_HDR_OK_DOMAIN | ROSENWEG_HDR_OK_EMAIL) & DMARC_POLICY_ALLOW)")
+ERLAUBT = "(ROSENWEG_FROM_OK_DOMAIN | ROSENWEG_FROM_OK_EMAIL)"
+
+
+def composite_block():
+    if ABSENDER_PRUEFEN:
+        reject = "ROSENWEG_GATED_RCPT & !(%s)" % BELEGT
+    else:
+        reject = "ROSENWEG_GATED_RCPT & !ROSENWEG_FROM_OK_DOMAIN & !ROSENWEG_FROM_OK_EMAIL"
+    return """%s
+ROSENWEG_VERTEILER_GATE_REJECT {
+  expression = "%s";
+  score = 9999.0;
+  policy = "leave";
+}
+ROSENWEG_GATE_UNBELEGT {
+  expression = "ROSENWEG_GATED_RCPT & %s & !(%s)";
+  score = 0.0;
+  policy = "leave";
+}
+%s
+""" % (BEGIN, reject, ERLAUBT, BELEGT, END)
 
 
 def fetch_config():
@@ -155,9 +210,11 @@ def main():
     maps_changed |= write_map("rosenweg_gated_rcpt.map", gated)
     maps_changed |= write_map("rosenweg_allowed_domains.map", domains)
     maps_changed |= write_map("rosenweg_allowed_emails.map", emails)
+    # Regex-Map: passt auf jeden nicht-leeren Benutzernamen
+    maps_changed |= write_map("rosenweg_authed.map", ["/^.+$/"])
 
     mm_changed, mm_prev = ensure_block(MULTIMAP, MULTIMAP_BLOCK)
-    co_changed, co_prev = ensure_block(COMPOSITES, COMPOSITE_BLOCK)
+    co_changed, co_prev = ensure_block(COMPOSITES, composite_block())
 
     if mm_changed or co_changed:
         ok, out = configtest()
