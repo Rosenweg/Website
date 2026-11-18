@@ -1,5 +1,5 @@
 [Unit]
-Description=nft: CrowdSec-Sperren auf PMG nur fuer 465/587
+Description=nft: CrowdSec-Sperren auf PMG fuer 25, 465, 587
 Before=crowdsec-firewall-bouncer.service
 After=network-pre.target
 
