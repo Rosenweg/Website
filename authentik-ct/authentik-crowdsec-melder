@@ -1,0 +1,40 @@
+#!/bin/bash
+# Meldet Authentik-Fehlanmeldungen an CrowdSec auf dem Edge (CT 245).
+# Laeuft auf dem Authentik-CT (100.64.2.37) jede Minute (Timer
+# authentik-crowdsec-melder.timer). Authentik schreibt Fehlanmeldungen nur in
+# die Datenbank (authentik_events_event, action=login_failed), nicht ins Log.
+# Gesendet wird NUR die Client-IP, kein Benutzername:
+#   <13> ... authentik-melder: login_failed ip=<adresse>
+# Edge: Parser rosenweg/authentik-melder, Szenario rosenweg/authentik-bf.
+set -euo pipefail
+umask 077
+
+ZIEL=${MELDER_ZIEL:-100.64.2.40}
+PORT=${MELDER_PORT:-4514}
+STAND=/var/lib/authentik-crowdsec-melder/stand
+mkdir -p "$(dirname "$STAND")"
+cd /opt/authentik
+
+# Beim ersten Lauf nur ab jetzt melden, keine Altlasten.
+[ -s "$STAND" ] || date -u +%Y-%m-%dT%H:%M:%S.%6NZ > "$STAND"
+seit=$(cat "$STAND")
+[[ $seit =~ ^[0-9T:.Z-]+$ ]] || { echo "Stand unlesbar: $STAND" >&2; exit 1; }
+
+zeilen=$(docker compose exec -T postgresql psql -U authentik -d authentik -At -F '|' -c \
+  "SELECT to_char(created AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"'), host(client_ip)
+     FROM authentik_events_event
+    WHERE action = 'login_failed' AND created > '$seit'::timestamptz AND client_ip IS NOT NULL
+    ORDER BY created LIMIT 5000")
+
+neu=$seit
+n=0
+while IFS='|' read -r zeit ip; do
+  [ -n "$zeit" ] || continue
+  neu=$zeit
+  # Nur echte Adressen weitergeben
+  [[ $ip =~ ^[0-9a-fA-F:.]+$ ]] || continue
+  logger --udp -n "$ZIEL" -P "$PORT" -t authentik-melder "login_failed ip=$ip"
+  n=$((n + 1))
+done <<< "$zeilen"
+echo "$neu" > "$STAND"
+[ "$n" -eq 0 ] || echo "authentik-crowdsec-melder: $n Fehlanmeldung(en) gemeldet"

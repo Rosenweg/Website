@@ -1,0 +1,7 @@
+displayName: Rosenweg echte Client-IP
+type: middleware
+import: github.com/rosenweg/echteip
+summary: Setzt X-Forwarded-For/X-Real-Ip aus Cf-Connecting-Ip nur fuer Cloudflare-Verbindungen.
+testData:
+  trustedCIDRs:
+    - 173.245.48.0/20

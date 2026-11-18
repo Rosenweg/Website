@@ -45,7 +45,9 @@ entryPoints:
       tls:
         certResolver: cf
       # CrowdSec-Bouncer vor allen HTTPS-Routern (dynamic/crowdsec.yml).
+      # Zuerst echte Client-IP setzen (dynamic/echteip.yml), dann CrowdSec.
       middlewares:
+        - echteip@file
         - crowdsec@file
     transport:
       respondingTimeouts:
@@ -111,3 +113,7 @@ experimental:
   localPlugins:
     bouncer:
       moduleName: github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin
+    # Eigenes Plugin (Repo: edge-traefik/plugins/echteip), liegt unter
+    # /plugins-local/src/github.com/rosenweg/echteip
+    echteip:
+      moduleName: github.com/rosenweg/echteip

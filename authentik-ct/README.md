@@ -31,3 +31,13 @@ Für **interne** Clients (PVE etc.) zusätzlich `isp_reverse_proxy_routes`-Zeile
 ## Rollback
 Alter Swarm-Stack `authentik` ist **gestoppt (scale 0)**, NFS-Daten unter `/mnt/nfs-shared/authentik_pgdata`
 unangetastet. Zurück: Routing/`AUTHENTIK_URL` zurück + `docker stack deploy -c /opt/authentik/docker-stack.yml authentik`.
+
+## Fehlanmeldungen an CrowdSec (seit 18.11.2026)
+
+`authentik-crowdsec-melder` (nach `/usr/local/sbin/`, mit
+`authentik-crowdsec-melder.service`/`.timer` nach `/etc/systemd/system/`,
+`systemctl enable --now authentik-crowdsec-melder.timer`) liest jede Minute neue
+`login_failed`-Ereignisse aus der Datenbank und schickt je Ereignis nur die
+Client-IP per Syslog an CrowdSec auf dem Edge (100.64.2.40:4514/udp). Stand in
+`/var/lib/authentik-crowdsec-melder/stand`. Prüfen auf dem Edge:
+`cscli metrics show parsers | grep authentik`, `cscli alerts list`.

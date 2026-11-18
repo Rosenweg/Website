@@ -34,6 +34,12 @@ WAN :80/:443/:465/:587/:993/:25/:8883 ─DNAT─▶ 100.64.2.40
 | `crowdsec/acquis-traefik.yaml` | `/etc/crowdsec/acquis.d/traefik.yaml` | CrowdSec liest das Zugriffsprotokoll |
 | `crowdsec/rosenweg-cf-echte-ip.yaml` | `/etc/crowdsec/parsers/s02-enrich/` | echte Client-IP aus `Cf-Connecting-Ip`, nur bei Cloudflare-Verbindungen |
 | `crowdsec/rosenweg-intern.yaml` | `/etc/crowdsec/postoverflows/s01-whitelist/` | eigene Netze nie sperren |
+| `echteip.yml` | `/etc/traefik/dynamic/echteip.yml` | Middleware `echteip`: echte Client-IP in `X-Forwarded-For`/`X-Real-Ip` |
+| `plugins/echteip/` | `/plugins-local/src/github.com/rosenweg/echteip/` | eigenes Traefik-Plugin dazu (Go, von Traefik interpretiert) |
+| `crowdsec/rosenweg-bf.yaml` | `/etc/crowdsec/scenarios/` | Szenarien: Einmal-Codes raten, Code-Drossel fluten, ActiveSync-Passwort-Raten |
+| `crowdsec/acquis-syslog.yaml` | `/etc/crowdsec/acquis.d/syslog.yaml` | Syslog-Eingang 100.64.2.40:4514 (Meldungen anderer Hosts) |
+| `crowdsec/rosenweg-authentik-*.yaml` | `/etc/crowdsec/parsers/s01-parse/`, `/etc/crowdsec/scenarios/` | Authentik-Fehlanmeldungen (vom Melder auf dem Authentik-CT) |
+| `rw-crowdsec-syslog.nft`, `.service` | `/etc/rosenweg/`, `/etc/systemd/system/` | Syslog-Eingang nur für freigegebene Hosts (Authentik 100.64.2.37) |
 | `logrotate-stuendlich.conf` | `/etc/systemd/system/logrotate.timer.d/stuendlich.conf` | logrotate stündlich, damit `maxsize 100M` greift |
 | `deploy.sh` | läuft vom Arbeitsplatz | kopiert alles ausser `extra-routes.yml` und startet die Dienste |
 
@@ -189,6 +195,24 @@ entpacken, zuerst mit einer Testinstanz auf 127.0.0.1 prüfen, dann
 `systemctl restart traefik`. Zurückbauen: `traefik.yml.vor-crowdsec-2026-11-18`
 zurückkopieren, `dynamic/crowdsec.yml` löschen, Traefik neu starten;
 `apt purge crowdsec-firewall-bouncer-nftables` entfernt die nft-Sperren.
+
+Eigene Szenarien (`crowdsec/rosenweg-bf.yaml`, `rosenweg-authentik-bf.yaml`):
+falsche Einmal-Codes (400/429 an `/api/otp/verify`, `/api/reklamationen/oeffentlich`,
+`/api/doodle/verify`), Dauerfeuer in die Code-Drossel, ActiveSync-Passwort-Raten
+(401 auf contacts), Authentik-Fehlanmeldungen. Authentik schreibt diese nur in
+seine Datenbank; `authentik-ct/authentik-crowdsec-melder` meldet jede Minute die
+IP (ohne Benutzername) per Syslog an den Edge.
+
+### Echte Client-IP (seit 18.11.2026)
+
+Hinter Cloudflare sahen API, Frontends und Authentik nur die Adresse des
+Cloudflare-Knotens: die Code-Limits je IP galten für alle Nutzer desselben
+Knotens gemeinsam, Authentik verbuchte Fehlanmeldungen auf Cloudflare. Das
+Plugin `echteip` setzt `X-Forwarded-For`/`X-Real-Ip` auf `Cf-Connecting-Ip` —
+nur wenn die Verbindung aus einem Cloudflare-Netz kommt; sonst die
+Verbindungsadresse, gefälschte `Cf-*`-Köpfe werden entfernt. Der Kopf wird
+überschrieben, nicht ergänzt (Cloudflare hängt an einen vom Client gesetzten
+Kopf nur an). Cloudflare-Netze in `echteip.yml` und `crowdsec.yml` gleich halten.
 
 fail2ban ist bewusst nicht installiert: CrowdSec deckt sshd ab, ein zweites
 Sperrsystem würde nur doppelt zählen.
