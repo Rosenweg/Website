@@ -248,8 +248,8 @@ haben keine eigene JSON-Sperre (dort liegen keine Datendateien). `/.well-known/`
   `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3001/api/energy/meters`
   muss `403` liefern.
 - `/api/zaehler-technik` (Seite `stweg3/pages/zaehler-technik.html`): Zugang nur
-  für die Gruppen `technik`, `verwaltung` und `stweg3-eigentuemer` (also nur
-  Rosenweg 9; ein Präsident ohne eine dieser Gruppen bekommt 403). Volle Sicht nur
+  für die Gruppen `technik`, `präsident`, `verwaltung` und `stweg3-eigentuemer`
+  (Eigentümer also nur Rosenweg 9). Volle Sicht nur
   mit Technik/Präsident/Admin/`energie-config:read`; Verwaltung und Eigentümer
   sehen keine IP/Port/Seriennummer und Live-Werte nur von Netz, Produktion und
   eigenen Zählern.

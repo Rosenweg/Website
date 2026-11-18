@@ -25,8 +25,12 @@ const PAT_GESPERRT = [
 function scopeErlaubt(scopes, pfad, method) {
   if (!Array.isArray(scopes) || scopes.length === 0) return true;
   const need = method === 'GET' ? 'read' : 'write';
+  // Express liefert den Pfad roh: /api/zähler kommt als z%c3%a4hler an, der Scope
+  // "zähler:read" passte so nie. Nur Mehrbyte-UTF-8-Folgen (Umlaute) dekodieren;
+  // kodierte ASCII-Zeichen bleiben stehen (kein Umweg ueber %77asch o. ae.).
+  const roh = String(pfad || '').replace(/%[c-f][0-9a-f](?:%[89ab][0-9a-f])+/gi, m => { try { return decodeURIComponent(m); } catch { return m; } });
   // Klein geschrieben auf beiden Seiten — Express routet ohnehin so.
-  const teile = String(pfad || '').toLowerCase().split('/').filter(Boolean);
+  const teile = roh.toLowerCase().split('/').filter(Boolean);
   const segment = teile[0] || 'root';
   const unter = teile.length > 1 ? segment + '/' + teile[1] : null;
   const passt = (s, name) => s === name + ':*' || s === name + ':' + need;
