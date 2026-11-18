@@ -12,6 +12,18 @@ http:
       rule: Host(`www.rosenweg9.ch`) || Host(`rosenweg9.ch`)
       service: rw9-lxc-svc
       tls: { certResolver: cf }
+    # Kontakte-Sync (Z-Push, CT 115): TLS endet hier (Zertifikat ueber den
+    # Traefik-Resolver, erneuert sich mit allen anderen). Bis 18.11.2026 lief das
+    # als SNI-Passthrough mit eigenem certbot auf CT 115 - dessen Cloudflare-Token
+    # war ungueltig, das Zertifikat seit 16.09. abgelaufen.
+    contacts-rw4303:
+      entryPoints: [websecure]
+      rule: Host(`contacts.rosenweg4303.ch`)
+      service: contacts-zpush-svc
+      tls:
+        certResolver: cf
+        domains:
+          - main: contacts.rosenweg4303.ch
     nextcloud-rw4303:
       entryPoints: [websecure]
       rule: Host(`nextcloud.rosenweg4303.ch`)
@@ -294,6 +306,11 @@ http:
         passHostHeader: true
         servers:
           - url: http://100.64.2.45
+    contacts-zpush-svc:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: http://100.64.2.38
     nextcloud-lxc-svc:
       loadBalancer:
         passHostHeader: true
@@ -342,11 +359,6 @@ tcp:
       priority: 10000
       service: imaps-mailcow-proxy-svc
       tls: { passthrough: true }
-    contacts-rw4303-passthrough:
-      entryPoints: [websecure]
-      rule: HostSNI(`contacts.rosenweg4303.ch`)
-      service: contacts-rw4303-svc
-      tls: { passthrough: true }
     personen-rw4303-passthrough:
       entryPoints: [websecure]
       rule: HostSNI(`personen.rosenweg4303.ch`)
@@ -370,10 +382,6 @@ tcp:
         proxyProtocol: { version: 2 }
         servers:
           - address: 100.64.2.33:10993
-    contacts-rw4303-svc:
-      loadBalancer:
-        servers:
-          - address: 100.64.2.38:443
     personen-rw4303-svc:
       loadBalancer:
         servers:

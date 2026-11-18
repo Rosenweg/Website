@@ -17,7 +17,7 @@ WAN :80/:443/:465/:587/:993/:25/:8883 ─DNAT─▶ 100.64.2.40
                ├─ extra-routes.yml  ◀── von Hand aus dem Repo
                └─ static.yml        ◀── dynamic-static.yml (deploy.sh)
                                                 ▼
-                  Frontend-LXCs (HTTP), Dienste in CTs, TCP-SNI-Passthrough (Mail, Kontakte)
+                  Frontend-LXCs (HTTP), Dienste in CTs, TCP-SNI-Passthrough (Mail, Personen)
 ```
 
 ## Dateien
@@ -26,7 +26,7 @@ WAN :80/:443/:465/:587/:993/:25/:8883 ─DNAT─▶ 100.64.2.40
 |---|---|---|
 | `traefik.yml` | `/etc/traefik/traefik.yml` | statische Konfiguration: Entrypoints (`web` 80 → Umleitung auf https, `websecure` 443, `smtps` 465, `imaps` 993, `submission` 587, `smtp` 25, `mqtts` 8883, Metriken 127.0.0.1:8082), File-Provider, ACME |
 | `dynamic-static.yml` | `/etc/traefik/dynamic/static.yml` | Notfall-Routen (Dashboard, Header) |
-| `extra-routes.yml` | `/etc/traefik/dynamic/extra-routes.yml` | feste Routen: www/apex → CT 118, rosenweg9 → CT 122, pwa → CT 130, Nextcloud, Authentik, MQTT, Heizung (ioBroker), TV, Kontakte-/Personen-Passthrough |
+| `extra-routes.yml` | `/etc/traefik/dynamic/extra-routes.yml` | feste Routen: www/apex → CT 118, rosenweg9 → CT 122, pwa → CT 130, Nextcloud, Authentik, MQTT, Heizung (ioBroker), TV, Kontakte (Z-Push, TLS hier), Personen-Passthrough |
 | `traefik.service` | `/etc/systemd/system/` | Traefik, `EnvironmentFile=/etc/default/traefik` |
 | `traefik-sync.sh` | `/usr/local/sbin/traefik-sync.sh` | holt die Datenbank-Routen von der API und schreibt `routes.yml` |
 | `traefik-sync.service`, `.timer` | `/etc/systemd/system/` | alle 15 s, `EnvironmentFile=-/etc/default/traefik-sync` |
