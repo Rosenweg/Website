@@ -1,0 +1,64 @@
+# CrowdSec-Bouncer fuer Traefik (Edge CT 245) — liegt live unter
+# /etc/traefik/dynamic/crowdsec.yml. Wird ueber traefik.yml an den
+# Entrypoint websecure gehaengt (gilt fuer alle HTTPS-Router).
+#
+# - stream: holt die Sperrliste alle 60 s vom lokalen CrowdSec (LAPI
+#   127.0.0.1:8080) und prueft jede Anfrage aus dem Speicher (keine
+#   zusaetzliche Latenz).
+# - updateMaxFailure -1 / streamStartupBlock false: faellt CrowdSec aus,
+#   laeuft der Verkehr ungefiltert weiter. Die Websites sollen nie wegen des
+#   Bouncers ausfallen.
+# - Echte Client-IP bei Cloudflare aus Cf-Connecting-Ip — nur wenn die
+#   Verbindung von einer Cloudflare-Adresse kommt (forwardedHeadersTrustedIPs).
+# - Eigene Netze werden nie geprueft (clientTrustedIPs), gleiche Liste wie
+#   die CrowdSec-Whitelist crowdsec/rosenweg-intern.yaml.
+# - Der LAPI-Schluessel liegt in /etc/traefik/crowdsec-bouncer.key (0600),
+#   nicht hier. Anlegen: cscli bouncers add traefik-bouncer (README).
+http:
+  middlewares:
+    crowdsec:
+      plugin:
+        bouncer:
+          enabled: true
+          logLevel: INFO
+          crowdsecMode: stream
+          crowdsecLapiScheme: http
+          crowdsecLapiHost: 127.0.0.1:8080
+          crowdsecLapiKeyFile: /etc/traefik/crowdsec-bouncer.key
+          updateIntervalSeconds: 60
+          updateMaxFailure: -1
+          streamStartupBlock: false
+          httpTimeoutSeconds: 5
+          forwardedHeadersCustomName: Cf-Connecting-Ip
+          forwardedHeadersTrustedIPs:
+            - 173.245.48.0/20
+            - 103.21.244.0/22
+            - 103.22.200.0/22
+            - 103.31.4.0/22
+            - 141.101.64.0/18
+            - 108.162.192.0/18
+            - 190.93.240.0/20
+            - 188.114.96.0/20
+            - 197.234.240.0/22
+            - 198.41.128.0/17
+            - 162.158.0.0/15
+            - 104.16.0.0/13
+            - 104.24.0.0/14
+            - 172.64.0.0/13
+            - 131.0.72.0/22
+            - 2400:cb00::/32
+            - 2606:4700::/32
+            - 2803:f800::/32
+            - 2405:b500::/32
+            - 2405:8100::/32
+            - 2a06:98c0::/29
+            - 2c0f:f248::/32
+          clientTrustedIPs:
+            - 100.64.0.0/10
+            - 10.0.0.0/8
+            - 172.16.0.0/12
+            - 192.168.0.0/16
+            - 127.0.0.0/8
+            - 2a02:16a:1400::/48
+            - 37.17.232.133/32
+            - 37.17.232.136/32

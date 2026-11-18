@@ -14,6 +14,14 @@ accessLog:
   filePath: /var/log/traefik/access.log
   format: json
   bufferingSize: 100
+  # Fuer CrowdSec: echte Client-IP bei Cloudflare-Verbindungen (Cf-Connecting-Ip,
+  # nur von Cloudflare-Adressen ausgewertet) und User-Agent (Bot-Szenarien).
+  fields:
+    headers:
+      defaultMode: drop
+      names:
+        Cf-Connecting-Ip: keep
+        User-Agent: keep
 
 api:
   dashboard: true
@@ -36,6 +44,9 @@ entryPoints:
     http:
       tls:
         certResolver: cf
+      # CrowdSec-Bouncer vor allen HTTPS-Routern (dynamic/crowdsec.yml).
+      middlewares:
+        - crowdsec@file
     transport:
       respondingTimeouts:
         readTimeout: 0s      # Streaming-freundlich
@@ -93,4 +104,10 @@ metrics:
     addServicesLabels: true
 
 experimental:
-  # Reserviert fuer eventuelle Plugins (Crowdsec etc.) — aktuell aus.
+  # CrowdSec-Bouncer als lokales Plugin: Quelltext liegt fest unter
+  # /plugins-local/src/github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin
+  # (Arbeitsverzeichnis von Traefik ist /). Kein Download beim Start, damit
+  # Traefik auch ohne Internet/Plugin-Katalog hochkommt. Version: README.
+  localPlugins:
+    bouncer:
+      moduleName: github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin
