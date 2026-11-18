@@ -330,6 +330,18 @@ http:
           - url: http://100.64.90.50:8082
 tcp:
   routers:
+    # IMAPS mit PROXY-Protokoll (18.11.2026): Dovecot sieht so die echte
+    # Client-IP (Sperre/CrowdSec je Angreifer statt fuer den Edge). Ueberdeckt
+    # per Prioritaet die gleichnamigen Datenbank-Routen (routes.yml), die weiter
+    # auf 993 zeigen - Router loeschen = alter Weg. Mailcow-Port 10993 ist
+    # Mailcows eingebauter haproxy-Listener; PROXY-Koepfe nur von 100.64.2.40
+    # (data/conf/dovecot/extra.conf).
+    imaps-mailcow-proxy:
+      entryPoints: [imaps]
+      rule: HostSNI(`imap.rosenweg4303.ch`) || HostSNI(`mail.rosenweg4303.ch`) || HostSNI(`imap.rosenweg9.ch`) || HostSNI(`imap.personen.rosenweg4303.ch`)
+      priority: 10000
+      service: imaps-mailcow-proxy-svc
+      tls: { passthrough: true }
     contacts-rw4303-passthrough:
       entryPoints: [websecure]
       rule: HostSNI(`contacts.rosenweg4303.ch`)
@@ -353,6 +365,11 @@ tcp:
         domains:
           - main: mqtt.rosenweg4303.ch
   services:
+    imaps-mailcow-proxy-svc:
+      loadBalancer:
+        proxyProtocol: { version: 2 }
+        servers:
+          - address: 100.64.2.33:10993
     contacts-rw4303-svc:
       loadBalancer:
         servers:
