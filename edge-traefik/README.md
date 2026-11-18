@@ -30,6 +30,11 @@ WAN :80/:443/:465/:587/:993/:25/:8883 ─DNAT─▶ 100.64.2.40
 | `traefik.service` | `/etc/systemd/system/` | Traefik, `EnvironmentFile=/etc/default/traefik` |
 | `traefik-sync.sh` | `/usr/local/sbin/traefik-sync.sh` | holt die Datenbank-Routen von der API und schreibt `routes.yml` |
 | `traefik-sync.service`, `.timer` | `/etc/systemd/system/` | alle 15 s, `EnvironmentFile=-/etc/default/traefik-sync` |
+| `crowdsec.yml` | `/etc/traefik/dynamic/crowdsec.yml` | CrowdSec-Bouncer-Middleware (Plugin), hängt über `traefik.yml` an `websecure` |
+| `crowdsec/acquis-traefik.yaml` | `/etc/crowdsec/acquis.d/traefik.yaml` | CrowdSec liest das Zugriffsprotokoll |
+| `crowdsec/rosenweg-cf-echte-ip.yaml` | `/etc/crowdsec/parsers/s02-enrich/` | echte Client-IP aus `Cf-Connecting-Ip`, nur bei Cloudflare-Verbindungen |
+| `crowdsec/rosenweg-intern.yaml` | `/etc/crowdsec/postoverflows/s01-whitelist/` | eigene Netze nie sperren |
+| `logrotate-stuendlich.conf` | `/etc/systemd/system/logrotate.timer.d/stuendlich.conf` | logrotate stündlich, damit `maxsize 100M` greift |
 | `deploy.sh` | läuft vom Arbeitsplatz | kopiert alles ausser `extra-routes.yml` und startet die Dienste |
 
 Geheimnisse (nie im Repo):
@@ -40,6 +45,7 @@ Geheimnisse (nie im Repo):
 | `/etc/default/traefik-sync` (0600) | `TRAEFIK_CONFIG_SECRET` | Header `X-Traefik-Secret` für `/api/traefik/dynamic`; derselbe Wert steht in `/opt/rosenweg-core/.env` (CT 128). Fehlt er, antwortet die API 403 und der Sync behält die letzte Konfiguration. |
 | `/etc/traefik/.htpasswd` | – | BasicAuth für das Dashboard |
 | `/var/lib/traefik/acme.json` (0600) | – | Zertifikate |
+| `/etc/traefik/crowdsec-bouncer.key` (0600) | – | LAPI-Schlüssel des Traefik-Bouncers (`cscli bouncers add traefik-bouncer -o raw`, ohne Zeilenumbruch speichern) |
 
 ## Was die Datenbank-Routen liefern
 
@@ -148,15 +154,57 @@ curl -sI https://heizung.rosenweg4303.ch/vis-2/ | grep -iE '^(HTTP|location)'
 - Datenbank-Routen: in `isp-admin.html` bearbeiten; der Sync übernimmt sie
   innerhalb von 15 s.
 
+## CrowdSec (seit 18.11.2026)
+
+Erkennen: CrowdSec 1.8 (Paketquelle packagecloud, `bookworm`) liest
+`access.log` (Collection `crowdsecurity/traefik`) sowie sshd/postfix. Über
+Cloudflare geleitete Anfragen werden der echten Client-IP zugeordnet
+(`Cf-Connecting-Ip`, nur von Cloudflare-Adressen ausgewertet).
+
+Sperren, zweistufig:
+- **nftables** (`crowdsec-firewall-bouncer-nftables`, Tabellen `ip crowdsec`,
+  `ip6 crowdsec6`): verwirft direkte Verbindungen gesperrter Adressen auf allen
+  Ports, auch Mail und MQTT. Cloudflare-Adressen werden nie gesperrt
+  (Whitelist `crowdsecurity/cdn-whitelist`).
+- **Traefik-Plugin** (`crowdsec-bouncer-traefik-plugin` v1.8.2, lokal unter
+  `/plugins-local/src/github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin`):
+  antwortet gesperrten Clients hinter Cloudflare mit 403. Fällt CrowdSec aus,
+  lässt es alles durch (`updateMaxFailure: -1`).
+
+Nie gesperrt: 100.64.0.0/10, private Netze, `2a02:16a:1400::/48`,
+37.17.232.133 und .136.
+
+Bedienen:
+
+```bash
+cscli decisions list                 # aktuelle Sperren
+cscli alerts list                    # was erkannt wurde
+cscli decisions delete --ip <IP>     # Sperre aufheben
+cscli metrics                        # gelesene/geparste Zeilen, Bouncer-Abrufe
+cscli bouncers list                  # beide Bouncer müssen regelmässig abrufen
+```
+
+Plugin aktualisieren: Tarball des neuen Tags nach `/plugins-local/src/...`
+entpacken, zuerst mit einer Testinstanz auf 127.0.0.1 prüfen, dann
+`systemctl restart traefik`. Zurückbauen: `traefik.yml.vor-crowdsec-2026-11-18`
+zurückkopieren, `dynamic/crowdsec.yml` löschen, Traefik neu starten;
+`apt purge crowdsec-firewall-bouncer-nftables` entfernt die nft-Sperren.
+
+fail2ban ist bewusst nicht installiert: CrowdSec deckt sshd ab, ein zweites
+Sperrsystem würde nur doppelt zählen.
+
 ## Logs
 
 - `/var/log/traefik/traefik.log` — Traefik selbst
-- `/var/log/traefik/access.log` — Anfragen (JSON). Hinter Cloudflare steht dort
-  die Adresse des Cloudflare-Knotens, nicht die des Clients.
+- `/var/log/traefik/access.log` — Anfragen (JSON). Hinter Cloudflare steht in
+  `ClientHost` die Adresse des Cloudflare-Knotens; die echte Adresse steht in
+  `request_Cf-Connecting-Ip`. Rotation stündlich ab 100 MB (das Shelly-Polling
+  schreibt mehrere hundert MB pro Stunde). `copytruncate` braucht freien Platz
+  in Grösse des Logs; ist das Log zu gross geworden:
+  `gzip -c access.log > access.log.1.gz && truncate -s 0 access.log`.
+- `/var/log/crowdsec.log` — CrowdSec
 - `journalctl -u traefik -f`, `journalctl -u traefik-sync`
 
 ## Offen
 
-- CrowdSec/fail2ban sind auf dem Edge nicht installiert (`sicherheit.md`
-  Abschnitt 7.2).
 - `deploy.sh` verweist auf pve1 statt pve3 (siehe oben).
