@@ -353,6 +353,15 @@ tcp:
     # auf 993 zeigen - Router loeschen = alter Weg. Mailcow-Port 10993 ist
     # Mailcows eingebauter haproxy-Listener; PROXY-Koepfe nur von 100.64.2.40
     # (data/conf/dovecot/extra.conf).
+    # SMTPS zu PMG mit PROXY-Protokoll (18.11.2026): PMG-Port 10465 sieht die
+    # echte Client-IP (nur der Edge darf dorthin, nft auf PMG). Ueberdeckt die
+    # Datenbank-Routen auf 465. mail.rosenweg4303.ch bleibt bei Mailcow (Zertifikat).
+    smtps-pmg-proxy:
+      entryPoints: [smtps]
+      rule: HostSNI(`smtp.rosenweg4303.ch`) || HostSNI(`smtp.rosenweg9.ch`) || HostSNI(`smtp.personen.rosenweg4303.ch`)
+      priority: 10000
+      service: smtps-pmg-proxy-svc
+      tls: { passthrough: true }
     imaps-mailcow-proxy:
       entryPoints: [imaps]
       rule: HostSNI(`imap.rosenweg4303.ch`) || HostSNI(`mail.rosenweg4303.ch`) || HostSNI(`imap.rosenweg9.ch`) || HostSNI(`imap.personen.rosenweg4303.ch`)
@@ -377,6 +386,11 @@ tcp:
         domains:
           - main: mqtt.rosenweg4303.ch
   services:
+    smtps-pmg-proxy-svc:
+      loadBalancer:
+        proxyProtocol: { version: 2 }
+        servers:
+          - address: 100.64.2.31:10465
     imaps-mailcow-proxy-svc:
       loadBalancer:
         proxyProtocol: { version: 2 }

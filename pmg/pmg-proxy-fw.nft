@@ -1,0 +1,12 @@
+#!/usr/sbin/nft -f
+# PMG: SMTPS-Port mit PROXY-Protokoll (10465) nur fuer edge-traefik.
+# Wer dort verbinden darf, kann im PROXY-Kopf jede Absenderadresse angeben.
+table inet rw_pmg_proxy
+delete table inet rw_pmg_proxy
+table inet rw_pmg_proxy {
+	chain input {
+		type filter hook input priority filter - 5; policy accept;
+		tcp dport 10465 ip saddr 100.64.2.40 accept
+		tcp dport 10465 drop
+	}
+}

@@ -40,7 +40,8 @@ WAN :80/:443/:465/:587/:993/:25/:8883 ─DNAT─▶ 100.64.2.40
 | `crowdsec/acquis-syslog.yaml` | `/etc/crowdsec/acquis.d/syslog.yaml` | Syslog-Eingang 100.64.2.40:4514 (Meldungen anderer Hosts) |
 | `crowdsec/rosenweg-authentik-*.yaml` | `/etc/crowdsec/parsers/s01-parse/`, `/etc/crowdsec/scenarios/` | Authentik-Fehlanmeldungen (vom Melder auf dem Authentik-CT) |
 | `crowdsec/rosenweg-mail-*.yaml` | `/etc/crowdsec/parsers/s01-parse/`, `/etc/crowdsec/scenarios/` | Mailcow-Fehlanmeldungen (vom Melder auf Mailcow) |
-| `rw-crowdsec-syslog.nft`, `.service` | `/etc/rosenweg/`, `/etc/systemd/system/` | Syslog-Eingang nur für freigegebene Hosts (Authentik 100.64.2.37, Mailcow 100.64.2.33) |
+| `rw-crowdsec-syslog.nft`, `.service` | `/etc/rosenweg/`, `/etc/systemd/system/` | Syslog-Eingang nur für freigegebene Hosts (Authentik .37, Mailcow .33, PMG .31) |
+| `rw-crowdsec-lapi.nft`, `.service` | `/etc/rosenweg/`, `/etc/systemd/system/` | CrowdSec-API 8080 nur für localhost und PMG |
 | `logrotate-stuendlich.conf` | `/etc/systemd/system/logrotate.timer.d/stuendlich.conf` | logrotate stündlich, damit `maxsize 100M` greift |
 | `deploy.sh` | läuft vom Arbeitsplatz | kopiert alles ausser `extra-routes.yml` und startet die Dienste |
 
@@ -231,9 +232,16 @@ Kopf nur an). Cloudflare-Netze in `echteip.yml` und `crowdsec.yml` gleich halten
 - 100.64.2.40 steht in Mailcows Sperr-Whitelist (`F2B_WHITELIST`), damit
   Fehlversuche über noch nicht proxierte Wege (Webmail 443, SMTPS über PMG)
   nicht den Edge und damit alle sperren.
+- **SMTPS** (`smtp.rosenweg4303.ch`, `smtp.rosenweg9.ch`,
+  `smtp.personen.rosenweg4303.ch`) läuft mit PROXY-Protokoll zu PMG
+  `100.64.2.31:10465` (Router `smtps-pmg-proxy`); `mail.rosenweg4303.ch` bleibt
+  bei Mailcow (Zertifikat). Siehe `../pmg/README.md`.
+- PMG meldet SASL-Fehlanmeldungen (587, 465) ebenfalls an CrowdSec und hat
+  einen eigenen Bouncer (`pmg-bouncer`), weil Submission 587 direkt vom UDM zum
+  PMG geht. Dafür lauscht die CrowdSec-API auf `0.0.0.0:8080`, per
+  `rw-crowdsec-lapi.nft` nur für localhost und PMG offen.
 - Offen: Webmail/Mailcow-Oberfläche (443, SNI-Durchleitung aus der Datenbank)
-  und SMTPS (PMG prüft Passwörter über Dovecot-Port 10001) sehen weiter nur
-  die Edge-IP.
+  sieht weiter nur die Edge-IP.
 
 fail2ban ist bewusst nicht installiert: CrowdSec deckt sshd ab, ein zweites
 Sperrsystem würde nur doppelt zählen.

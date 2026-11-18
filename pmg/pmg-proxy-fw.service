@@ -1,0 +1,13 @@
+[Unit]
+Description=nft: PMG-Port 10465 (PROXY-Protokoll) nur fuer edge-traefik
+Before=postfix.service
+After=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/rosenweg/pmg-proxy-fw.nft
+ExecStop=/usr/sbin/nft delete table inet rw_pmg_proxy
+
+[Install]
+WantedBy=multi-user.target

@@ -1,10 +1,10 @@
 #!/usr/sbin/nft -f
 # Edge CT 245: Syslog-Eingang von CrowdSec (4514/udp+tcp) nur fuer
-# freigegebene Hosts: Authentik (100.64.2.37), Mailcow (100.64.2.33).
+# freigegebene Hosts: Authentik (100.64.2.37), Mailcow (100.64.2.33), PMG (100.64.2.31).
 table inet rw_crowdsec_syslog
 delete table inet rw_crowdsec_syslog
 table inet rw_crowdsec_syslog {
-	set erlaubt4 { type ipv4_addr; elements = { 100.64.2.37, 100.64.2.33 } }
+	set erlaubt4 { type ipv4_addr; elements = { 100.64.2.37, 100.64.2.33, 100.64.2.31 } }
 	chain input {
 		type filter hook input priority filter - 5; policy accept;
 		meta l4proto { tcp, udp } th dport 4514 ip saddr @erlaubt4 accept

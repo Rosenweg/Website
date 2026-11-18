@@ -139,3 +139,21 @@ selbst nennt (`/api/email/quota`); weichen beide ab, zählt SMTP2GO.
 scp pmg-usage-tracker.py root@100.64.2.21:/tmp/
 ssh root@100.64.2.21 'pct push 230 /tmp/pmg-usage-tracker.py /usr/local/sbin/pmg-usage-tracker.py --perms 755'
 ```
+
+## Echte Client-IP und CrowdSec (seit 18.11.2026)
+
+| Datei | Ziel auf PMG | Zweck |
+|---|---|---|
+| `pmg-restore-rosenweg.sh` | `/usr/local/sbin/` | hält den Rosenweg-Block in `master.cf` auf Sollstand (Submission 587, SMTPS 465, **10465** mit PROXY-Protokoll); ersetzt abweichende Blöcke, prüft mit `postfix check`. Ausgelöst von `pmg-restore-rosenweg.path` bei jeder Änderung an `master.cf` (z. B. `pmgconfig sync` beim Start). |
+| `pmg-proxy-fw.nft`, `.service` | `/etc/rosenweg/`, `/etc/systemd/system/` | Port 10465 nur für edge-traefik (100.64.2.40) — wer dorthin darf, kann im PROXY-Kopf jede Absenderadresse angeben |
+| `pmg-crowdsec-melder.py`, `.service` | `/usr/local/sbin/`, `/etc/systemd/system/` | meldet SASL-Fehlanmeldungen aus `/var/log/mail.log` (nur IP) per Syslog an CrowdSec auf dem Edge |
+| `pmg-crowdsec-sperre.nft`, `.service` | `/etc/rosenweg/`, `/etc/systemd/system/` | Sets `crowdsec-blacklists`/`crowdsec6-blacklists` und Regel: gesperrte Adressen nur auf **465/587** verwerfen; Port 25 bleibt unberührt |
+
+Der Bouncer `crowdsec-firewall-bouncer-nftables` (Paketquelle packagecloud,
+`bookworm`) läuft mit `set-only: true` und `api_url: http://100.64.2.40:8080/`;
+er füllt nur die Sets, die Regel liefert `pmg-crowdsec-sperre.nft`. Schlüssel:
+auf dem Edge `cscli bouncers add pmg-bouncer -o raw`, in
+`/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml` (0600).
+
+Submission 587 kommt direkt vom UDM (echte IP ohne PROXY); SMTPS über den Edge
+kommt auf 10465 (`syslog_name=postfix/smtps-edge`).
