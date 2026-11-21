@@ -31,7 +31,8 @@ lassen sich auf `tuerschilder.html` über ✏️ direkt im Schild ändern. Gespe
 die Vorlage). Erlaubt sind nur Text sowie `<strong>`, `<b>`, `<em>`, `<br>`. Der Standort des Raums wird
 beim Speichern zu `{{ORT}}`, damit Vorgaben je Typ in jedem Raum stimmen.
 
-Steht im Kopf «STWEG <n>» und hat diese STWEG ein eigenes Wappen (`STWEG_LOGOS` in
+Die Gemeinschaft (`kopf-name`) wird aus einer Liste gewählt (Kooperation, STWEG 1–7 aus
+`site-config.json`, MEG), nicht getippt. Steht dort «STWEG <n>» und hat diese STWEG ein eigenes Wappen (`STWEG_LOGOS` in
 `api/routes/raum-qr.js`, derzeit STWEG 3 und 6), ersetzt es das Rosenweg-Wappen.
 
 ## Neue Vorlage
