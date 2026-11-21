@@ -221,14 +221,49 @@
                 color-adjust: exact !important;
             }
         }
+    
+        /* Kopf im Rosenweg-Design (wie Deckblatt Druckauftrag und Aushang) */
+        .header.rw {
+            background: white;
+            color: #000;
+            text-align: left;
+            padding: 4.5mm 7mm 4mm;
+            box-shadow: 0 2mm 6mm rgba(0, 0, 0, 0.1);
+        }
+        .header.rw .rw-kopf {
+            display: flex;
+            align-items: center;
+            gap: 5mm;
+            border-bottom: 1mm solid #c41e1e;
+            padding-bottom: 3.5mm;
+            margin-bottom: 3mm;
+        }
+        .header.rw .rw-kopf img { width: 16mm; height: 16mm; }
+        .header.rw .rw-name { font-family: Arial, Helvetica, sans-serif; font-size: 18pt; font-weight: 700; color: #000; }
+        .header.rw .rw-ort { font-size: 11pt; color: #555; margin-top: 1mm; }
+        .header.rw h1 {
+            color: #c41e1e;
+            font-size: 26pt;
+            font-weight: 800;
+            margin: 0;
+            text-transform: none;
+            letter-spacing: -0.3pt;
+            line-height: 1.1;
+        }
     </style>
 </head>
 <body>
     <div class="page">
         <!-- Header -->
-        <div class="header">
+        <div class="header rw">
+            <div class="rw-kopf">
+                <img src="https://www.rosenweg4303.ch/logo-rosenweg.png" alt="Rosenweg">
+                <div>
+                    <div class="rw-name">MEG Rosenweg</div>
+                    <div class="rw-ort">4303 Kaiseraugst</div>
+                </div>
+            </div>
             <h1>🚗 Tiefgarage</h1>
-            <p>MEG - Rosenweg</p>
         </div>
 
         <!-- Warning -->
