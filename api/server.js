@@ -656,13 +656,14 @@ function isDocPathAllowed(filePath, groups) {
 }
 
 // Unterordner, die eigene Routen schreiben und ausliefern (Auslagen-Belege,
-// Reklamationsfotos, Unterschriftenlisten-PDFs, Anzeigen): lesen/schreiben
+// Reklamationsfotos, Unterschriftenlisten-PDFs, Anzeigen, Deckblaetter der
+// Druckauftraege mit Namen/Adressen): lesen/schreiben
 // ueber die Dokumenten-API nur Technik/Praesident – sonst lesbar fuer alle
 // bzw. faelschbar. Brief-Fotos (Empfaengeradressen) lesen nur Ausschuss.
 // Grundbuch-Auszuege (allgemein/grundbuch-bilder, Namen+Adressen) nur ueber
 // /api/grundbuch/.../bild mit dessen Rechtepruefung.
 // Pruefung segmentweise, case-insensitiv, leere/'.'-Segmente uebersprungen.
-const DOC_SPERR_ORDNER = new Set(['auslagen', 'anzeigen', 'reklamationen', 'unterschriftenlisten', 'grundbuch-bilder']);
+const DOC_SPERR_ORDNER = new Set(['auslagen', 'anzeigen', 'reklamationen', 'unterschriftenlisten', 'grundbuch-bilder', 'druckauftraege']);
 const DOC_AUSSCHUSS_ORDNER = new Set(['fotos_von_versendeten_briefen']);
 function docSperrOrdner(filePath) {
   const seg = String(filePath).toLowerCase().split('/').filter(x => x && x !== '.');
@@ -5354,6 +5355,17 @@ async function pollGmailForVerteiler() {
 
                 if (pdfResp.ok) {
                   const pdfBuf = Buffer.from(await pdfResp.arrayBuffer());
+                  // Deckblatt zusaetzlich in «Dokumente» ablegen (allgemein/druckauftraege/<Jahr>/).
+                  // Enthaelt Namen und Adressen -> Ordner ist gesperrt (nur Technik/Praesident, DOC_SPERR_ORDNER).
+                  try {
+                    const jetzt = new Date();
+                    const tag = jetzt.toLocaleString('sv-SE', { timeZone: 'Europe/Zurich' }).slice(0, 16).replace(' ', '_').replace(':', '');
+                    const wer = String(recipientInfo?.name || recipientTag || 'allgemein').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+                      .replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'allgemein';
+                    const dir = pathModule.join(DOCS_PATH, 'allgemein', 'druckauftraege', String(jetzt.getFullYear()));
+                    await fs.mkdir(dir, { recursive: true });
+                    await fs.writeFile(pathModule.join(dir, `${tag}_${wer}_${jobToken.slice(0, 8)}.pdf`), pdfBuf);
+                  } catch (e) { console.error(`[Print] Deckblatt-Ablage fehlgeschlagen: ${e.message}`); }
                   const coverResp = await fetch(`${PRINT_API}/print/${printer}`, {
                     method: 'POST',
                     body: pdfBuf,
@@ -29972,6 +29984,8 @@ initDB()
       startConnectionPolling();
       // SSH: GitHub-Schluessel periodisch abgleichen
       startSshGithubAbgleich();
+      // Mitgelieferte Dokumente (Beispielmappe) in die Ablage, siehe lib/ablage.js
+      setTimeout(() => require('./lib/ablage').ablageAbgleichen(), 20 * 1000);
       // Cleanup expired sessions every hour
       activeIntervals.push(setInterval(cleanupExpiredSessions, 60 * 60 * 1000));
       setTimeout(cleanupExpiredSessions, 30 * 1000); // first cleanup after 30s

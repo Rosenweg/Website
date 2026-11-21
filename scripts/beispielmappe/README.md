@@ -9,6 +9,12 @@ Dokumentart (Steckbrief plus Muster).
 `musterdaten.json`. E-Mail-Adressen nutzen die reservierte Endung `.example`;
 IP-Adressen stammen aus Dokumentationsbereichen (RFC 3849 / RFC 5737).
 
+## Ablage in «Dokumente»
+
+Das PDF kommt mit dem API-Image mit (`api/Dockerfile`, `.dockerignore`) und wird beim Start
+der API nach `allgemein/verwaltung2026/Beispielmappe-Rosenweg.pdf` kopiert, wenn es sich
+geändert hat (`api/lib/ablage.js`). Neu erzeugen, mergen, ausrollen – fertig.
+
 ## Aufruf
 
 ```bash

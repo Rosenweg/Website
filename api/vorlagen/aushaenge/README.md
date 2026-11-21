@@ -23,6 +23,12 @@ Die Vorlagen enthalten Platzhalter `{{QR:<thema>}}`. Beim Druck über
 Die Vorlagen liegen bewusst im API-Image und nicht im öffentlichen Docroot:
 Das Repo ist öffentlich, Tokens dürfen nie in Dateien stehen.
 
+## Ablage in «Dokumente»
+
+Jeder Druck (ohne ✏️) wird zusätzlich als PDF abgelegt:
+`<ordner>/schilder/<typ>-<kurz>-<vorlage>.pdf`, Ordner nach der Gemeinschaft im Kopf
+(STWEG n → `stwegN`, MEG → `meg`, sonst `allgemein`). Die neueste Fassung ersetzt die alte.
+
 ## Texte bearbeiten
 
 Elemente mit `data-feld` (Kopf: Gemeinschaft `kopf-name`, Ortszeile `kopf-ort`, Titel `titel`; Warnkasten, Listen `boxN-liste`, QR-Titel/-Texte, Fusszeile)
