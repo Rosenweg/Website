@@ -91,8 +91,9 @@ def band(img, zahl, text):
         bb = d.textbbox((0, 0), t, font=f)
         d.text((CX - (bb[0] + bb[2]) / 2, y_mitte - (bb[1] + bb[3]) / 2), t, font=f, fill=(255, 255, 255, 255))
     if zahl:
+        # Hausvariante wie STWEG 3/6: Hausnummer gross, «STWEG <n>» am gewohnten Ort
         mittig(zahl, schrift(132), 650)
-        mittig(text, schrift(66), 740)
+        mittig(text, schrift(74), 738)
     else:
         mittig(text, schrift(74), 738)
 
