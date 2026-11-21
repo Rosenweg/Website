@@ -59,10 +59,10 @@ const RAEUME = {
     teile: [
       { id: 'ansprechpartner', titel: '👤 Ansprechpartner', bloecke: [kontakt('technik'), kontakt('verwaltung')] },
       { id: 'servicefirma', titel: '🔧 Liftfirma', bloecke: [
-        { t: 'text', html: '<p>Wartung und Störungsbehebung erfolgen durch die beauftragte Liftfirma. Aufträge an die Liftfirma laufen über den <strong>Technischen Dienst</strong> bzw. die Verwaltung.</p>' },
+        { t: 'text', html: '<p>Wartung und Störungsbehebung der Lifte erfolgen durch <strong>Otis</strong>. Aufträge an Otis laufen über den <strong>Technischen Dienst</strong> bzw. die Verwaltung.</p>' },
         kontakt('technik')] },
       { id: 'notfall', titel: '🚨 Notfall', bloecke: [
-        { t: 'text', html: '<p><strong>Im Lift eingeschlossen?</strong> Ruhe bewahren und die <strong>Notruftaste im Lift</strong> drücken; sie ist direkt mit der Notrufzentrale der Liftfirma verbunden. Bei Rauch oder Feuer: Feuerwehr 118.</p>' },
+        { t: 'text', html: '<p><strong>Im Lift eingeschlossen?</strong> Ruhe bewahren und die <strong>Notruftaste im Lift</strong> drücken; sie ist direkt mit der Notrufzentrale von Otis verbunden. Bei Rauch oder Feuer: Feuerwehr 118.</p>' },
         { t: 'notruf' }] },
     ],
   },
@@ -72,7 +72,7 @@ const RAEUME = {
       { id: 'ansprechpartner', titel: '👤 Ansprechpartner', bloecke: [kontakt('technik')] },
       { id: 'dokumentation', titel: '📄 Dokumentation', bloecke: [unterlagen('Netzwerkplan und Anlagendokumentation')] },
       { id: 'support', titel: '🛠 Störungen & Support', bloecke: [
-        { t: 'text', html: '<p>Internet, TV oder Telefon gestört? Bitte zuerst den <strong>Technischen Dienst</strong> informieren; er klärt, ob die Hausanlage oder der Anbieter zuständig ist.</p>' },
+        { t: 'text', html: '<p>Die Erschliessung der Gebäude (Glasfaser) stammt von der <strong>Swisscom</strong>.</p><p>Internet, TV oder Telefon gestört? Bitte zuerst den <strong>Technischen Dienst</strong> informieren; er klärt, ob die Hausanlage, die Swisscom-Erschliessung oder der eigene Anbieter zuständig ist.</p>' },
         kontakt('technik'), { t: 'defekt' }] },
     ],
   },
