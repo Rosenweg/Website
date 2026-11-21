@@ -129,14 +129,12 @@
                 const wohnungen = (d.snapshot.wohnungen || []).map(w => `
                     <tr>
                         <td class="px-3 py-2 font-semibold">${escapeHtml(w.bezeichnung)}</td>
-                        <td class="px-3 py-2">${escapeHtml((w.eigentuemer || []).join(', '))}${w.verwalter && w.verwalter.length ? `<br><span class="text-xs text-gray-500">↳ Verwalter: ${escapeHtml(w.verwalter.join(', '))}</span>` : ''}</td>
+                        <td class="px-3 py-2">${escapeHtml(String(w.eigentuemer_anzahl ?? '—'))}</td>
                         <td class="px-3 py-2 text-center font-mono text-sm">${escapeHtml(w.wertquote || '—')}</td>
-                        <td class="px-3 py-2 text-xs text-gray-600">${(w.korrespondenz_adressen || []).map(escapeHtml).join('; ') || '<em>—</em>'}</td>
                     </tr>`).join('');
                 const zeichner = (d.snapshot.zeichnungsberechtigte || []).map(z => `
                     <tr>
                         <td class="px-3 py-2 font-semibold">${escapeHtml(z.funktion || '')}</td>
-                        <td class="px-3 py-2">${escapeHtml(z.name || '')}</td>
                     </tr>`).join('');
 
                 result.className = '';
@@ -156,26 +154,26 @@
                         </dl>
                     </div>
                     <div class="bg-white border rounded-xl p-5 mb-4 overflow-x-auto">
-                        <h3 class="font-semibold text-gray-800 mb-2">Eigentümer-Stand zum Generierungszeitpunkt</h3>
-                        <p class="text-xs text-gray-500 mb-3">Vergleichen Sie diese Daten mit Ihrer ausgedruckten Liste — stimmen alle ${d.snapshot.wohnungen?.length || 0} Einträge überein, ist die Liste unverändert.</p>
+                        <h3 class="font-semibold text-gray-800 mb-2">Stand zum Generierungszeitpunkt</h3>
+                        <p class="text-xs text-gray-500 mb-3">Vergleichen Sie Einheiten, Anzahl Eigentümer und Wertquoten mit Ihrer ausgedruckten Liste — stimmen alle ${d.snapshot.wohnungen?.length || 0} Einträge überein, ist die Liste unverändert. Namen und Adressen werden hier aus Datenschutzgründen nicht angezeigt.</p>
                         <table class="w-full text-sm">
                             <thead class="bg-gray-50 text-left text-xs uppercase tracking-wider text-gray-600">
-                                <tr><th class="px-3 py-2">Einheit</th><th class="px-3 py-2">Eigentümer</th><th class="px-3 py-2 text-center">Wertquote</th><th class="px-3 py-2">Korrespondenz</th></tr>
+                                <tr><th class="px-3 py-2">Einheit</th><th class="px-3 py-2">Anzahl Eigentümer</th><th class="px-3 py-2 text-center">Wertquote</th></tr>
                             </thead>
                             <tbody class="divide-y">${wohnungen}</tbody>
                             <tfoot class="bg-red-50 font-semibold">
-                                <tr><td class="px-3 py-2">TOTAL</td><td class="px-3 py-2">${d.snapshot.total_units || 0} Einheiten</td><td class="px-3 py-2 text-center font-mono">${d.snapshot.total_wq || 0}/1000</td><td></td></tr>
+                                <tr><td class="px-3 py-2">TOTAL</td><td class="px-3 py-2">${d.snapshot.total_units || 0} Einheiten</td><td class="px-3 py-2 text-center font-mono">${d.snapshot.total_wq || 0}/1000</td></tr>
                             </tfoot>
                         </table>
                     </div>
                     ${zeichner ? `
                     <div class="bg-white border rounded-xl p-5 mb-4">
                         <h3 class="font-semibold text-gray-800 mb-2">Zeichnungsberechtigte</h3>
-                        <table class="w-full text-sm"><thead class="bg-gray-50 text-left text-xs uppercase text-gray-600"><tr><th class="px-3 py-2">Funktion</th><th class="px-3 py-2">Name</th></tr></thead><tbody class="divide-y">${zeichner}</tbody></table>
+                        <table class="w-full text-sm"><thead class="bg-gray-50 text-left text-xs uppercase text-gray-600"><tr><th class="px-3 py-2">Funktion</th></tr></thead><tbody class="divide-y">${zeichner}</tbody></table>
                     </div>` : ''}
                     <div class="bg-white border rounded-xl p-5">
                         <h3 class="font-semibold text-gray-800 mb-2">Original-PDF</h3>
-                        <p class="text-sm text-gray-600 mb-3">Falls Teile des Ausdrucks verloren gegangen sind, kann das Original-PDF inhaltlich identisch erneut bezogen werden:</p>
+                        <p class="text-sm text-gray-600 mb-3">Das Original-PDF (mit Namen und Adressen) steht nur angemeldeten Berechtigten zur Verfügung:</p>
                         <div class="flex flex-wrap gap-2">
                             <a href="/api/unterschriftenliste/snapshot/${encodeURIComponent(d.hash)}.pdf" class="inline-block bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-medium text-sm">📄 Original-PDF herunterladen</a>
                             <a href="/api/unterschriftenliste/snapshot/${encodeURIComponent(d.hash)}.pdf?preview=1" target="_blank" class="inline-block bg-gray-100 hover:bg-gray-200 text-gray-800 border px-4 py-2 rounded-lg font-medium text-sm">👁 Im Browser ansehen</a>
