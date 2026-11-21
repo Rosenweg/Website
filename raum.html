@@ -116,6 +116,12 @@ async function block(b) {
         case 'kontakt': return B[b.wer] ? await B[b.wer]() : '';
         case 'notruf': return B.notruf();
         case 'defekt': return B.defekt();
+        case 'personen': {
+            if (!b.personen?.length) return `<div class="rounded-lg border p-4"><p class="font-bold text-gray-900">${ESC(b.titel)}</p>
+                <p class="text-sm text-gray-600">Schlüssel erhalten Sie über den Technischen Dienst.</p></div>`;
+            return `<div class="rounded-lg border p-4"><p class="font-bold text-gray-900 mb-2">${ESC(b.titel)}</p>
+                ${b.personen.map(x => `<p>${ESC(x.name)}${x.telefon ? ` · ${tel(x.telefon)}` : ''}</p>`).join('')}</div>`;
+        }
         case 'link': return `<a href="${ESC(b.href)}" class="inline-block rounded-lg px-4 py-3 font-semibold text-white bg-green-700">${ESC(b.text)}</a>`;
         default: return '';
     }

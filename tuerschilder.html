@@ -29,6 +29,11 @@
         (Ansprechpartner, Zugang, Notfall). <strong>Drucken</strong> öffnet die fertige A4-Vorlage; im Browser
         mit «Drucken» ausgeben. <strong>Codes erneuern</strong> macht alle bisherigen Ausdrucke dieses Raums ungültig.
       </p>
+      <p class="text-sm text-gray-600 mb-5 bg-amber-50 border border-amber-200 rounded-lg p-3">
+        🔑 <strong>Schlüsselhalter</strong> werden in Authentik gepflegt: Personen in die Gruppe des Raums aufnehmen
+        (Spalte «Gruppe»). Gezeigt werden Name und Telefon (Attribut <code>telefon</code>) – nur für Leute, die den QR-Code scannen.
+        Änderungen erscheinen nach spätestens 5 Minuten.
+      </p>
 
       <div class="bg-white rounded-lg shadow overflow-hidden mb-6">
         <h2 class="font-semibold text-gray-800 px-4 pt-4">Vorlagen</h2>
@@ -44,7 +49,7 @@
         <h2 class="font-semibold text-gray-800 px-4 pt-4">Räume und Codes</h2>
         <table class="w-full text-sm mt-2">
           <thead class="bg-gray-50 text-gray-500 text-xs uppercase">
-            <tr><th class="text-left px-4 py-2">Raum</th><th class="text-left px-4 py-2">Codes gültig seit</th><th class="px-4 py-2"></th></tr>
+            <tr><th class="text-left px-4 py-2">Raum</th><th class="text-left px-4 py-2">Gruppe Schlüsselhalter</th><th class="text-left px-4 py-2">Codes gültig seit</th><th class="px-4 py-2"></th></tr>
           </thead>
           <tbody id="raeume"></tbody>
         </table>
@@ -80,6 +85,7 @@
     document.getElementById('raeume').innerHTML = d.raeume.map(x => `
       <tr class="border-t">
         <td class="px-4 py-2 font-medium text-gray-800">${esc(x.titel)}</td>
+        <td class="px-4 py-2 text-gray-600"><code>schluessel-${esc(x.raum)}</code></td>
         <td class="px-4 py-2 text-gray-600">${esc(datum(x.aktiv_seit))}</td>
         <td class="px-4 py-2 text-right"><button onclick="erneuern('${esc(x.raum)}', '${esc(x.titel)}')" class="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-800">🔄 Codes erneuern</button></td>
       </tr>`).join('');

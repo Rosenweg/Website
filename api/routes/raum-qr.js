@@ -16,6 +16,7 @@ const QRCode = require('qrcode');
 const { pool } = require('../lib/db');
 const { authMiddleware, requirePermission } = require('../middleware/auth');
 const { SITE_URL } = require('../lib/config');
+const { authentikAPI } = require('../lib/auth');
 
 const router = express.Router();
 const VORLAGEN_DIR = path.join(__dirname, '..', 'vorlagen', 'aushaenge');
@@ -23,18 +24,20 @@ const VORLAGEN_DIR = path.join(__dirname, '..', 'vorlagen', 'aushaenge');
 // ─── Inhalte je Raum ────────────────────────────────────────────────
 // Bausteine: text (HTML, nur von uns geschrieben), liste, kontakt
 // (technik|verwaltung|meg, Daten laedt die Seite aus den oeffentlichen
-// APIs), notruf, defekt, link. Die Abschnitts-IDs sind die "themen", fuer
+// APIs), notruf, defekt, link, schluessel (wird in /info zu 'personen'). Die Abschnitts-IDs sind die "themen", fuer
 // die je ein Token erzeugt wird; sie entsprechen den {{QR:<thema>}} der Vorlagen.
 const zugang = raum => ({ t: 'text', html: `<p>Der ${raum} ist abgeschlossen. Zutritt nur für Hauswart, berechtigte Bewohnerinnen und Bewohner sowie beauftragte Servicetechniker.</p><p>Schlüssel und Zutrittsberechtigungen vergibt der <strong>Technische Dienst</strong>. Bitte Schlüssel nicht weitergeben und die Tür nach dem Verlassen immer verschliessen.</p>` });
 const unterlagen = was => ({ t: 'text', html: `<p>${was} sind aus Sicherheitsgründen nicht öffentlich. Berechtigte Fachpersonen erhalten sie beim <strong>Technischen Dienst</strong>.</p>` });
 const kontakt = wer => ({ t: 'kontakt', wer });
+// Schluesselhalter: Mitglieder der Authentik-Gruppe schluessel-<raum> (Name + Attribut telefon).
+const schluessel = { t: 'schluessel' };
 
 const RAEUME = {
   heizung: {
     titel: '🔥 Heizungs- und Technikraum', sub: 'Zentrale Heizungsanlage für alle 8 Gebäude',
     teile: [
       { id: 'ansprechpartner', titel: '👤 Ansprechpartner', bloecke: [kontakt('technik'), kontakt('verwaltung')] },
-      { id: 'zugang', titel: '🔑 Schlüssel & Zugang', bloecke: [zugang('Heizungs- und Technikraum')] },
+      { id: 'zugang', titel: '🔑 Schlüssel & Zugang', bloecke: [zugang('Heizungs- und Technikraum'), schluessel] },
       { id: 'notfall', titel: '🚨 Notfall & Service', bloecke: [
         { t: 'text', html: '<p><strong>Heizungsausfall, Wasseraustritt oder Gasgeruch:</strong> bei Gefahr sofort die Feuerwehr, sonst den Technischen Dienst anrufen.</p>' },
         { t: 'notruf' }, kontakt('technik'), { t: 'defekt' }] },
@@ -51,13 +54,13 @@ const RAEUME = {
         { t: 'link', href: 'https://stweg3.rosenweg4303.ch/#waschkueche', text: 'Waschküche reservieren' }] },
       { id: 'zugang', titel: '🔑 Schlüssel & Zugang', bloecke: [
         { t: 'text', html: '<p>Zugang und Schlüssel für die Waschküche erhalten Bewohnerinnen und Bewohner über den <strong>Technischen Dienst</strong>. Defekte an Maschinen bitte sofort melden.</p>' },
-        { t: 'defekt' }] },
+        schluessel, { t: 'defekt' }] },
     ],
   },
   lift: {
     titel: '🛗 Liftmaschinenraum', sub: 'Rosenweg 7–43 · Kaiseraugst',
     teile: [
-      { id: 'ansprechpartner', titel: '👤 Ansprechpartner', bloecke: [kontakt('technik'), kontakt('verwaltung')] },
+      { id: 'ansprechpartner', titel: '👤 Ansprechpartner', bloecke: [kontakt('technik'), kontakt('verwaltung'), schluessel] },
       { id: 'servicefirma', titel: '🔧 Liftfirma', bloecke: [
         { t: 'text', html: '<p>Wartung und Störungsbehebung der Lifte erfolgen durch <strong>Otis</strong>. Aufträge an Otis laufen über den <strong>Technischen Dienst</strong> bzw. die Verwaltung.</p>' },
         kontakt('technik')] },
@@ -69,7 +72,7 @@ const RAEUME = {
   telekom: {
     titel: '📡 Telekommunikation', sub: 'Zentrale Telekommunikationsanlage für alle 8 Gebäude',
     teile: [
-      { id: 'ansprechpartner', titel: '👤 Ansprechpartner', bloecke: [kontakt('technik')] },
+      { id: 'ansprechpartner', titel: '👤 Ansprechpartner', bloecke: [kontakt('technik'), schluessel] },
       { id: 'dokumentation', titel: '📄 Dokumentation', bloecke: [unterlagen('Netzwerkplan und Anlagendokumentation')] },
       { id: 'support', titel: '🛠 Störungen & Support', bloecke: [
         { t: 'text', html: '<p>Die Erschliessung der Gebäude (Glasfaser) stammt von der <strong>Swisscom</strong>.</p><p>Internet, TV oder Telefon gestört? Bitte zuerst den <strong>Technischen Dienst</strong> informieren; er klärt, ob die Hausanlage, die Swisscom-Erschliessung oder der eigene Anbieter zuständig ist.</p>' },
@@ -79,7 +82,7 @@ const RAEUME = {
   hauptverteilung: {
     titel: '⚡ Hauptverteilung', sub: 'Elektrische Hauptverteilung für alle 8 Gebäude',
     teile: [
-      { id: 'ansprechpartner', titel: '👤 Ansprechpartner', bloecke: [kontakt('technik'), kontakt('verwaltung')] },
+      { id: 'ansprechpartner', titel: '👤 Ansprechpartner', bloecke: [kontakt('technik'), kontakt('verwaltung'), schluessel] },
       { id: 'schema', titel: '📐 Schaltschema', bloecke: [unterlagen('Verteilplan und Schaltschema'),
         { t: 'text', html: '<p><strong>Arbeiten an der Anlage nur durch konzessionierte Elektrofachpersonen.</strong></p>' }] },
       { id: 'notfall', titel: '🚨 Notfall', bloecke: [
@@ -90,7 +93,7 @@ const RAEUME = {
   tiefgarage: {
     titel: '🚗 Tiefgarage', sub: 'MEG Rosenweg', org: 'MEG Rosenweg',
     teile: [
-      { id: 'ansprechpartner', titel: '👤 Ansprechpartner', bloecke: [kontakt('meg'), kontakt('technik')] },
+      { id: 'ansprechpartner', titel: '👤 Ansprechpartner', bloecke: [kontakt('meg'), kontakt('technik'), schluessel] },
       { id: 'hausordnung', titel: '📋 Hausordnung', bloecke: [
         { t: 'text', html: '<p><strong>Erlaubt</strong></p>' },
         { t: 'liste', items: ['Parkieren von Fahrzeugen', 'Fahrzeugpflege', 'Fahrräder und E-Bikes'] },
@@ -164,6 +167,31 @@ async function tokensFuer(raum, wer) {
   return map;
 }
 
+// Mitglieder der Gruppe schluessel-<raum> aus Authentik, 5 Minuten zwischengespeichert
+// (wie /api/public/technik). Nur Name und Telefon; ohne Gruppe/Mitglieder: leere Liste.
+const halterCache = { at: 0, data: null };
+async function schluesselhalter(raum) {
+  try {
+    if (!halterCache.data || Date.now() - halterCache.at > 5 * 60 * 1000) {
+      const [g, u] = await Promise.all([
+        authentikAPI('GET', '/core/groups/?page_size=500&name__startswith=schluessel-'),
+        authentikAPI('GET', '/core/users/?page_size=500&is_active=true'),
+      ]);
+      halterCache.data = { groups: g.results || [], users: u.results || [] };
+      halterCache.at = Date.now();
+    }
+    const grp = halterCache.data.groups.find(x => x.name.toLowerCase() === `schluessel-${raum}`);
+    if (!grp) return [];
+    return halterCache.data.users
+      .filter(x => x.is_active && (x.groups_obj ? x.groups_obj.map(o => o.pk) : (x.groups || [])).includes(grp.pk))
+      .map(x => ({ name: x.name, telefon: x.attributes?.telefon || null }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'de'));
+  } catch (e) {
+    console.error('[raum-qr-schluessel]', e.message);
+    return [];
+  }
+}
+
 const qrUrl = token => `${SITE_URL}/raum.html?t=${token}`;
 
 // GET /api/raum-qr/info/:token — oeffentlich, aber nur mit gueltigem Token.
@@ -176,8 +204,10 @@ router.get('/info/:token', async (req, res) => {
     const row = r.rows[0];
     if (!row || !RAEUME[row.raum]) return res.status(404).json({ error: 'Ungültiger Code' });
     const { titel, sub, org, teile } = RAEUME[row.raum];
+    const halter = await schluesselhalter(row.raum);
+    const mitHaltern = teile.map(t => ({ ...t, bloecke: t.bloecke.map(bl => bl.t === 'schluessel' ? { t: 'personen', titel: '🔑 Schlüsselhalter', personen: halter } : bl) }));
     res.set('Cache-Control', 'no-store');
-    res.json({ raum: row.raum, thema: row.thema, titel, sub, org: org || null, teile });
+    res.json({ raum: row.raum, thema: row.thema, titel, sub, org: org || null, teile: mitHaltern });
   } catch (e) { console.error('[raum-qr-info]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 

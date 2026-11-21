@@ -15,6 +15,8 @@ Die Vorlagen enthalten Platzhalter `{{QR:<thema>}}`. Beim Druck über
   ohne Token nur «Bitte QR-Code scannen».
 - «Codes erneuern» macht alle alten Ausdrucke eines Raums ungültig.
 - Inhalte der Raumseiten: `RAEUME` in `api/routes/raum-qr.js`.
+- Schlüsselhalter: Mitglieder der Authentik-Gruppe `schluessel-<raum>` (heizung, waschkueche,
+  lift, telekom, hauptverteilung, tiefgarage); angezeigt werden Name und Attribut `telefon`.
 
 Die Vorlagen liegen bewusst im API-Image und nicht im öffentlichen Docroot:
 Das Repo ist öffentlich, Tokens dürfen nie in Dateien stehen.
