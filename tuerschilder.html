@@ -30,28 +30,37 @@
         mit «Drucken» ausgeben. <strong>Codes erneuern</strong> macht alle bisherigen Ausdrucke dieses Raums ungültig.
       </p>
       <p class="text-sm text-gray-600 mb-5 bg-amber-50 border border-amber-200 rounded-lg p-3">
-        🔑 <strong>Schlüsselhalter</strong> werden in Authentik gepflegt: Personen in die Gruppe des Raums aufnehmen
-        (Spalte «Gruppe»). Gezeigt werden Name und Telefon (Attribut <code>telefon</code>) – nur für Leute, die den QR-Code scannen.
+        🔑 <strong>Schlüsselhalter</strong> werden in Authentik gepflegt: Gruppe mit dem Namen aus der Spalte
+        «Gruppe Schlüsselhalter» anlegen und die Personen aufnehmen. Gezeigt werden Name und Telefon (Attribut <code>telefon</code>) – nur für Leute, die den QR-Code scannen.
         Änderungen erscheinen nach spätestens 5 Minuten.
       </p>
 
-      <div class="bg-white rounded-lg shadow overflow-hidden mb-6">
-        <h2 class="font-semibold text-gray-800 px-4 pt-4">Vorlagen</h2>
-        <table class="w-full text-sm mt-2">
-          <thead class="bg-gray-50 text-gray-500 text-xs uppercase">
-            <tr><th class="text-left px-4 py-2">Vorlage</th><th class="text-left px-4 py-2">Art</th><th class="px-4 py-2"></th></tr>
-          </thead>
-          <tbody id="vorlagen"><tr><td colspan="3" class="px-4 py-3 text-gray-400">Lädt …</td></tr></tbody>
-        </table>
+      <div class="bg-white rounded-lg shadow p-4 mb-5">
+        <h2 class="font-semibold text-gray-800 mb-3">Raum anlegen</h2>
+        <form id="neu" class="grid sm:grid-cols-4 gap-3 items-end">
+          <div>
+            <label class="block text-xs font-semibold text-gray-500 mb-1">Typ</label>
+            <select id="n-typ" class="w-full border rounded-lg px-3 py-2 text-sm bg-white"></select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-500 mb-1">Haus-Kurzname</label>
+            <input id="n-kurz" required maxlength="12" pattern="[a-z0-9]{1,12}" placeholder="z. B. r9" class="w-full border rounded-lg px-3 py-2 text-sm">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-500 mb-1">Standort (steht auf dem Schild)</label>
+            <input id="n-standort" required maxlength="200" placeholder="z. B. Rosenweg 9" class="w-full border rounded-lg px-3 py-2 text-sm">
+          </div>
+          <button class="px-4 py-2 rounded-lg text-white font-semibold" style="background:#c41e1e">+ Anlegen</button>
+        </form>
+        <p class="text-xs text-gray-500 mt-2">Gruppe für Schlüsselhalter: <code id="n-gruppe">schluessel-…</code></p>
       </div>
 
       <div class="bg-white rounded-lg shadow overflow-hidden">
-        <h2 class="font-semibold text-gray-800 px-4 pt-4">Räume und Codes</h2>
-        <table class="w-full text-sm mt-2">
+        <table class="w-full text-sm">
           <thead class="bg-gray-50 text-gray-500 text-xs uppercase">
-            <tr><th class="text-left px-4 py-2">Raum</th><th class="text-left px-4 py-2">Gruppe Schlüsselhalter</th><th class="text-left px-4 py-2">Codes gültig seit</th><th class="px-4 py-2"></th></tr>
+            <tr><th class="text-left px-4 py-2">Raum</th><th class="text-left px-4 py-2">Gruppe Schlüsselhalter</th><th class="text-left px-4 py-2">Codes seit</th><th class="px-4 py-2"></th></tr>
           </thead>
-          <tbody id="raeume"></tbody>
+          <tbody id="raeume"><tr><td colspan="4" class="px-4 py-3 text-gray-400">Lädt …</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -59,7 +68,7 @@
 
 <script>
   const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  const datum = d => d ? new Date(d).toLocaleDateString('de-CH') : 'noch keine (entstehen beim ersten Druck)';
+  const datum = d => d ? new Date(d).toLocaleDateString('de-CH') : 'noch keine (beim ersten Druck)';
 
   document.addEventListener('DOMContentLoaded', async () => {
     const u = await AuthentikAuth.init({ requireAuth: true });
@@ -69,43 +78,72 @@
     await load();
   });
 
+  let daten = null;
+  const gruppe = () => `schluessel-${document.getElementById('n-typ').value}-${document.getElementById('n-kurz').value.trim().toLowerCase() || '…'}`;
+
   async function load() {
     const r = await AuthentikAuth.apiFetch('/api/raum-qr');
     if (!r.ok) {
-      document.getElementById('vorlagen').innerHTML = `<tr><td colspan="3" class="px-4 py-3 text-red-600">Keine Berechtigung oder Fehler (${r.status})</td></tr>`;
+      document.getElementById('raeume').innerHTML = `<tr><td colspan="4" class="px-4 py-3 text-red-600">Keine Berechtigung oder Fehler (${r.status})</td></tr>`;
       return;
     }
-    const d = await r.json();
-    document.getElementById('vorlagen').innerHTML = d.vorlagen.map(v => `
-      <tr class="border-t">
-        <td class="px-4 py-2 font-medium text-gray-800">${esc(v.titel)}</td>
-        <td class="px-4 py-2 text-gray-600">${esc(v.art)}</td>
-        <td class="px-4 py-2 text-right"><button onclick="drucken('${esc(v.vorlage)}')" class="px-3 py-1 rounded text-white" style="background:#c41e1e">🖨 Drucken</button></td>
-      </tr>`).join('');
-    document.getElementById('raeume').innerHTML = d.raeume.map(x => `
-      <tr class="border-t">
-        <td class="px-4 py-2 font-medium text-gray-800">${esc(x.titel)}</td>
-        <td class="px-4 py-2 text-gray-600"><code>schluessel-${esc(x.raum)}</code></td>
-        <td class="px-4 py-2 text-gray-600">${esc(datum(x.aktiv_seit))}</td>
-        <td class="px-4 py-2 text-right"><button onclick="erneuern('${esc(x.raum)}', '${esc(x.titel)}')" class="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-800">🔄 Codes erneuern</button></td>
-      </tr>`).join('');
+    daten = await r.json();
+    const sel = document.getElementById('n-typ');
+    if (!sel.options.length) {
+      sel.innerHTML = daten.typen.map(t => `<option value="${esc(t.typ)}">${esc(t.titel)}</option>`).join('');
+      ['n-typ', 'n-kurz'].forEach(id => document.getElementById(id).addEventListener('input', () => { document.getElementById('n-gruppe').textContent = gruppe(); }));
+      document.getElementById('n-gruppe').textContent = gruppe();
+      document.getElementById('neu').addEventListener('submit', anlegen);
+    }
+    document.getElementById('raeume').innerHTML = daten.raeume.length ? daten.raeume.map(x => `
+      <tr class="border-t align-top">
+        <td class="px-4 py-2"><div class="font-medium text-gray-800">${esc(x.titel)}</div><div class="text-gray-500">${esc(x.standort)}</div></td>
+        <td class="px-4 py-2 text-gray-600"><code>${esc(x.gruppe)}</code></td>
+        <td class="px-4 py-2 text-gray-600">${esc(datum(x.codes_seit))}</td>
+        <td class="px-4 py-2 text-right space-y-1">
+          ${daten.vorlagen.filter(v => v.typ === x.typ).map(v => `<button onclick="drucken(${x.id}, '${esc(v.vorlage)}')" class="block w-full px-3 py-1 rounded text-white" style="background:#c41e1e">🖨 ${esc(v.titel)}</button>`).join('')}
+          <button onclick="erneuern(${x.id})" class="block w-full px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-800">🔄 Codes erneuern</button>
+          <button onclick="entfernen(${x.id})" class="block w-full px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-600">Entfernen</button>
+        </td>
+      </tr>`).join('') : '<tr><td colspan="4" class="px-4 py-3 text-gray-500">Noch keine Räume angelegt.</td></tr>';
   }
 
-  async function drucken(vorlage) {
+  const raumName = id => { const x = daten.raeume.find(r => r.id === id); return x ? `${x.titel} – ${x.standort}` : ''; };
+
+  async function anlegen(e) {
+    e.preventDefault();
+    const body = { typ: document.getElementById('n-typ').value, kurz: document.getElementById('n-kurz').value.trim().toLowerCase(),
+                   standort: document.getElementById('n-standort').value.trim() };
+    const r = await AuthentikAuth.apiFetch('/api/raum-qr/orte', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { alert(d.error || ('Fehler ' + r.status)); return; }
+    document.getElementById('n-kurz').value = ''; document.getElementById('n-standort').value = '';
+    document.getElementById('n-gruppe').textContent = gruppe();
+    await load();
+  }
+
+  async function drucken(id, vorlage) {
     // Fenster sofort öffnen (sonst blockiert der Popup-Blocker), Inhalt danach schreiben.
     const w = window.open('', '_blank');
     if (!w) { alert('Bitte Pop-ups für diese Seite erlauben.'); return; }
     w.document.write('<p style="font-family:sans-serif;padding:2em">Vorlage wird erstellt …</p>');
-    const r = await AuthentikAuth.apiFetch('/api/raum-qr/druck/' + encodeURIComponent(vorlage));
+    const r = await AuthentikAuth.apiFetch(`/api/raum-qr/druck/${id}/${encodeURIComponent(vorlage)}`);
     if (!r.ok) { w.document.body.innerHTML = '<p style="font-family:sans-serif;padding:2em;color:#b91c1c">Fehler ' + r.status + '</p>'; return; }
     const html = await r.text();
     w.document.open(); w.document.write(html); w.document.close();
     load();
   }
 
-  async function erneuern(raum, titel) {
-    if (!confirm(`Codes für «${titel}» erneuern?\n\nAlle bisher gedruckten Schilder und Poster dieses Raums funktionieren danach nicht mehr und müssen neu gedruckt werden.`)) return;
-    const r = await AuthentikAuth.apiFetch('/api/raum-qr/' + encodeURIComponent(raum) + '/erneuern', { method: 'POST' });
+  async function erneuern(id) {
+    if (!confirm(`Codes für «${raumName(id)}» erneuern?\n\nAlle bisher gedruckten Schilder und Poster dieses Raums funktionieren danach nicht mehr und müssen neu gedruckt werden.`)) return;
+    const r = await AuthentikAuth.apiFetch(`/api/raum-qr/orte/${id}/erneuern`, { method: 'POST' });
+    if (!r.ok) { alert('Fehler ' + r.status); return; }
+    await load();
+  }
+
+  async function entfernen(id) {
+    if (!confirm(`«${raumName(id)}» entfernen?\n\nDie QR-Codes dieses Raums funktionieren danach nicht mehr.`)) return;
+    const r = await AuthentikAuth.apiFetch(`/api/raum-qr/orte/${id}`, { method: 'DELETE' });
     if (!r.ok) { alert('Fehler ' + r.status); return; }
     await load();
   }
