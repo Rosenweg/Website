@@ -25,10 +25,11 @@ Das Repo ist öffentlich, Tokens dürfen nie in Dateien stehen.
 
 ## Texte bearbeiten
 
-Elemente mit `data-feld` (Warnkasten, Listen `boxN-liste`, QR-Titel/-Texte, Fusszeile)
+Elemente mit `data-feld` (Kopf: Gemeinschaft `kopf-name`, Ortszeile `kopf-ort`, Titel `titel`; Warnkasten, Listen `boxN-liste`, QR-Titel/-Texte, Fusszeile)
 lassen sich auf `tuerschilder.html` über ✏️ direkt im Schild ändern. Gespeichert wird in
 `raum_inhalt` als Vorgabe je Typ oder pro Raum (Raum überschreibt Typ, Typ überschreibt
-die Vorlage). Erlaubt sind nur Text sowie `<strong>`, `<b>`, `<em>`, `<br>`.
+die Vorlage). Erlaubt sind nur Text sowie `<strong>`, `<b>`, `<em>`, `<br>`. Der Standort des Raums wird
+beim Speichern zu `{{ORT}}`, damit Vorgaben je Typ in jedem Raum stimmen.
 
 ## Neue Vorlage
 

@@ -389,6 +389,7 @@ router.get('/druck/:id/:vorlage', authMiddleware, requirePermission('reklamation
     for (const [thema, token] of Object.entries(tokens)) qr[thema] = await QRCode.toDataURL(qrUrl(token), { width: 400, margin: 1, errorCorrectionLevel: 'M' });
     html = html.replace(/\{\{QR:([a-z]+)\}\}/g, (m, thema) => qr[thema] || '').replace(/\{\{ORT\}\}/g, ESC(o.standort));
     const inhalt = await inhaltFuer(o, req.params.vorlage);
+    for (const k of Object.keys(inhalt.wirksam)) if (typeof inhalt.wirksam[k] === 'string') inhalt.wirksam[k] = inhalt.wirksam[k].replace(/\{\{ORT\}\}/g, ESC(o.standort));
     const bearbeiten = req.query.bearbeiten === '1';
     if (bearbeiten || Object.keys(inhalt.wirksam).length) {
       const skript = inhaltSkript(inhalt.wirksam, bearbeiten,
@@ -412,6 +413,10 @@ router.put('/inhalt', authMiddleware, requirePermission('reklamationen', 'write'
     if (!o || !v || v.typ !== o.typ) return res.status(404).json({ error: 'Unbekannter Raum oder Vorlage' });
     if (!['ort', 'typ'].includes(b.ebene)) return res.status(400).json({ error: 'Ebene ort oder typ' });
     const felder = saeubereFelder(b.felder);
+    // Standort wieder als Platzhalter speichern, damit eine Vorgabe je Typ in jedem
+    // Raum den eigenen Standort zeigt (wird beim Druck ersetzt).
+    const ortHtml = ESC(o.standort);
+    if (ortHtml) for (const k of Object.keys(felder)) if (typeof felder[k] === 'string') felder[k] = felder[k].split(ortHtml).join('{{ORT}}');
     const ziel = b.ebene === 'ort' ? String(o.id) : o.typ;
     await pool.query(
       `INSERT INTO raum_inhalt (ebene, ziel, vorlage, felder, geaendert_von, updated_at) VALUES ($1,$2,$3,$4,$5,NOW())
