@@ -98,12 +98,13 @@ const TYPEN = {
     teile: [
       { id: 'ansprechpartner', titel: '👤 Ansprechpartner', bloecke: [kontakt('meg'), kontakt('technik'), schluessel] },
       { id: 'hausordnung', titel: '📋 Hausordnung', bloecke: [
-        { t: 'text', html: '<p><strong>Erlaubt</strong></p>' },
-        { t: 'liste', items: ['Parkieren von Fahrzeugen', 'Fahrzeugpflege', 'Fahrräder und E-Bikes'] },
+        { t: 'text', html: '<p>Brandsicherheit in Einstellhallen nach dem Merkblatt der BFB (Brandverhütungsstelle der kantonalen Gebäudeversicherungen).</p><p><strong>Je Abstellplatz erlaubt</strong></p>' },
+        { t: 'liste', items: ['1 Schrank: 1 m³ nicht brennbar oder 0,5 m³ brennbar', '1 Satz Reifen', 'Sperrige Gegenstände wie Sportgeräte, Dachboxen, Leitern'] },
         { t: 'text', html: '<p><strong>Verboten</strong></p>' },
-        { t: 'liste', items: ['Lagern von brennbaren Flüssigkeiten und gefährlichen Stoffen', 'Werkstattbetrieb', 'Lagern von Gegenständen (Zweckentfremdung als Lagerraum)'] },
-        { t: 'text', html: '<p><strong>Sicherheit (VKF/AGV)</strong></p>' },
-        { t: 'liste', items: ['Fluchtwege frei halten', 'Hydranten und Löscher zugänglich halten'] }] },
+        { t: 'liste', items: ['Brenn- und Treibstoffe (Kanister, Gasflaschen)', 'Hausrat, Möbel, Altpapier, Karton', 'Werkstattbetrieb'] },
+        { t: 'text', html: '<p><strong>Sicherheit</strong></p>' },
+        { t: 'liste', items: ['Alle Notausgänge frei halten', 'Löscheinrichtungen zugänglich und einsatzbereit halten', 'Bei Brand: Halle verlassen, Feuerwehr 118'] },
+        { t: 'link', href: 'https://cms.vkg.ch/media/m45fk21t/bfb-merkblatt-einstellhallen.pdf', text: 'Merkblatt Brandsicherheit (BFB, PDF)' }] },
       { id: 'notfall', titel: '🚨 Notfall', bloecke: [
         { t: 'text', html: '<p>Bei Feuer oder Rauch: Tiefgarage verlassen und Feuerwehr 118 alarmieren.</p>' },
         { t: 'notruf' }] },
