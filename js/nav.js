@@ -48,6 +48,7 @@ const SERVICES_GROUPS = [
       { label: 'PBX (Telefonanlage)', href: 'https://pbx.rosenweg4303.ch', activeKey: 'pbx-admin', perm: 'pbx-admin' },
       { label: 'Reklamationen', href: 'reklamationen.html', activeKey: 'reklamationen', perm: 'reklamationen' },
       { label: 'Melde-Orte (QR-Codes)', href: 'melde-orte.html', activeKey: 'melde-orte', perm: 'reklamationen' },
+      { label: 'Türschilder & Aushänge (QR)', href: 'tuerschilder.html', activeKey: 'tuerschilder', perm: 'reklamationen' },
       { label: 'Reklamationen (meine STWEG)', href: 'pages/reklamationen.html', activeKey: 'reklamationen', permAny: 'bewohner,eigentuemer,ausschuss,technik,praesident,verwaltung', stwegOnly: true },
     ],
   },
