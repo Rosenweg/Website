@@ -9037,20 +9037,6 @@ app.get('/api/unterschriftenliste/:stweg/haeuser', authMiddleware, requirePermis
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Oeffentliche Sicht eines Unterschriftenlisten-Snapshots: keine Namen, keine Adressen.
-function ulSnapshotOeffentlich(snap) {
-  const d = (snap && typeof snap === 'object') ? snap : {};
-  return {
-    wohnungen: (Array.isArray(d.wohnungen) ? d.wohnungen : []).map(w => ({
-      bezeichnung: w && w.bezeichnung, wertquote: w && w.wertquote,
-      eigentuemer_anzahl: Array.isArray(w && w.eigentuemer) ? w.eigentuemer.length : 0,
-    })),
-    zeichnungsberechtigte: (Array.isArray(d.zeichnungsberechtigte) ? d.zeichnungsberechtigte : [])
-      .map(z => ({ funktion: z && z.funktion })),
-    total_units: d.total_units, total_wq: d.total_wq,
-  };
-}
-
 // GET /api/unterschriftenliste/verify-json — Öffentliche JSON-API für die Echtheitsprüfungs-Webseite
 app.get('/api/unterschriftenliste/verify-json', async (req, res) => {
   try {
@@ -9088,10 +9074,10 @@ app.get('/api/unterschriftenliste/verify-json', async (req, res) => {
       generated_at: s.generated_at,
       generated_at_local: new Date(s.generated_at).toLocaleString('de-CH', { timeZone: 'Europe/Zurich' }),
       download_count: (s.download_count || 0) + 1,
-      // Oeffentlich ohne Personendaten (Sicherheitspruefung 21.11.2026): Einheiten mit
-      // Wertquote und Summen reichen zum Abgleich mit dem Ausdruck; Namen,
-      // Verwalter und Korrespondenzadressen gibt es nur im Original-PDF (mit Anmeldung).
-      snapshot: ulSnapshotOeffentlich(s.snapshot_data)
+      // Bewusst vollstaendig (Stefan 21.11.2026): die Pruefseite zeigt alles wie das
+      // Original, damit Dritte den Ausdruck Zeile fuer Zeile abgleichen koennen – so
+      // entspricht es den Anforderungen nach CH-Recht. Nicht einschraenken.
+      snapshot: s.snapshot_data
     });
   } catch (err) {
     console.error('[Verify-JSON] error:', err.message);
@@ -9203,8 +9189,7 @@ function ulHashDrossel(req, res) {
 }
 
 // GET /api/unterschriftenliste/snapshot/:hash.pdf — Gespeichertes Original-PDF ausliefern (öffentlich, Hash dient als Token)
-// Seit 21.11.2026 nur mit Anmeldung: das PDF enthaelt Namen und Adressen der Eigentuemer.
-app.get('/api/unterschriftenliste/snapshot/:hash.pdf', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
+app.get('/api/unterschriftenliste/snapshot/:hash.pdf', async (req, res) => {
   try {
     const hash = req.params.hash.toUpperCase();
     if (!/^[A-F0-9]{12}$/.test(hash)) return res.status(400).json({ error: 'Ungültiger Hash' });
