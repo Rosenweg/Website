@@ -295,7 +295,7 @@ function inhaltSkript(felder, bearbeiten, info) {
     var akt=kn.textContent.trim(), da=false;
     M.gemeinschaften.forEach(function(g){ var o=document.createElement('option'); o.value=g; o.textContent=g; if(g===akt){o.selected=true;da=true;} ws.appendChild(o); });
     if(!da){ var o=document.createElement('option'); o.value=akt; o.textContent=akt+' (bisher)'; o.selected=true; ws.insertBefore(o, ws.firstChild); }
-    function wappen(){ var m=ws.value.match(/STWEG\s*(\d+)/i); if(img) img.src=(m&&M.logos[m[1]])||M.standardLogo; }
+    function wappen(){ var m=ws.value.match(/STWEG[ ]*([0-9]+)/i); if(img) img.src=(m&&M.logos[m[1]])||M.standardLogo; }
     ws.onchange=function(){ kn.textContent=ws.value; wappen(); };
     kn.addEventListener('click',function(){ ws.focus(); });
     lab.appendChild(ws); l.insertBefore(lab, l.children[1]);
