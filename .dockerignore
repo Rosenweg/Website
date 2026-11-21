@@ -9,6 +9,7 @@ docs/
 # ins API-Image (api/mcp/erweiterungen.js). Keine Wildcard, damit neue Dateien mit
 # Zugangsdaten nicht ungeprueft ins Image wandern (Liste = api/Dockerfile).
 !docs/Home.md
+!docs/beispielmappe/Beispielmappe-Rosenweg.pdf
 !docs/README.md
 !docs/verwaltung-anleitung.md
 !docs/email.md

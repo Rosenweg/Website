@@ -97,7 +97,8 @@ const TYPEN = {
     titel: '🚗 Tiefgarage', sub: '', org: 'MEG Rosenweg',
     teile: [
       { id: 'ansprechpartner', titel: '👤 Ansprechpartner', bloecke: [kontakt('meg'), kontakt('technik'), schluessel] },
-      { id: 'hausordnung', titel: '📋 Hausordnung', bloecke: [
+      // id bleibt 'hausordnung' (steckt in gedruckten Tokens), Titel ist «Regeln & Brandschutz».
+      { id: 'hausordnung', titel: '📋 Regeln & Brandschutz', bloecke: [
         { t: 'text', html: '<p>Brandsicherheit in Einstellhallen nach dem Merkblatt der BFB (Brandverhütungsstelle der kantonalen Gebäudeversicherungen).</p><p><strong>Je Abstellplatz erlaubt</strong></p>' },
         { t: 'liste', items: ['1 Schrank: 1 m³ nicht brennbar oder 0,5 m³ brennbar', '1 Satz Reifen', 'Sperrige Gegenstände wie Sportgeräte, Dachboxen, Leitern'] },
         { t: 'text', html: '<p><strong>Verboten</strong></p>' },
@@ -354,6 +355,38 @@ function logoFuer(kopfName) {
   return WAPPEN[t] || null;
 }
 
+// ─── Ablage in «Dokumente» ──────────────────────────────────────────
+// Jeder Druck (ohne Bearbeiten) wird zusaetzlich als PDF abgelegt, damit die
+// aktuelle Fassung im Dokumentenbereich liegt: <ordner>/schilder/<typ>-<kurz>-<vorlage>.pdf.
+// Ordner nach der Gemeinschaft im Kopf: STWEG n -> stwegN, MEG -> meg, sonst allgemein.
+// Die PDFs enthalten die Token-QR-Codes; lesen koennen sie nur Angemeldete mit
+// Zugriff auf den Ordner (isDocPathAllowed in server.js).
+const DOCS_PATH = process.env.DOCS_PATH || '/documents';
+const GOTENBERG = process.env.GOTENBERG_URL || 'http://doc-converter:3000';
+function ablageOrdner(kopfName) {
+  const t = String(kopfName || '').replace(/<[^>]*>/g, '');
+  const m = t.match(/STWEG[ ]*([0-9]+)/i);
+  if (m) return `stweg${m[1]}`;
+  if (/\bMEG\b/i.test(t)) return 'meg';
+  return 'allgemein';
+}
+async function ablegen(html, relPfad) {
+  try {
+    const fd = new FormData();
+    fd.append('files', new Blob([html], { type: 'text/html' }), 'index.html');
+    fd.append('preferCssPageSize', 'true');
+    fd.append('printBackground', 'true');
+    fd.append('marginTop', '0'); fd.append('marginBottom', '0'); fd.append('marginLeft', '0'); fd.append('marginRight', '0');
+    const r = await fetch(`${GOTENBERG}/forms/chromium/convert/html`, { method: 'POST', body: fd, signal: AbortSignal.timeout(60000) });
+    if (!r.ok) throw new Error(`Gotenberg ${r.status}`);
+    const buf = Buffer.from(await r.arrayBuffer());
+    const ziel = path.join(DOCS_PATH, relPfad);
+    await fs.promises.mkdir(path.dirname(ziel), { recursive: true });
+    await fs.promises.writeFile(ziel, buf);
+    console.log(`[raum-qr] abgelegt: ${relPfad} (${buf.length} B)`);
+  } catch (e) { console.error(`[raum-qr] Ablage ${relPfad} fehlgeschlagen:`, e.message); }
+}
+
 const qrUrl = token => `${SITE_URL}/raum.html?t=${token}`;
 const ESC = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -461,6 +494,11 @@ router.get('/druck/:id/:vorlage', authMiddleware, requirePermission('reklamation
     html = html.replace('<head>', `<head><base href="${SITE_URL}/">`);
     res.set('Cache-Control', 'no-store');
     res.type('html').send(html);
+    if (!bearbeiten) {
+      // Nach der Antwort, damit der Druck nicht wartet.
+      const rel = `${ablageOrdner(kopfName)}/schilder/${o.typ}-${o.kurz}-${req.params.vorlage}.pdf`;
+      setImmediate(() => ablegen(html, rel));
+    }
   } catch (e) { console.error('[raum-qr-druck]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 
