@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Türschilder &amp; Aushänge (QR) — Rosenweg</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=5"></script>
+  <script src="/js/nav.js?v=3"></script>
+  <link rel="icon" href="/logo-rosenweg.png">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <!-- Druck der Tuerschilder und Poster mit Token-QR (api/routes/raum-qr.js).
+       Die Vorlagen liegen im API-Image, nicht im oeffentlichen Docroot. -->
+  <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+  <script>RosenwegNav.init({ active: 'tuerschilder' });</script>
+
+  <main class="max-w-5xl mx-auto px-4 py-6">
+    <div id="auth-gate" class="bg-white rounded-lg shadow p-8 text-center"><p class="text-gray-600">Lade…</p></div>
+
+    <div id="content" class="hidden">
+      <h1 class="text-2xl font-bold text-gray-900 mb-1">🚪 Türschilder &amp; Aushänge (QR)</h1>
+      <p class="text-sm text-gray-600 mb-5">
+        Die QR-Codes enthalten einen geheimen Code je Raum. Nur wer ihn vor Ort scannt, sieht die Raum-Infos
+        (Ansprechpartner, Zugang, Notfall). <strong>Drucken</strong> öffnet die fertige A4-Vorlage; im Browser
+        mit «Drucken» ausgeben. <strong>Codes erneuern</strong> macht alle bisherigen Ausdrucke dieses Raums ungültig.
+      </p>
+
+      <div class="bg-white rounded-lg shadow overflow-hidden mb-6">
+        <h2 class="font-semibold text-gray-800 px-4 pt-4">Vorlagen</h2>
+        <table class="w-full text-sm mt-2">
+          <thead class="bg-gray-50 text-gray-500 text-xs uppercase">
+            <tr><th class="text-left px-4 py-2">Vorlage</th><th class="text-left px-4 py-2">Art</th><th class="px-4 py-2"></th></tr>
+          </thead>
+          <tbody id="vorlagen"><tr><td colspan="3" class="px-4 py-3 text-gray-400">Lädt …</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="bg-white rounded-lg shadow overflow-hidden">
+        <h2 class="font-semibold text-gray-800 px-4 pt-4">Räume und Codes</h2>
+        <table class="w-full text-sm mt-2">
+          <thead class="bg-gray-50 text-gray-500 text-xs uppercase">
+            <tr><th class="text-left px-4 py-2">Raum</th><th class="text-left px-4 py-2">Codes gültig seit</th><th class="px-4 py-2"></th></tr>
+          </thead>
+          <tbody id="raeume"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+<script>
+  const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const datum = d => d ? new Date(d).toLocaleDateString('de-CH') : 'noch keine (entstehen beim ersten Druck)';
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    const u = await AuthentikAuth.init({ requireAuth: true });
+    if (!u) return;
+    document.getElementById('auth-gate').classList.add('hidden');
+    document.getElementById('content').classList.remove('hidden');
+    await load();
+  });
+
+  async function load() {
+    const r = await AuthentikAuth.apiFetch('/api/raum-qr');
+    if (!r.ok) {
+      document.getElementById('vorlagen').innerHTML = `<tr><td colspan="3" class="px-4 py-3 text-red-600">Keine Berechtigung oder Fehler (${r.status})</td></tr>`;
+      return;
+    }
+    const d = await r.json();
+    document.getElementById('vorlagen').innerHTML = d.vorlagen.map(v => `
+      <tr class="border-t">
+        <td class="px-4 py-2 font-medium text-gray-800">${esc(v.titel)}</td>
+        <td class="px-4 py-2 text-gray-600">${esc(v.art)}</td>
+        <td class="px-4 py-2 text-right"><button onclick="drucken('${esc(v.vorlage)}')" class="px-3 py-1 rounded text-white" style="background:#c41e1e">🖨 Drucken</button></td>
+      </tr>`).join('');
+    document.getElementById('raeume').innerHTML = d.raeume.map(x => `
+      <tr class="border-t">
+        <td class="px-4 py-2 font-medium text-gray-800">${esc(x.titel)}</td>
+        <td class="px-4 py-2 text-gray-600">${esc(datum(x.aktiv_seit))}</td>
+        <td class="px-4 py-2 text-right"><button onclick="erneuern('${esc(x.raum)}', '${esc(x.titel)}')" class="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-800">🔄 Codes erneuern</button></td>
+      </tr>`).join('');
+  }
+
+  async function drucken(vorlage) {
+    // Fenster sofort öffnen (sonst blockiert der Popup-Blocker), Inhalt danach schreiben.
+    const w = window.open('', '_blank');
+    if (!w) { alert('Bitte Pop-ups für diese Seite erlauben.'); return; }
+    w.document.write('<p style="font-family:sans-serif;padding:2em">Vorlage wird erstellt …</p>');
+    const r = await AuthentikAuth.apiFetch('/api/raum-qr/druck/' + encodeURIComponent(vorlage));
+    if (!r.ok) { w.document.body.innerHTML = '<p style="font-family:sans-serif;padding:2em;color:#b91c1c">Fehler ' + r.status + '</p>'; return; }
+    const html = await r.text();
+    w.document.open(); w.document.write(html); w.document.close();
+    load();
+  }
+
+  async function erneuern(raum, titel) {
+    if (!confirm(`Codes für «${titel}» erneuern?\n\nAlle bisher gedruckten Schilder und Poster dieses Raums funktionieren danach nicht mehr und müssen neu gedruckt werden.`)) return;
+    const r = await AuthentikAuth.apiFetch('/api/raum-qr/' + encodeURIComponent(raum) + '/erneuern', { method: 'POST' });
+    if (!r.ok) { alert('Fehler ' + r.status); return; }
+    await load();
+  }
+</script>
+</body>
+</html>

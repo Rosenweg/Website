@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Telekommunikation Kooperation - Türschild</title>
+    <title>Waschküche - Türschild</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@600;700;800&display=swap');
 
@@ -29,7 +29,7 @@
             width: 210mm;
             height: 297mm;
             padding: 8mm;
-            background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+            background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
             display: grid;
             grid-template-rows: auto auto 1fr auto;
             gap: 4mm;
@@ -37,12 +37,12 @@
 
         /* Header */
         .header {
-            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+            background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
             color: white;
             padding: 8mm;
             border-radius: 4mm;
             text-align: center;
-            box-shadow: 0 2mm 6mm rgba(59, 130, 246, 0.3);
+            box-shadow: 0 2mm 6mm rgba(22, 163, 74, 0.3);
         }
 
         .header h1 {
@@ -116,7 +116,7 @@
         }
 
         .box h3 {
-            color: #2563eb;
+            color: #15803d;
             font-size: 15pt;
             margin-bottom: 2.5mm;
             font-weight: 700;
@@ -137,10 +137,10 @@
         }
 
         .box li:before {
-            content: "•";
+            content: "✓";
             position: absolute;
             left: 0;
-            color: #3b82f6;
+            color: #16a34a;
             font-weight: bold;
             font-size: 14pt;
         }
@@ -162,7 +162,7 @@
         }
 
         .qr-item h4 {
-            color: #2563eb;
+            color: #15803d;
             font-size: 11pt;
             margin-bottom: 2.5mm;
             font-weight: 700;
@@ -174,7 +174,7 @@
             margin: 0 auto 2mm;
             background: white;
             padding: 2mm;
-            border: 1.5mm solid #3b82f6;
+            border: 1.5mm solid #16a34a;
             border-radius: 4mm;
         }
 
@@ -263,18 +263,18 @@
                     <div class="rw-ort">4303 Kaiseraugst</div>
                 </div>
             </div>
-            <h1>📡 Telekommunikation</h1>
+            <h1>🧺 Waschküche</h1>
         </div>
 
         <!-- Warning -->
         <div class="warning">
             <h2>
                 <span class="warning-icon">⚠</span>
-                Zutritt nur für Berechtigte!
+                Fenster geschlossen halten!
             </h2>
             <p>
-                Dieser Raum enthält zentrale Telekommunikationsanlagen für alle 8 Gebäude.
-                Zugang nur für Hauswarte, berechtigte Bewohner und Servicetechniker.
+                Die Fenster in der Waschküche müssen GESCHLOSSEN bleiben!
+                Zum Trocknen nutzen Sie bitte den Trockner oder die fest verbauten Wäscheleinen.
             </p>
         </div>
 
@@ -284,23 +284,22 @@
             <div class="box">
                 <h3>📦 Ausstattung</h3>
                 <ul>
-                    <li>Internet-Router zentral</li>
-                    <li>Netzwerk-Switches</li>
-                    <li>Glasfaser-Verteiler (FTTH)</li>
-                    <li>Telefonanlagen</li>
-                    <li>Patchpanels & Verkabelung</li>
+                    <li>Waschmaschine</li>
+                    <li>Trockner</li>
+                    <li>Waschtisch mit Waschbecken</li>
+                    <li>Wäscheleinen (fest verbaut)</li>
+                    <li>Bügelbrett & Bügeleisen</li>
                 </ul>
             </div>
 
-            <!-- Informationen -->
+            <!-- Nutzungszeiten -->
             <div class="box">
-                <h3>📋 Informationen</h3>
+                <h3>🕐 Nutzungszeiten</h3>
                 <ul>
-                    <li>Provider: Swisscom/Salt/etc.</li>
-                    <li>Zentrale Glasfaseranbindung</li>
-                    <li>Keine eigenmächtige Änderungen</li>
-                    <li>Sauberkeit beachten</li>
-                    <li>Tür immer verschliessen</li>
+                    <li>Mo-Sa: 07:00 - 22:00 Uhr</li>
+                    <li>Sonntags: Ruhetag</li>
+                    <li>Feiertage: Ruhetag</li>
+                    <li>Reservation erforderlich</li>
                 </ul>
             </div>
 
@@ -309,25 +308,25 @@
                 <div class="qr-item">
                     <h4>👤 Ansprech&shy;partner</h4>
                     <div class="qr-code">
-                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=https://rosenweg4303.ch/telekom-ansprechpartner.html" alt="QR Code Ansprechpartner">
+                        <img src="{{QR:ansprechpartner}}" alt="QR Code Ansprechpartner">
                     </div>
-                    <p class="qr-label">IT-Verantwortliche & Hauswart</p>
+                    <p class="qr-label">Verantwortliche & Hauswart</p>
                 </div>
 
                 <div class="qr-item">
-                    <h4>📋 Doku&shy;mentation</h4>
+                    <h4>📋 Regeln & Buchung</h4>
                     <div class="qr-code">
-                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=https://rosenweg4303.ch/telekom-dokumentation.html" alt="QR Code Dokumentation">
+                        <img src="{{QR:regeln}}" alt="QR Code Regeln">
                     </div>
-                    <p class="qr-label">Netzwerk&shy;plan & Doku</p>
+                    <p class="qr-label">Nutzungs&shy;regeln & Reservierung</p>
                 </div>
 
                 <div class="qr-item">
-                    <h4>🚨 Support</h4>
+                    <h4>🔑 Schlüssel</h4>
                     <div class="qr-code">
-                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=https://rosenweg4303.ch/telekom-support.html" alt="QR Code Support">
+                        <img src="{{QR:zugang}}" alt="QR Code Schlüssel">
                     </div>
-                    <p class="qr-label">Störungen & Provider-Kontakt</p>
+                    <p class="qr-label">Schlüssel&shy;halter & Zugang</p>
                 </div>
             </div>
         </div>
@@ -335,7 +334,7 @@
         <!-- Footer -->
         <div class="footer">
             <p><strong>STWEG-Kooperation Rosenweg</strong> - Rosenweg 7-43, 4303 Kaiseraugst</p>
-            <p>Zentrale Telekommunikationsanlage für alle 8 Gebäude</p>
+            <p>Gemeinschaftliche Waschküche - Bitte Ruhezeiten beachten</p>
         </div>
     </div>
 

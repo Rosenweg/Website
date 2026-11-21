@@ -567,11 +567,18 @@ def main():
         assert alt in aushang, alt
         aushang = aushang.replace(alt, neu)
     aushang_pdf = render_doc('aushang', aushang)
-    tuer_pdfs = [render_doc(f'tuer-{n}', (ROOT / 'door-signs' / f'{n}.html').read_text(encoding='utf-8'))
+    # Vorlagen aus dem API-Image (api/vorlagen/aushaenge/); die API ersetzt {{QR:<thema>}}
+    # durch QR-Codes mit geheimem Token. Für die Mappe: Muster-Token, nicht gültig.
+    def mit_muster_qr(html_text):
+        return re.sub(r'\{\{QR:([a-z]+)\}\}',
+                      lambda m: qr_data_uri(f'https://www.rosenweg4303.ch/raum.html?t=beispiel{m.group(1)[:8]:x<8}'),
+                      html_text)
+    VORL = ROOT / 'api' / 'vorlagen' / 'aushaenge'
+    tuer_pdfs = [render_doc(f'tuer-{n}', mit_muster_qr((VORL / f'{n}.html').read_text(encoding='utf-8')))
                  for n in ('heizung-technikraum', 'waschkueche')]
     # Der Inhalt des Posters ist in aktuellem Chromium ca. 405 mm hoch und liefe auf eine
     # zweite Seite über: auf eine lange Seite drucken, to_a4() verkleinert es danach auf A4.
-    poster = (ROOT / 'stweg3' / 'pages' / 'waschkueche-poster-a4.html').read_text(encoding='utf-8')
+    poster = mit_muster_qr((VORL / 'waschkueche-poster-a4.html').read_text(encoding='utf-8'))
     poster_pdf = render_doc('poster', poster.replace('</head>', '<style>@page{size:210mm 410mm}</style></head>', 1))
 
     print('Rendere Kapitelseiten …')
@@ -673,22 +680,23 @@ des Servers wurde für die Mappe mit den Musterdaten nachgebildet.</p>''')
     S['tuer'] = render_own('k-tuer', steckbrief(6, 'Türschilder', [
         ('Zweck', 'Beschriftung der Technik- und Gemeinschaftsräume mit Zutrittsregeln und QR-Codes zu Ansprechpartnern, '
                   'Schlüsselregelung und Störungsmeldung.'),
-        ('Entstehung', 'HTML-Druckvorlagen unter <code>door-signs/</code>; die QR-Codes verweisen auf Seiten der Website, '
-                       'deren Inhalt (z. B. Ansprechpartner) zentral gepflegt wird – das Schild bleibt dadurch aktuell.'),
+        ('Entstehung', 'Druck aus dem Adminbereich (Seite «Türschilder &amp; Aushänge»). Jeder QR-Code enthält einen '
+                       'geheimen Code je Raum: Nur wer ihn vor Ort scannt, sieht Ansprechpartner, Zugang und Notfall-Infos. '
+                       'Der Inhalt wird zentral gepflegt – das Schild bleibt dadurch aktuell.'),
         ('Empfänger', 'Türen der Räume: Hauptverteilung, Heizungs- und Technikraum, Liftmaschinenraum, '
                       'Telekommunikation, Tiefgarage, Waschküche.'),
         ('Format', 'A4 hoch, laminiert.'),
-        ('Besonderheiten', 'Gezeigt werden zwei der sechs Schilder (Heizungs-/Technikraum und Waschküche).'),
-    ], '<div class="grau">QR-Codes für die Mappe lokal erzeugt (gleicher Inhalt wie im Original, das den Dienst '
-       'api.qrserver.com nutzt).</div>'))
+        ('Besonderheiten', 'Codes lassen sich je Raum erneuern; alte Ausdrucke werden damit ungültig. '
+                           'Gezeigt werden zwei der sechs Schilder (Heizungs-/Technikraum und Waschküche).'),
+    ], '<div class="grau">Die QR-Codes in dieser Mappe enthalten Muster-Codes und funktionieren nicht.</div>'))
 
     S['poster'] = render_own('k-poster', steckbrief(7, 'Waschküche-Poster', [
         ('Zweck', 'Regeln und Ausstattung der Waschküche einer STWEG auf einen Blick.'),
-        ('Entstehung', 'HTML-Druckvorlage je STWEG (hier <code>stweg3/pages/waschkueche-poster-a4.html</code>).'),
+        ('Entstehung', 'Druck aus dem Adminbereich (Seite «Türschilder &amp; Aushänge»), Vorlage je STWEG.'),
         ('Empfänger', 'Waschküche des jeweiligen Hauses.'),
         ('Format', 'A4 hoch. Hinweis: Die Vorlage ist inzwischen länger als eine A4-Seite (ca. 405 mm); '
                    'für die Mappe wurde sie auf eine Seite verkleinert.'),
-        ('Besonderheiten', 'Der QR-Code führt zur Waschküchen-Seite der STWEG. Die Nutzung der Waschküche wird '
+        ('Besonderheiten', 'Der QR-Code (mit geheimem Code, wie bei den Türschildern) führt zu Regeln und Reservation der Waschküche. Die Nutzung der Waschküche wird '
                            'minutengenau erfasst und monatlich abgerechnet (Mail-Vorlage <code>wasch-billing</code>, '
                            'Muster in Kapitel 4).'),
     ]))

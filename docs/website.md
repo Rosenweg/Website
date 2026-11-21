@@ -70,7 +70,7 @@ ausgeliefert; `/data/` ist auf den STWEG-Hosts gesperrt.
 ### Spezial
 | Pfad | Beschreibung |
 |------|-------------|
-| `/door-signs/` | Türschilder (Kiosk-Modus) |
+| `/tuerschilder.html` | Türschilder & Poster mit Token-QR drucken (Login); Ziel der QR: `/raum.html?t=<token>` |
 | `kiosk/` (Repo) | Einrichtung der Kiosk-Geräte (`setup-kiosk.sh`) – kein Webinhalt |
 
 ## Shared JavaScript

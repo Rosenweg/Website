@@ -11166,6 +11166,9 @@ require('./mcp').mountMcp(app);
 // GRUNDBUCH-CROWDSOURCING -> routes/grundbuch.js (Router-Split, PoC-Domäne)
 app.use('/api/grundbuch', require('./routes/grundbuch'));
 
+// RAUM-QR: Tuerschilder/Aushaenge mit Token-QR -> routes/raum-qr.js
+app.use('/api/raum-qr', require('./routes/raum-qr'));
+
 // STATIONEN (Rosenweg/os-stationen) -> routes/stations.js
 // Bewusst ohne authMiddleware: der Installer läuft auf einem Gerät ohne
 // Browser und ohne Identität und meldet sich mit Benutzer + Passwort gegen

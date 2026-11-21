@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Heizungs- und Technikraum - Türschild</title>
+    <title>Tiefgarage Zugang - Türschild</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@600;700;800&display=swap');
 
@@ -28,8 +28,8 @@
         .page {
             width: 210mm;
             height: 297mm;
-            padding: 8mm;
-            background: linear-gradient(135deg, #fff7ed 0%, #fed7aa 100%);
+            padding: 10mm;
+            background: linear-gradient(135deg, #faf5ff 0%, #e9d5ff 100%);
             display: grid;
             grid-template-rows: auto auto 1fr auto;
             gap: 4mm;
@@ -37,63 +37,63 @@
 
         /* Header */
         .header {
-            background: linear-gradient(135deg, #ea580c 0%, #dc2626 100%);
+            background: linear-gradient(135deg, #9333ea 0%, #7c3aed 100%);
             color: white;
             padding: 8mm;
-            border-radius: 4mm;
+            border-radius: 6mm;
             text-align: center;
-            box-shadow: 0 2mm 6mm rgba(234, 88, 12, 0.3);
+            box-shadow: 0 2mm 6mm rgba(147, 51, 234, 0.3);
         }
 
         .header h1 {
-            font-size: 28pt;
+            font-size: 24pt;
             font-weight: 800;
-            margin-bottom: 2mm;
+            margin-bottom: 1.5mm;
             text-transform: uppercase;
-            letter-spacing: 1.5pt;
+            letter-spacing: 1pt;
         }
 
         .header p {
-            font-size: 14pt;
+            font-size: 12pt;
             opacity: 0.95;
         }
 
         /* Warning */
         .warning {
-            background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-            border: 2.5mm solid #dc2626;
-            border-radius: 4mm;
-            padding: 8mm;
-            box-shadow: 0 2mm 6mm rgba(220, 38, 38, 0.2);
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            border: 2mm solid #f59e0b;
+            border-radius: 5mm;
+            padding: 6mm;
+            box-shadow: 0 2mm 5mm rgba(245, 158, 11, 0.2);
         }
 
         .warning h2 {
-            color: #991b1b;
+            color: #92400e;
             font-size: 15pt;
             font-weight: 800;
-            margin-bottom: 2.5mm;
+            margin-bottom: 3mm;
             display: flex;
             align-items: center;
-            gap: 3mm;
+            gap: 2.5mm;
         }
 
         .warning-icon {
-            background: #dc2626;
+            background: #f59e0b;
             color: white;
-            width: 30pt;
-            height: 30pt;
+            width: 26pt;
+            height: 26pt;
             border-radius: 50%;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            font-size: 15pt;
+            font-size: 16pt;
             flex-shrink: 0;
         }
 
         .warning p {
-            color: #7f1d1d;
-            font-size: 14pt;
-            line-height: 1.3;
+            color: #78350f;
+            font-size: 11pt;
+            line-height: 1.25;
             font-weight: 600;
         }
 
@@ -101,14 +101,14 @@
         .content {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 5mm;
+            gap: 4mm;
         }
 
         .box {
             background: white;
-            border-radius: 4mm;
-            padding: 7mm;
-            box-shadow: 0 2mm 6mm rgba(0, 0, 0, 0.1);
+            border-radius: 5mm;
+            padding: 5mm;
+            box-shadow: 0 1.5mm 4mm rgba(0, 0, 0, 0.1);
         }
 
         .box.full {
@@ -116,9 +116,9 @@
         }
 
         .box h3 {
-            color: #ea580c;
-            font-size: 15pt;
-            margin-bottom: 2.5mm;
+            color: #7c3aed;
+            font-size: 13pt;
+            margin-bottom: 3mm;
             font-weight: 700;
         }
 
@@ -128,21 +128,21 @@
         }
 
         .box li {
-            font-size: 11pt;
-            margin-bottom: 2.5mm;
-            padding-left: 6mm;
+            font-size: 10pt;
+            margin-bottom: 2mm;
+            padding-left: 5mm;
             position: relative;
             color: #1f2937;
-            line-height: 1.3;
+            line-height: 1.15;
         }
 
         .box li:before {
             content: "•";
             position: absolute;
             left: 0;
-            color: #ea580c;
+            color: #9333ea;
             font-weight: bold;
-            font-size: 14pt;
+            font-size: 12pt;
         }
 
         /* QR Codes Section */
@@ -150,11 +150,11 @@
             grid-column: 1 / -1;
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 4mm;
+            gap: 3mm;
             background: white;
-            border-radius: 4mm;
-            padding: 7mm;
-            box-shadow: 0 2mm 6mm rgba(0, 0, 0, 0.1);
+            border-radius: 5mm;
+            padding: 5mm;
+            box-shadow: 0 1.5mm 4mm rgba(0, 0, 0, 0.1);
         }
 
         .qr-item {
@@ -162,20 +162,20 @@
         }
 
         .qr-item h4 {
-            color: #dc2626;
-            font-size: 11pt;
-            margin-bottom: 2.5mm;
+            color: #7c3aed;
+            font-size: 10pt;
+            margin-bottom: 2mm;
             font-weight: 700;
         }
 
         .qr-code {
             width: 100%;
             aspect-ratio: 1;
-            margin: 0 auto 2mm;
+            margin: 0 auto 1.5mm;
             background: white;
-            padding: 2mm;
-            border: 1.5mm solid #ea580c;
-            border-radius: 4mm;
+            padding: 1.5mm;
+            border: 1mm solid #9333ea;
+            border-radius: 3mm;
         }
 
         .qr-code img {
@@ -185,22 +185,22 @@
         }
 
         .qr-label {
-            font-size: 8pt;
+            font-size: 7.5pt;
             color: #6b7280;
-            line-height: 1.3;
+            line-height: 1.1;
         }
 
         /* Footer */
         .footer {
             text-align: center;
             color: #6b7280;
-            font-size: 9pt;
-            padding-top: 4mm;
-            border-top: 1mm solid #d1d5db;
+            font-size: 8pt;
+            padding-top: 3mm;
+            border-top: 0.8mm solid #d1d5db;
         }
 
         .footer p {
-            margin: 1.5mm 0;
+            margin: 1mm 0;
         }
 
         /* Print Optimization */
@@ -259,48 +259,54 @@
             <div class="rw-kopf">
                 <img src="https://www.rosenweg4303.ch/logo-rosenweg.png" alt="Rosenweg">
                 <div>
-                    <div class="rw-name">STWEG-Kooperation Rosenweg</div>
+                    <div class="rw-name">MEG Rosenweg</div>
                     <div class="rw-ort">4303 Kaiseraugst</div>
                 </div>
             </div>
-            <h1>🔥 Heizungs- und Technikraum</h1>
+            <h1>🚗 Tiefgarage</h1>
         </div>
 
         <!-- Warning -->
         <div class="warning">
             <h2>
                 <span class="warning-icon">⚠</span>
-                Zutritt nur für Berechtigte!
+                Brandschutz beachten!
             </h2>
             <p>
-                Dieser Raum enthält zentrale technische Anlagen. Zugang nur für Hauswarte,
-                berechtigte Bewohner und Servicetechniker. Bei Störungen siehe QR-Code unten.
+                <strong>Lagerverbot:</strong> Brennbare Flüssigkeiten und gefährliche Stoffe sind verboten.
+                Keine Zweckentfremdung als Werkstatt oder Lagerraum.
             </p>
         </div>
 
         <!-- Content -->
         <div class="content">
-            <!-- Ausstattung -->
+            <!-- Nutzung -->
             <div class="box">
-                <h3>🔧 Ausstattung</h3>
+                <h3>✓ Erlaubt</h3>
                 <ul>
-                    <li>Heizungsanlage zentral</li>
-                    <li>Warmwasseraufbereitung</li>
-                    <li>Steuerungstechnik</li>
-                    <li>Pumpen & Verteiler</li>
-                    <li>Sicherungskasten</li>
+                    <li>Parkieren von Fahrzeugen</li>
+                    <li>Fahrzeugpflege</li>
+                    <li>Fahrräder & E-Bikes</li>
                 </ul>
             </div>
 
-            <!-- Grundinformationen -->
+            <!-- Verboten -->
             <div class="box">
-                <h3>📋 Informationen</h3>
+                <h3>✗ Verboten</h3>
                 <ul>
-                    <li>Zutritt nur mit Berechtigung</li>
-                    <li>Sauberkeit beachten</li>
-                    <li>Keine Lagerhaltung im Raum</li>
-                    <li>Fluchtwege freihalten</li>
-                    <li>Tür immer verschliessen</li>
+                    <li>Brennbare Flüssigkeiten</li>
+                    <li>Werkstattbetrieb</li>
+                    <li>Lagern von Gegenständen</li>
+                </ul>
+            </div>
+
+            <!-- Sicherheit -->
+            <div class="box full">
+                <h3>🔒 Sicherheit (VKF/AGV)</h3>
+                <ul>
+                    <li>Fluchtwege frei halten</li>
+                    <li>Bei Feuer: Feuerwehr 118</li>
+                    <li>Hydranten/Löscher zugänglich</li>
                 </ul>
             </div>
 
@@ -309,33 +315,33 @@
                 <div class="qr-item">
                     <h4>👤 Ansprech&shy;partner</h4>
                     <div class="qr-code">
-                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=https://rosenweg4303.ch/heizung-ansprechpartner.html" alt="QR Code Ansprechpartner">
+                        <img src="{{QR:ansprechpartner}}" alt="QR Code Ansprechpartner">
                     </div>
-                    <p class="qr-label">Hauswart & Verantwortliche</p>
+                    <p class="qr-label">Hauswart & Verwaltung</p>
                 </div>
 
                 <div class="qr-item">
-                    <h4>🔑 Schlüssel & Zugang</h4>
+                    <h4>📋 Hausordnung</h4>
                     <div class="qr-code">
-                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=https://rosenweg4303.ch/heizung-zugang.html" alt="QR Code Zugang">
+                        <img src="{{QR:hausordnung}}" alt="QR Code Hausordnung">
                     </div>
-                    <p class="qr-label">Schlüssel&shy;halter & Berechtigungen</p>
+                    <p class="qr-label">Regeln & Vorschriften</p>
                 </div>
 
                 <div class="qr-item">
-                    <h4>🚨 Notfall & Service</h4>
+                    <h4>🚨 Notfall</h4>
                     <div class="qr-code">
-                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=https://rosenweg4303.ch/heizung-notfall.html" alt="QR Code Notfall">
+                        <img src="{{QR:notfall}}" alt="QR Code Notfall">
                     </div>
-                    <p class="qr-label">Störungen & Service-Nummern</p>
+                    <p class="qr-label">Feuerwehr 118 · Polizei 117</p>
                 </div>
             </div>
         </div>
 
         <!-- Footer -->
         <div class="footer">
-            <p><strong>STWEG-Kooperation Rosenweg</strong> - Rosenweg 7-43, 4303 Kaiseraugst</p>
-            <p>Zentrale Heizungsanlage für alle 8 Gebäude</p>
+            <p><strong>MEG</strong> - Rosenweg, 4303 Kaiseraugst</p>
+            <p>Brandschutz nach VKF & AGV Aargau - Bei Notfall: Feuerwehr 118</p>
         </div>
     </div>
 

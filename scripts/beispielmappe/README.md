@@ -36,8 +36,8 @@ Node.js und eine Datenbank sind nicht nötig.
 | Deckblatt Druckauftrag | Vorlage `coverHtml` im IMAP-Druckablauf | Code-Block wird extrahiert, Variablen aus `musterdaten.json` |
 | Mail-Vorlagen | `renderTemplate()` + `MAIL_TEMPLATE_DEFAULTS` | Rendern der Standardvorlagen, Darstellung als Mail-Ansicht |
 | Aushang | `aushang-verwaltungswechsel.html` | Direkt gedruckt; Firmen und Kontakte durch Musterwerte ersetzt |
-| Türschilder | `door-signs/*.html` | Direkt gedruckt |
-| Waschküche-Poster | `stweg3/pages/waschkueche-poster-a4.html` | Auf eine lange Seite gedruckt (Inhalt ca. 405 mm), dann auf A4 verkleinert |
+| Türschilder | `api/vorlagen/aushaenge/*.html` | `{{QR:…}}` durch Muster-QR ersetzt (im Betrieb Token-QR über `/api/raum-qr/druck`) |
+| Waschküche-Poster | `api/vorlagen/aushaenge/waschkueche-poster-a4.html` | Auf eine lange Seite gedruckt (Inhalt ca. 405 mm), dann auf A4 verkleinert |
 | Excel / vCard | `objektverwaltung.html` (`exportXLSX`), `buildVCard` in `api/server.js` | Kleiner Ausschnitt; die vCard wird in Python nach demselben Schema erzeugt |
 
 Externe Abhängigkeiten werden beim Rendern ersetzt:

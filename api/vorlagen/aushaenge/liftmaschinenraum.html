@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Waschküche - Türschild</title>
+    <title>Liftmaschinenraum - Türschild</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@600;700;800&display=swap');
 
@@ -29,7 +29,7 @@
             width: 210mm;
             height: 297mm;
             padding: 8mm;
-            background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+            background: linear-gradient(135deg, #f1f5f9 0%, #cbd5e1 100%);
             display: grid;
             grid-template-rows: auto auto 1fr auto;
             gap: 4mm;
@@ -37,12 +37,12 @@
 
         /* Header */
         .header {
-            background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
+            background: linear-gradient(135deg, #475569 0%, #334155 100%);
             color: white;
             padding: 8mm;
             border-radius: 4mm;
             text-align: center;
-            box-shadow: 0 2mm 6mm rgba(22, 163, 74, 0.3);
+            box-shadow: 0 2mm 6mm rgba(71, 85, 105, 0.3);
         }
 
         .header h1 {
@@ -58,17 +58,24 @@
             opacity: 0.95;
         }
 
+        .header .location {
+            font-size: 14pt;
+            opacity: 0.9;
+            margin-top: 2mm;
+            font-weight: 600;
+        }
+
         /* Warning */
         .warning {
-            background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-            border: 2.5mm solid #dc2626;
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            border: 2.5mm solid #f59e0b;
             border-radius: 4mm;
             padding: 8mm;
-            box-shadow: 0 2mm 6mm rgba(220, 38, 38, 0.2);
+            box-shadow: 0 2mm 6mm rgba(245, 158, 11, 0.2);
         }
 
         .warning h2 {
-            color: #991b1b;
+            color: #92400e;
             font-size: 15pt;
             font-weight: 800;
             margin-bottom: 2.5mm;
@@ -78,7 +85,7 @@
         }
 
         .warning-icon {
-            background: #dc2626;
+            background: #f59e0b;
             color: white;
             width: 30pt;
             height: 30pt;
@@ -91,7 +98,7 @@
         }
 
         .warning p {
-            color: #7f1d1d;
+            color: #78350f;
             font-size: 14pt;
             line-height: 1.3;
             font-weight: 600;
@@ -116,7 +123,7 @@
         }
 
         .box h3 {
-            color: #15803d;
+            color: #334155;
             font-size: 15pt;
             margin-bottom: 2.5mm;
             font-weight: 700;
@@ -137,10 +144,10 @@
         }
 
         .box li:before {
-            content: "✓";
+            content: "•";
             position: absolute;
             left: 0;
-            color: #16a34a;
+            color: #475569;
             font-weight: bold;
             font-size: 14pt;
         }
@@ -162,7 +169,7 @@
         }
 
         .qr-item h4 {
-            color: #15803d;
+            color: #334155;
             font-size: 11pt;
             margin-bottom: 2.5mm;
             font-weight: 700;
@@ -174,7 +181,7 @@
             margin: 0 auto 2mm;
             background: white;
             padding: 2mm;
-            border: 1.5mm solid #16a34a;
+            border: 1.5mm solid #475569;
             border-radius: 4mm;
         }
 
@@ -260,21 +267,21 @@
                 <img src="https://www.rosenweg4303.ch/logo-rosenweg.png" alt="Rosenweg">
                 <div>
                     <div class="rw-name">STWEG-Kooperation Rosenweg</div>
-                    <div class="rw-ort">4303 Kaiseraugst</div>
+                    <div class="rw-ort">Rosenweg 7–43 · 4303 Kaiseraugst</div>
                 </div>
             </div>
-            <h1>🧺 Waschküche</h1>
+            <h1>🛗 Liftmaschinenraum</h1>
         </div>
 
         <!-- Warning -->
         <div class="warning">
             <h2>
                 <span class="warning-icon">⚠</span>
-                Fenster geschlossen halten!
+                Zutritt nur für Berechtigte!
             </h2>
             <p>
-                Die Fenster in der Waschküche müssen GESCHLOSSEN bleiben!
-                Zum Trocknen nutzen Sie bitte den Trockner oder die fest verbauten Wäscheleinen.
+                Dieser Raum enthält die Liftmaschinenanlage. Zugang nur für
+                Hauswarte, berechtigte Bewohner und Servicetechniker der Liftfirma.
             </p>
         </div>
 
@@ -282,24 +289,25 @@
         <div class="content">
             <!-- Ausstattung -->
             <div class="box">
-                <h3>📦 Ausstattung</h3>
+                <h3>🔧 Ausstattung</h3>
                 <ul>
-                    <li>Waschmaschine</li>
-                    <li>Trockner</li>
-                    <li>Waschtisch mit Waschbecken</li>
-                    <li>Wäscheleinen (fest verbaut)</li>
-                    <li>Bügelbrett & Bügeleisen</li>
+                    <li>Liftantrieb & Motor</li>
+                    <li>Steuerungselektronik</li>
+                    <li>Seilwinde & Tragsystem</li>
+                    <li>Not-Stromversorgung</li>
+                    <li>Sicherheitsbremse</li>
                 </ul>
             </div>
 
-            <!-- Nutzungszeiten -->
+            <!-- Informationen -->
             <div class="box">
-                <h3>🕐 Nutzungszeiten</h3>
+                <h3>📋 Informationen</h3>
                 <ul>
-                    <li>Mo-Sa: 07:00 - 22:00 Uhr</li>
-                    <li>Sonntags: Ruhetag</li>
-                    <li>Feiertage: Ruhetag</li>
-                    <li>Reservation erforderlich</li>
+                    <li>Regelmässige Wartung</li>
+                    <li>TÜV/SUVA-Prüfungen</li>
+                    <li>Keine Lagerhaltung</li>
+                    <li>Sauberkeit beachten</li>
+                    <li>Tür immer verschliessen</li>
                 </ul>
             </div>
 
@@ -308,25 +316,25 @@
                 <div class="qr-item">
                     <h4>👤 Ansprech&shy;partner</h4>
                     <div class="qr-code">
-                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=https://rosenweg4303.ch/waschkueche-ansprechpartner.html" alt="QR Code Ansprechpartner">
+                        <img src="{{QR:ansprechpartner}}" alt="QR Code Ansprechpartner">
                     </div>
-                    <p class="qr-label">Verantwortliche & Hauswart</p>
+                    <p class="qr-label">Hauswart & Lift-Verantwortliche</p>
                 </div>
 
                 <div class="qr-item">
-                    <h4>📋 Regeln & Buchung</h4>
+                    <h4>🏢 Lift&shy;firma</h4>
                     <div class="qr-code">
-                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=https://rosenweg4303.ch/waschkueche-regeln.html" alt="QR Code Regeln">
+                        <img src="{{QR:servicefirma}}" alt="QR Code Liftfirma">
                     </div>
-                    <p class="qr-label">Nutzungs&shy;regeln & Reservierung</p>
+                    <p class="qr-label">Service-Partner & Wartung</p>
                 </div>
 
                 <div class="qr-item">
-                    <h4>🔑 Schlüssel</h4>
+                    <h4>🚨 Notfall</h4>
                     <div class="qr-code">
-                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=https://rosenweg4303.ch/waschkueche-zugang.html" alt="QR Code Schlüssel">
+                        <img src="{{QR:notfall}}" alt="QR Code Notfall">
                     </div>
-                    <p class="qr-label">Schlüssel&shy;halter & Zugang</p>
+                    <p class="qr-label">Störung & Not-Telefon 24/7</p>
                 </div>
             </div>
         </div>
@@ -334,7 +342,7 @@
         <!-- Footer -->
         <div class="footer">
             <p><strong>STWEG-Kooperation Rosenweg</strong> - Rosenweg 7-43, 4303 Kaiseraugst</p>
-            <p>Gemeinschaftliche Waschküche - Bitte Ruhezeiten beachten</p>
+            <p>Bei Liftpanne: Notruftaste im Lift drücken oder 118 (Feuerwehr)</p>
         </div>
     </div>
 
