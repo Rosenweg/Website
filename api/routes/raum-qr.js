@@ -295,7 +295,7 @@ function inhaltSkript(felder, bearbeiten, info) {
     var akt=kn.textContent.trim(), da=false;
     M.gemeinschaften.forEach(function(g){ var o=document.createElement('option'); o.value=g; o.textContent=g; if(g===akt){o.selected=true;da=true;} ws.appendChild(o); });
     if(!da){ var o=document.createElement('option'); o.value=akt; o.textContent=akt+' (bisher)'; o.selected=true; ws.insertBefore(o, ws.firstChild); }
-    function wappen(){ var m=ws.value.match(/STWEG[ ]*([0-9]+)/i); if(img) img.src=(m&&M.logos[m[1]])||M.standardLogo; }
+    function wappen(){ if(img) img.src=M.logos[ws.value]||M.standardLogo; }
     ws.onchange=function(){ kn.textContent=ws.value; wappen(); };
     kn.addEventListener('click',function(){ ws.focus(); });
     lab.appendChild(ws); l.insertBefore(lab, l.children[1]);
@@ -314,30 +314,43 @@ function inhaltSkript(felder, bearbeiten, info) {
 })();</script>`;
 }
 
-// Auswahl fuer die Gemeinschaft im Schildkopf (kopf-name): Kooperation, STWEGs aus
-// site-config.json (im Image /app/site-config.json, im Repo im Wurzelverzeichnis), MEG.
+// Auswahl fuer die Gemeinschaft im Schildkopf (kopf-name) und das passende Wappen.
+// Aus site-config.json (im Image /app/site-config.json, im Repo im Wurzelverzeichnis):
+//   «STWEG-Kooperation Rosenweg»            -> Rosenweg-Wappen
+//   «STWEG <n> · Rosenweg <a/b/c>»          -> STWEG-Wappen logo-stweg<n>-rosenweg<a-b-c>.png
+//   «STWEG <n> · Rosenweg <a>» (je Haus)    -> Hauswappen logo-stweg<n>-rosenweg<a>.png
+//   «MEG Rosenweg»                          -> logo-meg-rosenweg.png
+// Die Wappen liegen im Website-Docroot (erzeugt mit scripts/wappen/erzeuge.py).
+const ROSENWEG_LOGO = 'https://www.rosenweg4303.ch/logo-rosenweg.png';
 function gemeinschaften() {
   let stwegen = [];
   for (const p of [path.join(__dirname, '..', 'site-config.json'), path.join(__dirname, '..', '..', 'site-config.json')]) {
     try { stwegen = JSON.parse(fs.readFileSync(p, 'utf-8')).stwegen || []; break; } catch {}
   }
   const liste = ['STWEG-Kooperation Rosenweg'];
+  const logos = {};
   for (const st of stwegen) {
     if (st.typ === 'Tiefgarage' || /^MEG/i.test(st.name)) continue;
-    liste.push(st.adressen ? `${st.name} · ${st.adressen}` : st.name);
+    const m = String(st.adressen || '').match(/^Rosenweg\s+([\d/]+)$/);
+    if (!m) { liste.push(st.name); continue; }
+    const haeuser = m[1].split('/');
+    const ganz = `${st.name} · Rosenweg ${haeuser.join('/')}`;
+    liste.push(ganz);
+    logos[ganz] = `logo-stweg${st.nr}-rosenweg${haeuser.join('-')}.png`;
+    if (haeuser.length > 1) for (const h of haeuser) {
+      const eins = `${st.name} · Rosenweg ${h}`;
+      liste.push(eins);
+      logos[eins] = `logo-stweg${st.nr}-rosenweg${h}.png`;
+    }
   }
   liste.push('MEG Rosenweg');
-  return liste;
+  logos['MEG Rosenweg'] = 'logo-meg-rosenweg.png';
+  return { liste, logos: Object.fromEntries(Object.entries(logos).map(([k, v]) => [k, `${SITE_URL}/${v}`])) };
 }
-const GEMEINSCHAFTEN = gemeinschaften();
-
-// Eigene Wappen einzelner STWEGs (Dateien im Website-Docroot). Steht im Kopf
-// eines Schilds «STWEG <n>», wird das Rosenweg-Wappen durch dieses ersetzt.
-const STWEG_LOGOS = { 3: 'logo-stweg3-rosenweg9.png', 6: 'logo-stweg6-rosenweg1.png' };
-const ROSENWEG_LOGO = 'https://www.rosenweg4303.ch/logo-rosenweg.png';
+const { liste: GEMEINSCHAFTEN, logos: WAPPEN } = gemeinschaften();
 function logoFuer(kopfName) {
-  const m = String(kopfName || '').replace(/<[^>]*>/g, '').match(/STWEG\s*(\d+)/i);
-  return m && STWEG_LOGOS[m[1]] ? `${SITE_URL}/${STWEG_LOGOS[m[1]]}` : null;
+  const t = String(kopfName || '').replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').trim();
+  return WAPPEN[t] || null;
 }
 
 const qrUrl = token => `${SITE_URL}/raum.html?t=${token}`;
@@ -440,7 +453,7 @@ router.get('/druck/:id/:vorlage', authMiddleware, requirePermission('reklamation
     if (bearbeiten || Object.keys(inhalt.wirksam).length) {
       const skript = inhaltSkript(inhalt.wirksam, bearbeiten,
         { id: o.id, vorlage: req.params.vorlage, raum: `${TYPEN[o.typ].titel.replace(/^\S+\s/, '')} ${o.standort}`, typ: TYPEN[o.typ].titel.replace(/^\S+\s/, ''), eigen: inhalt.eigen.length > 0,
-          gemeinschaften: GEMEINSCHAFTEN, logos: Object.fromEntries(Object.entries(STWEG_LOGOS).map(([k, v]) => [k, `${SITE_URL}/${v}`])), standardLogo: ROSENWEG_LOGO });
+          gemeinschaften: GEMEINSCHAFTEN, logos: WAPPEN, standardLogo: ROSENWEG_LOGO });
       html = html.includes('</body>') ? html.replace('</body>', skript + '</body>') : html + skript;
     }
     // <base>, damit relative Pfade (Logo) auch im Druckfenster laden.

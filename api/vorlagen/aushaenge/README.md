@@ -31,9 +31,11 @@ lassen sich auf `tuerschilder.html` über ✏️ direkt im Schild ändern. Gespe
 die Vorlage). Erlaubt sind nur Text sowie `<strong>`, `<b>`, `<em>`, `<br>`. Der Standort des Raums wird
 beim Speichern zu `{{ORT}}`, damit Vorgaben je Typ in jedem Raum stimmen.
 
-Die Gemeinschaft (`kopf-name`) wird aus einer Liste gewählt (Kooperation, STWEG 1–7 aus
-`site-config.json`, MEG), nicht getippt. Steht dort «STWEG <n>» und hat diese STWEG ein eigenes Wappen (`STWEG_LOGOS` in
-`api/routes/raum-qr.js`, derzeit STWEG 3 und 6), ersetzt es das Rosenweg-Wappen.
+Die Gemeinschaft (`kopf-name`) wird aus einer Liste gewählt, nicht getippt: Kooperation,
+je STWEG «STWEG <n> · Rosenweg <Häuser>», bei mehreren Häusern zusätzlich je Haus, und
+«MEG Rosenweg» (aus `site-config.json`). Das Wappen folgt der Auswahl: STWEG-Wappen,
+Hauswappen bzw. MEG-Wappen (`logo-stweg<n>-rosenweg<…>.png`, `logo-meg-rosenweg.png`,
+erzeugt mit `scripts/wappen/erzeuge.py`); bei der Kooperation das Rosenweg-Wappen.
 
 ## Neue Vorlage
 
