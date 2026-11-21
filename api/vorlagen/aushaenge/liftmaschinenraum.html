@@ -267,7 +267,7 @@
                 <img src="https://www.rosenweg4303.ch/logo-rosenweg.png" alt="Rosenweg">
                 <div>
                     <div class="rw-name">STWEG-Kooperation Rosenweg</div>
-                    <div class="rw-ort">Rosenweg 7–43 · 4303 Kaiseraugst</div>
+                    <div class="rw-ort">{{ORT}} · 4303 Kaiseraugst</div>
                 </div>
             </div>
             <h1>🛗 Liftmaschinenraum</h1>
@@ -277,11 +277,11 @@
         <div class="warning">
             <h2>
                 <span class="warning-icon">⚠</span>
-                Zutritt nur für Berechtigte!
+                <span data-feld="warn-titel">Zutritt nur für Berechtigte!</span>
             </h2>
-            <p>
+            <p data-feld="warn-text">
                 Dieser Raum enthält die Liftmaschinenanlage. Zugang nur für
-                Hauswarte, berechtigte Bewohner und Servicetechniker der Liftfirma.
+                Hauswarte, berechtigte Bewohner und Servicetechniker der Liftfirma (Otis).
             </p>
         </div>
 
@@ -289,8 +289,8 @@
         <div class="content">
             <!-- Ausstattung -->
             <div class="box">
-                <h3>🔧 Ausstattung</h3>
-                <ul>
+                <h3 data-feld="box1-titel">🔧 Ausstattung</h3>
+                <ul data-feld="box1-liste">
                     <li>Liftantrieb & Motor</li>
                     <li>Steuerungselektronik</li>
                     <li>Seilwinde & Tragsystem</li>
@@ -301,8 +301,8 @@
 
             <!-- Informationen -->
             <div class="box">
-                <h3>📋 Informationen</h3>
-                <ul>
+                <h3 data-feld="box2-titel">📋 Informationen</h3>
+                <ul data-feld="box2-liste">
                     <li>Regelmässige Wartung</li>
                     <li>TÜV/SUVA-Prüfungen</li>
                     <li>Keine Lagerhaltung</li>
@@ -314,35 +314,35 @@
             <!-- QR Codes -->
             <div class="qr-grid">
                 <div class="qr-item">
-                    <h4>👤 Ansprech&shy;partner</h4>
+                    <h4 data-feld="qr1-titel">👤 Ansprech&shy;partner</h4>
                     <div class="qr-code">
                         <img src="{{QR:ansprechpartner}}" alt="QR Code Ansprechpartner">
                     </div>
-                    <p class="qr-label">Hauswart & Lift-Verantwortliche</p>
+                    <p class="qr-label" data-feld="qr1-text">Hauswart & Lift-Verantwortliche</p>
                 </div>
 
                 <div class="qr-item">
-                    <h4>🏢 Lift&shy;firma</h4>
+                    <h4 data-feld="qr2-titel">🏢 Lift&shy;firma</h4>
                     <div class="qr-code">
                         <img src="{{QR:servicefirma}}" alt="QR Code Liftfirma">
                     </div>
-                    <p class="qr-label">Service-Partner & Wartung</p>
+                    <p class="qr-label" data-feld="qr2-text">Liftfirma Otis & Wartung</p>
                 </div>
 
                 <div class="qr-item">
-                    <h4>🚨 Notfall</h4>
+                    <h4 data-feld="qr3-titel">🚨 Notfall</h4>
                     <div class="qr-code">
                         <img src="{{QR:notfall}}" alt="QR Code Notfall">
                     </div>
-                    <p class="qr-label">Störung & Not-Telefon 24/7</p>
+                    <p class="qr-label" data-feld="qr3-text">Störung & Not-Telefon 24/7</p>
                 </div>
             </div>
         </div>
 
         <!-- Footer -->
         <div class="footer">
-            <p><strong>STWEG-Kooperation Rosenweg</strong> - Rosenweg 7-43, 4303 Kaiseraugst</p>
-            <p>Bei Liftpanne: Notruftaste im Lift drücken oder 118 (Feuerwehr)</p>
+            <p data-feld="fuss1"><strong>STWEG-Kooperation Rosenweg</strong> - Rosenweg 7-43, 4303 Kaiseraugst</p>
+            <p data-feld="fuss2">Bei Liftpanne: Notruftaste im Lift drücken oder 118 (Feuerwehr)</p>
         </div>
     </div>
 

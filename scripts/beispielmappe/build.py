@@ -572,7 +572,7 @@ def main():
     def mit_muster_qr(html_text):
         return re.sub(r'\{\{QR:([a-z]+)\}\}',
                       lambda m: qr_data_uri(f'https://www.rosenweg4303.ch/raum.html?t=beispiel{m.group(1)[:8]:x<8}'),
-                      html_text)
+                      html_text).replace('{{ORT}}', 'Rosenweg 9')
     VORL = ROOT / 'api' / 'vorlagen' / 'aushaenge'
     tuer_pdfs = [render_doc(f'tuer-{n}', mit_muster_qr((VORL / f'{n}.html').read_text(encoding='utf-8')))
                  for n in ('heizung-technikraum', 'waschkueche')]
