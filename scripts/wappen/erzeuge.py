@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Erzeugt STWEG-Wappen aus dem STWEG-3-Wappen (logo-stweg3-rosenweg9.png).
 
-Ring oben: «ROSENWEG <Hausnummern>», rotes Band unten: grosse STWEG-Nummer und
-«STWEG <n>» (bei der MEG nur «MEG»). Turm, Rose und Weg bleiben unverändert.
+Ring oben: «ROSENWEG <Hausnummern>», rotes Band unten: «STWEG <n>» bzw. «MEG».
+Optional eine grosse Zahl über dem Bandtext (wie beim STWEG-3-Wappen), sonst "". Turm, Rose und Weg bleiben unverändert.
 
 Aufruf:  python3 scripts/wappen/erzeuge.py <ziel.png> "<Ringtext>" "<Bandzahl>" "<Bandtext>"
-Beispiel: python3 scripts/wappen/erzeuge.py logo-stweg2.png "ROSENWEG 13/14/16" 2 "STWEG 2"
+Beispiel: python3 scripts/wappen/erzeuge.py logo-stweg2-rosenweg13-14-16.png "ROSENWEG 13/14/16" "" "STWEG 2"
 Schrift: Inter ExtraBold (scripts/beispielmappe/.cache/fonts/inter-800.woff2, wird
 von der Beispielmappe geladen) – sonst DejaVu Sans Bold.
 """
@@ -26,6 +26,7 @@ RING_INNEN, RING_AUSSEN = 316, 433   # weisser Ring zwischen den schwarzen Linie
 WEISS = (250, 249, 247, 255)
 ROT = (247, 14, 18, 255)
 SCHWARZ = (20, 18, 18, 255)
+# Bandtext «STWEG <n>» sitzt bei allen dort, wo im Original «STWEG3» steht (Mitte y=738).
 # Textflächen im roten Band, die überdeckt werden («9» und «STWEG3»).
 BAND_BOXEN = [(400, 600, 510, 708), (278, 706, 628, 772)]
 
@@ -93,7 +94,7 @@ def band(img, zahl, text):
         mittig(zahl, schrift(132), 650)
         mittig(text, schrift(66), 740)
     else:
-        mittig(text, schrift(92), 690)
+        mittig(text, schrift(74), 738)
 
 
 def main():
@@ -102,16 +103,10 @@ def main():
     ziel, ring, zahl, text = sys.argv[1:]
     img = Image.open(BASIS).convert('RGBA')
     ring_leeren(img)
-    groesse = 72
-    while True:
-        try:
-            bogentext(img, ring, groesse)
-            break
-        except SystemExit:
-            groesse -= 4
-            img = Image.open(BASIS).convert('RGBA'); ring_leeren(img)
-            if groesse < 36:
-                raise
+    # Gleiche Versalhöhe wie das Original (ca. 63 px) -> Inter ExtraBold 88 px;
+    # nicht verkleinern, damit alle Wappen gleich gross beschriftet sind.
+    groesse = 88
+    bogentext(img, ring, groesse)
     band(img, zahl, text)
     img.save(ROOT / ziel, optimize=True)
     print(f'{ziel}: Ringschrift {groesse}px')
