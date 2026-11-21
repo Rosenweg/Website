@@ -279,6 +279,8 @@ function inhaltSkript(felder, bearbeiten, info) {
     +'body{padding-top:48px}@media print{#rw-leiste{display:none}body{padding-top:0}[data-feld]{outline:none!important;background:none!important}}';
   document.head.appendChild(st);
   document.querySelectorAll('[data-feld]').forEach(function(el){ el.contentEditable='true'; });
+  var kn=document.querySelector('[data-feld="kopf-name"]'), img=document.querySelector('.rw-kopf img');
+  if(kn&&img) kn.addEventListener('input',function(){ var m=kn.textContent.match(/STWEG\s*(\d+)/i); img.src=(m&&M.logos[m[1]])||M.standardLogo; });
   var l=document.createElement('div'); l.id='rw-leiste';
   l.innerHTML='<span>✏️ Bearbeiten: '+M.raum+' – rot umrandete Texte anklicken; in Listen erzeugt Enter einen neuen Punkt.'+(M.eigen?' <b>(eigene Texte aktiv)</b>':'')+'</span>'
     +'<button id="rw-ort" style="background:#c41e1e;color:#fff">Für diesen Raum speichern</button>'
@@ -295,6 +297,15 @@ function inhaltSkript(felder, bearbeiten, info) {
   document.getElementById('rw-reset').onclick=function(){ if(confirm('Eigene Texte dieses Raums entfernen? Danach gilt wieder die Vorgabe.')) senden('weg'); };
   document.getElementById('rw-druck').onclick=function(){ window.print(); };
 })();</script>`;
+}
+
+// Eigene Wappen einzelner STWEGs (Dateien im Website-Docroot). Steht im Kopf
+// eines Schilds «STWEG <n>», wird das Rosenweg-Wappen durch dieses ersetzt.
+const STWEG_LOGOS = { 3: 'logo-stweg3-rosenweg9.png', 6: 'logo-stweg6-rosenweg1.png' };
+const ROSENWEG_LOGO = 'https://www.rosenweg4303.ch/logo-rosenweg.png';
+function logoFuer(kopfName) {
+  const m = String(kopfName || '').replace(/<[^>]*>/g, '').match(/STWEG\s*(\d+)/i);
+  return m && STWEG_LOGOS[m[1]] ? `${SITE_URL}/${STWEG_LOGOS[m[1]]}` : null;
 }
 
 const qrUrl = token => `${SITE_URL}/raum.html?t=${token}`;
@@ -390,10 +401,14 @@ router.get('/druck/:id/:vorlage', authMiddleware, requirePermission('reklamation
     html = html.replace(/\{\{QR:([a-z]+)\}\}/g, (m, thema) => qr[thema] || '').replace(/\{\{ORT\}\}/g, ESC(o.standort));
     const inhalt = await inhaltFuer(o, req.params.vorlage);
     for (const k of Object.keys(inhalt.wirksam)) if (typeof inhalt.wirksam[k] === 'string') inhalt.wirksam[k] = inhalt.wirksam[k].replace(/\{\{ORT\}\}/g, ESC(o.standort));
+    const kopfName = inhalt.wirksam['kopf-name'] ?? (html.match(/data-feld="kopf-name">([^<]*)</) || [])[1];
+    const logo = logoFuer(kopfName);
+    if (logo) html = html.replace(`<img src="${ROSENWEG_LOGO}" alt="Rosenweg">`, `<img src="${logo}" alt="Wappen">`);
     const bearbeiten = req.query.bearbeiten === '1';
     if (bearbeiten || Object.keys(inhalt.wirksam).length) {
       const skript = inhaltSkript(inhalt.wirksam, bearbeiten,
-        { id: o.id, vorlage: req.params.vorlage, raum: `${TYPEN[o.typ].titel.replace(/^\S+\s/, '')} ${o.standort}`, typ: TYPEN[o.typ].titel.replace(/^\S+\s/, ''), eigen: inhalt.eigen.length > 0 });
+        { id: o.id, vorlage: req.params.vorlage, raum: `${TYPEN[o.typ].titel.replace(/^\S+\s/, '')} ${o.standort}`, typ: TYPEN[o.typ].titel.replace(/^\S+\s/, ''), eigen: inhalt.eigen.length > 0,
+          logos: Object.fromEntries(Object.entries(STWEG_LOGOS).map(([k, v]) => [k, `${SITE_URL}/${v}`])), standardLogo: ROSENWEG_LOGO });
       html = html.includes('</body>') ? html.replace('</body>', skript + '</body>') : html + skript;
     }
     // <base>, damit relative Pfade (Logo) auch im Druckfenster laden.
