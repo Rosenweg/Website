@@ -290,6 +290,7 @@ def build_deckblatt():
             f'const totalItems = {d["totalItems"]};\n'
             f'const printableAtts = {json.dumps(d["printableAtts"], ensure_ascii=False)};\n'
             f'const pickupUrl = {json.dumps(d["pickupUrl"])};\n'
+            f'const pickupQr = {json.dumps(qr)};\n'
             + js_wrap(block + '\nreturn coverHtml;'))
     doc = run_js('deckblatt', task)
     return render_doc('deckblatt', doc)
@@ -628,11 +629,15 @@ des Servers wurde für die Mappe mit den Musterdaten nachgebildet.</p>''')
                        '<code>druckerr13+…</code> (Rosenweg 13, A3). Die Plattform prüft die Absenderadresse, sucht '
                        'den Empfänger in der Objektverwaltung, erzeugt das Deckblatt und druckt Deckblatt und Anhänge.'),
         ('Empfänger', 'Die im +Tag genannte Person; Abholung im Haus.'),
+        ('Benachrichtigung', '<b>Die Abholer werden automatisch benachrichtigt:</b> Sobald der Auftrag gedruckt ist, erhalten '
+                             'Technik und Präsident eine Mail mit Empfänger, Wohnung, Drucker, Betreff und Absender '
+                             '(Vorlage <code>print-notification</code>). Sie holen den Ausdruck am Drucker ab und verteilen ihn.'),
         ('Format', 'PDF A4 (bzw. A3 am Drucker Rosenweg 13), eine Seite, vor den Anhängen.'),
-        ('Besonderheiten', 'Der <b>QR-Code</b> führt zur Abholbestätigung. Wird ein Ausdruck nicht abgeholt, erinnert die '
-                           'Plattform per Mail (Vorlage <code>pickup-reminder</code>). Nur freigegebene Absender dürfen drucken.'),
-    ], f'<div class="grau">Für die Mappe wurde der QR-Code lokal erzeugt; im Betrieb lädt das Deckblatt ihn vom Dienst '
-       f'api.qrserver.com. Inhalt, Layout und Texte stammen unverändert aus der Vorlage im Server.</div>'))
+        ('Besonderheiten', 'Der <b>QR-Code</b> führt zur Abholbestätigung. Ist ein Ausdruck nach 24 Stunden nicht als abgeholt '
+                           'bestätigt, erinnert die Plattform die Abholer per Sammelmail und danach alle 3 Tage erneut, bis er '
+                           'abgeholt ist (Vorlage <code>pickup-reminder</code>). Nur freigegebene Absender dürfen drucken.'),
+    ], '<div class="grau">Der QR-Code wird wie im Betrieb lokal erzeugt (im Server mit dem Paket qrcode). '
+       'Inhalt, Layout und Texte stammen unverändert aus der Vorlage im Server.</div>'))
 
     gerendert = mails['gerendert']
     alle = mails['alle']
