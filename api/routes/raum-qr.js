@@ -159,6 +159,17 @@ function tabelle() {
       );
       ALTER TABLE raum_qr ALTER COLUMN raum TYPE VARCHAR(80);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_raum_qr_aktiv ON raum_qr (raum, thema) WHERE aktiv;
+      -- Bearbeitete Texte der Druckvorlagen: ebene 'typ' (Vorgabe fuer alle Raeume eines
+      -- Typs, ziel = Typ) oder 'ort' (ein Raum, ziel = raum_orte.id). felder: {data-feld: Wert}.
+      CREATE TABLE IF NOT EXISTS raum_inhalt (
+        ebene VARCHAR(8) NOT NULL,
+        ziel VARCHAR(40) NOT NULL,
+        vorlage VARCHAR(60) NOT NULL,
+        felder JSONB NOT NULL DEFAULT '{}',
+        geaendert_von VARCHAR(255),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (ebene, ziel, vorlage)
+      );
       -- Tokens aus der ersten Fassung (ein Raum je Typ, ohne Haus) nie gedruckt -> stilllegen.
       UPDATE raum_qr SET aktiv = false, deaktiviert_at = NOW() WHERE aktiv AND raum NOT LIKE '%-%';
     `).catch(e => { tabelleBereit = null; throw e; });
@@ -214,6 +225,76 @@ async function schluesselhalter(gruppe) {
     console.error('[raum-qr-schluessel]', e.message);
     return [];
   }
+}
+
+// ─── Bearbeitbare Texte ─────────────────────────────────────────────
+// Elemente mit data-feld in den Vorlagen. *-liste: Array von Zeilen (nur Text),
+// sonst Text mit <strong>/<b>/<em>/<br> erlaubt. Alles andere wird entfernt.
+function saeubereText(v) {
+  return String(v ?? '').slice(0, 1000)
+    .replace(/<(?!\/?(strong|b|em|br)\s*\/?>)[^>]*>/gi, '')
+    .replace(/&(?!(amp|lt|gt|quot|nbsp|shy|#\d+);)/g, '&amp;')
+    .trim();
+}
+function saeubereFelder(felder) {
+  const out = {};
+  for (const [k, v] of Object.entries(felder || {})) {
+    if (!/^[a-z0-9-]{1,30}$/.test(k)) continue;
+    if (k.endsWith('-liste')) {
+      if (!Array.isArray(v)) continue;
+      out[k] = v.map(x => String(x ?? '').replace(/<[^>]*>/g, '').trim().slice(0, 200)).filter(Boolean).slice(0, 20);
+    } else {
+      out[k] = saeubereText(v);
+    }
+  }
+  return out;
+}
+async function inhaltFuer(ort, vorlage) {
+  const r = await pool.query(
+    `SELECT ebene, felder FROM raum_inhalt WHERE vorlage = $1 AND ((ebene = 'typ' AND ziel = $2) OR (ebene = 'ort' AND ziel = $3))`,
+    [vorlage, ort.typ, String(ort.id)]);
+  const typ = r.rows.find(x => x.ebene === 'typ')?.felder || {};
+  const eigen = r.rows.find(x => x.ebene === 'ort')?.felder || {};
+  return { wirksam: { ...typ, ...eigen }, eigen: Object.keys(eigen) };
+}
+
+// Skript, das die gespeicherten Texte in die data-feld-Elemente setzt; im
+// Bearbeiten-Modus zusaetzlich contenteditable + Leiste, die ueber
+// window.opener (tuerschilder.html, angemeldet) speichert.
+function inhaltSkript(felder, bearbeiten, info) {
+  const json = JSON.stringify(felder).replace(/</g, '\\u003c');
+  const meta = JSON.stringify(info).replace(/</g, '\\u003c');
+  return `<script>(function(){
+  var F=${json}, M=${meta};
+  document.querySelectorAll('[data-feld]').forEach(function(el){
+    var k=el.getAttribute('data-feld'); if(!(k in F)) return;
+    if(/-liste$/.test(k)){ el.innerHTML=''; F[k].forEach(function(t){ var li=document.createElement('li'); li.textContent=t; el.appendChild(li); }); }
+    else el.innerHTML=F[k];
+  });
+  if(!${bearbeiten ? 'true' : 'false'}) return;
+  var st=document.createElement('style');
+  st.textContent='[data-feld]{outline:1.5px dashed #c41e1e66;outline-offset:2px;cursor:text}[data-feld]:focus{outline:2px solid #c41e1e;background:#fff8}'
+    +'#rw-leiste{position:fixed;top:0;left:0;right:0;z-index:99;background:#1f2937;color:#fff;font:13px Arial,sans-serif;padding:8px 12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}'
+    +'#rw-leiste button{border:0;border-radius:6px;padding:6px 10px;font:600 13px Arial,sans-serif;cursor:pointer}'
+    +'body{padding-top:48px}@media print{#rw-leiste{display:none}body{padding-top:0}[data-feld]{outline:none!important;background:none!important}}';
+  document.head.appendChild(st);
+  document.querySelectorAll('[data-feld]').forEach(function(el){ el.contentEditable='true'; });
+  var l=document.createElement('div'); l.id='rw-leiste';
+  l.innerHTML='<span>✏️ Bearbeiten: '+M.raum+' – rot umrandete Texte anklicken; in Listen erzeugt Enter einen neuen Punkt.'+(M.eigen?' <b>(eigene Texte aktiv)</b>':'')+'</span>'
+    +'<button id="rw-ort" style="background:#c41e1e;color:#fff">Für diesen Raum speichern</button>'
+    +'<button id="rw-typ" style="background:#fff;color:#111">Als Vorgabe für alle '+M.typ+'</button>'
+    +'<button id="rw-reset" style="background:#4b5563;color:#fff">Eigene Texte entfernen</button>'
+    +'<button id="rw-druck" style="background:#4b5563;color:#fff">🖨 Drucken</button>';
+  document.body.prepend(l);
+  function sammeln(){ var o={}; document.querySelectorAll('[data-feld]').forEach(function(el){ var k=el.getAttribute('data-feld');
+    o[k]=/-liste$/.test(k)?Array.prototype.map.call(el.querySelectorAll('li'),function(li){return li.textContent.trim();}).filter(Boolean):el.innerHTML.trim(); }); return o; }
+  function senden(ebene){ if(!window.opener||!window.opener.rwInhaltSpeichern){ alert('Bitte aus der Seite «Türschilder & Aushänge» heraus öffnen.'); return; }
+    window.opener.rwInhaltSpeichern(M.id, M.vorlage, ebene, ebene==='weg'?null:sammeln()).then(function(ok){ if(ok) alert('Gespeichert.'); }); }
+  document.getElementById('rw-ort').onclick=function(){ senden('ort'); };
+  document.getElementById('rw-typ').onclick=function(){ if(confirm('Diese Texte als Vorgabe für alle Räume dieses Typs speichern? Dieser Raum übernimmt die Vorgabe; andere Räume mit eigenen Texten behalten ihre.')) senden('typ'); };
+  document.getElementById('rw-reset').onclick=function(){ if(confirm('Eigene Texte dieses Raums entfernen? Danach gilt wieder die Vorgabe.')) senden('weg'); };
+  document.getElementById('rw-druck').onclick=function(){ window.print(); };
+})();</script>`;
 }
 
 const qrUrl = token => `${SITE_URL}/raum.html?t=${token}`;
@@ -307,11 +388,50 @@ router.get('/druck/:id/:vorlage', authMiddleware, requirePermission('reklamation
     const qr = {};
     for (const [thema, token] of Object.entries(tokens)) qr[thema] = await QRCode.toDataURL(qrUrl(token), { width: 400, margin: 1, errorCorrectionLevel: 'M' });
     html = html.replace(/\{\{QR:([a-z]+)\}\}/g, (m, thema) => qr[thema] || '').replace(/\{\{ORT\}\}/g, ESC(o.standort));
+    const inhalt = await inhaltFuer(o, req.params.vorlage);
+    const bearbeiten = req.query.bearbeiten === '1';
+    if (bearbeiten || Object.keys(inhalt.wirksam).length) {
+      const skript = inhaltSkript(inhalt.wirksam, bearbeiten,
+        { id: o.id, vorlage: req.params.vorlage, raum: `${TYPEN[o.typ].titel.replace(/^\S+\s/, '')} ${o.standort}`, typ: TYPEN[o.typ].titel.replace(/^\S+\s/, ''), eigen: inhalt.eigen.length > 0 });
+      html = html.includes('</body>') ? html.replace('</body>', skript + '</body>') : html + skript;
+    }
     // <base>, damit relative Pfade (Logo) auch im Druckfenster laden.
     html = html.replace('<head>', `<head><base href="${SITE_URL}/">`);
     res.set('Cache-Control', 'no-store');
     res.type('html').send(html);
   } catch (e) { console.error('[raum-qr-druck]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
+// PUT /api/raum-qr/inhalt {ort_id, vorlage, ebene: 'ort'|'typ', felder} — Texte speichern.
+// DELETE /api/raum-qr/inhalt {ort_id, vorlage} — eigene Texte des Raums entfernen.
+router.put('/inhalt', authMiddleware, requirePermission('reklamationen', 'write'), async (req, res) => {
+  try {
+    const b = req.body || {};
+    const o = await ortById(b.ort_id);
+    const v = VORLAGEN[b.vorlage];
+    if (!o || !v || v.typ !== o.typ) return res.status(404).json({ error: 'Unbekannter Raum oder Vorlage' });
+    if (!['ort', 'typ'].includes(b.ebene)) return res.status(400).json({ error: 'Ebene ort oder typ' });
+    const felder = saeubereFelder(b.felder);
+    const ziel = b.ebene === 'ort' ? String(o.id) : o.typ;
+    await pool.query(
+      `INSERT INTO raum_inhalt (ebene, ziel, vorlage, felder, geaendert_von, updated_at) VALUES ($1,$2,$3,$4,$5,NOW())
+       ON CONFLICT (ebene, ziel, vorlage) DO UPDATE SET felder = EXCLUDED.felder, geaendert_von = EXCLUDED.geaendert_von, updated_at = NOW()`,
+      [b.ebene, ziel, b.vorlage, JSON.stringify(felder), req.user?.email || null]);
+    if (b.ebene === 'typ') {
+      // Wer als Vorgabe speichert, will das Ergebnis auch in diesem Raum sehen.
+      await pool.query(`DELETE FROM raum_inhalt WHERE ebene = 'ort' AND ziel = $1 AND vorlage = $2`, [String(o.id), b.vorlage]);
+    }
+    res.json({ ok: true });
+  } catch (e) { console.error('[raum-qr-inhalt]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+router.delete('/inhalt', authMiddleware, requirePermission('reklamationen', 'write'), async (req, res) => {
+  try {
+    const b = req.body || {};
+    const o = await ortById(b.ort_id);
+    if (!o || !VORLAGEN[b.vorlage]) return res.status(404).json({ error: 'Unbekannter Raum oder Vorlage' });
+    await pool.query(`DELETE FROM raum_inhalt WHERE ebene = 'ort' AND ziel = $1 AND vorlage = $2`, [String(o.id), b.vorlage]);
+    res.json({ ok: true });
+  } catch (e) { console.error('[raum-qr-inhalt-weg]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 
 module.exports = router;

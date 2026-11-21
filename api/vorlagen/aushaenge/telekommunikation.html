@@ -270,9 +270,9 @@
         <div class="warning">
             <h2>
                 <span class="warning-icon">⚠</span>
-                Zutritt nur für Berechtigte!
+                <span data-feld="warn-titel">Zutritt nur für Berechtigte!</span>
             </h2>
-            <p>
+            <p data-feld="warn-text">
                 Dieser Raum enthält zentrale Telekommunikationsanlagen für alle 8 Gebäude.
                 Zugang nur für Hauswarte, berechtigte Bewohner und Servicetechniker.
             </p>
@@ -282,8 +282,8 @@
         <div class="content">
             <!-- Ausstattung -->
             <div class="box">
-                <h3>📦 Ausstattung</h3>
-                <ul>
+                <h3 data-feld="box1-titel">📦 Ausstattung</h3>
+                <ul data-feld="box1-liste">
                     <li>Internet-Router zentral</li>
                     <li>Netzwerk-Switches</li>
                     <li>Glasfaser-Verteiler (FTTH)</li>
@@ -294,8 +294,8 @@
 
             <!-- Informationen -->
             <div class="box">
-                <h3>📋 Informationen</h3>
-                <ul>
+                <h3 data-feld="box2-titel">📋 Informationen</h3>
+                <ul data-feld="box2-liste">
                     <li>Erschliessung: Swisscom</li>
                     <li>Zentrale Glasfaseranbindung</li>
                     <li>Keine eigenmächtige Änderungen</li>
@@ -307,35 +307,35 @@
             <!-- QR Codes -->
             <div class="qr-grid">
                 <div class="qr-item">
-                    <h4>👤 Ansprech&shy;partner</h4>
+                    <h4 data-feld="qr1-titel">👤 Ansprech&shy;partner</h4>
                     <div class="qr-code">
                         <img src="{{QR:ansprechpartner}}" alt="QR Code Ansprechpartner">
                     </div>
-                    <p class="qr-label">IT-Verantwortliche & Hauswart</p>
+                    <p class="qr-label" data-feld="qr1-text">IT-Verantwortliche & Hauswart</p>
                 </div>
 
                 <div class="qr-item">
-                    <h4>📋 Doku&shy;mentation</h4>
+                    <h4 data-feld="qr2-titel">📋 Doku&shy;mentation</h4>
                     <div class="qr-code">
                         <img src="{{QR:dokumentation}}" alt="QR Code Dokumentation">
                     </div>
-                    <p class="qr-label">Netzwerk&shy;plan & Doku</p>
+                    <p class="qr-label" data-feld="qr2-text">Netzwerk&shy;plan & Doku</p>
                 </div>
 
                 <div class="qr-item">
-                    <h4>🚨 Support</h4>
+                    <h4 data-feld="qr3-titel">🚨 Support</h4>
                     <div class="qr-code">
                         <img src="{{QR:support}}" alt="QR Code Support">
                     </div>
-                    <p class="qr-label">Störungen & Provider-Kontakt</p>
+                    <p class="qr-label" data-feld="qr3-text">Störungen & Provider-Kontakt</p>
                 </div>
             </div>
         </div>
 
         <!-- Footer -->
         <div class="footer">
-            <p><strong>STWEG-Kooperation Rosenweg</strong> - Rosenweg 7-43, 4303 Kaiseraugst</p>
-            <p>Zentrale Telekommunikationsanlage für alle 8 Gebäude</p>
+            <p data-feld="fuss1"><strong>STWEG-Kooperation Rosenweg</strong> - Rosenweg 7-43, 4303 Kaiseraugst</p>
+            <p data-feld="fuss2">Zentrale Telekommunikationsanlage für alle 8 Gebäude</p>
         </div>
     </div>
 

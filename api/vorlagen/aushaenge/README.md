@@ -23,8 +23,16 @@ Die Vorlagen enthalten Platzhalter `{{QR:<thema>}}`. Beim Druck über
 Die Vorlagen liegen bewusst im API-Image und nicht im öffentlichen Docroot:
 Das Repo ist öffentlich, Tokens dürfen nie in Dateien stehen.
 
+## Texte bearbeiten
+
+Elemente mit `data-feld` (Warnkasten, Listen `boxN-liste`, QR-Titel/-Texte, Fusszeile)
+lassen sich auf `tuerschilder.html` über ✏️ direkt im Schild ändern. Gespeichert wird in
+`raum_inhalt` als Vorgabe je Typ oder pro Raum (Raum überschreibt Typ, Typ überschreibt
+die Vorlage). Erlaubt sind nur Text sowie `<strong>`, `<b>`, `<em>`, `<br>`.
+
 ## Neue Vorlage
 
-1. HTML hier ablegen, QR-Bilder als `<img src="{{QR:<thema>}}">`.
+1. HTML hier ablegen, QR-Bilder als `<img src="{{QR:<thema>}}">`, Standort als `{{ORT}}`,
+   bearbeitbare Texte mit `data-feld="…"` (Listen: Name endet auf `-liste`).
 2. In `VORLAGEN` (`api/routes/raum-qr.js`) eintragen, Typ zuordnen.
 3. Das Thema muss eine Abschnitts-ID des Typs in `TYPEN` sein.

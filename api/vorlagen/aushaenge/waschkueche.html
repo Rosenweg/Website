@@ -270,9 +270,9 @@
         <div class="warning">
             <h2>
                 <span class="warning-icon">⚠</span>
-                Fenster geschlossen halten!
+                <span data-feld="warn-titel">Fenster geschlossen halten!</span>
             </h2>
-            <p>
+            <p data-feld="warn-text">
                 Die Fenster in der Waschküche müssen GESCHLOSSEN bleiben!
                 Zum Trocknen nutzen Sie bitte den Trockner oder die fest verbauten Wäscheleinen.
             </p>
@@ -282,8 +282,8 @@
         <div class="content">
             <!-- Ausstattung -->
             <div class="box">
-                <h3>📦 Ausstattung</h3>
-                <ul>
+                <h3 data-feld="box1-titel">📦 Ausstattung</h3>
+                <ul data-feld="box1-liste">
                     <li>Waschmaschine</li>
                     <li>Trockner</li>
                     <li>Waschtisch mit Waschbecken</li>
@@ -294,8 +294,8 @@
 
             <!-- Nutzungszeiten -->
             <div class="box">
-                <h3>🕐 Nutzungszeiten</h3>
-                <ul>
+                <h3 data-feld="box2-titel">🕐 Nutzungszeiten</h3>
+                <ul data-feld="box2-liste">
                     <li>Mo-Sa: 07:00 - 22:00 Uhr</li>
                     <li>Sonntags: Ruhetag</li>
                     <li>Feiertage: Ruhetag</li>
@@ -306,35 +306,35 @@
             <!-- QR Codes -->
             <div class="qr-grid">
                 <div class="qr-item">
-                    <h4>👤 Ansprech&shy;partner</h4>
+                    <h4 data-feld="qr1-titel">👤 Ansprech&shy;partner</h4>
                     <div class="qr-code">
                         <img src="{{QR:ansprechpartner}}" alt="QR Code Ansprechpartner">
                     </div>
-                    <p class="qr-label">Verantwortliche & Hauswart</p>
+                    <p class="qr-label" data-feld="qr1-text">Verantwortliche & Hauswart</p>
                 </div>
 
                 <div class="qr-item">
-                    <h4>📋 Regeln & Buchung</h4>
+                    <h4 data-feld="qr2-titel">📋 Regeln & Buchung</h4>
                     <div class="qr-code">
                         <img src="{{QR:regeln}}" alt="QR Code Regeln">
                     </div>
-                    <p class="qr-label">Nutzungs&shy;regeln & Reservierung</p>
+                    <p class="qr-label" data-feld="qr2-text">Nutzungs&shy;regeln & Reservierung</p>
                 </div>
 
                 <div class="qr-item">
-                    <h4>🔑 Schlüssel</h4>
+                    <h4 data-feld="qr3-titel">🔑 Schlüssel</h4>
                     <div class="qr-code">
                         <img src="{{QR:zugang}}" alt="QR Code Schlüssel">
                     </div>
-                    <p class="qr-label">Schlüssel&shy;halter & Zugang</p>
+                    <p class="qr-label" data-feld="qr3-text">Schlüssel&shy;halter & Zugang</p>
                 </div>
             </div>
         </div>
 
         <!-- Footer -->
         <div class="footer">
-            <p><strong>STWEG-Kooperation Rosenweg</strong> - Rosenweg 7-43, 4303 Kaiseraugst</p>
-            <p>Gemeinschaftliche Waschküche - Bitte Ruhezeiten beachten</p>
+            <p data-feld="fuss1"><strong>STWEG-Kooperation Rosenweg</strong> - Rosenweg 7-43, 4303 Kaiseraugst</p>
+            <p data-feld="fuss2">Gemeinschaftliche Waschküche - Bitte Ruhezeiten beachten</p>
         </div>
     </div>
 

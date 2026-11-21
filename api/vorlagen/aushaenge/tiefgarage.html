@@ -270,9 +270,9 @@
         <div class="warning">
             <h2>
                 <span class="warning-icon">⚠</span>
-                Brandschutz beachten!
+                <span data-feld="warn-titel">Brandschutz beachten!</span>
             </h2>
-            <p>
+            <p data-feld="warn-text">
                 <strong>Lagerverbot:</strong> Brennbare Flüssigkeiten und gefährliche Stoffe sind verboten.
                 Keine Zweckentfremdung als Werkstatt oder Lagerraum.
             </p>
@@ -282,8 +282,8 @@
         <div class="content">
             <!-- Nutzung -->
             <div class="box">
-                <h3>✓ Erlaubt</h3>
-                <ul>
+                <h3 data-feld="box1-titel">✓ Erlaubt</h3>
+                <ul data-feld="box1-liste">
                     <li>Parkieren von Fahrzeugen</li>
                     <li>Fahrzeugpflege</li>
                     <li>Fahrräder & E-Bikes</li>
@@ -292,8 +292,8 @@
 
             <!-- Verboten -->
             <div class="box">
-                <h3>✗ Verboten</h3>
-                <ul>
+                <h3 data-feld="box2-titel">✗ Verboten</h3>
+                <ul data-feld="box2-liste">
                     <li>Brennbare Flüssigkeiten</li>
                     <li>Werkstattbetrieb</li>
                     <li>Lagern von Gegenständen</li>
@@ -302,8 +302,8 @@
 
             <!-- Sicherheit -->
             <div class="box full">
-                <h3>🔒 Sicherheit (VKF/AGV)</h3>
-                <ul>
+                <h3 data-feld="box3-titel">🔒 Sicherheit (VKF/AGV)</h3>
+                <ul data-feld="box3-liste">
                     <li>Fluchtwege frei halten</li>
                     <li>Bei Feuer: Feuerwehr 118</li>
                     <li>Hydranten/Löscher zugänglich</li>
@@ -313,35 +313,35 @@
             <!-- QR Codes -->
             <div class="qr-grid">
                 <div class="qr-item">
-                    <h4>👤 Ansprech&shy;partner</h4>
+                    <h4 data-feld="qr1-titel">👤 Ansprech&shy;partner</h4>
                     <div class="qr-code">
                         <img src="{{QR:ansprechpartner}}" alt="QR Code Ansprechpartner">
                     </div>
-                    <p class="qr-label">Hauswart & Verwaltung</p>
+                    <p class="qr-label" data-feld="qr1-text">Hauswart & Verwaltung</p>
                 </div>
 
                 <div class="qr-item">
-                    <h4>📋 Hausordnung</h4>
+                    <h4 data-feld="qr2-titel">📋 Hausordnung</h4>
                     <div class="qr-code">
                         <img src="{{QR:hausordnung}}" alt="QR Code Hausordnung">
                     </div>
-                    <p class="qr-label">Regeln & Vorschriften</p>
+                    <p class="qr-label" data-feld="qr2-text">Regeln & Vorschriften</p>
                 </div>
 
                 <div class="qr-item">
-                    <h4>🚨 Notfall</h4>
+                    <h4 data-feld="qr3-titel">🚨 Notfall</h4>
                     <div class="qr-code">
                         <img src="{{QR:notfall}}" alt="QR Code Notfall">
                     </div>
-                    <p class="qr-label">Feuerwehr 118 · Polizei 117</p>
+                    <p class="qr-label" data-feld="qr3-text">Feuerwehr 118 · Polizei 117</p>
                 </div>
             </div>
         </div>
 
         <!-- Footer -->
         <div class="footer">
-            <p><strong>MEG</strong> - Rosenweg, 4303 Kaiseraugst</p>
-            <p>Brandschutz nach VKF & AGV Aargau - Bei Notfall: Feuerwehr 118</p>
+            <p data-feld="fuss1"><strong>MEG</strong> - Rosenweg, 4303 Kaiseraugst</p>
+            <p data-feld="fuss2">Brandschutz nach VKF & AGV Aargau - Bei Notfall: Feuerwehr 118</p>
         </div>
     </div>
 

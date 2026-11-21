@@ -27,7 +27,8 @@
       <p class="text-sm text-gray-600 mb-5">
         Die QR-Codes enthalten einen geheimen Code je Raum. Nur wer ihn vor Ort scannt, sieht die Raum-Infos
         (Ansprechpartner, Zugang, Notfall). <strong>Drucken</strong> öffnet die fertige A4-Vorlage; im Browser
-        mit «Drucken» ausgeben. <strong>Codes erneuern</strong> macht alle bisherigen Ausdrucke dieses Raums ungültig.
+        mit «Drucken» ausgeben. ✏️ öffnet das Schild zum <strong>Bearbeiten</strong>: Texte direkt anklicken und ändern,
+        dann für diesen Raum oder als Vorgabe für alle Räume des Typs speichern. <strong>Codes erneuern</strong> macht alle bisherigen Ausdrucke dieses Raums ungültig.
       </p>
       <p class="text-sm text-gray-600 mb-5 bg-amber-50 border border-amber-200 rounded-lg p-3">
         🔑 <strong>Schlüsselhalter</strong> werden in Authentik gepflegt: Gruppe mit dem Namen aus der Spalte
@@ -101,7 +102,10 @@
         <td class="px-4 py-2 text-gray-600"><code>${esc(x.gruppe)}</code></td>
         <td class="px-4 py-2 text-gray-600">${esc(datum(x.codes_seit))}</td>
         <td class="px-4 py-2 text-right space-y-1">
-          ${daten.vorlagen.filter(v => v.typ === x.typ).map(v => `<button onclick="drucken(${x.id}, '${esc(v.vorlage)}')" class="block w-full px-3 py-1 rounded text-white" style="background:#c41e1e">🖨 ${esc(v.titel)}</button>`).join('')}
+          ${daten.vorlagen.filter(v => v.typ === x.typ).map(v => `<div class="flex gap-1">
+            <button onclick="drucken(${x.id}, '${esc(v.vorlage)}')" class="flex-1 px-3 py-1 rounded text-white" style="background:#c41e1e">🖨 ${esc(v.titel)}</button>
+            ${v.art === 'Türschild' ? `<button onclick="drucken(${x.id}, '${esc(v.vorlage)}', true)" title="Texte bearbeiten" class="px-2 py-1 rounded bg-amber-100 hover:bg-amber-200">✏️</button>` : ''}
+          </div>`).join('')}
           <button onclick="erneuern(${x.id})" class="block w-full px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-800">🔄 Codes erneuern</button>
           <button onclick="entfernen(${x.id})" class="block w-full px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-600">Entfernen</button>
         </td>
@@ -122,17 +126,27 @@
     await load();
   }
 
-  async function drucken(id, vorlage) {
+  async function drucken(id, vorlage, bearbeiten) {
     // Fenster sofort öffnen (sonst blockiert der Popup-Blocker), Inhalt danach schreiben.
     const w = window.open('', '_blank');
     if (!w) { alert('Bitte Pop-ups für diese Seite erlauben.'); return; }
     w.document.write('<p style="font-family:sans-serif;padding:2em">Vorlage wird erstellt …</p>');
-    const r = await AuthentikAuth.apiFetch(`/api/raum-qr/druck/${id}/${encodeURIComponent(vorlage)}`);
+    const r = await AuthentikAuth.apiFetch(`/api/raum-qr/druck/${id}/${encodeURIComponent(vorlage)}${bearbeiten ? '?bearbeiten=1' : ''}`);
     if (!r.ok) { w.document.body.innerHTML = '<p style="font-family:sans-serif;padding:2em;color:#b91c1c">Fehler ' + r.status + '</p>'; return; }
     const html = await r.text();
     w.document.open(); w.document.write(html); w.document.close();
     load();
   }
+
+  // Wird aus dem Schildfenster (Bearbeiten-Modus) aufgerufen; hier ist die Anmeldung vorhanden.
+  // ebene: 'ort' | 'typ' | 'weg' (eigene Texte des Raums entfernen).
+  window.rwInhaltSpeichern = async (id, vorlage, ebene, felder) => {
+    const r = ebene === 'weg'
+      ? await AuthentikAuth.apiFetch('/api/raum-qr/inhalt', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ort_id: id, vorlage }) })
+      : await AuthentikAuth.apiFetch('/api/raum-qr/inhalt', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ort_id: id, vorlage, ebene, felder }) });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || ('Fehler ' + r.status)); return false; }
+    return true;
+  };
 
   async function erneuern(id) {
     if (!confirm(`Codes für «${raumName(id)}» erneuern?\n\nAlle bisher gedruckten Schilder und Poster dieses Raums funktionieren danach nicht mehr und müssen neu gedruckt werden.`)) return;

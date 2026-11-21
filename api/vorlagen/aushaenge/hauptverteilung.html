@@ -270,9 +270,9 @@
         <div class="warning">
             <h2>
                 <span class="warning-icon">⚠</span>
-                Lebensgefahr - Hochspannung!
+                <span data-feld="warn-titel">Lebensgefahr - Hochspannung!</span>
             </h2>
-            <p>
+            <p data-feld="warn-text">
                 <strong>Zutritt streng verboten!</strong> Dieser Raum enthält die elektrische Hauptverteilung
                 mit Hochspannung. Zugang nur für autorisierte Elektriker mit gültiger Schaltberechtigung.
             </p>
@@ -282,8 +282,8 @@
         <div class="content">
             <!-- Ausstattung -->
             <div class="box">
-                <h3>⚡ Ausstattung</h3>
-                <ul>
+                <h3 data-feld="box1-titel">⚡ Ausstattung</h3>
+                <ul data-feld="box1-liste">
                     <li>Hauptverteilung 400V/230V</li>
                     <li>Unterverteilungen</li>
                     <li>Hauptsicherungen & FI-Schalter</li>
@@ -294,8 +294,8 @@
 
             <!-- Sicherheit -->
             <div class="box">
-                <h3>🔒 Sicherheit</h3>
-                <ul>
+                <h3 data-feld="box2-titel">🔒 Sicherheit</h3>
+                <ul data-feld="box2-liste">
                     <li>Nur Fachpersonal (Elektriker)</li>
                     <li>Schaltberechtigung erforderlich</li>
                     <li>NIV/NIN Vorschriften beachten</li>
@@ -307,35 +307,35 @@
             <!-- QR Codes -->
             <div class="qr-grid">
                 <div class="qr-item">
-                    <h4>👤 Ansprech&shy;partner</h4>
+                    <h4 data-feld="qr1-titel">👤 Ansprech&shy;partner</h4>
                     <div class="qr-code">
                         <img src="{{QR:ansprechpartner}}" alt="QR Code Ansprechpartner">
                     </div>
-                    <p class="qr-label">Elektro-Verantwortliche & Hauswart</p>
+                    <p class="qr-label" data-feld="qr1-text">Elektro-Verantwortliche & Hauswart</p>
                 </div>
 
                 <div class="qr-item">
-                    <h4>📋 Schalt&shy;schema</h4>
+                    <h4 data-feld="qr2-titel">📋 Schalt&shy;schema</h4>
                     <div class="qr-code">
                         <img src="{{QR:schema}}" alt="QR Code Schema">
                     </div>
-                    <p class="qr-label">Verteil&shy;plan & Doku</p>
+                    <p class="qr-label" data-feld="qr2-text">Verteil&shy;plan & Doku</p>
                 </div>
 
                 <div class="qr-item">
-                    <h4>🚨 Notfall</h4>
+                    <h4 data-feld="qr3-titel">🚨 Notfall</h4>
                     <div class="qr-code">
                         <img src="{{QR:notfall}}" alt="QR Code Notfall">
                     </div>
-                    <p class="qr-label">Störungen & Notdienst 24/7</p>
+                    <p class="qr-label" data-feld="qr3-text">Störungen & Notdienst 24/7</p>
                 </div>
             </div>
         </div>
 
         <!-- Footer -->
         <div class="footer">
-            <p><strong>STWEG-Kooperation Rosenweg</strong> - Rosenweg 7-43, 4303 Kaiseraugst</p>
-            <p>Elektrische Hauptverteilung für alle 8 Gebäude - Bei Störung: 144 (Notruf)</p>
+            <p data-feld="fuss1"><strong>STWEG-Kooperation Rosenweg</strong> - Rosenweg 7-43, 4303 Kaiseraugst</p>
+            <p data-feld="fuss2">Elektrische Hauptverteilung für alle 8 Gebäude - Bei Störung: 144 (Notruf)</p>
         </div>
     </div>
 
