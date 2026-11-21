@@ -13,6 +13,8 @@ COPY api/server.js ./
 COPY api/lib/ ./lib/
 COPY api/middleware/ ./middleware/
 COPY api/routes/ ./routes/
+# Druckvorlagen (Tuerschilder, Poster) – nur ueber /api/raum-qr/druck, nicht oeffentlich
+COPY api/vorlagen/ ./vorlagen/
 # MCP-Server fuer Agenten (mcp.rosenweg4303.ch), siehe docs/mcp.md
 COPY api/mcp/ ./mcp/
 # Dokumentation als MCP-Ressourcen (api/mcp/erweiterungen.js) – nur die

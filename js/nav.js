@@ -314,6 +314,7 @@ const RosenwegNav = {
       { href: 'projekte.html', label: 'Projekte', group: 'Vorgänge', perm: 'projekte' },
       { href: 'reklamationen.html', label: 'Reklamationen', group: 'Vorgänge', perm: 'reklamationen' },
       { href: 'melde-orte.html', label: 'Melde-Orte (QR)', group: 'Vorgänge', perm: 'reklamationen' },
+      { href: 'tuerschilder.html', label: 'Türschilder & Aushänge (QR)', group: 'Vorgänge', perm: 'reklamationen' },
       { href: 'loeschungen.html', label: 'Löschungen', group: 'Vorgänge', perm: 'loeschungen' },
       { href: 'echtheitspruefung.html', label: 'Echtheitsprüfung', group: 'Vorgänge', perm: 'echtheitspruefung' },
       { href: 'brief-tracking.html', label: 'Brief-Tracking', group: 'Vorgänge', perm: 'brief-tracking' },

@@ -16,10 +16,9 @@
     </style>
 </head>
 <body class="bg-gray-50">
-    <!-- Seite fuer die QR-Codes der Tuerschilder (door-signs/). Die Kurzadressen
-         /<raum>-<thema> leitet nginx auf /raum.html?r=<raum>#<thema> um
-         (frontends-lxc/nginx/website.conf). Kontakte kommen aus site-config.json
-         und den oeffentlichen APIs, damit ein Wechsel nur dort gepflegt wird. -->
+    <!-- Ziel der Token-QR-Codes auf Tuerschildern und Aushaengen: /raum.html?t=<token>.
+         Inhalt nur mit gueltigem Token von /api/raum-qr/info (api/routes/raum-qr.js);
+         Kontakte aus site-config.json und den oeffentlichen APIs. Druck: tuerschilder.html. -->
     <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
     <script src="/js/nav.js?v=3"></script>
     <script>RosenwegNav.init({ active: '' });</script>
@@ -41,10 +40,6 @@
 
     <main class="max-w-4xl mx-auto px-4 py-8 space-y-6" id="inhalt"></main>
 
-    <section class="max-w-4xl mx-auto px-4 pb-10" id="raumliste" hidden>
-        <h2 class="text-xl font-bold text-gray-800 mb-3">Räume</h2>
-        <div class="grid sm:grid-cols-2 gap-3" id="raumliste-grid"></div>
-    </section>
 
 <script>
 const ESC = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -52,7 +47,7 @@ const tel = n => n ? `<a href="tel:${ESC(n.replace(/[^+\d]/g, ''))}" class="font
 const mail = m => m ? `<a href="mailto:${ESC(m)}" class="font-semibold text-blue-700 hover:underline">${ESC(m)}</a>` : '';
 const liste = arr => `<ul class="list-disc pl-5 space-y-1 text-gray-700">${arr.map(x => `<li>${x}</li>`).join('')}</ul>`;
 
-// Bausteine, die mehrere Raeume teilen. Rueckgabe: HTML (async erlaubt).
+// Bausteine; die Inhalte je Raum kommen nur mit gueltigem Token von der API.
 const B = {
     async technik() {
         const t = SiteConfig.getTechnik() || {};
@@ -107,124 +102,60 @@ const B = {
         return `<div class="grid grid-cols-3 gap-3">${k('Polizei', n.polizei || '117')}${k('Feuerwehr', n.feuerwehr || '118')}${k('Sanität', n.sanitaet || '144')}</div>`;
     },
     defekt() {
-        return `<a href="/defekt-melden" class="inline-flex items-center gap-2 rounded-lg px-4 py-3 font-semibold text-white" style="background:#c41e1e">
+        return `<div><a href="/defekt-melden" class="inline-flex items-center gap-2 rounded-lg px-4 py-3 font-semibold text-white" style="background:#c41e1e">
             🔧 Defekt online melden</a>
-            <p class="text-sm text-gray-600 mt-2">Mit Fotos; die Meldung geht automatisch an Technik bzw. Verwaltung.</p>`;
-    },
-    zugang(raum) {
-        return `<p class="text-gray-700">Der ${raum} ist abgeschlossen. Zutritt nur für Hauswart, berechtigte Bewohnerinnen und Bewohner
-            sowie beauftragte Servicetechniker.</p>
-            <p class="text-gray-700 mt-2">Schlüssel und Zutrittsberechtigungen vergibt der <strong>Technische Dienst</strong>.
-            Bitte Schlüssel nicht weitergeben und die Tür nach dem Verlassen immer verschliessen.</p>`;
-    },
-    unterlagen(was) {
-        return `<p class="text-gray-700">${was} sind aus Sicherheitsgründen nicht öffentlich.
-            Berechtigte Fachpersonen erhalten sie beim <strong>Technischen Dienst</strong>.</p>`;
+            <p class="text-sm text-gray-600 mt-2">Mit Fotos; die Meldung geht automatisch an Technik bzw. Verwaltung.</p></div>`;
     },
 };
 
-// Je Raum die Abschnitte; die IDs entsprechen dem zweiten Teil der QR-Kurzadresse.
-const RAEUME = {
-    heizung: {
-        titel: '🔥 Heizungs- und Technikraum', sub: 'Zentrale Heizungsanlage für alle 8 Gebäude',
-        teile: [
-            ['ansprechpartner', '👤 Ansprechpartner', async () => (await B.technik()) + (await B.verwaltung())],
-            ['zugang', '🔑 Schlüssel & Zugang', () => B.zugang('Heizungs- und Technikraum')],
-            ['notfall', '🚨 Notfall & Service', () => `<p class="text-gray-700 mb-3"><strong>Heizungsausfall, Wasseraustritt oder Gasgeruch:</strong>
-                bei Gefahr sofort die Feuerwehr, sonst den Technischen Dienst anrufen.</p>` + B.notruf() + '<div class="mt-4"></div>' + B.defekt()],
-        ],
-    },
-    waschkueche: {
-        titel: '🧺 Waschküche', sub: 'Gemeinschaftliche Waschküche',
-        teile: [
-            ['ansprechpartner', '👤 Ansprechpartner', async () => (await B.technik()) + (await B.verwaltung())],
-            ['regeln', '📅 Regeln & Buchung', () => liste([
-                'Mo–Sa: 07:00–22:00 Uhr',
-                'Sonntag und Feiertage: Ruhetag',
-                'Waschen nur mit Reservation',
-                'Fenster geschlossen halten; zum Trocknen Trockner oder die fest verbauten Wäscheleinen nutzen',
-                'Maschinen und Raum nach Gebrauch sauber hinterlassen',
-            ]) + `<a href="/waschkueche.html" class="inline-block mt-4 rounded-lg px-4 py-3 font-semibold text-white bg-green-700">Waschküche reservieren</a>`],
-            ['zugang', '🔑 Schlüssel & Zugang', async () => `<p class="text-gray-700">Zugang und Schlüssel für die Waschküche erhalten Bewohnerinnen und Bewohner
-                über den <strong>Technischen Dienst</strong>. Defekte an Maschinen bitte sofort melden.</p><div class="mt-4">${B.defekt()}</div>`],
-        ],
-    },
-    lift: {
-        titel: '🛗 Liftmaschinenraum', sub: 'Rosenweg 7–43 · Kaiseraugst',
-        teile: [
-            ['ansprechpartner', '👤 Ansprechpartner', async () => (await B.technik()) + (await B.verwaltung())],
-            ['servicefirma', '🔧 Liftfirma', async () => `<p class="text-gray-700">Wartung und Störungsbehebung erfolgen durch die beauftragte Liftfirma.
-                Aufträge an die Liftfirma laufen über den <strong>Technischen Dienst</strong> bzw. die Verwaltung.</p><div class="mt-3">${await B.technik()}</div>`],
-            ['notfall', '🚨 Notfall', () => `<p class="text-gray-700 mb-3"><strong>Im Lift eingeschlossen?</strong> Ruhe bewahren und die
-                <strong>Notruftaste im Lift</strong> drücken; sie ist direkt mit der Notrufzentrale der Liftfirma verbunden.
-                Bei Rauch oder Feuer: Feuerwehr 118.</p>` + B.notruf()],
-        ],
-    },
-    telekom: {
-        titel: '📡 Telekommunikation', sub: 'Zentrale Telekommunikationsanlage für alle 8 Gebäude',
-        teile: [
-            ['ansprechpartner', '👤 Ansprechpartner', async () => await B.technik()],
-            ['dokumentation', '📄 Dokumentation', () => B.unterlagen('Netzwerkplan und Anlagendokumentation')],
-            ['support', '🛠 Störungen & Support', async () => `<p class="text-gray-700">Internet, TV oder Telefon gestört? Bitte zuerst den
-                <strong>Technischen Dienst</strong> informieren; er klärt, ob die Hausanlage oder der Anbieter zuständig ist.</p>
-                <div class="mt-3">${await B.technik()}</div><div class="mt-4">${B.defekt()}</div>`],
-        ],
-    },
-    hauptverteilung: {
-        titel: '⚡ Hauptverteilung', sub: 'Elektrische Hauptverteilung für alle 8 Gebäude',
-        teile: [
-            ['ansprechpartner', '👤 Ansprechpartner', async () => (await B.technik()) + (await B.verwaltung())],
-            ['schema', '📐 Schaltschema', () => B.unterlagen('Verteilplan und Schaltschema') +
-                `<p class="text-gray-700 mt-2"><strong>Arbeiten an der Anlage nur durch konzessionierte Elektrofachpersonen.</strong></p>`],
-            ['notfall', '🚨 Notfall', () => `<p class="text-gray-700 mb-3"><strong>Lebensgefahr – Hochspannung.</strong> Bei Brand, Rauch oder
-                Stromunfall sofort Notruf wählen; verunfallte Personen erst berühren, wenn der Strom abgeschaltet ist.
-                Stromausfall im Haus: Technischen Dienst anrufen.</p>` + B.notruf()],
-        ],
-    },
-    tiefgarage: {
-        titel: '🚗 Tiefgarage', sub: 'MEG Rosenweg', org: 'MEG Rosenweg',
-        teile: [
-            ['ansprechpartner', '👤 Ansprechpartner', async () => (await B.meg()) + (await B.technik())],
-            ['hausordnung', '📋 Hausordnung', () => `<p class="font-semibold text-gray-800">Erlaubt</p>` + liste([
-                'Parkieren von Fahrzeugen', 'Fahrzeugpflege', 'Fahrräder und E-Bikes']) +
-                `<p class="font-semibold text-gray-800 mt-3">Verboten</p>` + liste([
-                'Lagern von brennbaren Flüssigkeiten und gefährlichen Stoffen', 'Werkstattbetrieb',
-                'Lagern von Gegenständen (Zweckentfremdung als Lagerraum)']) +
-                `<p class="font-semibold text-gray-800 mt-3">Sicherheit (VKF/AGV)</p>` + liste([
-                'Fluchtwege frei halten', 'Hydranten und Löscher zugänglich halten'])],
-            ['notfall', '🚨 Notfall', () => `<p class="text-gray-700 mb-3">Bei Feuer oder Rauch: Tiefgarage verlassen und Feuerwehr 118 alarmieren.</p>` + B.notruf()],
-        ],
-    },
-};
+// Ein Baustein aus der API -> HTML. text-HTML stammt aus api/routes/raum-qr.js (von uns geschrieben).
+async function block(b) {
+    switch (b.t) {
+        case 'text': return `<div class="text-gray-700 space-y-2">${b.html}</div>`;
+        case 'liste': return liste((b.items || []).map(ESC));
+        case 'kontakt': return B[b.wer] ? await B[b.wer]() : '';
+        case 'notruf': return B.notruf();
+        case 'defekt': return B.defekt();
+        case 'link': return `<a href="${ESC(b.href)}" class="inline-block rounded-lg px-4 py-3 font-semibold text-white bg-green-700">${ESC(b.text)}</a>`;
+        default: return '';
+    }
+}
+
+function ohneToken() {
+    document.getElementById('raum-titel').textContent = 'Bitte QR-Code scannen';
+    document.getElementById('inhalt').innerHTML = `<div class="bg-white rounded-xl shadow p-6 text-gray-700">
+        <p>Diese Seite zeigt Informationen zu einem Raum am Rosenweg. Sie öffnet sich nur über den
+        <strong>QR-Code auf dem Türschild oder Aushang</strong> vor Ort.</p>
+        <p class="mt-3">Fragen? <a href="/" class="text-blue-700 hover:underline">Zur Startseite</a></p></div>`;
+}
 
 (async () => {
     await SiteConfig.load();
-    const key = new URLSearchParams(location.search).get('r');
-    const raum = RAEUME[key];
-    const main = document.getElementById('inhalt');
-    if (!raum) {
-        document.getElementById('raum-titel').textContent = 'Raum-Info';
-        main.innerHTML = '<p class="text-gray-700">Bitte einen Raum wählen.</p>';
-        document.getElementById('raumliste').hidden = false;
-        document.getElementById('raumliste-grid').innerHTML = Object.entries(RAEUME).map(([k, r]) =>
-            `<a href="/raum.html?r=${k}" class="block rounded-lg bg-white shadow p-4 font-semibold text-gray-800 hover:shadow-md">${ESC(r.titel)}</a>`).join('');
-        return;
-    }
+    const token = (new URLSearchParams(location.search).get('t') || '').toLowerCase();
+    if (!/^[a-z0-9]{16}$/.test(token)) return ohneToken();
+    let raum;
+    try {
+        const r = await fetch('/api/raum-qr/info/' + encodeURIComponent(token));
+        if (!r.ok) return ohneToken();
+        raum = await r.json();
+    } catch { return ohneToken(); }
     document.title = raum.titel.replace(/^\S+\s/, '') + ' - STWEG-Kooperation Rosenweg';
     document.getElementById('raum-titel').textContent = raum.titel;
-    document.getElementById('raum-sub').textContent = raum.sub;
+    document.getElementById('raum-sub').textContent = raum.sub || '';
     if (raum.org) document.getElementById('kopf-org').textContent = raum.org;
-    main.innerHTML = raum.teile.map(([id, t]) =>
-        `<section id="${id}" class="karte bg-white rounded-xl shadow p-6">
-            <h2 class="text-xl font-bold mb-4" style="color:#c41e1e">${t}</h2>
-            <div class="space-y-3" data-teil="${id}"><p class="text-gray-400">Lädt …</p></div>
+    // Gescannter Abschnitt zuerst, die anderen darunter.
+    const teile = [...raum.teile].sort((a, b) => (b.id === raum.thema) - (a.id === raum.thema));
+    const main = document.getElementById('inhalt');
+    main.innerHTML = teile.map(t =>
+        `<section id="${ESC(t.id)}" class="karte bg-white rounded-xl shadow p-6${t.id === raum.thema ? ' ziel' : ''}">
+            <h2 class="text-xl font-bold mb-4" style="color:#c41e1e">${ESC(t.titel)}</h2>
+            <div class="space-y-3" data-teil="${ESC(t.id)}"><p class="text-gray-400">Lädt …</p></div>
         </section>`).join('');
-    await Promise.all(raum.teile.map(async ([id, , f]) => {
-        try { main.querySelector(`[data-teil="${id}"]`).innerHTML = await f(); }
-        catch { main.querySelector(`[data-teil="${id}"]`).innerHTML = '<p class="text-gray-600">Bitte den Technischen Dienst kontaktieren.</p>'; }
+    await Promise.all(teile.map(async t => {
+        const el = main.querySelector(`[data-teil="${t.id}"]`);
+        try { el.innerHTML = (await Promise.all(t.bloecke.map(block))).join(''); }
+        catch { el.innerHTML = '<p class="text-gray-600">Bitte den Technischen Dienst kontaktieren.</p>'; }
     }));
-    const ziel = location.hash && document.getElementById(location.hash.slice(1));
-    if (ziel) { ziel.classList.add('ziel'); ziel.scrollIntoView(); }
 })();
 </script>
 </body>
