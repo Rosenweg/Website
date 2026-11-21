@@ -49,7 +49,7 @@ assemble_website() {
     --exclude='/wlan.html' --exclude='/tv.html' --exclude='/netzwerk.html' \
     --exclude='/verbindungen.html' --exclude='/dmarc.html' --exclude='/pbx-admin.html' \
     --exclude='/js/nav-isp.js' \
-    --include='/css/***' --include='/img/***' --include='/js/***' \
+    --include='/css/***' --include='/img/***' --include='/js/***' --include='/door-signs/' --include='/door-signs/*.html' \
     --include='/*.html' --include='/*.png' --include='/*.pdf' --include='/*.webmanifest' \
     --include='/*-sw.js' --include='/CNAME' \
     --include='/site-config.json' --include='/zaehler-config.json' --include='/access-manifest.json' \
