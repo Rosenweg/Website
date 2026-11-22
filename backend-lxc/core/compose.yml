@@ -46,8 +46,14 @@ services:
       DOCS_PATH: /documents
       WG_CONTROL_URL: "http://100.64.2.34:3001"
       NOC_PUBLIC_OPEN: "1"
+      JOURNAL_URL: "https://100.64.2.52:19532"
     ports: ["3000:3000"]
-    volumes: ["/mnt/documents:/documents"]
+    volumes:
+      - /mnt/documents:/documents
+      # Stations-CA fürs Journal: die API stellt damit Client-Zertifikate aus
+      # (POST /api/stations/:id/journal-zertifikat). Siehe journal-remote/README.md.
+      - /opt/rosenweg-core/journal-tls/ca.key:/journal-tls/ca.key:ro
+      - /opt/rosenweg-core/journal-tls/ca.crt:/journal-tls/ca.crt:ro
     depends_on:
       postgres: {condition: service_healthy}
     restart: unless-stopped
@@ -78,5 +84,17 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
     restart: unless-stopped
+  journal-remote:
+    image: ghcr.io/rosenweg/journal-remote:latest
+    environment:
+      JOURNAL_AUFBEWAHRUNG: "30d"
+    ports: ["19532:19532"]
+    volumes:
+      - journal-remote:/var/log/journal/remote
+      - /opt/rosenweg-core/journal-tls/server.key:/tls/server.key:ro
+      - /opt/rosenweg-core/journal-tls/server.crt:/tls/server.crt:ro
+      - /opt/rosenweg-core/journal-tls/ca.crt:/tls/ca.crt:ro
+    restart: unless-stopped
 volumes:
+  journal-remote:
   pgdata:

@@ -11,7 +11,7 @@ beim Ausrollen: [`../docs/sicherheit.md`](../docs/sicherheit.md) Abschnitte 4.6,
 | Container | **CT 128 `core-backend`**, pve1 | **CT 129 `energy-stack`**, pve1 |
 | Adresse | `100.64.2.52` | `100.64.2.53` |
 | Verzeichnis | `/opt/rosenweg-core/` | `/opt/rosenweg-energy/` |
-| Dienste | `api` (Port 3000), `postgres` (nur Docker-intern), `doc-converter` (Gotenberg), `shelly-emulator` (8089), `syslog-collector` (5514 udp/tcp) | `energy-db` (5432), `energy-collector` (3001) |
+| Dienste | `api` (Port 3000), `postgres` (nur Docker-intern), `doc-converter` (Gotenberg), `shelly-emulator` (8089), `syslog-collector` (5514 udp/tcp), `journal-remote` (19532, Stationsjournal, siehe `journal-remote/README.md`) | `energy-db` (5432), `energy-collector` (3001) |
 | Geheimnisse | `/opt/rosenweg-core/.env` (0600, nie im Repo) | `/opt/rosenweg-energy/.env` (0600, nie im Repo) |
 | Privilegiert | ja (historisch, siehe unten) | nein |
 
