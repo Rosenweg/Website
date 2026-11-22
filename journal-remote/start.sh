@@ -22,8 +22,10 @@ mkdir -p "$ZIEL"
 nginx -t
 nginx
 
-# --split-mode=host: eine Datei je Station (nach _HOSTNAME).
+# Eine gemeinsame Datei: hinter nginx sieht journal-remote jeden Absender als
+# 127.0.0.1, --split-mode=host trennte also ohnehin nichts. Gefiltert wird beim
+# Lesen nach _HOSTNAME (= Stations-ID).
 exec /usr/lib/systemd/systemd-journal-remote \
     --listen-http=127.0.0.1:19531 \
-    --split-mode=host \
+    --split-mode=none \
     --output="$ZIEL/"
