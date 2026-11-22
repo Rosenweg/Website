@@ -7,6 +7,7 @@ Windows-Rechner der Domäne sehen damit aus wie die Stationen:
 - Taskleiste links
 - Rosenweg als Hersteller mit Logo
 - das Logo als Standard-Kontobild
+- die Laufwerke H: (Home) und D: (Dokumente) bei jeder Anmeldung
 - die Drucker DruckerR9 und DruckerR13 über den CUPS-Server (IPP, ohne Herstellertreiber, A4)
 
 Gilt für alle Rechner in `OU=Windows`. Seit dem 22.11.2026 liegt dort `WIN11-1` (VM 107 auf pve3, Windows 11 Enterprise).

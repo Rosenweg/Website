@@ -1,0 +1,33 @@
+#!/bin/bash
+# ============================================================================
+# windows-ou-einsortieren - Windows-Rechner der Domaene nach OU=Windows
+# ============================================================================
+# Ein Windows-Rechner, der der Domaene beitritt, landet in CN=Computers. An
+# einen Container laesst sich keine Gruppenrichtlinie haengen - er bekaeme also
+# weder den Rosenweg-Look noch die Drucker (gpo-rosenweg-look-windows/). Dieser
+# Lauf sortiert ihn nach operatingSystem ("Windows ...") selbst ein.
+#
+# Nur aus CN=Computers heraus: wer einen Rechner von Hand in eine andere OU
+# gelegt hat, hat sich etwas dabei gedacht, und das wird nicht ueberstimmt.
+# Ausnahmen (Rechnername, eine pro Zeile) in /etc/windows-ou-ausnahmen.
+#
+# Laeuft auf dc1 als root gegen die lokale sam.ldb (Timer, alle 10 Minuten).
+# ============================================================================
+set -uo pipefail
+SAM=/var/lib/samba/private/sam.ldb
+BASIS="DC=ad,DC=rosenweg4303,DC=ch"
+ZIEL="OU=Windows,$BASIS"
+AUSNAHMEN=/etc/windows-ou-ausnahmen
+
+ldbsearch -H "$SAM" -b "CN=Computers,$BASIS" -s one \
+    "(&(objectClass=computer)(operatingSystem=Windows*))" sAMAccountName \
+  | sed -n 's/^sAMAccountName: //p' | while read -r konto; do
+    name="${konto%\$}"
+    if [ -f "$AUSNAHMEN" ] && grep -qix "$name" "$AUSNAHMEN"; then continue; fi
+    if samba-tool computer move "$name" "$ZIEL" -H "$SAM" >/dev/null 2>&1; then
+        echo "$name nach OU=Windows verschoben."
+        logger -t windows-ou "$name nach OU=Windows verschoben"
+    else
+        echo "$name liess sich nicht verschieben." >&2
+    fi
+done

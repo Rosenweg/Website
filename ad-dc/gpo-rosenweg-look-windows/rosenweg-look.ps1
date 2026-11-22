@@ -163,4 +163,24 @@ foreach ($d in 'DruckerR9', 'DruckerR13') {
     try { Set-PrintConfiguration -PrinterName $d -PaperSize A4 -ErrorAction Stop } catch { Log "Drucker ${d}: A4 nicht setzbar: $($_.Exception.Message)" }
 }
 
+# --- Laufwerke -------------------------------------------------------------
+# H: das eigene Home, D: die Dokumente - dieselben Freigaben wie auf den
+# Stationen (files.ad, Kerberos, kein Passwort). Verbunden wird bei jeder
+# Anmeldung im Namen der Person, darum eine geplante Aufgabe fuer die Gruppe
+# Benutzer statt einer Benutzerrichtlinie (die braeuchte Loopback, weil die
+# Konten nicht in OU=Windows liegen). Der Befehl steht in der Aufgabe selbst
+# und nicht in einer .cmd-Datei: die Programm-Whitelist erlaubt Skripte nur
+# aus Windows- und Programme-Ordnern.
+$FileServer = 'files.ad.rosenweg4303.ch'
+$befehl = "/c net use H: \\$FileServer\home\%USERNAME% /persistent:no & net use D: \\$FileServer\dokumente /persistent:no"
+$aufgabe = Get-ScheduledTask -TaskName 'Rosenweg Laufwerke' -ErrorAction SilentlyContinue
+if (-not $aufgabe -or $aufgabe.Actions[0].Arguments -ne $befehl) {
+    $a = New-ScheduledTaskAction -Execute "$env:WINDIR\System32\cmd.exe" -Argument $befehl
+    $t = New-ScheduledTaskTrigger -AtLogOn
+    $p = New-ScheduledTaskPrincipal -GroupId 'S-1-5-32-545' -RunLevel Limited
+    $o = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+    Register-ScheduledTask -TaskName 'Rosenweg Laufwerke' -Action $a -Trigger $t -Principal $p -Settings $o -Force | Out-Null
+    Log "Aufgabe 'Rosenweg Laufwerke' eingerichtet"
+}
+
 Log "Fertig"
