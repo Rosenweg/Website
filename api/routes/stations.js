@@ -20,6 +20,7 @@
 //     GET    /api/stations/:id/config     Konfiguration abholen
 //     POST   /api/stations/:id/seen       Lebenszeichen und Zustand melden
 //     POST   /api/stations/:id/logs       Journal und Zustand einsenden
+//     POST   /api/stations/:id/journal-zertifikat  Client-Zertifikat fuers Journal (CSR)
 //     DELETE /api/stations/:id            sich selbst abmelden
 //
 //   Verwaltung (Anmeldung im Web, Gruppe technik)
@@ -1573,6 +1574,59 @@ router.appSession = appSession;
 // die eigenen Peers beim Abmelden zurueckzuziehen. Da ist niemand mehr
 // angemeldet, den man fragen koennte, und ein Geraet darf abraeumen, was es
 // selbst bekommen hat.
+// POST /api/stations/:id/journal-zertifikat { csr } — Client-Zertifikat fuers
+// Stationsjournal (systemd-journal-upload -> journal-remote, siehe
+// journal-remote/README.md). Die Station schickt eine CSR mit ihrer ID als CN,
+// die API signiert mit der Stations-CA (1 Jahr) und gibt Zertifikat, CA und
+// Ziel-URL zurueck. Der private Schluessel verlaesst die Station nie.
+const JOURNAL_CA_KEY = process.env.JOURNAL_CA_KEY || '/journal-tls/ca.key';
+const JOURNAL_CA_CRT = process.env.JOURNAL_CA_CRT || '/journal-tls/ca.crt';
+const JOURNAL_URL = process.env.JOURNAL_URL || '';
+router.post('/:id/journal-zertifikat', stationAuth, a(async (req, res) => {
+  const fs = require('fs/promises');
+  const os = require('os');
+  const path = require('path');
+  const { execFile } = require('child_process');
+  const run = (args, eingabe) => new Promise((ok, fehl) => {
+    const p = execFile('openssl', args, { timeout: 20000 }, (e, out, err) => e ? fehl(new Error(String(err || e.message).trim())) : ok(out));
+    if (eingabe !== undefined) p.stdin.end(eingabe);
+  });
+
+  if (!JOURNAL_URL) return res.status(503).json({ error: 'Stationsjournal ist nicht eingerichtet (JOURNAL_URL fehlt)' });
+  try { await fs.access(JOURNAL_CA_KEY); } catch { return res.status(503).json({ error: 'Stations-CA fehlt' }); }
+  const csr = String(req.body?.csr || '');
+  if (!/^-----BEGIN CERTIFICATE REQUEST-----[\s\S]+-----END CERTIFICATE REQUEST-----\s*$/.test(csr) || csr.length > 8192) {
+    return res.status(400).json({ error: 'Feld "csr" fehlt oder ist keine PEM-CSR' });
+  }
+
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'journal-'));
+  try {
+    const csrDatei = path.join(dir, 'station.csr');
+    await fs.writeFile(csrDatei, csr);
+    // CSR pruefen: Signatur gueltig, CN genau die eigene Stations-ID.
+    await run(['req', '-in', csrDatei, '-noout', '-verify']);
+    const subject = await run(['req', '-in', csrDatei, '-noout', '-subject', '-nameopt', 'RFC2253']);
+    const cn = (subject.match(/CN=([^,\n]+)/) || [])[1];
+    if (cn !== req.station.id) {
+      return res.status(400).json({ error: `CN der CSR muss "${req.station.id}" sein` });
+    }
+    const ext = path.join(dir, 'ext');
+    await fs.writeFile(ext, 'extendedKeyUsage=clientAuth\nkeyUsage=digitalSignature,keyEncipherment\n');
+    const crt = path.join(dir, 'station.crt');
+    await run(['x509', '-req', '-in', csrDatei, '-CA', JOURNAL_CA_CRT, '-CAkey', JOURNAL_CA_KEY,
+      '-set_serial', '0x' + crypto.randomBytes(16).toString('hex'),
+      '-days', '365', '-sha256', '-extfile', ext, '-out', crt]);
+    const [zertifikat, ca] = await Promise.all([fs.readFile(crt, 'utf8'), fs.readFile(JOURNAL_CA_CRT, 'utf8')]);
+    console.log(`[stations] Journal-Zertifikat fuer ${req.station.id} ausgestellt`);
+    res.json({ zertifikat, ca, url: JOURNAL_URL });
+  } catch (e) {
+    console.error('[stations] Journal-Zertifikat:', e.message);
+    res.status(400).json({ error: 'CSR nicht verwendbar' });
+  } finally {
+    fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}));
+
 router.stationAuth = stationAuth;
 
 module.exports = router;
