@@ -77,9 +77,11 @@ $LogoGeaendert = -not (Test-Path $Marke) -or ((Get-Content $Marke -ErrorAction S
 
 # --- Hintergrund und Sperrbild ----------------------------------------------
 $csp = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\PersonalizationCSP'
-Setze $csp 'DesktopImagePath'    (Join-Path $Ziel 'hintergrund.png')
-Setze $csp 'DesktopImageUrl'     (Join-Path $Ziel 'hintergrund.png')
-Setze $csp 'DesktopImageStatus'  1 'DWord'
+# Den Desktop-Hintergrund setzt seit BGInfo (bginfo.ps1) die Anmeldung selbst:
+# pro Person, mit Namen und Adressen. Fruehere CSP-Werte deshalb entfernen.
+foreach ($v in 'DesktopImagePath', 'DesktopImageUrl', 'DesktopImageStatus') {
+    Remove-ItemProperty -Path $csp -Name $v -ErrorAction SilentlyContinue
+}
 Setze $csp 'LockScreenImagePath' (Join-Path $Ziel 'sperrbild.png')
 Setze $csp 'LockScreenImageUrl'  (Join-Path $Ziel 'sperrbild.png')
 Setze $csp 'LockScreenImageStatus' 1 'DWord'
@@ -131,12 +133,15 @@ foreach ($p in $profile) {
         # Angemeldet (Skript von Hand gestartet): direkt in den geladenen Zweig
         $k = "Registry::HKEY_USERS\$($p.Sid)\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
         Setze $k 'TaskbarAl' 0 'DWord'
+        Setze "Registry::HKEY_USERS\$($p.Sid)\Software\Microsoft\Windows\CurrentVersion\Policies\ActiveDesktop" 'NoChangingWallPaper' 1 'DWord'
         continue
     }
     & reg.exe load 'HKU\RosenwegLook' $p.Datei 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) { Log "Profil $($p.Name) nicht ladbar"; continue }
     try {
         Setze 'Registry::HKEY_USERS\RosenwegLook\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' 'TaskbarAl' 0 'DWord'
+        # Hintergrund gehoert der Station (wie auf den Linux-Stationen)
+        Setze 'Registry::HKEY_USERS\RosenwegLook\Software\Microsoft\Windows\CurrentVersion\Policies\ActiveDesktop' 'NoChangingWallPaper' 1 'DWord'
     } finally {
         [gc]::Collect(); [gc]::WaitForPendingFinalizers()
         & reg.exe unload 'HKU\RosenwegLook' 2>&1 | Out-Null
@@ -256,6 +261,31 @@ if ($frei) {
     # Ohne den Dienst AppIDSvc setzt Windows keine Regel durch.
     Setze 'HKLM:\SYSTEM\CurrentControlSet\Services\AppIDSvc' 'Start' 2 'DWord'
     Start-Service AppIDSvc -ErrorAction SilentlyContinue
+}
+
+# --- BGInfo -----------------------------------------------------------------
+# Rechner, Adressen, Person, Windows-Stand und letztes Update unten rechts auf
+# dem Hintergrund (bginfo.ps1). Das Skript liegt unter Programme, weil die
+# Programm-Whitelist Skripte nur von dort und aus Windows startet; es laeuft
+# bei jeder Anmeldung im Namen der Person. conhost --headless, damit kein
+# Fenster aufblitzt.
+$prog = Join-Path $env:ProgramFiles 'Rosenweg'
+New-Item -ItemType Directory -Force -Path $prog | Out-Null
+$bgQuelle = Join-Path $Quelle 'bginfo.ps1'
+$bgZiel = Join-Path $prog 'bginfo.ps1'
+if ((Test-Path $bgQuelle) -and (-not (Test-Path $bgZiel) -or (Get-FileHash $bgQuelle).Hash -ne (Get-FileHash $bgZiel).Hash)) {
+    Copy-Item $bgQuelle $bgZiel -Force
+    Log "bginfo.ps1 aktualisiert"
+}
+$bgArg = "--headless $env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$bgZiel`""
+$bgAufgabe = Get-ScheduledTask -TaskName 'Rosenweg BGInfo' -ErrorAction SilentlyContinue
+if (-not $bgAufgabe -or $bgAufgabe.Actions[0].Arguments -ne $bgArg) {
+    $a = New-ScheduledTaskAction -Execute "$env:WINDIR\System32\conhost.exe" -Argument $bgArg
+    $t = New-ScheduledTaskTrigger -AtLogOn
+    $p = New-ScheduledTaskPrincipal -GroupId 'S-1-5-32-545' -RunLevel Limited
+    $o = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+    Register-ScheduledTask -TaskName 'Rosenweg BGInfo' -Action $a -Trigger $t -Principal $p -Settings $o -Force | Out-Null
+    Log "Aufgabe 'Rosenweg BGInfo' eingerichtet"
 }
 
 Log "Fertig"
