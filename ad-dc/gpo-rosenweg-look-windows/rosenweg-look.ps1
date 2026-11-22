@@ -183,4 +183,79 @@ if (-not $aufgabe -or $aufgabe.Actions[0].Arguments -ne $befehl) {
     Log "Aufgabe 'Rosenweg Laufwerke' eingerichtet"
 }
 
+# --- Programm-Whitelist (AppLocker) -----------------------------------------
+# Laufen darf, was unter C:\Windows oder den Programme-Ordnern liegt (dorthin
+# schreiben nur Admins - was ein Admin installiert, ist damit automatisch
+# freigegeben), signierte Store-Apps und OneDrive. Alles andere, vor allem
+# Heruntergeladenes in Downloads oder AppData, wird blockiert.
+#
+# Wer ALLES darf: die AD-Gruppe Windows-Programme-frei (enthaelt Domain
+# Admins). Nicht die lokale Gruppe Administratoren: mit UAC traegt das Token
+# eines Admins diese Gruppe nur "deny-only", und AppLocker liesse ihn dann so
+# wenig zu wie alle anderen. Eine gewoehnliche Gruppe filtert UAC nicht.
+#
+# Weitere Freigaben: programme-freigaben.txt neben diesem Skript.
+# Skripte aus SYSVOL/NETLOGON bleiben erlaubt, sonst sperrte sich diese
+# Richtlinie beim naechsten Start selbst aus.
+try {
+    $frei = (New-Object System.Security.Principal.NTAccount('ROSENWEG', 'Windows-Programme-frei')).Translate([System.Security.Principal.SecurityIdentifier]).Value
+} catch { $frei = $null; Log "Gruppe Windows-Programme-frei nicht aufloesbar - Whitelist NICHT gesetzt" }
+if ($frei) {
+    $jeder = 'S-1-1-0'; $admins = 'S-1-5-32-544'
+    $n = 0
+    function Regel([string]$sid, [string]$pfad, [string]$name) {
+        $script:n++
+        $id = [guid]::NewGuid().ToString()
+        $pfadX = [System.Security.SecurityElement]::Escape($pfad)
+        "<FilePathRule Id=""$id"" Name=""$name"" Description="""" UserOrGroupSid=""$sid"" Action=""Allow""><Conditions><FilePathCondition Path=""$pfadX"" /></Conditions></FilePathRule>"
+    }
+    $extra = @()
+    $liste = Join-Path $Quelle 'programme-freigaben.txt'
+    if (Test-Path $liste) {
+        $extra = Get-Content $liste | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith('#') }
+    }
+    $exe = @(
+        (Regel $jeder '%WINDIR%\*' 'Windows'),
+        (Regel $jeder '%PROGRAMFILES%\*' 'Programme'),
+        (Regel $frei '*' 'Windows-Programme-frei: alles'),
+        (Regel $admins '*' 'Administratoren (mit Admin-Token): alles')
+    ) + ($extra | ForEach-Object { Regel $jeder $_ "Freigabe: $_" })
+    $onedrive = '<FilePublisherRule Id="' + [guid]::NewGuid() + '" Name="OneDrive" Description="" UserOrGroupSid="S-1-1-0" Action="Allow"><Conditions><FilePublisherCondition PublisherName="O=MICROSOFT CORPORATION, L=REDMOND, S=WASHINGTON, C=US" ProductName="MICROSOFT ONEDRIVE" BinaryName="*"><BinaryVersionRange LowSection="*" HighSection="*" /></FilePublisherCondition></Conditions></FilePublisherRule>'
+    $skript = @(
+        (Regel $jeder '%WINDIR%\*' 'Windows'),
+        (Regel $jeder '%PROGRAMFILES%\*' 'Programme'),
+        (Regel $jeder '\\ad.rosenweg4303.ch\SysVol\*' 'Gruppenrichtlinien (SYSVOL)'),
+        (Regel $jeder '\\ad.rosenweg4303.ch\NETLOGON\*' 'Anmeldeskripte (NETLOGON)'),
+        (Regel $frei '*' 'Windows-Programme-frei: alles'),
+        (Regel $admins '*' 'Administratoren: alles')
+    )
+    $msi = @(
+        (Regel $jeder '%WINDIR%\Installer\*' 'Windows Installer'),
+        (Regel $frei '*.*' 'Windows-Programme-frei: alles'),
+        (Regel $admins '*.*' 'Administratoren: alles')
+    )
+    $appx = '<FilePublisherRule Id="a9e18c21-ff8f-43cf-b9fc-db40eed693ba" Name="Signierte Store-Apps" Description="" UserOrGroupSid="S-1-1-0" Action="Allow"><Conditions><FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="*"><BinaryVersionRange LowSection="0.0.0.0" HighSection="*" /></FilePublisherCondition></Conditions></FilePublisherRule>'
+    $xml = "<AppLockerPolicy Version=""1"">" +
+        "<RuleCollection Type=""Exe"" EnforcementMode=""Enabled"">$($exe -join '')$onedrive</RuleCollection>" +
+        "<RuleCollection Type=""Msi"" EnforcementMode=""Enabled"">$($msi -join '')</RuleCollection>" +
+        "<RuleCollection Type=""Script"" EnforcementMode=""Enabled"">$($skript -join '')</RuleCollection>" +
+        "<RuleCollection Type=""Appx"" EnforcementMode=""Enabled"">$appx</RuleCollection>" +
+        "</AppLockerPolicy>"
+    # Nur neu setzen, wenn sich die Regeln (ohne die zufaelligen IDs) geaendert haben
+    $kern = ($xml -replace 'Id="[0-9a-f-]+"', '')
+    $stand = Join-Path $Ziel 'applocker.stand'
+    if (-not (Test-Path $stand) -or (Get-Content $stand -Raw) -ne $kern) {
+        $datei = Join-Path $Ziel 'applocker.xml'
+        Set-Content -Path $datei -Value $xml -Encoding UTF8
+        try {
+            Set-AppLockerPolicy -XmlPolicy $datei -ErrorAction Stop
+            Set-Content -Path $stand -Value $kern -NoNewline
+            Log "AppLocker-Regeln gesetzt ($($extra.Count) Zusatzfreigaben)"
+        } catch { Log "AppLocker FEHLER: $($_.Exception.Message)" }
+    }
+    # Ohne den Dienst AppIDSvc setzt Windows keine Regel durch.
+    Setze 'HKLM:\SYSTEM\CurrentControlSet\Services\AppIDSvc' 'Start' 2 'DWord'
+    Start-Service AppIDSvc -ErrorAction SilentlyContinue
+}
+
 Log "Fertig"

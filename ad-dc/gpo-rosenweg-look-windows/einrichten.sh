@@ -104,6 +104,7 @@ start_dir="$gpo_dir/Machine/Scripts/Startup"
 mkdir -p "$start_dir"
 install -m 0644 "$HIER/rosenweg-look.ps1" "$start_dir/rosenweg-look.ps1"
 install -m 0644 "$HIER"/bilder/*.png "$start_dir/"
+install -m 0644 "$HIER/programme-freigaben.txt" "$start_dir/programme-freigaben.txt"
 
 # scripts.ini statt psscripts.ini: so startet die Richtlinie powershell.exe
 # selbst und kann -ExecutionPolicy Bypass mitgeben. Ein Windows-Client steht

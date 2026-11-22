@@ -7,6 +7,7 @@ Windows-Rechner der Domäne sehen damit aus wie die Stationen:
 - Taskleiste links
 - Rosenweg als Hersteller mit Logo
 - das Logo als Standard-Kontobild
+- eine Programm-Whitelist (AppLocker, erzwungen): Siehe unten
 - die Laufwerke H: (Home) und D: (Dokumente) bei jeder Anmeldung
 - die Drucker DruckerR9 und DruckerR13 über den CUPS-Server (IPP, ohne Herstellertreiber, A4)
 
@@ -28,3 +29,25 @@ Bilder oder Skript anpassen, dann auf dc1 im Ordner `./einrichten.sh` ausführen
 - **`scripts.ini` mit `powershell.exe -ExecutionPolicy Bypass` statt `psscripts.ini`:** Ein Windows-Client steht ab Werk auf `Restricted` und würde das Skript sonst verweigern.
 - **Hintergrund und Sperrbild über PersonalizationCSP:** Das geht nur bei Enterprise/Education, und Benutzer können es nicht überschreiben. Auf den Stationen gehören diese Bilder ebenfalls der Station.
 - **Taskleiste links:** Das ist eine Benutzereinstellung. Das Skript lädt deshalb beim Start jedes Profil und die Vorlage für neue Profile kurz und setzt sie dort.
+
+## Programm-Whitelist (AppLocker)
+
+Seit dem 22.11.2026 erzwungen. Erlaubt sind:
+
+- alles unter `C:\Windows` und den Programme-Ordnern. Dort schreiben nur Admins, was ein Admin installiert, ist also sofort freigegeben.
+- signierte Store-Apps und OneDrive
+- Skripte aus SYSVOL/NETLOGON
+- alles für die AD-Gruppe **Windows-Programme-frei** (enthält Domain Admins)
+
+Alles andere wird blockiert, vor allem Programme aus Downloads oder AppData.
+
+**Warum eine eigene Gruppe statt Administratoren:** Mit UAC trägt das Token eines Admins die Gruppe Administratoren nur als «deny-only». AppLocker würde ihn dann behandeln wie alle anderen. Eine gewöhnliche AD-Gruppe filtert UAC nicht.
+
+**Programm freigeben**, das nicht in den Programme-Ordnern liegt:
+
+1. Den Pfad in `programme-freigaben.txt` eintragen. Nur Orte, die normale Benutzer nicht beschreiben können.
+2. Auf dc1 `./einrichten.sh` ausführen. Die Freigabe wirkt beim nächsten Start.
+
+Eine Person dauerhaft von der Liste ausnehmen: in die Gruppe Windows-Programme-frei aufnehmen.
+
+Geprüft mit `Test-AppLockerPolicy`: Eine Kopie von notepad.exe unter `C:\Users\Public` wird für «Jeder» abgelehnt (DeniedByDefault) und für stefan.mueller erlaubt (über Windows-Programme-frei).
