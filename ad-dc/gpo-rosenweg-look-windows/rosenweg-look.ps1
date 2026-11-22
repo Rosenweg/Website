@@ -143,4 +143,24 @@ foreach ($p in $profile) {
     }
 }
 
+# --- Drucker ---------------------------------------------------------------
+# Dieselben Drucker wie auf den Stationen, ueber denselben Weg: der CUPS-Server
+# (CT 111) per IPP, mit dem Windows-eigenen "Microsoft IPP Class Driver" - kein
+# Herstellertreiber, nichts zu pflegen. Rechnerweit angelegt, gilt also fuer
+# jede Person, die sich anmeldet.
+#
+# Papier A4 fest: DruckerR13 steht im CUPS auf A3 (er kann beides). Auf den
+# Stationen wird er deshalb nie Standard (roles/desktop/parts/50-apps.sh);
+# hier bekommt er A4 als Vorgabe, damit ein Brief nicht auf A3 herauskommt.
+$CupsServer = 'cups-server.ad.rosenweg4303.ch'
+foreach ($d in 'DruckerR9', 'DruckerR13') {
+    if (-not (Get-Printer -Name $d -ErrorAction SilentlyContinue)) {
+        try {
+            Add-Printer -Name $d -IppURL "http://${CupsServer}:631/printers/$d" -ErrorAction Stop
+            Log "Drucker $d angelegt"
+        } catch { Log "Drucker $d FEHLER: $($_.Exception.Message)"; continue }
+    }
+    try { Set-PrintConfiguration -PrinterName $d -PaperSize A4 -ErrorAction Stop } catch { Log "Drucker ${d}: A4 nicht setzbar: $($_.Exception.Message)" }
+}
+
 Log "Fertig"
