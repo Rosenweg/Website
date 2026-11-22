@@ -1,5 +1,5 @@
 #!/bin/sh
-# Startet systemd-journal-remote (HTTPS, Client-Zertifikat Pflicht) und räumt
+# nginx (TLS + Client-Zertifikat) vor systemd-journal-remote (HTTP, nur lokal);
 # einmal täglich alles weg, was älter als JOURNAL_AUFBEWAHRUNG ist.
 set -eu
 
@@ -12,8 +12,6 @@ for f in server.key server.crt ca.crt; do
 done
 mkdir -p "$ZIEL"
 
-# Aufräumen: beim Start und danach alle 24 Stunden. journal-remote selbst
-# begrenzt nur die Grösse (journal-remote.conf), nicht das Alter.
 (
     while :; do
         journalctl --directory="$ZIEL" --vacuum-time="$AUFBEWAHRUNG" >/dev/null 2>&1 || true
@@ -21,13 +19,11 @@ mkdir -p "$ZIEL"
     done
 ) &
 
-# --split-mode=host: eine Datei je Station (nach _HOSTNAME), so lässt sich
-# eine Station gezielt lesen. --trust erzwingt Client-Zertifikate der
-# Stations-CA: ohne gültiges Zertifikat nimmt der Dienst nichts an.
+nginx -t
+nginx
+
+# --split-mode=host: eine Datei je Station (nach _HOSTNAME).
 exec /usr/lib/systemd/systemd-journal-remote \
-    --listen-https=0.0.0.0:19532 \
-    --key="$TLS/server.key" \
-    --cert="$TLS/server.crt" \
-    --trust="$TLS/ca.crt" \
+    --listen-http=127.0.0.1:19531 \
     --split-mode=host \
     --output="$ZIEL/"
