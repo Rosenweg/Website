@@ -28,4 +28,4 @@ nginx
 exec /usr/lib/systemd/systemd-journal-remote \
     --listen-http=127.0.0.1:19531 \
     --split-mode=none \
-    --output="$ZIEL/"
+    --output="$ZIEL/stationen.journal"
