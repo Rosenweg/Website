@@ -1,0 +1,7 @@
+[Unit]
+Description=Windows-Rechner nach OU=Windows einsortieren
+After=samba-ad-dc.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/windows-ou-einsortieren
