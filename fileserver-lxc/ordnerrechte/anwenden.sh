@@ -2,7 +2,10 @@
 # Setzt POSIX-ACLs auf die Dokumente nach einer Tabelle (siehe tabelle.txt).
 #
 #   anwenden.sh --tabelle tabelle.txt --wurzel /mnt/cephfs-stage [--trocken]
+#               [--nur stweg1,stweg2,/]
 #
+# --nur: nur diese Ordner der obersten Ebene (samt ihren ~-Zeilen), "/" =
+# die Wurzel selbst. Fuer das schrittweise Ausrollen.
 # --trocken zeigt nur, was gesetzt wuerde, und aendert nichts.
 # Vorher immer sichern.sh laufen lassen; zurueck.sh ist der Rueckweg.
 #
@@ -12,12 +15,13 @@
 # scanner uid 999). setfacl mit Namen wuerde dort die lokalen erwischen.
 set -euo pipefail
 
-TABELLE="" WURZEL="" TROCKEN=0
+TABELLE="" WURZEL="" TROCKEN=0 NUR=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --tabelle) TABELLE="$2"; shift 2 ;;
     --wurzel)  WURZEL="${2%/}"; shift 2 ;;
     --trocken) TROCKEN=1; shift ;;
+    --nur)     NUR=",$2,"; shift 2 ;;
     *) echo "Unbekannt: $1" >&2; exit 2 ;;
   esac
 done
@@ -81,8 +85,9 @@ while IFS= read -r zeile || [ -n "$zeile" ]; do
   zeile="${zeile%%#*}"
   [ -z "${zeile//[[:space:]]/}" ] && continue
   IFS='|' read -r a b c <<<"$zeile"
-  a=$(echo "$a" | xargs); b=$(echo "${b:-}" | tr -d '[:space:]'); c=$(echo "${c:-}" | tr -d '[:space:]')
+  a=$(printf '%s' "$a" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'); b=$(echo "${b:-}" | tr -d '[:space:]'); c=$(echo "${c:-}" | tr -d '[:space:]')
   if [ "$a" = ADMIN ]; then ADMIN="$b"; continue; fi
+  if [ "$a" = NIE ]; then IFS=, read -ra x <<<"$b"; NIE+=("${x[@]}"); continue; fi
   P_PFAD+=("$a"); P_LES+=("${b:--}"); P_SCHR+=("${c:--}")
 done <"$TABELLE"
 [ -n "$ADMIN" ] || { echo "ADMIN-Zeile fehlt in $TABELLE" >&2; exit 2; }
@@ -123,17 +128,20 @@ setzen() {
 [ "$TROCKEN" = 1 ] && echo "=== TROCKENLAUF - es wird nichts geaendert ==="
 echo "Wurzel: $WURZEL"
 
+gewaehlt() { [ -z "$NUR" ] || [[ "$NUR" == *",$1,"* ]]; }
+
 # 1. Wurzel
 wl="-" ws="-"
 for i in "${!P_PFAD[@]}"; do
   [ "${P_PFAD[$i]}" = "/" ] && { wl="${P_LES[$i]}"; ws="${P_SCHR[$i]}"; }
 done
-setzen "$WURZEL" "$wl" "$ws" 0 "/ (nur Ebene)"
+gewaehlt / && setzen "$WURZEL" "$wl" "$ws" 0 "/ (nur Ebene)"
 
 # 2. Ordner der obersten Ebene: aus der Tabelle oder nur ADMIN
 while IFS= read -r -d '' d; do
   n=$(basename "$d")
   for x in "${NIE[@]}"; do [ "$n" = "$x" ] && continue 2; done
+  gewaehlt "$n" || continue
   les="-" schr="-" bez="$n (nicht in Tabelle: nur ADMIN)"
   for i in "${!P_PFAD[@]}"; do
     if [ "${P_PFAD[$i]}" = "$n" ]; then les="${P_LES[$i]}"; schr="${P_SCHR[$i]}"; bez="$n"; fi
@@ -152,6 +160,7 @@ for i in "${!P_PFAD[@]}"; do
   p="${P_PFAD[$i]}"
   [ "${p:0:1}" = "~" ] || continue
   while IFS= read -r -d '' d; do
+    rel="${d#"$WURZEL"/}"; gewaehlt "${rel%%/*}" || continue
     setzen "$d" "${P_LES[$i]}" "${P_SCHR[$i]}" 1 "${d#"$WURZEL"/} ($p)"
   done < <(find "$WURZEL" -mindepth 1 -maxdepth 2 \( "${prune_args[@]}" \) -prune -o -type d -iname "${p:1}" -print0 | sort -z)
 done

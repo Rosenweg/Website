@@ -17,9 +17,13 @@
 #
 # Ordner der obersten Ebene, die hier NICHT stehen, sind nur fuer ADMIN
 # offen - so wie die Website sie ausser Technik/Praesident niemandem zeigt.
-# .git, .github, .claude und .recycle fasst das Skript nie an.
+# .git, .github, .claude und .recycle fasst das Skript nie an, dazu was in
+# der NIE-Zeile steht (Komma-Liste von Namen, auf jeder Ebene).
 
 ADMIN | g:technik,g:präsident,u:api-svc
+
+# Testordner des Probelaufs hat eigene Rechte (tabelle-probelauf.txt)
+NIE   | _acltest
 
 # Wurzel: alle duerfen hinein und die Dateien der obersten Ebene lesen
 # (Website wertet sie als 'allgemein'). Schreiben nur ADMIN.
@@ -47,6 +51,19 @@ stweg6     | r1-bewohner,r1-eigentuemer         | stweg6-ausschuss
 stweg7     | stweg7-bewohner,stweg7-eigentuemer | stweg7-ausschuss
 meg        | meg-bewohner,meg-eigentuemer       | meg-ausschuss
 stweg8     | meg-bewohner,meg-eigentuemer       | meg-ausschuss
+
+# Ordner der obersten Ebene ohne STWEG-Bezug: auf der Website nur fuer
+# Technik/Praesident (isDocPathAllowed kennt sie nicht). Waeren auch ohne
+# Zeile nur ADMIN - hier ausdruecklich, damit es dokumentiert ist
+# (Entscheid Stefan 22.11.2026).
+dump                                                        | - | -
+template                                                    | - | -
+archiv                                                      | - | -
+vorlagen                                                    | - | -
+anzeigen                                                    | - | -
+20260609 Verträge Rosenweg                                  | - | -
+Immosense Vertrag und Start                                 | - | -
+Messages aus der Immoapp von LangPartners nur RW 14 und 6   | - | -
 
 # Sperrordner (DOC_SPERR_ORDNER): nur ADMIN
 ~auslagen              | - | -

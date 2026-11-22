@@ -61,11 +61,21 @@ Samba braucht dazu in [dokumente]:
 
 ```ini
    hide unreadable = yes     # was man nicht lesen darf, sieht man nicht
-   inherit acls = yes
    map acl inherit = yes
+   recycle:directory_mode = 0700
 ```
 
-und in `[api]` und `[scans]` `inherit acls = yes`. **CT 106 und CT 206 müssen
+**Ohne `inherit acls`** (Entscheid 22.11.2026): Damit baut Samba die ACL neuer
+Dateien über NT-Vererbung selbst und schreibt jede Gruppe zusätzlich als
+`user:`-Eintrag (idmap `rid` bildet jede SID auf uid und gid ab), dazu das
+x-Bit auf Dateien. Ohne die Option übernimmt der Kernel die Default-ACL des
+Ordners — sauber, und gleich wie bei der API und bei root.
+
+**Papierkorb:** `/mnt/cephfs-stage/.recycle` vorher von Hand anlegen,
+`root:rosenweg`, Modus `1733`, ohne ACL (`setfacl -b`). Sonst kann ihn nach
+dem Ausrollen niemand mehr anlegen (Wurzel nur lesen). Jeder legt darin seinen
+Ordner an (0700), fremde sieht man nicht; `.recycle` ist unsichtbar, der eigene
+Ordner direkt erreichbar (`\\files…\dokumente\.recycle\<konto>`). **CT 106 und CT 206 müssen
 die gleiche smb.conf haben** (bis auf `server string`), sonst sieht man je nach
 Server, der gerade die Clusteradresse hält, etwas anderes.
 
@@ -82,6 +92,8 @@ cd /root/ordnerrechte
 ./sichern.sh  --wurzel /mnt/cephfs-stage                 # getfacl, Rechte 600, lokal
 ./anwenden.sh --tabelle tabelle.txt --wurzel /mnt/cephfs-stage --trocken
 ./anwenden.sh --tabelle tabelle.txt --wurzel /mnt/cephfs-stage
+# oder schrittweise, z. B. --nur dump,template,archiv,vorlagen
+# dann --nur stweg1,…,stweg8,meg, dann --nur allgemein,Scans, zuletzt --nur /
 # Rueckweg:
 ./zurueck.sh /root/ordnerrechte-sicherung/acl-cephfs-stage-….txt [--trocken]
 ```
@@ -92,6 +104,7 @@ Fileserver kopieren.
 
 ## Probelauf 22.11.2026
 
+Erster Durchgang noch mit `inherit acls`, zweiter ohne (siehe unten).
 Auf `/mnt/cephfs-stage/_acltest/` mit `alle`, `stweg5`, `gesperrt` und
 [`tabelle-probelauf.txt`](tabelle-probelauf.txt); smb.conf auf 106 und 206
 geändert (Sicherung `smb.conf.vor-ordnerrechte-2026-11-22`). Testkonto
@@ -109,16 +122,21 @@ durch und legt an/sperrt/entsperrt; reine AD-Konten fasst er nicht an.
 | `api-svc` liest und schreibt überall (POSIX, `runuser`) | ja | gleiches CephFS | – |
 | Neue Dateien/Ordner erben die ACL (Samba, api-svc, root mit umask 022) | ja | gleiches CephFS | – |
 
+Zweiter Durchgang ohne `inherit acls` (CT 106 und CT 206): Dateien und
+Ordner, die über Samba, als `api-svc` und als root (umask 022) entstehen,
+haben alle dieselbe saubere ACL wie der Elternordner, Dateien `rw-rw----`,
+Ordner mit Default-ACL. Papierkorb: als Ausschuss gelöscht, Datei unter
+`.recycle/acltest/_acltest/stweg5/` wiedergefunden und zurückgeholt,
+`.recycle` selbst nicht auflistbar und in der Wurzel unsichtbar.
+
 Aufgefallen:
 
-- Über Samba angelegte Dateien bekommen mit `inherit acls = yes` eine
-  aufgeblähte ACL: jede Gruppe zusätzlich als `user:`-Eintrag (idmap `rid`
-  bildet jede SID auf uid **und** gid ab), dazu `group:<ersteller>` und das
-  x-Bit auf Dateien. Die wirksamen Rechte stimmen, es ist Kosmetik. Ohne
-  `inherit acls` würde der Kernel die Default-ACL sauber übernehmen — zu
-  entscheiden vor dem Ausrollen.
 - `meg-bewohner` gibt es im AD nicht; die Zeile wirkt erst, wenn die Gruppe
-  existiert.
+  existiert. Sie muss in Authentik entstehen (der Sync bringt sie ins AD);
+  danach `anwenden.sh --nur meg,stweg8` noch einmal.
+- Neue Sperrordner, die die API später anlegt (z. B. `stweg5/reklamationen`),
+  erben die Rechte der STWEG und sind nicht gesperrt, bis das Skript wieder
+  läuft.
 - `api-svc` mit Samba-Passwort ist nicht getestet: Die API hängt das CephFS
   seit August direkt ein und läuft als root (ACLs gelten für root nicht), die
   Freigabe `[api]` hat zurzeit keine Verbindungen.
