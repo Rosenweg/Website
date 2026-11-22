@@ -24,6 +24,7 @@ der Weg auf der Stationsseite stehen im anderen Repo:
 | Datei | Ziel |
 |---|---|
 | `10-auf-adressen-warten.conf` | CT 106 **und** CT 206: `/etc/systemd/system/keepalived.service.d/` |
+| `ordnerrechte/` | Ordnerrechte der Freigabe `dokumente` per POSIX-ACL, siehe [`ordnerrechte/README.md`](ordnerrechte/README.md) |
 
 Danach auf beiden Containern:
 
