@@ -9,7 +9,7 @@ der Hänger vor dem Reset war nirgends mehr zu lesen).
 | | |
 |---|---|
 | Läuft | Container `journal-remote` in `backend-lxc/core/compose.yml` (CT 128, 100.64.2.52) |
-| Port | 19532/tcp, HTTPS mit Client-Zertifikat (Stations-CA) |
+| Port | 19532/tcp, HTTPS mit Client-Zertifikat (Stations-CA) — nginx nimmt TLS an, journal-remote läuft dahinter auf 127.0.0.1:19531 (Debians Paket kann keine Client-Zertifikate prüfen) |
 | Ablage | Volume `journal-remote`, eine Datei je Station (`--split-mode=host`) |
 | Aufbewahrung | 30 Tage (`JOURNAL_AUFBEWAHRUNG`), täglich aufgeräumt |
 
