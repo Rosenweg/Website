@@ -161,6 +161,10 @@ DEFAULT_CONFIG = {
         "com.google.android.apps.subscriptions.red", # Google One
         "com.facebook.katana", "com.facebook.appmanager", "com.facebook.services", "com.facebook.system",
         "com.netflix.mediaclient", "com.microsoft.skydrive", "com.spotify.music",
+        # Nachinstallierer ab Werk (A15, 24.11.2026): Galaxy Store installierte Temu
+        # und ein Spiel still nach der Einrichtung; Aura (ironSource) ist App-Werbung.
+        "com.sec.android.app.samsungapps", "com.aura.oobe.samsung.gl",
+        "com.einnovation.temu", "com.lazada.android", "com.block.juggle",
     ]),
 }
 
