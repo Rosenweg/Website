@@ -928,6 +928,9 @@ def prov_fetch(token):
 # Der Dialplan ([geteilt]) fragt bei jedem Anruf /api/pbx/telefon/<ext>/sitzung
 # ab; ohne Sitzung gehen nur Notrufe.
 TELEFON_AUSWEIS_TTL_S = int(os.environ.get("PBX_TELEFON_AUSWEIS_TTL_S", "90"))
+# APKs fuer die geteilten Telefone (App-Katalog, art='apk').
+TELEFON_APPS_DIR = os.environ.get("PBX_TELEFON_APPS_DIR", "/var/lib/pbx-api/apps")
+TELEFON_APK_MAX = 300 * 1024 * 1024
 TELEFON_QR_PRAEFIX = "RWTEL1:"
 
 
@@ -981,6 +984,7 @@ def _sitzung_json(row):
     return {"angemeldet": True, "name": row["name"], "email": row["email"], "seit": row["seit"]}
 
 
+
 @app.get("/api/telefon/status")
 def telefon_status():
     ext, deny = _geraet()
@@ -988,8 +992,8 @@ def telefon_status():
         return deny
     conn = db.connect()
     try:
-        row = conn.execute("SELECT name, email, seit FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
-        return jsonify({"ext": ext, **_sitzung_json(row)})
+        row = conn.execute("SELECT name, email, seit, gruppen FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+        return jsonify({"ext": ext, **_sitzung_json(row), **_apps_fuer(conn, row)})
     finally:
         conn.close()
 
@@ -1030,15 +1034,18 @@ def telefon_ausweis():
         bis = (datetime.now(timezone.utc) + timedelta(seconds=TELEFON_AUSWEIS_TTL_S)).isoformat(timespec="seconds")
         name = str(user.get("name") or user.get("username") or actor(user))[:80]
         name = re.sub(r'[\x00-\x1f\x7f"<>\\]', "", name) or "Unbekannt"
-        conn.execute("INSERT INTO telefon_ausweise (token_hash, user_id, email, name, durch, expires_at) "
-                     "VALUES (?,?,?,?,?,?)",
-                     (_token_hash(token), str(user.get("id") or ""), email, name, actor(user), bis))
+        gruppen = json.dumps(sorted({str(g).lower() for g in (user.get("groups") or [])}))
+        conn.execute("INSERT INTO telefon_ausweise (token_hash, user_id, email, name, durch, expires_at, gruppen) "
+                     "VALUES (?,?,?,?,?,?,?)",
+                     (_token_hash(token), str(user.get("id") or ""), email, name, actor(user), bis, gruppen))
         conn.commit()
     finally:
         conn.close()
     inhalt = TELEFON_QR_PRAEFIX + token
     qr = segno.make(inhalt, error="m").svg_inline(scale=8, dark="#000000", light="#ffffff", border=2)
-    return jsonify({"qr_svg": qr, "expires_at": bis, "ttl_seconds": TELEFON_AUSWEIS_TTL_S})
+    # "inhalt" braucht die Anmeldeseite, wenn sie IM geteilten Telefon laeuft
+    # (Login direkt mit Authentik): sie reicht ihn ueber die JS-Bruecke an die App.
+    return jsonify({"qr_svg": qr, "inhalt": inhalt, "expires_at": bis, "ttl_seconds": TELEFON_AUSWEIS_TTL_S})
 
 
 @app.post("/api/telefon/einloesen")
@@ -1055,7 +1062,7 @@ def telefon_einloesen():
     h = _token_hash(roh)
     conn = db.connect()
     try:
-        a = conn.execute("SELECT user_id, email, name, durch, expires_at FROM telefon_ausweise "
+        a = conn.execute("SELECT user_id, email, name, durch, expires_at, gruppen FROM telefon_ausweise "
                          "WHERE token_hash = ?", (h,)).fetchone()
         # Atomar verbrauchen: nur wer die Zeile loescht, meldet sich an.
         if not a or conn.execute("DELETE FROM telefon_ausweise WHERE token_hash = ?", (h,)).rowcount != 1:
@@ -1064,14 +1071,295 @@ def telefon_einloesen():
             conn.commit()
             return jsonify({"error": "Code abgelaufen — auf dem Handy neu laden"}), 404
         _telefon_abmelden(conn, ext, f"abgeloest:{a['durch']}")
-        conn.execute("INSERT INTO telefon_sitzungen (ext, user_id, email, name) VALUES (?,?,?,?)",
-                     (ext, a["user_id"], a["email"], a["name"]))
+        conn.execute("INSERT INTO telefon_sitzungen (ext, user_id, email, name, gruppen) VALUES (?,?,?,?,?)",
+                     (ext, a["user_id"], a["email"], a["name"], a["gruppen"] or "[]"))
         conn.execute("INSERT INTO telefon_log (ext, ereignis, email, name, durch) VALUES (?,?,?,?,?)",
                      (ext, "an", a["email"], a["name"], a["durch"]))
         conn.commit()
-        return jsonify({"ok": True, "ext": ext, "angemeldet": True, "name": a["name"], "email": a["email"]})
+        s = conn.execute("SELECT name, email, seit, gruppen FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+        return jsonify({"ok": True, "ext": ext, **_sitzung_json(s), **_apps_fuer(conn, s)})
     finally:
         conn.close()
+
+
+# ─── App-Katalog der geteilten Telefone ─────────────────────────────────────
+_PAKET = re.compile(r"(web\.[a-z0-9_]{1,40}|[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*){1,10})")
+
+
+def _app_json(r, mit_intern=False):
+    d = {"paket": r["paket"], "name": r["name"], "art": r["art"], "persoenlich": bool(r["persoenlich"]),
+         "reihenfolge": r["reihenfolge"]}
+    if r["art"] == "web":
+        d["url"] = r["url"]
+    else:
+        d.update({"sha256": r["sha256"], "groesse": r["groesse"],
+                  "download": f"/api/telefon/apk/{r['paket']}" if r["apk_datei"] else None})
+    if mit_intern:
+        d.update({"gruppen": r["gruppen"], "konfig": r["konfig"], "aktiv": bool(r["aktiv"]),
+                  "apk_datei": r["apk_datei"], "updated_at": r["updated_at"]})
+    return d
+
+
+def _konfig_fuer(roh, sitzung):
+    """Platzhalter {email} {name} {benutzer} in den Werten der Managed Configuration fuellen."""
+    try:
+        k = json.loads(roh or "{}")
+    except ValueError:
+        return {}
+    email = sitzung["email"] or ""
+    werte = {"email": email, "name": sitzung["name"] or "", "benutzer": email.split("@")[0]}
+    out = {}
+    for key, v in (k.items() if isinstance(k, dict) else []):
+        if isinstance(v, str):
+            for ph, w in werte.items():
+                v = v.replace("{" + ph + "}", w)
+        out[str(key)] = v
+    return out
+
+
+def _apps_fuer(conn, sitzung):
+    """Welche Katalog-Apps die angemeldete Person sieht (+ ihre Einstellungen)."""
+    if not sitzung:
+        return {"apps": []}
+    try:
+        gruppen = {str(g).lower() for g in json.loads(sitzung["gruppen"] or "[]")}
+    except (ValueError, IndexError, KeyError):
+        gruppen = set()
+    out = []
+    for r in conn.execute("SELECT * FROM telefon_apps WHERE aktiv = 1 ORDER BY reihenfolge, name"):
+        erlaubt = {g.strip().lower() for g in (r["gruppen"] or "").split(",") if g.strip()}
+        if erlaubt and not (erlaubt & gruppen):
+            continue
+        d = _app_json(r)
+        d["konfig"] = _konfig_fuer(r["konfig"], sitzung)
+        out.append(d)
+    return {"apps": out}
+
+
+@app.get("/api/telefon/katalog")
+def telefon_katalog():
+    """Alle aktiven Apps — das Geraet installiert die APKs vorab und haelt sie versteckt."""
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        rows = conn.execute("SELECT * FROM telefon_apps WHERE aktiv = 1 ORDER BY reihenfolge, name").fetchall()
+        return jsonify({"apps": [_app_json(r) for r in rows]})
+    finally:
+        conn.close()
+
+
+@app.get("/api/telefon/apk/<paket>")
+def telefon_apk(paket):
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        r = conn.execute("SELECT apk_datei FROM telefon_apps WHERE paket = ? AND art = 'apk' AND aktiv = 1",
+                         (paket,)).fetchone()
+    finally:
+        conn.close()
+    if not r or not r["apk_datei"]:
+        return jsonify({"error": "unbekannt"}), 404
+    return send_from_directory(TELEFON_APPS_DIR, r["apk_datei"],
+                               mimetype="application/vnd.android.package-archive")
+
+
+@app.get("/api/pbx/telefon-apps")
+def telefon_apps_liste():
+    _, deny = require_admin()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        rows = conn.execute("SELECT * FROM telefon_apps ORDER BY reihenfolge, name").fetchall()
+        return jsonify({"apps": [_app_json(r, True) for r in rows]})
+    finally:
+        conn.close()
+
+
+@app.put("/api/pbx/telefon-apps/<paket>")
+def telefon_app_speichern(paket):
+    """Anlegen oder aendern (ohne APK-Datei; die kommt per POST .../apk)."""
+    user, deny = require_admin()
+    if deny:
+        return deny
+    if not _PAKET.fullmatch(paket):
+        return jsonify({"error": "Paketname ungueltig (z.B. com.nextcloud.client oder web.portal)"}), 400
+    b = request.get_json(silent=True) or {}
+    art = "web" if paket.startswith("web.") else "apk"
+    name = str(b.get("name") or "").strip()
+    if not name or len(name) > 60 or _STEUERZEICHEN.search(name):
+        return jsonify({"error": "name ungueltig"}), 400
+    url = str(b.get("url") or "").strip() if art == "web" else None
+    if art == "web" and not re.fullmatch(r"https://[A-Za-z0-9.-]+(:[0-9]+)?(/[^\s]*)?", url or ""):
+        return jsonify({"error": "url muss mit https:// beginnen"}), 400
+    gruppen = str(b.get("gruppen") or "").strip()
+    if not re.fullmatch(r"[\w äöüÄÖÜ,.-]{0,300}", gruppen):
+        return jsonify({"error": "gruppen: Namen durch Komma getrennt"}), 400
+    konfig = b.get("konfig", {})
+    if isinstance(konfig, str):
+        try:
+            konfig = json.loads(konfig or "{}")
+        except ValueError:
+            return jsonify({"error": "konfig ist kein gueltiges JSON"}), 400
+    if not isinstance(konfig, dict) or not all(isinstance(v, (str, int, bool)) for v in konfig.values()):
+        return jsonify({"error": "konfig: flaches JSON-Objekt mit Text/Zahl/Ja-Nein"}), 400
+    try:
+        reihenfolge = int(b.get("reihenfolge", 100))
+    except (TypeError, ValueError):
+        return jsonify({"error": "reihenfolge muss eine Zahl sein"}), 400
+    conn = db.connect()
+    try:
+        conn.execute(
+            "INSERT INTO telefon_apps (paket, name, art, url, gruppen, persoenlich, konfig, reihenfolge, aktiv) "
+            "VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(paket) DO UPDATE SET name=excluded.name, url=excluded.url, "
+            "gruppen=excluded.gruppen, persoenlich=excluded.persoenlich, konfig=excluded.konfig, "
+            "reihenfolge=excluded.reihenfolge, aktiv=excluded.aktiv, updated_at=datetime('now')",
+            (paket, name, art, url, gruppen, 1 if b.get("persoenlich", True) else 0,
+             json.dumps(konfig, ensure_ascii=False), reihenfolge, 1 if b.get("aktiv", True) else 0))
+        conn.commit()
+        r = conn.execute("SELECT * FROM telefon_apps WHERE paket = ?", (paket,)).fetchone()
+        return jsonify({"app": _app_json(r, True)})
+    finally:
+        conn.close()
+
+
+@app.post("/api/pbx/telefon-apps/<paket>/apk")
+def telefon_app_apk_hochladen(paket):
+    """APK hochladen (Rohdaten im Body oder multipart 'apk'). Ersetzt die bisherige Datei."""
+    _, deny = require_admin()
+    if deny:
+        return deny
+    f = request.files.get("apk")
+    daten = f.read(TELEFON_APK_MAX + 1) if f else request.get_data(cache=False)
+    if not daten or len(daten) > TELEFON_APK_MAX or daten[:2] != b"PK":
+        return jsonify({"error": "keine APK-Datei (ZIP) oder zu gross"}), 400
+    conn = db.connect()
+    try:
+        r = conn.execute("SELECT art, apk_datei FROM telefon_apps WHERE paket = ?", (paket,)).fetchone()
+        if not r or r["art"] != "apk":
+            return jsonify({"error": "zuerst die App (art apk) anlegen"}), 404
+        sha = hashlib.sha256(daten).hexdigest()
+        os.makedirs(TELEFON_APPS_DIR, exist_ok=True)
+        datei = f"{paket}-{sha[:12]}.apk"
+        tmp = os.path.join(TELEFON_APPS_DIR, datei + ".tmp")
+        with open(tmp, "wb") as out:
+            out.write(daten)
+        os.replace(tmp, os.path.join(TELEFON_APPS_DIR, datei))
+        conn.execute("UPDATE telefon_apps SET apk_datei=?, sha256=?, groesse=?, updated_at=datetime('now') "
+                     "WHERE paket=?", (datei, sha, len(daten), paket))
+        conn.commit()
+        alt = r["apk_datei"]
+        if alt and alt != datei:
+            try:
+                os.remove(os.path.join(TELEFON_APPS_DIR, alt))
+            except OSError:
+                pass
+        return jsonify({"ok": True, "paket": paket, "sha256": sha, "groesse": len(daten)})
+    finally:
+        conn.close()
+
+
+@app.delete("/api/pbx/telefon-apps/<paket>")
+def telefon_app_loeschen(paket):
+    _, deny = require_admin()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        r = conn.execute("SELECT apk_datei FROM telefon_apps WHERE paket = ?", (paket,)).fetchone()
+        conn.execute("DELETE FROM telefon_apps WHERE paket = ?", (paket,))
+        conn.commit()
+        if r and r["apk_datei"]:
+            try:
+                os.remove(os.path.join(TELEFON_APPS_DIR, r["apk_datei"]))
+            except OSError:
+                pass
+        return jsonify({"ok": True})
+    finally:
+        conn.close()
+
+
+# ─── Telefonbuch fuer die geteilten Telefone ────────────────────────────────
+# Die Geraete bekommen das Rosenweg-Verzeichnis (Nextcloud, contacts-sync) als
+# schlanke Liste und schreiben es ins Android-Adressbuch (eigenes Konto
+# "Rosenweg"). Die CardDAV-Zugangsdaten bleiben hier auf der Anlage.
+_KONTAKTE_CACHE = {"zeit": 0.0, "daten": None}
+_KONTAKTE_TTL_S = 600
+
+
+def _vcard_wert(v):
+    return (v.replace("\\n", " ").replace("\\,", ",").replace("\\;", ";").replace("\\\\", "\\")).strip()
+
+
+def _vcards_lesen(text):
+    """Minimaler vCard-Leser: FN, ORG, TEL (mit TYPE), EMAIL. Gefaltete Zeilen werden zusammengesetzt."""
+    zeilen = []
+    for z in text.replace("\r\n", "\n").split("\n"):
+        if z[:1] in (" ", "\t") and zeilen:
+            zeilen[-1] += z[1:]
+        else:
+            zeilen.append(z)
+    karten, k = [], None
+    for z in zeilen:
+        if z.upper() == "BEGIN:VCARD":
+            k = {"name": "", "org": "", "nummern": [], "emails": []}
+        elif z.upper() == "END:VCARD" and k is not None:
+            if k["name"] and (k["nummern"] or k["emails"]):
+                karten.append(k)
+            k = None
+        elif k is not None and ":" in z:
+            kopf, wert = z.split(":", 1)
+            teile = kopf.split(";")
+            feld = teile[0].split(".")[-1].upper()   # "item1.TEL" -> TEL
+            params = ";".join(teile[1:]).upper()
+            if feld == "FN":
+                k["name"] = _vcard_wert(wert)[:120]
+            elif feld == "ORG":
+                k["org"] = _vcard_wert(wert.replace(";", " ")).strip()[:120]
+            elif feld == "TEL":
+                nummer = re.sub(r"[^0-9+*#]", "", wert)
+                if 3 <= len(nummer) <= 25:
+                    typ = ("mobil" if "CELL" in params else "arbeit" if "WORK" in params
+                           else "privat" if "HOME" in params else "andere")
+                    k["nummern"].append({"nummer": nummer, "typ": typ})
+            elif feld == "EMAIL":
+                mail = _vcard_wert(wert)
+                if "@" in mail and len(mail) <= 200:
+                    k["emails"].append(mail)
+    karten.sort(key=lambda x: x["name"].lower())
+    return karten
+
+
+@app.get("/api/telefon/kontakte")
+def telefon_kontakte():
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    if not PROV_CARDDAV_URL:
+        return jsonify({"version": "", "kontakte": []})
+    jetzt = time.time()
+    if _KONTAKTE_CACHE["daten"] is None or jetzt - _KONTAKTE_CACHE["zeit"] > _KONTAKTE_TTL_S:
+        try:
+            r = requests.get(PROV_CARDDAV_URL.rstrip("/") + "/?export",
+                             auth=(PROV_CARDDAV_USER, PROV_CARDDAV_PASS), timeout=20)
+            r.raise_for_status()
+            r.encoding = "utf-8"
+            karten = _vcards_lesen(r.text)
+        except requests.RequestException as e:
+            if _KONTAKTE_CACHE["daten"] is None:
+                return jsonify({"error": f"Verzeichnis nicht erreichbar: {type(e).__name__}"}), 502
+        else:
+            roh = json.dumps(karten, ensure_ascii=False, sort_keys=True)
+            _KONTAKTE_CACHE.update(zeit=jetzt, daten={
+                "version": hashlib.sha256(roh.encode()).hexdigest()[:16], "kontakte": karten})
+    d = _KONTAKTE_CACHE["daten"]
+    if request.args.get("version") == d["version"]:
+        return jsonify({"version": d["version"], "unveraendert": True})
+    return jsonify(d)
 
 
 @app.get("/api/telefon/meine")

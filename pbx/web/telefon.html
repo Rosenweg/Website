@@ -80,6 +80,10 @@
 const $ = id => document.getElementById(id);
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 let bisMs = 0, qrTakt = null, holt = false;
+// Laeuft die Seite im Anmeldefenster der App "Rosenweg Telefon" (Login direkt
+// am geteilten Telefon), gibt es die Bruecke window.RosenwegTelefon: dann kein
+// QR, sondern direkt anmelden.
+const AM_GERAET = typeof window.RosenwegTelefon !== 'undefined';
 
 function zeige(art, text){ const m=$('msg'); m.className='msg '+art; m.textContent=text; }
 
@@ -97,6 +101,7 @@ async function holeQr(){
     const r = await api('/api/telefon/ausweis', {method:'POST'});
     const d = await r.json().catch(()=>({}));
     if (!r.ok) { $('qr').innerHTML=''; zeige('err', d.error || 'Kein Anmelde-QR erhalten.'); bisMs = 0; return; }
+    if (AM_GERAET) { zeige('ok','Anmelden …'); clearInterval(qrTakt); window.RosenwegTelefon.anmelden(d.inhalt); return; }
     $('qr').innerHTML = d.qr_svg;   // vom Server erzeugtes SVG
     $('qr').classList.remove('alt');
     bisMs = Date.now() + (d.ttl_seconds||90)*1000;
@@ -143,10 +148,15 @@ function anmelden(){ AuthentikAuth.login(location.pathname); }
 async function start(){
   AuthentikAuth.handleCallback();
   if (AuthentikAuth.ready) await AuthentikAuth.ready;
-  if (!AuthentikAuth.isLoggedIn()) { gate(); return; }
+  if (!AuthentikAuth.isLoggedIn()) {
+    // Im Anmeldefenster der App: sofort zu Authentik, kein zweiter Knopf.
+    if (AM_GERAET) { anmelden(); return; }
+    gate(); return;
+  }
   const u = AuthentikAuth.getUser();
   $('who').textContent = u?.name || u?.email || '';
   $('inhalt').style.display = 'block';
+  if (AM_GERAET) { $('qrKarte').querySelector('h2').textContent = 'Dieses Telefon übernehmen'; $('meineKarte').remove(); await holeQr(); return; }
   try { await ladeMeine(); } catch(e) {}
   await holeQr();
   clearInterval(qrTakt); qrTakt = setInterval(tick, 1000);

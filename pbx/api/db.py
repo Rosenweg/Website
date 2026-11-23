@@ -104,6 +104,27 @@ CREATE TABLE IF NOT EXISTS telefon_sitzungen (
     seit         TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- App-Katalog der geteilten Telefone. art='apk': das Geraet installiert die
+-- APK still (Device Owner) und blendet sie nur fuer erlaubte Gruppen ein.
+-- art='web': Kachel in der Rosenweg-App (WebView). gruppen leer = alle, die
+-- sich anmelden duerfen. persoenlich=1: Daten beim Abmelden loeschen.
+-- konfig: JSON fuer Managed Configurations, Platzhalter {email} {name} {benutzer}.
+CREATE TABLE IF NOT EXISTS telefon_apps (
+    paket        TEXT PRIMARY KEY,         -- Android-Paketname bzw. 'web.<id>'
+    name         TEXT NOT NULL,
+    art          TEXT NOT NULL DEFAULT 'apk',   -- 'apk' | 'web'
+    url          TEXT,                     -- nur web
+    apk_datei    TEXT,                     -- Dateiname im App-Verzeichnis
+    sha256       TEXT,
+    groesse      INTEGER,
+    gruppen      TEXT NOT NULL DEFAULT '',
+    persoenlich  INTEGER NOT NULL DEFAULT 1,
+    konfig       TEXT NOT NULL DEFAULT '{}',
+    reihenfolge  INTEGER NOT NULL DEFAULT 100,
+    aktiv        INTEGER NOT NULL DEFAULT 1,
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS telefon_log (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     ext          TEXT NOT NULL,
@@ -156,6 +177,10 @@ def init_db():
         cols = [r[1] for r in conn.execute("PRAGMA table_info(ring_members)")]
         if "internal_ext" not in cols:
             conn.execute("ALTER TABLE ring_members ADD COLUMN internal_ext INTEGER")
+        # Gruppen der Person (fuer die App-Freigaben) an Ausweis und Sitzung.
+        for tab in ("telefon_ausweise", "telefon_sitzungen"):
+            if "gruppen" not in [r[1] for r in conn.execute(f"PRAGMA table_info({tab})")]:
+                conn.execute(f"ALTER TABLE {tab} ADD COLUMN gruppen TEXT NOT NULL DEFAULT '[]'")
         # Der erste Anmeldeweg (Code am Geraet, 23.11.2026) wurde noch am selben
         # Abend durch den Anmelde-QR ersetzt.
         conn.execute("DROP TABLE IF EXISTS telefon_codes")
