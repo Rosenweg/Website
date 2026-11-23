@@ -113,12 +113,13 @@
   <div class="card">
     <h2>☎️ SIP-Telefone (LAN/VPN)</h2>
     <p class="muted" style="font-size:.82rem;margin-bottom:.7rem">Registrierung am Server <b class="mono">100.64.2.29</b> (Port 5060, nur im LAN/VPN). Benutzername = Extension, Passwort wie unten. Danach als Ring-Mitglied „SIP-Telefon" hinzufügbar.</p>
-    <table><thead><tr><th>Ext</th><th>Name</th><th>Passwort</th><th>Registriert</th><th>Status</th><th></th></tr></thead>
+    <table><thead><tr><th>Ext</th><th>Name</th><th>App</th><th>Passwort</th><th>Registriert</th><th>Status</th><th></th></tr></thead>
       <tbody id="exts"></tbody></table>
     <div class="row" style="margin-top:.8rem;border-top:1px solid #f1f5f9;padding-top:.8rem">
       <label class="f">Extension (leer = auto)<input id="e_ext" placeholder="2000+" style="width:90px"></label>
       <label class="f">Name<input id="e_name"></label>
       <label class="f">Passwort (leer = generiert)<input id="e_secret"></label>
+      <label class="f">App<select id="e_client"><option value="linphone">Linphone</option><option value="android-sip">Android SIP (Telefon-App)</option></select></label>
       <button onclick="addExt()" style="align-self:flex-end">+ Telefon</button>
     </div>
   </div>
@@ -142,10 +143,17 @@
     <h3 id="qr_titel">Linphone einrichten</h3>
     <div class="muted" id="qr_frist" style="font-size:.78rem"></div>
     <div class="qr" id="qr_bild"></div>
-    <div class="steps">
+    <div class="steps" id="qr_steps_linphone">
       <b>Am Telefon:</b> Linphone öffnen → Assistent →
       „Fetch Remote Configuration" → QR-Code scannen.
       Danach ist Konto, Transport und Rufnummer gesetzt — nichts abzutippen.
+    </div>
+    <div class="steps" id="qr_steps_androidsip" style="display:none">
+      <b>Am Telefon:</b> QR-Code mit der Kamera scannen → der Browser lädt
+      <span class="mono">androidsip-&lt;ext&gt;.xml</span> in „Downloads".
+      Dann Android SIP öffnen → ⋮ → <i>Import</i> → Downloads → Datei wählen.
+      Danach unter „System Calling Accounts" das Konto aktivieren.
+      <b>Die Datei danach aus Downloads löschen</b> — sie enthält das SIP-Passwort.
     </div>
     <div class="lnk" id="qr_url"></div>
     <details id="qr_cd" style="display:none">
@@ -233,12 +241,14 @@ async function loadExts(){
   const inRing = new Set(ringMembers.filter(m=>m.kind==='sip').map(m=>String(m.phone)));
   $('exts').innerHTML = xs.map(x=>`<tr>
     <td class="mono">${esc(x.ext)}</td><td>${esc(x.name)}</td>
+    <td><select onchange="setClient('${esc(x.ext)}',this.value)">${[['linphone','Linphone'],['android-sip','Android SIP']]
+        .map(([v,l])=>`<option value="${v}"${(x.client||'linphone')===v?' selected':''}>${l}</option>`).join('')}</select></td>
     <td class="mono">${esc(x.secret)}</td>
     <td>${x.registered?'<span class="pill ok">● registriert</span>':'<span class="muted">nicht angemeldet</span>'}</td>
     <td>${x.enabled?'<span class="pill ok">aktiv</span>':'<span class="muted">aus</span>'}</td>
     <td>${inRing.has(String(x.ext))?'<span class="pill ok">in Ring-Group</span>':`<button class="sec" onclick="addSipToRing('${esc(x.ext)}')">+ Ring-Group</button>`}
-        <button class="sec" onclick="qrZeigen('${esc(x.ext)}')" title="QR-Code für Linphone">📱 QR</button>
-        <button class="danger" onclick="delExt('${esc(x.ext)}')">Löschen</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Keine SIP-Telefone.</td></tr>';
+        <button class="sec" onclick="qrZeigen('${esc(x.ext)}')" title="QR-Code zum Einrichten">📱 QR</button>
+        <button class="danger" onclick="delExt('${esc(x.ext)}')">Löschen</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">Keine SIP-Telefone.</td></tr>';
 }
 async function addSipToRing(ext){
   const ph = sipPhones.find(x=>String(x.ext)===String(ext));
@@ -246,8 +256,13 @@ async function addSipToRing(ext){
   if(!r.ok){ showErr((await r.json()).error||'Fehler'); return; }
   await loadMembers(); loadExts();
 }
+async function setClient(ext, client){
+  const r = await api('/api/pbx/sip-extensions/'+encodeURIComponent(ext),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({client})});
+  if(!r.ok){ showErr((await r.json()).error||'Fehler'); }
+  loadExts();
+}
 async function addExt(){
-  const body = { ext:$('e_ext').value.trim(), name:$('e_name').value.trim(), secret:$('e_secret').value.trim() };
+  const body = { ext:$('e_ext').value.trim(), name:$('e_name').value.trim(), secret:$('e_secret').value.trim(), client:$('e_client').value };
   if(!body.name){ showErr('Name erforderlich'); return; }
   const r = await api('/api/pbx/sip-extensions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!r.ok){ showErr((await r.json()).error||'Fehler'); return; }
@@ -258,10 +273,13 @@ async function qrZeigen(ext){
   const r = await api('/api/pbx/sip-extensions/'+encodeURIComponent(ext)+'/provisioning',{method:'POST'});
   if(!r.ok){ showErr((await r.json()).error||'Fehler'); return; }
   const d = await r.json();
-  $('qr_titel').textContent = 'Linphone einrichten — '+d.name+' ('+d.ext+')';
+  const asip = d.client==='android-sip';
+  $('qr_titel').textContent = (asip?'Android SIP':'Linphone')+' einrichten — '+d.name+' ('+d.ext+')';
+  $('qr_steps_linphone').style.display = asip ? 'none' : 'block';
+  $('qr_steps_androidsip').style.display = asip ? 'block' : 'none';
   $('qr_bild').innerHTML = d.qr_svg;   // vom Server erzeugtes SVG, kein Fremd-Skript
   $('qr_url').textContent = d.url;
-  const cd = d.carddav;
+  const cd = asip ? null : d.carddav;   // Telefonbuch-Felder gelten nur fuer Linphone
   $('qr_cd').style.display = cd ? 'block' : 'none';
   if(cd){
     const felder = [['Anzeigename',cd.name],['Server-URL',cd.url],['Benutzername',cd.user],

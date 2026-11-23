@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS sip_extensions (
     name         TEXT NOT NULL,
     secret       TEXT NOT NULL,            -- SIP-Passwort (nur LAN/VPN sichtbar)
     context      TEXT NOT NULL DEFAULT 'internal',
+    client       TEXT NOT NULL DEFAULT 'linphone',  -- 'linphone' | 'android-sip' (steuert SDP + Provisionierung)
     enabled      INTEGER NOT NULL DEFAULT 1,
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
@@ -121,6 +122,9 @@ def init_db():
         cols = [r[1] for r in conn.execute("PRAGMA table_info(ring_members)")]
         if "internal_ext" not in cols:
             conn.execute("ALTER TABLE ring_members ADD COLUMN internal_ext INTEGER")
+        # client-Spalte (2026-11-23): Android SIP braucht eine eigene SDP-Variante.
+        if "client" not in [r[1] for r in conn.execute("PRAGMA table_info(sip_extensions)")]:
+            conn.execute("ALTER TABLE sip_extensions ADD COLUMN client TEXT NOT NULL DEFAULT 'linphone'")
         for r in conn.execute("SELECT id FROM ring_members WHERE internal_ext IS NULL ORDER BY id").fetchall():
             conn.execute("UPDATE ring_members SET internal_ext = ? WHERE id = ?",
                          (next_ext(conn, "ring_members", "internal_ext", 1000), r[0]))

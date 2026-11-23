@@ -65,6 +65,25 @@ PROV_CARDDAV_PASS = os.environ.get("PBX_CARDDAV_PASS", "")
 PROV_CARDDAV_REALM = os.environ.get("PBX_CARDDAV_REALM", "")
 PROV_CARDDAV_NAME = os.environ.get("PBX_CARDDAV_NAME", "Rosenweg")
 
+# ─── SIP-Clients ────────────────────────────────────────────────────────────
+# Welche App an einer Nebenstelle haengt, bestimmt zwei Dinge: was Asterisk im
+# SDP anbietet und welche Datei die Provisionierung ausliefert.
+#
+# android-sip (github.com/hell3lazer/Android-SIP, Sipdroid-Fork mit nativer
+# Telecom-Anbindung — die Anrufe laufen ueber die normale Telefon-App):
+#   * Seine SDP-Antwort fuehrt die DTMF-Payload (101) im m=-Feld, ohne die
+#     zugehoerige a=rtpmap-Zeile. pjproject verwirft so eine Antwort mit
+#     PJMEDIA_SDP_EMISSINGRTPMAP und bricht JEDEN eingehenden Anruf ab, noch
+#     waehrend es klingelt. Bietet Asterisk kein telephone-event an
+#     (dtmf_mode=inband), kommt die 101 gar nicht erst zurueck.
+#   * Opus kann die App nicht; ohne ihn bleibt das Angebot kuerzer.
+#   Getestet am 23.11.2026 mit einem Galaxy A15 (Android 16), App 1.4.
+CLIENTS = ("linphone", "android-sip")
+ENDPOINT_PROFILE = {
+    "linphone": ["allow=opus,g722,alaw,ulaw"],
+    "android-sip": ["allow=g722,alaw,ulaw", "dtmf_mode=inband"],
+}
+
 app = Flask(__name__)
 
 
@@ -536,7 +555,9 @@ SIP_KONTEXTE = {"internal"}
 
 def regenerate_phones_conf(conn):
     """Schreibt /etc/asterisk/pjsip_phones.conf aus der DB + triggert pjsip reload."""
-    rows = conn.execute("SELECT ext, name, secret, context FROM sip_extensions WHERE enabled = 1 ORDER BY ext").fetchall()
+    rows = conn.execute(
+        "SELECT ext, name, secret, context, client FROM sip_extensions WHERE enabled = 1 ORDER BY ext"
+    ).fetchall()
     lines = [
         "; AUTO-GENERIERT von pbx-api (app.py) aus sip_extensions — NICHT manuell editieren.",
         "; Quelle of truth: SQLite. Aenderungen ueber das pbx-admin Web-UI.",
@@ -564,7 +585,7 @@ def regenerate_phones_conf(conn):
             "type=endpoint",
             f"context={ctx}",
             "disallow=all",
-            "allow=opus,g722,alaw,ulaw",
+            *ENDPOINT_PROFILE.get(r["client"], ENDPOINT_PROFILE["linphone"]),
             f"auth={ext}",
             f"aors={ext}",
             f"callerid={name} <{ext}>",
@@ -602,7 +623,8 @@ def sip_ext_list():
     conn = db.connect()
     try:
         rows = conn.execute(
-            "SELECT ext, name, secret, context, enabled, created_at, updated_at FROM sip_extensions ORDER BY ext"
+            "SELECT ext, name, secret, context, client, enabled, created_at, updated_at "
+            "FROM sip_extensions ORDER BY ext"
         ).fetchall()
         exts = db.rows_to_dicts(rows)
         try:
@@ -637,13 +659,16 @@ def sip_ext_create():
     ctx = str(b.get("context") or "internal").strip()
     if ctx not in SIP_KONTEXTE:
         return jsonify({"error": "context nicht erlaubt"}), 400
+    client = str(b.get("client") or "linphone").strip()
+    if client not in CLIENTS:
+        return jsonify({"error": "Unbekannter Client"}), 400
     conn = db.connect()
     try:
         if not ext:
             ext = str(db.next_ext(conn, "sip_extensions", "ext", 2000))  # fortlaufend ab 2000
         conn.execute(
-            "INSERT INTO sip_extensions (ext, name, secret, context) VALUES (?,?,?,?)",
-            (ext, name, secret, ctx),
+            "INSERT INTO sip_extensions (ext, name, secret, context, client) VALUES (?,?,?,?,?)",
+            (ext, name, secret, ctx, client),
         )
         conn.commit()
         regenerate_phones_conf(conn)
@@ -651,6 +676,29 @@ def sip_ext_create():
         return jsonify({"extension": dict(row)})
     except db.sqlite3.IntegrityError:
         return jsonify({"error": "Extension existiert bereits"}), 409
+    finally:
+        conn.close()
+
+
+@app.put("/api/pbx/sip-extensions/<ext>")
+def sip_ext_update(ext):
+    """Aendert den Client einer Nebenstelle (Name/Passwort bleiben)."""
+    _, deny = require_admin()
+    if deny:
+        return deny
+    b = request.get_json(silent=True) or {}
+    client = str(b.get("client") or "").strip()
+    if client not in CLIENTS:
+        return jsonify({"error": "Unbekannter Client"}), 400
+    conn = db.connect()
+    try:
+        cur = conn.execute("UPDATE sip_extensions SET client = ? WHERE ext = ?", (client, ext))
+        if not cur.rowcount:
+            return jsonify({"error": "Nebenstelle unbekannt"}), 404
+        db.touch(conn, "sip_extensions", "ext", ext)
+        conn.commit()
+        regenerate_phones_conf(conn)
+        return jsonify({"ok": True, "ext": ext, "client": client})
     finally:
         conn.close()
 
@@ -731,6 +779,38 @@ def _prov_xml(ext, name, secret):
     return "\n".join(teile) + "\n"
 
 
+def _androidsip_xml(ext, secret):
+    """Einstellungsdatei fuer Android SIP (Menue -> Import).
+
+    Das Format ist das, was die App selbst exportiert: ein SharedPreferences-
+    <map>. Schluessel aus Settings.java. Die App kennt keine Abruf-URL, darum
+    wird die Datei im Browser geladen und in der App importiert.
+    """
+    host = PROV_SIP_HOST
+    werte = [
+        ("boolean", "account_enabled", "true"),
+        ("string", "username", str(ext)),
+        ("string", "password", secret),
+        ("string", "server", host),
+        ("string", "domain", host),
+        ("string", "port", "5060"),
+        # tls schaltet die App intern stillschweigend auf tcp um — also gleich tcp.
+        ("string", "protocol", "tcp"),
+        ("boolean", "wlan", "true"),
+        ("boolean", "vpn", "true"),
+        ("string", "pref", "SIP"),
+        ("boolean", "MWI_enabled", "false"),
+    ]
+    teile = ["<?xml version='1.0' encoding='utf-8' standalone='yes' ?>", "<map>"]
+    for typ, k, v in werte:
+        if typ == "string":
+            teile.append(f'<string name="{xesc(k)}">{xesc(v)}</string>')
+        else:
+            teile.append(f'<{typ} name="{xesc(k)}" value="{xesc(v)}" />')
+    teile.append("</map>")
+    return "\n".join(teile) + "\n"
+
+
 @app.post("/api/pbx/sip-extensions/<ext>/provisioning")
 def prov_create(ext):
     """Erzeugt einen Einmal-Link + QR-Code fuer die Linphone-Einrichtung."""
@@ -739,7 +819,7 @@ def prov_create(ext):
         return deny
     conn = db.connect()
     try:
-        row = conn.execute("SELECT ext, name FROM sip_extensions WHERE ext = ?", (ext,)).fetchone()
+        row = conn.execute("SELECT ext, name, client FROM sip_extensions WHERE ext = ?", (ext,)).fetchone()
         if not row:
             return jsonify({"error": "Nebenstelle unbekannt"}), 404
         token = pysecrets.token_urlsafe(24)
@@ -761,7 +841,7 @@ def prov_create(ext):
     url = f"https://{PUBLIC_HOST}/prov/{token}"
     qr = segno.make(url, error="m").svg_inline(scale=5, dark="#1f2937")
     return jsonify({
-        "ext": ext, "name": row["name"], "url": url, "qr_svg": qr,
+        "ext": ext, "name": row["name"], "client": row["client"], "url": url, "qr_svg": qr,
         "expires_at": gueltig_bis.isoformat(timespec="seconds"),
         "ttl_minutes": PROV_TTL_MIN,
         # Fuer das synchronisierte Adressbuch der App: das ist eine FriendList,
@@ -783,7 +863,7 @@ def prov_fetch(token):
     conn = db.connect()
     try:
         row = conn.execute(
-            "SELECT p.token, p.ext, p.expires_at, p.used_at, e.name, e.secret, e.enabled "
+            "SELECT p.token, p.ext, p.expires_at, p.used_at, e.name, e.secret, e.enabled, e.client "
             "FROM prov_tokens p LEFT JOIN sip_extensions e ON e.ext = p.ext "
             "WHERE p.token = ?", (token,)
         ).fetchone()
@@ -798,11 +878,19 @@ def prov_fetch(token):
         conn.commit()
         if cur.rowcount != 1:
             return jsonify({"error": "Link ungueltig oder abgelaufen"}), 404
-        xml = _prov_xml(row["ext"], row["name"], row["secret"])
+        client = row["client"]
+        if client == "android-sip":
+            xml = _androidsip_xml(row["ext"], row["secret"])
+        else:
+            xml = _prov_xml(row["ext"], row["name"], row["secret"])
     finally:
         conn.close()
-    return Response(xml, mimetype="application/xml",
-                    headers={"Cache-Control": "no-store"})
+    headers = {"Cache-Control": "no-store"}
+    if client == "android-sip":
+        # Der Browser soll die Datei speichern (Downloads), nicht anzeigen —
+        # von dort holt sie der Import-Dialog der App.
+        headers["Content-Disposition"] = f'attachment; filename="androidsip-{row["ext"]}.xml"'
+    return Response(xml, mimetype="application/xml", headers=headers)
 
 
 # ─── Web-UI + Reverse-Proxy fuer den Login-Flow ─────────────────────────────
