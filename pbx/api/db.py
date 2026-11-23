@@ -165,6 +165,20 @@ DEFAULT_CONFIG = {
         # und ein Spiel still nach der Einrichtung; Aura (ironSource) ist App-Werbung.
         "com.sec.android.app.samsungapps", "com.aura.oobe.samsung.gl",
         "com.einnovation.temu", "com.lazada.android", "com.block.juggle",
+        "com.google.android.apps.bard",              # Gemini
+        "com.samsung.android.app.omcagent",          # Samsung-Nachinstallierer (ohne SIM unnoetig)
+        "com.linkedin.android", "com.microsoft.office.officehubrow", "com.microsoft.appmanager",
+        "com.mojang.minecraftpe", "com.nebula.mahjongtile",
+        "com.samsung.sree", "com.samsung.android.game.gamehome", "com.samsung.android.app.spage",
+        "com.samsung.android.app.watchmanager", "com.samsung.android.oneconnect",
+        "com.samsung.android.voc", "com.sec.android.app.shealth", "com.sec.android.easyMover",
+        "com.samsung.ecomm.global.gbr", "com.sec.android.app.kidshome",   # Samsung Shop, Kids
+        "com.samsung.android.messaging",             # SMS — ohne SIM nutzlos
+        # Samsung-Tastatur (erst ausblendbar, wenn die Rosenweg Tastatur aktiv ist —
+        # die aktive Tastatur ist geschuetzt), Google-Spracheingabe + Vorlesestimme,
+        # Voice Access, Samsung-Sprachdienst.
+        "com.samsung.android.honeyboard", "com.google.android.tts",
+        "com.google.android.apps.accessibility.voiceaccess", "com.samsung.android.intellivoiceservice",
     ]),
 }
 
@@ -196,6 +210,10 @@ def init_db():
         cols = [r[1] for r in conn.execute("PRAGMA table_info(ring_members)")]
         if "internal_ext" not in cols:
             conn.execute("ALTER TABLE ring_members ADD COLUMN internal_ext INTEGER")
+        # immer=1: Werkzeug (Tastatur, Browser) — auch gesperrt verfuegbar, nie
+        # ausgeblendet, Daten bleiben. Sonst gaebe es z.B. beim Anmelden keine Tastatur.
+        if "immer" not in [r[1] for r in conn.execute("PRAGMA table_info(telefon_apps)")]:
+            conn.execute("ALTER TABLE telefon_apps ADD COLUMN immer INTEGER NOT NULL DEFAULT 0")
         # Gruppen der Person (fuer die App-Freigaben) an Ausweis und Sitzung.
         for tab in ("telefon_ausweise", "telefon_sitzungen"):
             if "gruppen" not in [r[1] for r in conn.execute(f"PRAGMA table_info({tab})")]:

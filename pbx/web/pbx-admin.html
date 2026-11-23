@@ -162,6 +162,7 @@
       <label class="f">Einstellungen (JSON)<input id="a_konfig" value="{}" style="width:210px"></label>
       <label class="f">Persönlich<select id="a_pers"><option value="1">ja – beim Abmelden löschen</option><option value="0">nein</option></select></label>
       <label class="f">Aktiv<select id="a_aktiv"><option value="1">ja</option><option value="0">nein</option></select></label>
+      <label class="f">Immer verfügbar<select id="a_immer"><option value="0">nein – nur angemeldet</option><option value="1">ja – Werkzeug (Tastatur, Browser)</option></select></label>
       <button onclick="saveApp()" style="align-self:flex-end">Speichern</button>
     </div>
     <input type="file" id="a_datei" accept=".apk" style="display:none" onchange="apkHoch(this)">
@@ -344,7 +345,7 @@ async function loadApps(){
     <td>${esc(a.name)}</td><td class="mono">${esc(a.paket)}</td>
     <td class="mono" style="font-size:.78rem">${a.art==='web' ? esc(a.url||'') :
         (a.sha256 ? esc(a.sha256.slice(0,12))+'… · '+(Math.round((a.groesse||0)/1048576))+' MB' : '<span class="muted">keine APK</span>')}</td>
-    <td>${esc(a.gruppen||'alle')}</td><td>${a.persoenlich?'ja':'nein'}</td>
+    <td>${a.immer?'<span class="pill ok">immer</span>':esc(a.gruppen||'alle')}</td><td>${a.persoenlich?'ja':'nein'}</td>
     <td>${a.aktiv?'<span class="pill ok">aktiv</span>':'<span class="muted">aus</span>'}</td>
     <td><button class="sec" onclick="editApp(${i})">Bearbeiten</button>
         ${a.art==='apk'?`<button class="sec" onclick="apkWaehlen('${esc(a.paket)}')">APK hochladen</button>`:''}
@@ -355,14 +356,14 @@ function editApp(i){
   const a = katalog[i];
   $('a_paket').value=a.paket; $('a_name').value=a.name; $('a_url').value=a.url||'';
   $('a_gruppen').value=a.gruppen||''; $('a_reihe').value=a.reihenfolge; $('a_konfig').value=a.konfig||'{}';
-  $('a_pers').value=a.persoenlich?'1':'0'; $('a_aktiv').value=a.aktiv?'1':'0';
+  $('a_pers').value=a.persoenlich?'1':'0'; $('a_aktiv').value=a.aktiv?'1':'0'; $('a_immer').value=a.immer?'1':'0';
   $('a_paket').scrollIntoView({behavior:'smooth', block:'center'});
 }
 async function saveApp(){
   const paket = $('a_paket').value.trim();
   let konfig; try { konfig = JSON.parse($('a_konfig').value||'{}'); } catch(e){ showErr('Einstellungen sind kein gültiges JSON'); return; }
   const body = { name:$('a_name').value.trim(), url:$('a_url').value.trim(), gruppen:$('a_gruppen').value.trim(),
-                 reihenfolge:Number($('a_reihe').value||100), konfig, persoenlich:$('a_pers').value==='1', aktiv:$('a_aktiv').value==='1' };
+                 reihenfolge:Number($('a_reihe').value||100), konfig, persoenlich:$('a_pers').value==='1', aktiv:$('a_aktiv').value==='1', immer:$('a_immer').value==='1' };
   const r = await api('/api/pbx/telefon-apps/'+encodeURIComponent(paket),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!r.ok){ showErr((await r.json()).error||'Fehler'); return; }
   ['a_paket','a_name','a_url','a_gruppen'].forEach(id=>$(id).value=''); $('a_konfig').value='{}';

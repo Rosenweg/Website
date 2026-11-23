@@ -1090,7 +1090,7 @@ _PAKET = re.compile(r"(web\.[a-z0-9_]{1,40}|[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Z
 
 def _app_json(r, mit_intern=False):
     d = {"paket": r["paket"], "name": r["name"], "art": r["art"], "persoenlich": bool(r["persoenlich"]),
-         "reihenfolge": r["reihenfolge"]}
+         "immer": bool(r["immer"]), "reihenfolge": r["reihenfolge"]}
     if r["art"] == "web":
         d["url"] = r["url"]
     else:
@@ -1217,12 +1217,13 @@ def telefon_app_speichern(paket):
     conn = db.connect()
     try:
         conn.execute(
-            "INSERT INTO telefon_apps (paket, name, art, url, gruppen, persoenlich, konfig, reihenfolge, aktiv) "
-            "VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(paket) DO UPDATE SET name=excluded.name, url=excluded.url, "
+            "INSERT INTO telefon_apps (paket, name, art, url, gruppen, persoenlich, konfig, reihenfolge, aktiv, immer) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(paket) DO UPDATE SET name=excluded.name, url=excluded.url, "
             "gruppen=excluded.gruppen, persoenlich=excluded.persoenlich, konfig=excluded.konfig, "
-            "reihenfolge=excluded.reihenfolge, aktiv=excluded.aktiv, updated_at=datetime('now')",
+            "reihenfolge=excluded.reihenfolge, aktiv=excluded.aktiv, immer=excluded.immer, updated_at=datetime('now')",
             (paket, name, art, url, gruppen, 1 if b.get("persoenlich", True) else 0,
-             json.dumps(konfig, ensure_ascii=False), reihenfolge, 1 if b.get("aktiv", True) else 0))
+             json.dumps(konfig, ensure_ascii=False), reihenfolge, 1 if b.get("aktiv", True) else 0,
+             1 if b.get("immer", False) else 0))
         conn.commit()
         r = conn.execute("SELECT * FROM telefon_apps WHERE paket = ?", (paket,)).fetchone()
         return jsonify({"app": _app_json(r, True)})
