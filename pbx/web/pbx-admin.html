@@ -135,9 +135,36 @@
       <label class="f" style="flex:1">Erlaubte Authentik-Gruppen (Komma)<input id="tel_gruppen"></label>
       <button onclick="saveTelGruppen()" style="align-self:flex-end">Speichern</button>
     </div>
+    <div class="row" style="margin-top:.8rem">
+      <label class="f" style="flex:1">Immer ausblenden (System-Apps, Paketnamen durch Komma) — WebView, Telefonie und Notruf schützt das Telefon selbst
+        <textarea id="tel_aus" rows="3" style="padding:.45rem .6rem;border:1px solid #d1d5db;border-radius:8px;font-family:ui-monospace,monospace;font-size:.8rem"></textarea></label>
+      <button onclick="saveTelAus()" style="align-self:flex-end">Speichern</button>
+    </div>
     <details style="margin-top:.8rem"><summary class="muted" style="cursor:pointer;font-size:.82rem">Verlauf</summary>
       <table style="margin-top:.5rem"><thead><tr><th>Zeit (UTC)</th><th>Ext</th><th>Was</th><th>Wer</th><th>Durch</th></tr></thead>
         <tbody id="tel_log"></tbody></table></details>
+  </div>
+
+  <!-- App-Katalog der geteilten Telefone -->
+  <div class="card">
+    <h2>🧩 Apps der geteilten Telefone <span class="act" onclick="loadApps()">Neu laden</span></h2>
+    <p class="muted" style="font-size:.82rem;margin-bottom:.7rem">Web-Apps (Paket <span class="mono">web.&lt;name&gt;</span>) erscheinen als Kachel in der Rosenweg-App,
+      APKs installiert das Telefon still und blendet sie nur für die angegebenen Gruppen ein (leer = alle).
+      Einstellungen als JSON, Platzhalter <span class="mono">{email} {name} {benutzer}</span>.</p>
+    <table><thead><tr><th>Name</th><th>Paket</th><th>Ziel</th><th>Gruppen</th><th>Pers.</th><th>Aktiv</th><th></th></tr></thead>
+      <tbody id="apps"></tbody></table>
+    <div class="row" style="margin-top:.8rem;border-top:1px solid #f1f5f9;padding-top:.8rem">
+      <label class="f">Paket<input id="a_paket" placeholder="web.portal / com.firma.app" style="width:190px"></label>
+      <label class="f">Name<input id="a_name" style="width:150px"></label>
+      <label class="f">URL (nur Web)<input id="a_url" placeholder="https://…rosenweg4303.ch/" style="width:210px"></label>
+      <label class="f">Gruppen<input id="a_gruppen" placeholder="leer = alle" style="width:130px"></label>
+      <label class="f">Reihenfolge<input id="a_reihe" type="number" value="100" style="width:80px"></label>
+      <label class="f">Einstellungen (JSON)<input id="a_konfig" value="{}" style="width:210px"></label>
+      <label class="f">Persönlich<select id="a_pers"><option value="1">ja – beim Abmelden löschen</option><option value="0">nein</option></select></label>
+      <label class="f">Aktiv<select id="a_aktiv"><option value="1">ja</option><option value="0">nein</option></select></label>
+      <button onclick="saveApp()" style="align-self:flex-end">Speichern</button>
+    </div>
+    <input type="file" id="a_datei" accept=".apk" style="display:none" onchange="apkHoch(this)">
   </div>
 
   <!-- Konferenz -->
@@ -290,6 +317,13 @@ async function loadTelefone(){
     <td>${l.ereignis==='an'?'angemeldet':'abgemeldet'}</td><td>${esc(l.name||'')}</td><td class="muted">${esc(l.durch||'')}</td></tr>`).join('')
     || '<tr><td colspan="5" class="muted">Noch nichts.</td></tr>';
   $('tel_gruppen').value = (d.gruppen||[]).join(', ');
+  $('tel_aus').value = (d.ausblenden||'').split(',').map(s=>s.trim()).filter(Boolean).join(',\n');
+}
+async function saveTelAus(){
+  const v = $('tel_aus').value.split(/[,\s]+/).map(s=>s.trim()).filter(Boolean).join(',');
+  const r = await api('/api/pbx/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({telefon_ausblenden:v})});
+  if(!r.ok){ showErr((await r.json()).error||'Fehler'); return; }
+  showErr('Gespeichert — die Telefone übernehmen es beim nächsten Abgleich.'); loadTelefone();
 }
 async function telAbmelden(ext){
   if(!confirm('Anmeldung an '+ext+' beenden?')) return;
@@ -301,6 +335,51 @@ async function saveTelGruppen(){
   const r = await api('/api/pbx/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({telefon_gruppen:$('tel_gruppen').value})});
   if(!r.ok){ showErr((await r.json()).error||'Fehler'); return; }
   loadTelefone();
+}
+let katalog = [], apkZiel = null;
+async function loadApps(){
+  const d = await (await api('/api/pbx/telefon-apps')).json();
+  katalog = d.apps || [];
+  $('apps').innerHTML = katalog.map((a,i)=>`<tr>
+    <td>${esc(a.name)}</td><td class="mono">${esc(a.paket)}</td>
+    <td class="mono" style="font-size:.78rem">${a.art==='web' ? esc(a.url||'') :
+        (a.sha256 ? esc(a.sha256.slice(0,12))+'… · '+(Math.round((a.groesse||0)/1048576))+' MB' : '<span class="muted">keine APK</span>')}</td>
+    <td>${esc(a.gruppen||'alle')}</td><td>${a.persoenlich?'ja':'nein'}</td>
+    <td>${a.aktiv?'<span class="pill ok">aktiv</span>':'<span class="muted">aus</span>'}</td>
+    <td><button class="sec" onclick="editApp(${i})">Bearbeiten</button>
+        ${a.art==='apk'?`<button class="sec" onclick="apkWaehlen('${esc(a.paket)}')">APK hochladen</button>`:''}
+        <button class="danger" onclick="delApp('${esc(a.paket)}')">Löschen</button></td></tr>`).join('')
+    || '<tr><td colspan="7" class="muted">Noch keine Apps.</td></tr>';
+}
+function editApp(i){
+  const a = katalog[i];
+  $('a_paket').value=a.paket; $('a_name').value=a.name; $('a_url').value=a.url||'';
+  $('a_gruppen').value=a.gruppen||''; $('a_reihe').value=a.reihenfolge; $('a_konfig').value=a.konfig||'{}';
+  $('a_pers').value=a.persoenlich?'1':'0'; $('a_aktiv').value=a.aktiv?'1':'0';
+  $('a_paket').scrollIntoView({behavior:'smooth', block:'center'});
+}
+async function saveApp(){
+  const paket = $('a_paket').value.trim();
+  let konfig; try { konfig = JSON.parse($('a_konfig').value||'{}'); } catch(e){ showErr('Einstellungen sind kein gültiges JSON'); return; }
+  const body = { name:$('a_name').value.trim(), url:$('a_url').value.trim(), gruppen:$('a_gruppen').value.trim(),
+                 reihenfolge:Number($('a_reihe').value||100), konfig, persoenlich:$('a_pers').value==='1', aktiv:$('a_aktiv').value==='1' };
+  const r = await api('/api/pbx/telefon-apps/'+encodeURIComponent(paket),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!r.ok){ showErr((await r.json()).error||'Fehler'); return; }
+  ['a_paket','a_name','a_url','a_gruppen'].forEach(id=>$(id).value=''); $('a_konfig').value='{}';
+  loadApps();
+}
+function apkWaehlen(paket){ apkZiel = paket; $('a_datei').value=''; $('a_datei').click(); }
+async function apkHoch(inp){
+  const f = inp.files[0]; if(!f || !apkZiel) return;
+  showErr('Lade '+f.name+' hoch …');
+  const r = await api('/api/pbx/telefon-apps/'+encodeURIComponent(apkZiel)+'/apk',{method:'POST',headers:{'Content-Type':'application/vnd.android.package-archive'},body:f});
+  if(!r.ok){ showErr((await r.json()).error||'Hochladen fehlgeschlagen'); return; }
+  showErr('APK hochgeladen — die Telefone holen sie beim nächsten Abgleich.');
+  loadApps();
+}
+async function delApp(paket){
+  if(!confirm('App '+paket+' aus dem Katalog löschen?\nDie Telefone deinstallieren sie beim nächsten Abgleich.')) return;
+  await api('/api/pbx/telefon-apps/'+encodeURIComponent(paket),{method:'DELETE'}); loadApps();
 }
 async function setClient(ext, client){
   const r = await api('/api/pbx/sip-extensions/'+encodeURIComponent(ext),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({client})});
@@ -376,7 +455,7 @@ async function start(){
   $('logout').onclick = ()=>AuthentikAuth.logout();
   $('content').style.display='block';
   kindHint();
-  try { await loadMembers(); await Promise.all([loadTrunk(),loadHours(),loadExts(),loadCalls(),loadTelefone()]); } catch(e){}
+  try { await loadMembers(); await Promise.all([loadTrunk(),loadHours(),loadExts(),loadCalls(),loadTelefone(),loadApps()]); } catch(e){}
   setInterval(()=>{ if(!document.hidden && AuthentikAuth.isLoggedIn()){ loadTrunk(); loadCalls(); } }, 15000);
 }
 start();

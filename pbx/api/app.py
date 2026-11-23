@@ -508,7 +508,7 @@ def config_put():
     if deny:
         return deny
     b = request.get_json(silent=True) or {}
-    allowed = {"hours_open_from", "hours_open_to", "ring_timeout", "weekdays", "telefon_gruppen"}
+    allowed = {"hours_open_from", "hours_open_to", "ring_timeout", "weekdays", "telefon_gruppen", "telefon_ausblenden"}
     import re as _re
     hhmm = _re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
     for k, v in b.items():
@@ -518,6 +518,8 @@ def config_put():
             return jsonify({"error": f"{k} muss HH:MM sein"}), 400
         if k == "ring_timeout" and not (str(v).isdigit() and 5 <= int(v) <= 120):
             return jsonify({"error": "ring_timeout muss 5-120 sein"}), 400
+        if k == "telefon_ausblenden" and not _re.fullmatch(r"[A-Za-z0-9_.,\s]{0,4000}", str(v)):
+            return jsonify({"error": "telefon_ausblenden: Paketnamen durch Komma getrennt"}), 400
         if k == "telefon_gruppen" and not _re.fullmatch(r"[\w äöüÄÖÜ,.-]{0,300}", str(v)):
             return jsonify({"error": "telefon_gruppen: Gruppennamen durch Komma getrennt"}), 400
     conn = db.connect()
@@ -1145,7 +1147,8 @@ def telefon_katalog():
     conn = db.connect()
     try:
         rows = conn.execute("SELECT * FROM telefon_apps WHERE aktiv = 1 ORDER BY reihenfolge, name").fetchall()
-        return jsonify({"apps": [_app_json(r) for r in rows]})
+        aus = [p.strip() for p in re.split(r"[,\s]+", _cfg(conn).get("telefon_ausblenden", "")) if p.strip()]
+        return jsonify({"apps": [_app_json(r) for r in rows], "ausblenden": aus})
     finally:
         conn.close()
 
@@ -1412,7 +1415,8 @@ def telefon_sitzungen_admin():
         log = conn.execute("SELECT ext, ereignis, name, durch, zeit FROM telefon_log "
                            "ORDER BY id DESC LIMIT 30").fetchall()
         return jsonify({"sitzungen": db.rows_to_dicts(sitz), "log": db.rows_to_dicts(log),
-                        "gruppen": sorted(_telefon_gruppen(conn))})
+                        "gruppen": sorted(_telefon_gruppen(conn)),
+                        "ausblenden": _cfg(conn).get("telefon_ausblenden", "")})
     finally:
         conn.close()
 

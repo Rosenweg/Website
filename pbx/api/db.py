@@ -147,6 +147,21 @@ DEFAULT_CONFIG = {
     "weekdays": "mon-sun",
     # Wer sich an geteilten Telefonen anmelden darf (Authentik-Gruppen, klein).
     "telefon_gruppen": "technik,präsident,praesident",
+    # System-Apps, die geteilte Telefone immer ausblenden (Device Owner).
+    # Lebenswichtiges (WebView, Telefonie, Notruf) schuetzt die App selbst.
+    "telefon_ausblenden": ",".join([
+        "com.android.vending",                       # Play Store
+        "com.google.android.youtube", "com.google.android.apps.youtube.music",
+        "com.google.android.gm",                     # Gmail
+        "com.google.android.apps.maps", "com.google.android.apps.photos",
+        "com.google.android.apps.docs",              # Drive
+        "com.google.android.googlequicksearchbox",   # Google-App/Suche
+        "com.google.android.apps.messaging", "com.google.android.apps.tachyon",
+        "com.google.android.apps.wellbeing", "com.google.android.apps.googleassistant",
+        "com.google.android.apps.subscriptions.red", # Google One
+        "com.facebook.katana", "com.facebook.appmanager", "com.facebook.services", "com.facebook.system",
+        "com.netflix.mediaclient", "com.microsoft.skydrive", "com.spotify.music",
+    ]),
 }
 
 
