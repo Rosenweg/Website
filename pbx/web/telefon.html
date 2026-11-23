@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Telefon anmelden — Rosenweg</title>
+<link rel="icon" href="https://www.rosenweg4303.ch/logo-rosenweg.png" type="image/png">
+<script src="https://www.rosenweg4303.ch/js/authentik-auth.js?v=5"></script>
+<style>
+  :root { --bg:#f1f5f9; --card:#fff; --text:#1f2937; --muted:#6b7280; --line:#e5e7eb;
+          --blue:#2563eb; --blue-d:#1d4ed8; --ok-bg:#dcfce7; --ok:#166534; --err-bg:#fee2e2; --err:#b91c1c; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f172a; --card:#1e293b; --text:#e5e7eb; --muted:#94a3b8; --line:#334155;
+            --ok-bg:#14532d; --ok:#bbf7d0; --err-bg:#450a0a; --err:#fecaca; }
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); }
+  .wrap { max-width:440px; margin:0 auto; padding:1.2rem 16px 2rem; }
+  .kopf { display:flex; align-items:center; gap:.7rem; margin-bottom:1.1rem; }
+  .kopf img { height:36px; }
+  .kopf h1 { font-size:1.15rem; }
+  .kopf .sp { flex:1; }
+  .kopf .who { font-size:.8rem; color:var(--muted); text-align:right; }
+  .card { background:var(--card); border-radius:14px; box-shadow:0 4px 16px rgba(0,0,0,.08); padding:1.2rem; margin-bottom:1rem; }
+  .card h2 { font-size:1rem; margin-bottom:.7rem; }
+  p { line-height:1.45; font-size:.92rem; }
+  .muted { color:var(--muted); font-size:.85rem; }
+  .qr { background:#fff; border-radius:14px; padding:12px; margin:.9rem auto .5rem; width:min(100%, 320px); aspect-ratio:1; }
+  .qr svg { width:100%; height:100%; display:block; }
+  .qr.alt { opacity:.25; }
+  .frist { text-align:center; font-size:.85rem; color:var(--muted); min-height:1.2em; }
+  button { width:100%; padding:.8rem; border:none; border-radius:10px; background:var(--blue); color:#fff;
+           font-weight:600; font-size:1rem; cursor:pointer; }
+  button:hover { background:var(--blue-d); }
+  button:disabled { opacity:.6; cursor:default; }
+  button.sec { background:var(--line); color:var(--text); width:auto; padding:.45rem .8rem; font-size:.85rem; }
+  .msg { border-radius:10px; padding:.75rem .9rem; margin-top:.8rem; font-size:.9rem; display:none; }
+  .msg.ok { background:var(--ok-bg); color:var(--ok); display:block; }
+  .msg.err { background:var(--err-bg); color:var(--err); display:block; }
+  ul.liste { list-style:none; }
+  ul.liste li { display:flex; align-items:center; gap:.6rem; padding:.55rem 0; border-top:1px solid var(--line); }
+  ul.liste li:first-child { border-top:none; }
+  ul.liste .t { flex:1; }
+  ul.liste .t b { display:block; font-size:.92rem; }
+  ul.liste .t span { font-size:.78rem; color:var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="kopf">
+    <img src="https://www.rosenweg4303.ch/logo-rosenweg.png" alt="">
+    <h1>Telefon anmelden</h1>
+    <div class="sp"></div>
+    <div class="who" id="who"></div>
+  </div>
+
+  <div class="card" id="gate" style="display:none">
+    <h2>Zuerst mit deinem Rosenweg-Konto anmelden</h2>
+    <p class="muted" style="margin-bottom:1rem">Danach zeigt diese Seite deinen Anmelde-QR für das geteilte Telefon.</p>
+    <div id="sso"></div>
+  </div>
+
+  <div id="inhalt" style="display:none">
+    <div class="card" id="qrKarte">
+      <h2>Dein Anmelde-QR</h2>
+      <p class="muted">Halte ihn vor die Kamera des gesperrten Telefons. Er gilt einmal und nur kurz — die Seite holt von selbst einen neuen.</p>
+      <div class="qr" id="qr"></div>
+      <div class="frist" id="frist"></div>
+      <div class="msg" id="msg"></div>
+    </div>
+
+    <div class="card" id="meineKarte" style="display:none">
+      <h2>Hier bist du angemeldet</h2>
+      <ul class="liste" id="meine"></ul>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let bisMs = 0, qrTakt = null, holt = false;
+
+function zeige(art, text){ const m=$('msg'); m.className='msg '+art; m.textContent=text; }
+
+async function api(path, opts){
+  const r = await AuthentikAuth.apiFetch(path, opts);
+  if (r.status === 401) { gate(); throw new Error('auth'); }
+  return r;
+}
+
+// Holt einen frischen Anmelde-QR. Er ist nur kurz gueltig; die Seite erneuert
+// ihn kurz vor Ablauf und sobald sie wieder sichtbar wird.
+async function holeQr(){
+  if (holt) return; holt = true;
+  try {
+    const r = await api('/api/telefon/ausweis', {method:'POST'});
+    const d = await r.json().catch(()=>({}));
+    if (!r.ok) { $('qr').innerHTML=''; zeige('err', d.error || 'Kein Anmelde-QR erhalten.'); bisMs = 0; return; }
+    $('qr').innerHTML = d.qr_svg;   // vom Server erzeugtes SVG
+    $('qr').classList.remove('alt');
+    bisMs = Date.now() + (d.ttl_seconds||90)*1000;
+    $('msg').className = 'msg';
+  } catch(e) {
+    if (e.message !== 'auth') zeige('err','Keine Verbindung zur Telefonanlage.');
+  } finally { holt = false; }
+}
+
+function tick(){
+  if (document.hidden) return;
+  const s = Math.round((bisMs - Date.now())/1000);
+  if (bisMs && s > 0) $('frist').textContent = 'gültig noch '+s+' s';
+  else { $('frist').textContent = 'wird erneuert …'; $('qr').classList.add('alt'); }
+  if (s <= 10) holeQr();
+}
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ holeQr(); ladeMeine().catch(()=>{}); } });
+
+async function abmelden(ext){
+  const r = await api('/api/telefon/'+encodeURIComponent(ext)+'/abmelden', {method:'POST'});
+  if (!r.ok) { const d = await r.json().catch(()=>({})); zeige('err', d.error || 'Abmelden fehlgeschlagen.'); return; }
+  zeige('ok','Abgemeldet.');
+  ladeMeine();
+}
+
+async function ladeMeine(){
+  const r = await api('/api/telefon/meine');
+  const d = await r.json();
+  if (!d.darf) { zeige('err','Dein Konto ist für geteilte Telefone nicht freigeschaltet. Melde dich bei der Technik.'); $('qr').innerHTML=''; clearInterval(qrTakt); }
+  const xs = d.sitzungen || [];
+  $('meineKarte').style.display = xs.length ? 'block' : 'none';
+  $('meine').innerHTML = xs.map(s => `<li><div class="t"><b>${esc(s.geraet)}</b>
+      <span>Nebenstelle ${esc(s.ext)} · seit ${esc(String(s.seit||'').slice(0,16))} UTC</span></div>
+      <button class="sec" onclick="abmelden('${esc(s.ext)}')">Abmelden</button></li>`).join('');
+}
+
+function gate(){
+  $('inhalt').style.display = 'none';
+  $('gate').style.display = 'block';
+  $('sso').innerHTML = '<button onclick="anmelden()">Mit Rosenweg-Konto anmelden</button>';
+}
+function anmelden(){ AuthentikAuth.login(location.pathname); }
+
+async function start(){
+  AuthentikAuth.handleCallback();
+  if (AuthentikAuth.ready) await AuthentikAuth.ready;
+  if (!AuthentikAuth.isLoggedIn()) { gate(); return; }
+  const u = AuthentikAuth.getUser();
+  $('who').textContent = u?.name || u?.email || '';
+  $('inhalt').style.display = 'block';
+  try { await ladeMeine(); } catch(e) {}
+  await holeQr();
+  clearInterval(qrTakt); qrTakt = setInterval(tick, 1000);
+  // Wer am Geraet angemeldet ist, soll das hier auch sehen.
+  setInterval(()=>{ if(!document.hidden) ladeMeine().catch(()=>{}); }, 5000);
+}
+start();
+</script>
+</body>
+</html>

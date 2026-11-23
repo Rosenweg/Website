@@ -15,8 +15,10 @@ Abhaengigkeit zur Haupt-API fuer den Betrieb. Zwei Auth-Welten:
 SIP-Telefone (LAN/VPN): aus der sip_extensions-Tabelle generiert die API
 /etc/asterisk/pjsip_phones.conf und triggert 'pjsip reload' via AMI.
 """
+import hashlib
 import hmac
 import json
+import time
 import os
 import re
 import secrets as pysecrets
@@ -506,7 +508,7 @@ def config_put():
     if deny:
         return deny
     b = request.get_json(silent=True) or {}
-    allowed = {"hours_open_from", "hours_open_to", "ring_timeout", "weekdays"}
+    allowed = {"hours_open_from", "hours_open_to", "ring_timeout", "weekdays", "telefon_gruppen"}
     import re as _re
     hhmm = _re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
     for k, v in b.items():
@@ -516,6 +518,8 @@ def config_put():
             return jsonify({"error": f"{k} muss HH:MM sein"}), 400
         if k == "ring_timeout" and not (str(v).isdigit() and 5 <= int(v) <= 120):
             return jsonify({"error": "ring_timeout muss 5-120 sein"}), 400
+        if k == "telefon_gruppen" and not _re.fullmatch(r"[\w äöüÄÖÜ,.-]{0,300}", str(v)):
+            return jsonify({"error": "telefon_gruppen: Gruppennamen durch Komma getrennt"}), 400
     conn = db.connect()
     try:
         for k, v in b.items():
@@ -550,7 +554,8 @@ def calls_list():
 
 # ─── SIP-Extensions (interne Telefone, LAN/VPN) ─────────────────────────────
 # Kontexte, in die ein internes Telefon gehoeren darf (extensions.conf).
-SIP_KONTEXTE = {"internal"}
+# 'geteilt' = geteiltes Telefon: ohne Anmeldung nur Notrufe (extensions.conf [geteilt]).
+SIP_KONTEXTE = {"internal", "geteilt"}
 
 
 def regenerate_phones_conf(conn):
@@ -682,23 +687,37 @@ def sip_ext_create():
 
 @app.put("/api/pbx/sip-extensions/<ext>")
 def sip_ext_update(ext):
-    """Aendert den Client einer Nebenstelle (Name/Passwort bleiben)."""
-    _, deny = require_admin()
+    """Aendert App (client) und/oder Kontext einer Nebenstelle (Name/Passwort bleiben)."""
+    user, deny = require_admin()
     if deny:
         return deny
     b = request.get_json(silent=True) or {}
-    client = str(b.get("client") or "").strip()
-    if client not in CLIENTS:
-        return jsonify({"error": "Unbekannter Client"}), 400
+    felder = {}
+    if "client" in b:
+        client = str(b.get("client") or "").strip()
+        if client not in CLIENTS:
+            return jsonify({"error": "Unbekannter Client"}), 400
+        felder["client"] = client
+    if "context" in b:
+        ctx = str(b.get("context") or "").strip()
+        if ctx not in SIP_KONTEXTE:
+            return jsonify({"error": "context nicht erlaubt"}), 400
+        felder["context"] = ctx
+    if not felder:
+        return jsonify({"error": "nichts zu aendern"}), 400
     conn = db.connect()
     try:
-        cur = conn.execute("UPDATE sip_extensions SET client = ? WHERE ext = ?", (client, ext))
+        sets = ", ".join(f"{k} = ?" for k in felder)  # Schluessel stammen aus der Liste oben
+        cur = conn.execute(f"UPDATE sip_extensions SET {sets} WHERE ext = ?", (*felder.values(), ext))
         if not cur.rowcount:
             return jsonify({"error": "Nebenstelle unbekannt"}), 404
         db.touch(conn, "sip_extensions", "ext", ext)
+        if felder.get("context") == "internal":
+            # Kein geteiltes Telefon mehr: eine offene Anmeldung waere sonst Altlast.
+            _telefon_abmelden(conn, ext, f"admin:{actor(user)}")
         conn.commit()
         regenerate_phones_conf(conn)
-        return jsonify({"ok": True, "ext": ext, "client": client})
+        return jsonify({"ok": True, "ext": ext, **felder})
     finally:
         conn.close()
 
@@ -891,6 +910,242 @@ def prov_fetch(token):
         # von dort holt sie der Import-Dialog der App.
         headers["Content-Disposition"] = f'attachment; filename="androidsip-{row["ext"]}.xml"'
     return Response(xml, mimetype="application/xml", headers=headers)
+
+
+# ─── Geteilte Telefone: Anmeldung pro Person ────────────────────────────────
+# Ablauf:
+#   1. Die Person oeffnet /telefon auf dem EIGENEN Handy, meldet sich mit
+#      Authentik an und bekommt einen persoenlichen Anmelde-QR
+#      (POST /api/telefon/ausweis): einmalig, 90 s gueltig, Inhalt
+#      "RWTEL1:<token>" — bewusst keine URL, eine fremde Kamera-App kann damit
+#      nichts anfangen.
+#   2. Das gesperrte Telefon scannt den QR mit seiner Kamera und loest ihn ein
+#      (POST /api/telefon/einloesen). Es weist sich mit seinen SIP-Zugangsdaten
+#      aus (HTTP Basic ext:secret) — die hat es ohnehin.
+#   3. Ab dann ist die Person an diesem Geraet angemeldet, bis sie sich von Hand
+#      abmeldet (Geraet, /telefon oder Admin).
+# Der QR muss physisch vor die Kamera: das belegt, dass die Person davorsteht.
+# Der Dialplan ([geteilt]) fragt bei jedem Anruf /api/pbx/telefon/<ext>/sitzung
+# ab; ohne Sitzung gehen nur Notrufe.
+TELEFON_AUSWEIS_TTL_S = int(os.environ.get("PBX_TELEFON_AUSWEIS_TTL_S", "90"))
+TELEFON_QR_PRAEFIX = "RWTEL1:"
+
+
+def _jetzt_iso():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _telefon_gruppen(conn):
+    roh = _cfg(conn).get("telefon_gruppen", "")
+    return {g.strip().lower() for g in roh.split(",") if g.strip()}
+
+
+def _telefon_darf(conn, user):
+    erlaubt = _telefon_gruppen(conn)
+    gruppen = {str(g).lower() for g in (user or {}).get("groups", [])}
+    return bool(erlaubt & gruppen)
+
+
+def _geraet():
+    """HTTP-Basic ext:secret eines geteilten Telefons. Gibt (ext, None) oder (None, response)."""
+    a = request.authorization
+    nein = (jsonify({"error": "Geraet nicht berechtigt"}), 401)
+    if not a or not a.username or not a.password:
+        return None, nein
+    conn = db.connect()
+    try:
+        row = conn.execute(
+            "SELECT ext, secret FROM sip_extensions WHERE ext = ? AND enabled = 1 AND context = 'geteilt'",
+            (a.username,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row or not hmac.compare_digest(str(row["secret"]).encode(), a.password.encode()):
+        return None, nein
+    return row["ext"], None
+
+
+def _telefon_abmelden(conn, ext, durch):
+    s = conn.execute("SELECT email, name FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+    if not s:
+        return False
+    conn.execute("DELETE FROM telefon_sitzungen WHERE ext = ?", (ext,))
+    conn.execute("INSERT INTO telefon_log (ext, ereignis, email, name, durch) VALUES (?,?,?,?,?)",
+                 (ext, "ab", s["email"], s["name"], durch))
+    return True
+
+
+def _sitzung_json(row):
+    if not row:
+        return {"angemeldet": False}
+    return {"angemeldet": True, "name": row["name"], "email": row["email"], "seit": row["seit"]}
+
+
+@app.get("/api/telefon/status")
+def telefon_status():
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        row = conn.execute("SELECT name, email, seit FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+        return jsonify({"ext": ext, **_sitzung_json(row)})
+    finally:
+        conn.close()
+
+
+@app.post("/api/telefon/abmelden")
+def telefon_abmelden_geraet():
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        _telefon_abmelden(conn, ext, "geraet")
+        conn.commit()
+        return jsonify({"ok": True, "angemeldet": False})
+    finally:
+        conn.close()
+
+
+def _token_hash(token):
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+@app.post("/api/telefon/ausweis")
+def telefon_ausweis():
+    """Persoenlicher Anmelde-QR fuer die Person, die gerade auf /telefon angemeldet ist."""
+    user = current_user()
+    if not user:
+        return jsonify({"error": "Nicht angemeldet"}), 401
+    conn = db.connect()
+    try:
+        if not _telefon_darf(conn, user):
+            return jsonify({"error": "Dein Konto ist fuer geteilte Telefone nicht freigeschaltet"}), 403
+        jetzt = _jetzt_iso()
+        email = user.get("email") or ""
+        # Pro Person gilt nur der neueste QR; alte und abgelaufene weg.
+        conn.execute("DELETE FROM telefon_ausweise WHERE lower(email) = lower(?) OR expires_at < ?", (email, jetzt))
+        token = pysecrets.token_urlsafe(24)
+        bis = (datetime.now(timezone.utc) + timedelta(seconds=TELEFON_AUSWEIS_TTL_S)).isoformat(timespec="seconds")
+        name = str(user.get("name") or user.get("username") or actor(user))[:80]
+        name = re.sub(r'[\x00-\x1f\x7f"<>\\]', "", name) or "Unbekannt"
+        conn.execute("INSERT INTO telefon_ausweise (token_hash, user_id, email, name, durch, expires_at) "
+                     "VALUES (?,?,?,?,?,?)",
+                     (_token_hash(token), str(user.get("id") or ""), email, name, actor(user), bis))
+        conn.commit()
+    finally:
+        conn.close()
+    inhalt = TELEFON_QR_PRAEFIX + token
+    qr = segno.make(inhalt, error="m").svg_inline(scale=8, dark="#000000", light="#ffffff", border=2)
+    return jsonify({"qr_svg": qr, "expires_at": bis, "ttl_seconds": TELEFON_AUSWEIS_TTL_S})
+
+
+@app.post("/api/telefon/einloesen")
+def telefon_einloesen():
+    """Das gesperrte Telefon hat einen Anmelde-QR gescannt."""
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    roh = str((request.get_json(silent=True) or {}).get("token", "")).strip()
+    if roh.startswith(TELEFON_QR_PRAEFIX):
+        roh = roh[len(TELEFON_QR_PRAEFIX):]
+    if not re.fullmatch(r"[A-Za-z0-9_-]{20,64}", roh):
+        return jsonify({"error": "Das ist kein Rosenweg-Anmeldecode"}), 400
+    h = _token_hash(roh)
+    conn = db.connect()
+    try:
+        a = conn.execute("SELECT user_id, email, name, durch, expires_at FROM telefon_ausweise "
+                         "WHERE token_hash = ?", (h,)).fetchone()
+        # Atomar verbrauchen: nur wer die Zeile loescht, meldet sich an.
+        if not a or conn.execute("DELETE FROM telefon_ausweise WHERE token_hash = ?", (h,)).rowcount != 1:
+            return jsonify({"error": "Code unbekannt oder schon benutzt — auf dem Handy neu laden"}), 404
+        if a["expires_at"] < _jetzt_iso():
+            conn.commit()
+            return jsonify({"error": "Code abgelaufen — auf dem Handy neu laden"}), 404
+        _telefon_abmelden(conn, ext, f"abgeloest:{a['durch']}")
+        conn.execute("INSERT INTO telefon_sitzungen (ext, user_id, email, name) VALUES (?,?,?,?)",
+                     (ext, a["user_id"], a["email"], a["name"]))
+        conn.execute("INSERT INTO telefon_log (ext, ereignis, email, name, durch) VALUES (?,?,?,?,?)",
+                     (ext, "an", a["email"], a["name"], a["durch"]))
+        conn.commit()
+        return jsonify({"ok": True, "ext": ext, "angemeldet": True, "name": a["name"], "email": a["email"]})
+    finally:
+        conn.close()
+
+
+@app.get("/api/telefon/meine")
+def telefon_meine():
+    """Geraete, an denen die angemeldete Person gerade angemeldet ist."""
+    user = current_user()
+    if not user:
+        return jsonify({"error": "Nicht angemeldet"}), 401
+    conn = db.connect()
+    try:
+        rows = conn.execute(
+            "SELECT s.ext, e.name AS geraet, s.seit FROM telefon_sitzungen s "
+            "JOIN sip_extensions e ON e.ext = s.ext WHERE lower(s.email) = lower(?) ORDER BY s.ext",
+            (user.get("email") or "",)).fetchall()
+        return jsonify({"name": user.get("name"), "darf": _telefon_darf(conn, user),
+                        "sitzungen": db.rows_to_dicts(rows)})
+    finally:
+        conn.close()
+
+
+@app.post("/api/telefon/<ext>/abmelden")
+def telefon_abmelden_web(ext):
+    """Abmelden aus dem Browser: die eigene Sitzung, oder jede fuer Technik/Praesident."""
+    user = current_user()
+    if not user:
+        return jsonify({"error": "Nicht angemeldet"}), 401
+    conn = db.connect()
+    try:
+        s = conn.execute("SELECT email FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+        if not s:
+            return jsonify({"ok": True, "angemeldet": False})
+        eigene = (s["email"] or "").lower() == (user.get("email") or "").lower() and s["email"]
+        if not eigene and not is_admin(user):
+            return jsonify({"error": "Nur die eigene Anmeldung"}), 403
+        _telefon_abmelden(conn, ext, ("person:" if eigene else "admin:") + actor(user))
+        conn.commit()
+        return jsonify({"ok": True, "angemeldet": False})
+    finally:
+        conn.close()
+
+
+@app.get("/api/pbx/telefon-sitzungen")
+def telefon_sitzungen_admin():
+    _, deny = require_admin()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        sitz = conn.execute("SELECT ext, name, email, seit FROM telefon_sitzungen ORDER BY ext").fetchall()
+        log = conn.execute("SELECT ext, ereignis, name, durch, zeit FROM telefon_log "
+                           "ORDER BY id DESC LIMIT 30").fetchall()
+        return jsonify({"sitzungen": db.rows_to_dicts(sitz), "log": db.rows_to_dicts(log),
+                        "gruppen": sorted(_telefon_gruppen(conn))})
+    finally:
+        conn.close()
+
+
+@app.get("/api/pbx/telefon/<ext>/sitzung")
+def telefon_sitzung_agi(ext):
+    """AGI (Dialplan [geteilt]): wer ist an diesem Geraet angemeldet?"""
+    err = require_agi()
+    if err:
+        return err
+    conn = db.connect()
+    try:
+        row = conn.execute("SELECT name, email, seit FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+        return jsonify(_sitzung_json(row))
+    finally:
+        conn.close()
+
+
+@app.get("/telefon")
+def serve_telefon():
+    return send_from_directory(os.path.abspath(WEB_DIR), "telefon.html")
 
 
 # ─── Web-UI + Reverse-Proxy fuer den Login-Flow ─────────────────────────────

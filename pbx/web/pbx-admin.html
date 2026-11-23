@@ -113,7 +113,7 @@
   <div class="card">
     <h2>☎️ SIP-Telefone (LAN/VPN)</h2>
     <p class="muted" style="font-size:.82rem;margin-bottom:.7rem">Registrierung am Server <b class="mono">100.64.2.29</b> (Port 5060, nur im LAN/VPN). Benutzername = Extension, Passwort wie unten. Danach als Ring-Mitglied „SIP-Telefon" hinzufügbar.</p>
-    <table><thead><tr><th>Ext</th><th>Name</th><th>App</th><th>Passwort</th><th>Registriert</th><th>Status</th><th></th></tr></thead>
+    <table><thead><tr><th>Ext</th><th>Name</th><th>App</th><th>Nutzung</th><th>Passwort</th><th>Registriert</th><th>Status</th><th></th></tr></thead>
       <tbody id="exts"></tbody></table>
     <div class="row" style="margin-top:.8rem;border-top:1px solid #f1f5f9;padding-top:.8rem">
       <label class="f">Extension (leer = auto)<input id="e_ext" placeholder="2000+" style="width:90px"></label>
@@ -122,6 +122,22 @@
       <label class="f">App<select id="e_client"><option value="linphone">Linphone</option><option value="android-sip">Android SIP (Telefon-App)</option></select></label>
       <button onclick="addExt()" style="align-self:flex-end">+ Telefon</button>
     </div>
+  </div>
+
+  <!-- Geteilte Telefone -->
+  <div class="card">
+    <h2>📱 Geteilte Telefone <span class="act" onclick="loadTelefone()">Neu laden</span></h2>
+    <p class="muted" style="font-size:.82rem;margin-bottom:.7rem">Nebenstellen mit Nutzung „geteilt": ohne Anmeldung nur Notrufe.
+      Anmelden: auf dem eigenen Handy <b class="mono">pbx.rosenweg4303.ch/telefon</b> öffnen und den Anmelde-QR vor die Kamera des gesperrten Telefons halten.</p>
+    <table><thead><tr><th>Ext</th><th>Angemeldet</th><th>Konto</th><th>Seit (UTC)</th><th></th></tr></thead>
+      <tbody id="tel_sitz"></tbody></table>
+    <div class="row" style="margin-top:.8rem;border-top:1px solid #f1f5f9;padding-top:.8rem">
+      <label class="f" style="flex:1">Erlaubte Authentik-Gruppen (Komma)<input id="tel_gruppen"></label>
+      <button onclick="saveTelGruppen()" style="align-self:flex-end">Speichern</button>
+    </div>
+    <details style="margin-top:.8rem"><summary class="muted" style="cursor:pointer;font-size:.82rem">Verlauf</summary>
+      <table style="margin-top:.5rem"><thead><tr><th>Zeit (UTC)</th><th>Ext</th><th>Was</th><th>Wer</th><th>Durch</th></tr></thead>
+        <tbody id="tel_log"></tbody></table></details>
   </div>
 
   <!-- Konferenz -->
@@ -243,18 +259,48 @@ async function loadExts(){
     <td class="mono">${esc(x.ext)}</td><td>${esc(x.name)}</td>
     <td><select onchange="setClient('${esc(x.ext)}',this.value)">${[['linphone','Linphone'],['android-sip','Android SIP']]
         .map(([v,l])=>`<option value="${v}"${(x.client||'linphone')===v?' selected':''}>${l}</option>`).join('')}</select></td>
+    <td><select onchange="setKontext('${esc(x.ext)}',this.value)">${[['internal','persönlich'],['geteilt','geteilt (Anmeldung)']]
+        .map(([v,l])=>`<option value="${v}"${(x.context||'internal')===v?' selected':''}>${l}</option>`).join('')}</select></td>
     <td class="mono">${esc(x.secret)}</td>
     <td>${x.registered?'<span class="pill ok">● registriert</span>':'<span class="muted">nicht angemeldet</span>'}</td>
     <td>${x.enabled?'<span class="pill ok">aktiv</span>':'<span class="muted">aus</span>'}</td>
     <td>${inRing.has(String(x.ext))?'<span class="pill ok">in Ring-Group</span>':`<button class="sec" onclick="addSipToRing('${esc(x.ext)}')">+ Ring-Group</button>`}
         <button class="sec" onclick="qrZeigen('${esc(x.ext)}')" title="QR-Code zum Einrichten">📱 QR</button>
-        <button class="danger" onclick="delExt('${esc(x.ext)}')">Löschen</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">Keine SIP-Telefone.</td></tr>';
+        <button class="danger" onclick="delExt('${esc(x.ext)}')">Löschen</button></td></tr>`).join('') || '<tr><td colspan="8" class="muted">Keine SIP-Telefone.</td></tr>';
 }
 async function addSipToRing(ext){
   const ph = sipPhones.find(x=>String(x.ext)===String(ext));
   const r = await api('/api/pbx/ring-members',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name: ph?ph.name:String(ext), kind:'sip', phone:String(ext), priority:10})});
   if(!r.ok){ showErr((await r.json()).error||'Fehler'); return; }
   await loadMembers(); loadExts();
+}
+async function setKontext(ext, context){
+  if(context==='geteilt' && !confirm('Nebenstelle '+ext+' als geteiltes Telefon führen?\nOhne Anmeldung gehen dort dann nur noch Notrufe.')){ loadExts(); return; }
+  const r = await api('/api/pbx/sip-extensions/'+encodeURIComponent(ext),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({context})});
+  if(!r.ok){ showErr((await r.json()).error||'Fehler'); }
+  loadExts(); loadTelefone();
+}
+async function loadTelefone(){
+  const d = await (await api('/api/pbx/telefon-sitzungen')).json();
+  $('tel_sitz').innerHTML = (d.sitzungen||[]).map(s=>`<tr><td class="mono">${esc(s.ext)}</td><td>${esc(s.name)}</td>
+    <td class="muted">${esc(s.email||'')}</td><td class="mono">${esc(String(s.seit||'').slice(0,16))}</td>
+    <td><button class="danger" onclick="telAbmelden('${esc(s.ext)}')">Abmelden</button></td></tr>`).join('')
+    || '<tr><td colspan="5" class="muted">Niemand angemeldet.</td></tr>';
+  $('tel_log').innerHTML = (d.log||[]).map(l=>`<tr><td class="mono">${esc(String(l.zeit||'').slice(0,16))}</td><td class="mono">${esc(l.ext)}</td>
+    <td>${l.ereignis==='an'?'angemeldet':'abgemeldet'}</td><td>${esc(l.name||'')}</td><td class="muted">${esc(l.durch||'')}</td></tr>`).join('')
+    || '<tr><td colspan="5" class="muted">Noch nichts.</td></tr>';
+  $('tel_gruppen').value = (d.gruppen||[]).join(', ');
+}
+async function telAbmelden(ext){
+  if(!confirm('Anmeldung an '+ext+' beenden?')) return;
+  const r = await api('/api/telefon/'+encodeURIComponent(ext)+'/abmelden',{method:'POST'});
+  if(!r.ok){ showErr((await r.json()).error||'Fehler'); }
+  loadTelefone();
+}
+async function saveTelGruppen(){
+  const r = await api('/api/pbx/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({telefon_gruppen:$('tel_gruppen').value})});
+  if(!r.ok){ showErr((await r.json()).error||'Fehler'); return; }
+  loadTelefone();
 }
 async function setClient(ext, client){
   const r = await api('/api/pbx/sip-extensions/'+encodeURIComponent(ext),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({client})});
@@ -330,7 +376,7 @@ async function start(){
   $('logout').onclick = ()=>AuthentikAuth.logout();
   $('content').style.display='block';
   kindHint();
-  try { await loadMembers(); await Promise.all([loadTrunk(),loadHours(),loadExts(),loadCalls()]); } catch(e){}
+  try { await loadMembers(); await Promise.all([loadTrunk(),loadHours(),loadExts(),loadCalls(),loadTelefone()]); } catch(e){}
   setInterval(()=>{ if(!document.hidden && AuthentikAuth.isLoggedIn()){ loadTrunk(); loadCalls(); } }, 15000);
 }
 start();

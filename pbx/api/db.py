@@ -82,6 +82,38 @@ CREATE TABLE IF NOT EXISTS prov_tokens (
     created_by   TEXT
 );
 
+-- Geteilte Telefone (Kontext 'geteilt'): Anmeldung pro Person.
+-- Die Person holt sich auf /telefon (eigenes Handy, Authentik) einen
+-- persoenlichen Anmelde-QR; das gesperrte Telefon scannt und loest ihn ein.
+-- Gespeichert wird nur der SHA-256 des Tokens.
+CREATE TABLE IF NOT EXISTS telefon_ausweise (
+    token_hash   TEXT PRIMARY KEY,
+    user_id      TEXT,
+    email        TEXT,
+    name         TEXT NOT NULL,
+    durch        TEXT,                     -- actor() der Person
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at   TEXT NOT NULL             -- ISO8601 UTC, kurz (90 s)
+);
+
+CREATE TABLE IF NOT EXISTS telefon_sitzungen (
+    ext          TEXT PRIMARY KEY,         -- ein Geraet, hoechstens eine Person
+    user_id      TEXT,
+    email        TEXT,
+    name         TEXT NOT NULL,
+    seit         TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS telefon_log (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    ext          TEXT NOT NULL,
+    ereignis     TEXT NOT NULL,            -- 'an' | 'ab'
+    email        TEXT,
+    name         TEXT,
+    durch        TEXT,                     -- wer es ausgeloest hat (Geraet, Person, Admin)
+    zeit         TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_calls_started ON calls(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ring_enabled ON ring_members(enabled);
 CREATE INDEX IF NOT EXISTS idx_prov_ext ON prov_tokens(ext);
@@ -92,6 +124,8 @@ DEFAULT_CONFIG = {
     "hours_open_to": "20:00",
     "ring_timeout": "30",
     "weekdays": "mon-sun",
+    # Wer sich an geteilten Telefonen anmelden darf (Authentik-Gruppen, klein).
+    "telefon_gruppen": "technik,präsident,praesident",
 }
 
 
@@ -122,6 +156,9 @@ def init_db():
         cols = [r[1] for r in conn.execute("PRAGMA table_info(ring_members)")]
         if "internal_ext" not in cols:
             conn.execute("ALTER TABLE ring_members ADD COLUMN internal_ext INTEGER")
+        # Der erste Anmeldeweg (Code am Geraet, 23.11.2026) wurde noch am selben
+        # Abend durch den Anmelde-QR ersetzt.
+        conn.execute("DROP TABLE IF EXISTS telefon_codes")
         # client-Spalte (2026-11-23): Android SIP braucht eine eigene SDP-Variante.
         if "client" not in [r[1] for r in conn.execute("PRAGMA table_info(sip_extensions)")]:
             conn.execute("ALTER TABLE sip_extensions ADD COLUMN client TEXT NOT NULL DEFAULT 'linphone'")
