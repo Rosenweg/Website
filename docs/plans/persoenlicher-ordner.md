@@ -122,8 +122,15 @@ Die Nextcloud-Einbindung ist leer, solange es keinen Home gibt. Heute legt Windo
    `/root/homes-rechte/anwenden.sh` (Standard `--trocken`, ändert nur mit `--ausfuehren`).
    Ergebnis: 1 Home (stefan.mueller, uid 11184), 15'462 Ordner und 96'627 Dateien, keine Auffälligkeiten.
    Kopie der Sicherung auf CT 106 fehlt noch.
-2b. Vor dem Anwenden: `inherit acls = yes` in `[home]` (CT 106 + 206) und `localstorage.umask` 0007. *(Freigabe)*
-2c. Anwenden. *(Freigabe)*
+2b. ✓ 24.11.: `inherit acls = yes` in `[home]` auf CT 106 und CT 206 (Sicherung
+    `/root/smb.conf.vor-home-inherit-2026-11-24`, `smbcontrol smbd reload-config`, kein Neustart);
+    Nextcloud `localstorage.umask` = 7 (= 0007; Sicherung `/root/config.php.vor-umask-2026-11-24`).
+2c. ✓ 24.11.: ACL auf `stefan.mueller` gesetzt (6 Min.). Sicherung auch auf CT 106.
+    Geprüft auf CT 206 mit setpriv:
+    - uid 33 + gid 11280 (wie Nextcloud) liest und schreibt; eine neue Datei bekommt u:11184 rw.
+    - Stefan (11184) kann sie lesen und ändern.
+    - Fremde Person (11170) kommt nicht hinein, auch nicht mit gid 11156 (technik).
+    Noch ungetestet: eine über Samba/Windows neu angelegte Datei (inherit acls).
 3. Mountpoint in CT 104 und Einbindung „Persönlich“, zuerst nur für `technik`, also Stefan testet.
 4. Timer für fehlende Homes.
 5. Für alle freischalten, Apps anpassen, Nextcloud-Wurzel zurückdrängen.
