@@ -1127,7 +1127,19 @@ def _telefon_abmelden(conn, ext, durch):
 def _sitzung_json(row):
     if not row:
         return {"angemeldet": False}
-    return {"angemeldet": True, "name": row["name"], "email": row["email"], "seit": row["seit"]}
+    # Persoenliche interne Nummer der angemeldeten Person (das Geraet zeigt sie neben der
+    # Nebenstelle des Geraets an; intern ruft die Person mit dieser Nummer an).
+    nummer = ""
+    try:
+        c = db.connect()
+        try:
+            nummer = _nummer_der_person(c, row["email"], row["name"]) or ""
+        finally:
+            c.close()
+    except Exception as e:
+        app.logger.warning("Nummer der Person: %s", e)
+    return {"angemeldet": True, "name": row["name"], "email": row["email"], "seit": row["seit"],
+            "nummer": str(nummer)}
 
 
 
