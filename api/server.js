@@ -18365,6 +18365,227 @@ app.get('/api/pbx/personen', requirePbxSecret, async (_req, res) => {
   }
 });
 
+// ═══ NFC-Karten fuer die geteilten Telefone (Anmeldung per UniFi-Access-Karte) ═══
+// Die pbx-api fragt hier, wem eine Karte gehoert (Anmeldung am geteilten Telefon) und
+// verwaltet Karten fuer Technik/Praesident (Kartenverwaltung auf dem Telefon).
+// UniFi Access ist die einzige Quelle: zugewiesen = darf, entzogen/unbekannt = darf nicht.
+// Karten-UID = Tag.getId() des Telefons als Hex = nfc_id in Access (z.B. 04D4C227C22A81).
+const normNfcId = (s) => String(s || '').replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+const nfcIdGueltig = (s) => /^[0-9A-F]{8,20}$/.test(s) && s.length % 2 === 0;
+
+// Kartenliste kurz zwischenspeichern (nur um das Token zur UID zu finden; Status und
+// Besitzer werden bei jeder Anfrage live ueber /tokens/{token} gelesen).
+let accessKartenCache = { zeit: 0, karten: null };
+const ACCESS_KARTEN_TTL_MS = 30 * 1000;
+async function accessKartenListe(frisch = false) {
+  if (!frisch && accessKartenCache.karten && Date.now() - accessKartenCache.zeit < ACCESS_KARTEN_TTL_MS) {
+    return accessKartenCache.karten;
+  }
+  const alle = [];
+  const GROESSE = 500;
+  for (let seite = 1; seite <= 40; seite++) {
+    const r = await unifiAccessRaw('GET', `/credentials/nfc_cards/tokens?page_num=${seite}&page_size=${GROESSE}`);
+    if (r.error === 'not_configured') throw Object.assign(new Error('UniFi Access nicht konfiguriert'), { http: 503 });
+    if (r.status === 0) throw Object.assign(new Error('UniFi Access nicht erreichbar'), { http: 502 });
+    if (!accessOk(r)) throw Object.assign(new Error(`UniFi Access: HTTP ${r.status}`), { http: 502 });
+    const d = Array.isArray(r.body?.data) ? r.body.data : [];
+    alle.push(...d);
+    const total = Number(r.body?.pagination?.total);
+    if (d.length < GROESSE || (Number.isFinite(total) && alle.length >= total)) break;
+  }
+  accessKartenCache = { zeit: Date.now(), karten: alle };
+  return alle;
+}
+function accessKartenCacheLeeren() { accessKartenCache = { zeit: 0, karten: null }; }
+
+async function accessKarteZurUid(nfcId, frisch = false) {
+  const finde = (liste) => liste.find(k => normNfcId(k.nfc_id) === nfcId) || null;
+  let k = finde(await accessKartenListe(frisch));
+  // Nicht im Zwischenspeicher: vielleicht gerade erst angelegt -> einmal frisch nachsehen
+  if (!k && !frisch) k = finde(await accessKartenListe(true));
+  if (!k) return null;
+  // Live-Stand der einen Karte (Status/Besitzer koennen sich seit dem Listenabruf geaendert haben)
+  const r = await unifiAccessRaw('GET', `/credentials/nfc_cards/tokens/${encodeURIComponent(k.token)}`);
+  if (r.status === 0) throw Object.assign(new Error('UniFi Access nicht erreichbar'), { http: 502 });
+  if (r.status === 404) { accessKartenCacheLeeren(); return null; }   // inzwischen geloescht
+  if (!accessOk(r) || !r.body?.data) throw Object.assign(new Error(`UniFi Access: HTTP ${r.status}`), { http: 502 });
+  return r.body.data;
+}
+
+function accessKartenBesitzerId(k) {
+  return k?.user_id || k?.user?.id || null;
+}
+function accessKartenBesitzerName(k) {
+  const u = k?.user || {};
+  return u.name || `${u.first_name || ''} ${u.last_name || ''}`.trim() || null;
+}
+
+// Access-Benutzer -> E-Mail -> Website-Person (id, Name, Gruppen). Gruppen live aus Authentik,
+// sonst wie /api/auth/me aus users.groups_json.
+async function kartenPerson(accessUserId) {
+  const r = await unifiAccessRaw('GET', `/users/${encodeURIComponent(accessUserId)}`);
+  if (r.status === 0) throw Object.assign(new Error('UniFi Access nicht erreichbar'), { http: 502 });
+  const au = r.body?.data;
+  const email = String(au?.email || au?.user_email || '').toLowerCase().trim();
+  if (!email) return null;
+  let zeile = null;
+  try {
+    zeile = (await pool.query(
+      'SELECT id, email, name, groups_json FROM users WHERE LOWER(email) = $1 ORDER BY id LIMIT 1', [email])).rows[0] || null;
+  } catch (e) { console.error('[pbx-karte] users:', e.message); }
+  let gruppen = null, name = zeile?.name || null;
+  try {
+    const ak = await authentikUserByEmail(email);
+    if (ak) { gruppen = ak.groups || []; name = name || ak.name; }
+  } catch (e) { console.warn('[pbx-karte] Authentik:', e.message); }
+  if (!gruppen) { try { gruppen = JSON.parse(zeile?.groups_json || '[]'); } catch { gruppen = []; } }
+  if (!zeile && !gruppen.length) return { user_id: null, email, name: name || au.full_name || null, groups: [] };
+  return {
+    user_id: zeile ? String(zeile.id) : null,
+    email,
+    name: name || au.full_name || `${au.first_name || ''} ${au.last_name || ''}`.trim() || email,
+    groups: gruppen.map(g => String(g)),
+  };
+}
+
+// Jede Aenderung protokollieren: Access sieht nur das API-Token, nicht wer am Telefon stand.
+let kartenProtokollBereit = null;
+async function kartenProtokollieren(aktion, { nfcId, displayId, email, name, durch, erfolg, detail }) {
+  try {
+    if (!kartenProtokollBereit) {
+      kartenProtokollBereit = pool.query(`CREATE TABLE IF NOT EXISTS access_karten_protokoll (
+        id SERIAL PRIMARY KEY, aktion TEXT NOT NULL, nfc_id TEXT, display_id TEXT,
+        ziel_email TEXT, ziel_name TEXT, durch TEXT, erfolg BOOLEAN, detail TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW())`);
+    }
+    await kartenProtokollBereit;
+    await pool.query(`INSERT INTO access_karten_protokoll (aktion, nfc_id, display_id, ziel_email, ziel_name, durch, erfolg, detail)
+                      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [aktion, nfcId || null, displayId || null, email || null, name || null,
+       String(durch || '').slice(0, 200) || null, !!erfolg, detail ? String(detail).slice(0, 500) : null]);
+  } catch (e) {
+    kartenProtokollBereit = null;
+    console.error('[pbx-karte] nicht protokolliert:', e.message);
+  }
+  console.log(`[pbx-karte] ${aktion} ${erfolg ? 'ok' : 'fehlgeschlagen'}: Karte ${displayId || nfcId} ${email ? '-> ' + email + ' ' : ''}durch ${durch || '?'}${detail ? ' (' + detail + ')' : ''}`);
+}
+
+// Fremdkarte in die Access-Karteninventur importieren.
+// Dokumentiert (Access-API, "Import Third-Party NFC Cards"): POST multipart/form-data, Feld "file"
+// = CSV; Antwort data:[{alias, nfc_id, token}]. Die CSV-Spalten selbst sind nirgends oeffentlich
+// beschrieben: wir senden "nfc_id,alias" mit Kopfzeile und versuchen bei Fehler einmal ohne.
+// Danach wird immer ueber die Kartenliste geprueft, ob die Karte wirklich da ist.
+async function accessKarteImportieren(nfcId, alias) {
+  const host = await getAccessSetting('host', '');
+  const token = await getAccessSetting('token', '');
+  if (!host || !token) throw Object.assign(new Error('UniFi Access nicht konfiguriert'), { http: 503 });
+  const aliasSauber = String(alias || '').replace(/[",\r\n]/g, ' ').trim().slice(0, 60);
+  const varianten = [`nfc_id,alias\r\n${nfcId},${aliasSauber}\r\n`, `${nfcId},${aliasSauber}\r\n`];
+  let letzter = '';
+  for (const csv of varianten) {
+    const form = new FormData();
+    form.append('file', new Blob([csv], { type: 'text/csv' }), 'karte.csv');
+    let status = 0, body = null;
+    try {
+      const r = await fetch(`https://${host}/api/v1/developer/credentials/nfc_cards/import`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form, signal: AbortSignal.timeout(15000),
+      });
+      status = r.status;
+      try { body = await r.json(); } catch {}
+    } catch (e) {
+      throw Object.assign(new Error('UniFi Access nicht erreichbar'), { http: 502 });
+    }
+    letzter = `HTTP ${status} ${body?.code || ''} ${body?.msg || ''}`.trim();
+    if (status >= 200 && status < 300 && (!body?.code || body.code === 'SUCCESS')) {
+      accessKartenCacheLeeren();
+      const k = await accessKarteZurUid(nfcId, true);
+      if (k) return k;
+      letzter = 'Import gemeldet, Karte aber nicht in der Liste';
+    }
+  }
+  throw Object.assign(new Error(`Karte konnte nicht in UniFi Access angelegt werden (${letzter})`), { http: 502 });
+}
+
+function kartenFehler(res, e) {
+  console.error('[pbx-karte]', e.message);
+  res.status(e.http || 500).json({ error: e.http ? e.message : 'Kartenabfrage fehlgeschlagen' });
+}
+
+// Wem gehoert diese Karte? -> {found, assigned, status, display_id, access_name, person:{user_id,email,name,groups}|null}
+app.get('/api/pbx/karte/:nfcId', requirePbxSecret, async (req, res) => {
+  const nfcId = normNfcId(req.params.nfcId);
+  if (!nfcIdGueltig(nfcId)) return res.status(400).json({ error: 'Ungueltige Karten-UID' });
+  try {
+    const k = await accessKarteZurUid(nfcId);
+    if (!k) return res.json({ found: false });
+    const besitzer = accessKartenBesitzerId(k);
+    const assigned = !!besitzer && String(k.status || '').toLowerCase() === 'assigned';
+    const person = besitzer ? await kartenPerson(besitzer) : null;
+    res.json({ found: true, assigned, status: k.status || null, display_id: k.display_id || null,
+      access_name: accessKartenBesitzerName(k), person });
+  } catch (e) { kartenFehler(res, e); }
+});
+
+// Karte einer Person zuordnen (Import, falls Access sie noch nicht kennt). {nfc_id, email, durch}
+app.post('/api/pbx/karte/zuordnen', requirePbxSecret, async (req, res) => {
+  const nfcId = normNfcId(req.body?.nfc_id);
+  const email = String(req.body?.email || '').toLowerCase().trim();
+  const durch = String(req.body?.durch || 'pbx').slice(0, 200);
+  if (!nfcIdGueltig(nfcId)) return res.status(400).json({ error: 'Ungueltige Karten-UID' });
+  if (!/^[^\s@]+@[^\s@]+$/.test(email)) return res.status(400).json({ error: 'E-Mail fehlt' });
+  const log = { nfcId, email, durch };
+  try {
+    const au = await unifiUserByEmail(email);
+    if (!au) {
+      await kartenProtokollieren('zuordnen', { ...log, erfolg: false, detail: 'kein Access-Benutzer' });
+      return res.status(404).json({ error: 'Diese Person hat keinen Benutzer in UniFi Access — bitte zuerst dort anlegen.' });
+    }
+    const auName = au.full_name || `${au.first_name || ''} ${au.last_name || ''}`.trim() || email;
+    let k = await accessKarteZurUid(nfcId, true);
+    let importiert = false;
+    if (!k) { k = await accessKarteImportieren(nfcId, `Rosenweg ${email}`); importiert = true; }
+    const besitzer = accessKartenBesitzerId(k);
+    if (besitzer && String(besitzer) !== String(au.id)) {
+      const wer = accessKartenBesitzerName(k) || 'jemand anderem';
+      await kartenProtokollieren('zuordnen', { ...log, displayId: k.display_id, name: auName, erfolg: false, detail: `gehoert ${wer}` });
+      return res.status(409).json({ error: `Die Karte gehört bereits ${wer}. Zuerst entziehen.`, besitzer: { name: wer } });
+    }
+    if (besitzer && String(besitzer) === String(au.id)) {
+      return res.json({ ok: true, schon: true, display_id: k.display_id || null, name: auName });
+    }
+    const r = await unifiAccessRaw('PUT', `/users/${encodeURIComponent(au.id)}/nfc_cards`, { token: k.token });
+    accessKartenCacheLeeren();
+    if (r.status === 0) throw Object.assign(new Error('UniFi Access nicht erreichbar'), { http: 502 });
+    const ok = accessOk(r) && (!r.body?.code || r.body.code === 'SUCCESS');
+    await kartenProtokollieren('zuordnen', { ...log, displayId: k.display_id, name: auName, erfolg: ok,
+      detail: (importiert ? 'importiert; ' : '') + (ok ? '' : `${r.status} ${r.body?.msg || ''}`) });
+    if (!ok) return res.status(502).json({ error: r.body?.msg || 'Zuordnen in UniFi Access fehlgeschlagen' });
+    res.json({ ok: true, importiert, display_id: k.display_id || null, name: auName });
+  } catch (e) { kartenFehler(res, e); }
+});
+
+// Karte entziehen (Zuordnung loesen; die Karte bleibt in der Access-Inventur). {nfc_id, durch}
+app.post('/api/pbx/karte/entziehen', requirePbxSecret, async (req, res) => {
+  const nfcId = normNfcId(req.body?.nfc_id);
+  const durch = String(req.body?.durch || 'pbx').slice(0, 200);
+  if (!nfcIdGueltig(nfcId)) return res.status(400).json({ error: 'Ungueltige Karten-UID' });
+  try {
+    const k = await accessKarteZurUid(nfcId, true);
+    if (!k) return res.status(404).json({ error: 'Karte nicht bekannt' });
+    const besitzer = accessKartenBesitzerId(k);
+    if (!besitzer) return res.json({ ok: true, schon: true, display_id: k.display_id || null });
+    const wer = accessKartenBesitzerName(k);
+    const r = await unifiAccessRaw('DELETE', `/users/${encodeURIComponent(besitzer)}/nfc_cards/${encodeURIComponent(k.token)}`);
+    accessKartenCacheLeeren();
+    if (r.status === 0) throw Object.assign(new Error('UniFi Access nicht erreichbar'), { http: 502 });
+    const ok = accessOk(r) && (!r.body?.code || r.body.code === 'SUCCESS');
+    await kartenProtokollieren('entziehen', { nfcId, displayId: k.display_id, name: wer, durch, erfolg: ok,
+      detail: ok ? '' : `${r.status} ${r.body?.msg || ''}` });
+    if (!ok) return res.status(502).json({ error: r.body?.msg || 'Entziehen in UniFi Access fehlgeschlagen' });
+    res.json({ ok: true, display_id: k.display_id || null, name: wer });
+  } catch (e) { kartenFehler(res, e); }
+});
+
 app.get('/api/pbx/cnam/:number', requirePbxSecret, async (req, res) => {
   try {
     const raw = String(req.params.number || '').trim();

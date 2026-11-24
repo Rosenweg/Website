@@ -325,7 +325,7 @@ async function loadTelefone(){
       <button class="danger" onclick="telAbmelden('${esc(s.ext)}')">Abmelden</button></td></tr>`).join('')
     || '<tr><td colspan="5" class="muted">Niemand angemeldet.</td></tr>';
   $('tel_log').innerHTML = (d.log||[]).map(l=>`<tr><td class="mono">${esc(String(l.zeit||'').slice(0,16))}</td><td class="mono">${esc(l.ext)}</td>
-    <td>${l.ereignis==='an'?'angemeldet':'abgemeldet'}</td><td>${esc(l.name||'')}</td><td class="muted">${esc(l.durch||'')}</td></tr>`).join('')
+    <td>${({an:'angemeldet',ab:'abgemeldet','karte-abgelehnt':'Karte abgelehnt','karte-info':'Karte abgefragt','karte-zu':'Karte zugeordnet','karte-weg':'Karte entzogen'})[l.ereignis]||esc(l.ereignis)}</td><td>${esc(l.name||'')}</td><td class="muted">${esc(l.durch||'')}</td></tr>`).join('')
     || '<tr><td colspan="5" class="muted">Noch nichts.</td></tr>';
   $('tel_gruppen').value = (d.gruppen||[]).join(', ');
   $('tel_aus').value = (d.ausblenden||'').split(',').map(s=>s.trim()).filter(Boolean).join(',\n');

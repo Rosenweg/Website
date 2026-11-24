@@ -1238,6 +1238,204 @@ def telefon_einloesen():
         conn.close()
 
 
+# ─── Anmeldung per NFC-Karte (UniFi Access) ─────────────────────────────────
+# Die Karte ALLEIN meldet an (Entscheid Stefan 24.11.2026), ohne PIN. Wem die Karte
+# gehoert, steht nur in UniFi Access; die Haupt-API fragt dort bei jeder Anmeldung
+# live nach (/api/pbx/karte/<uid>). Entzogene oder unbekannte Karten gelten nicht.
+# Sicherheit: die UID ist kopierbar — verlorene Karten sofort entziehen.
+KARTE_FEHL_MAX = 10          # Fehlversuche pro Nebenstelle ...
+KARTE_FEHL_FENSTER_S = 60    # ... pro Minute
+_KARTE_FEHL = {}             # ext -> [Zeitpunkte der Fehlversuche]
+KARTEN_VERWALTER = {"technik", "präsident", "praesident"}
+
+
+def _karten_uid(roh):
+    uid = re.sub(r"[^0-9A-Fa-f]", "", str(roh or "")).upper()
+    return uid if 8 <= len(uid) <= 20 and len(uid) % 2 == 0 else None
+
+
+def _karte_gebremst(ext):
+    jetzt = time.time()
+    liste = [t for t in _KARTE_FEHL.get(ext, []) if jetzt - t < KARTE_FEHL_FENSTER_S]
+    _KARTE_FEHL[ext] = liste
+    return len(liste) >= KARTE_FEHL_MAX
+
+
+def _karte_fehlversuch(ext):
+    _KARTE_FEHL.setdefault(ext, []).append(time.time())
+
+
+def _haupt_karte(methode, pfad, daten=None):
+    """Haupt-API (Kartenabfrage/-verwaltung). -> (status, json). Wirft requests.RequestException."""
+    r = requests.request(methode, f"{MAIN_API_BASE}{pfad}", json=daten,
+                         headers={"X-PBX-Secret": PBX_SHARED_SECRET}, timeout=25)
+    try:
+        body = r.json()
+    except ValueError:
+        body = {}
+    return r.status_code, body if isinstance(body, dict) else {}
+
+
+def _karten_log(conn, ext, ereignis, email, name, durch):
+    conn.execute("INSERT INTO telefon_log (ext, ereignis, email, name, durch) VALUES (?,?,?,?,?)",
+                 (ext, ereignis, email, name, durch))
+
+
+@app.post("/api/telefon/karte")
+def telefon_karte():
+    """Das gesperrte Telefon hat eine NFC-Karte gelesen: anmelden wie mit dem QR."""
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    uid = _karten_uid((request.get_json(silent=True) or {}).get("uid"))
+    if not uid:
+        return jsonify({"error": "Karte nicht lesbar", "grund": "unlesbar"}), 400
+    if _karte_gebremst(ext):
+        return jsonify({"error": "Zu viele Versuche — bitte kurz warten", "grund": "gebremst"}), 429
+    try:
+        status, k = _haupt_karte("GET", f"/api/pbx/karte/{uid}")
+    except requests.RequestException as e:
+        app.logger.warning("Karte %s: Website nicht erreichbar (%s)", ext, type(e).__name__)
+        return jsonify({"error": "Keine Verbindung zur Anlage", "grund": "verbindung"}), 502
+    if status != 200:
+        return jsonify({"error": "Keine Verbindung zur Anlage", "grund": "verbindung"}), 502
+    karte = f"karte:{k.get('display_id') or uid[-6:]}"
+    person = k.get("person") or {}
+    conn = db.connect()
+    try:
+        fehler = None
+        if not k.get("found"):
+            fehler = ({"error": "Karte nicht bekannt", "grund": "unbekannt"}, 404)
+        elif not k.get("assigned") or not person.get("email"):
+            fehler = ({"error": "Karte gesperrt", "grund": "gesperrt"}, 403)
+        elif not _telefon_darf(conn, {"groups": person.get("groups") or []}):
+            fehler = ({"error": "Dein Konto ist für geteilte Telefone nicht freigeschaltet",
+                       "grund": "nicht_freigeschaltet"}, 403)
+        if fehler:
+            _karte_fehlversuch(ext)
+            _karten_log(conn, ext, "karte-abgelehnt", person.get("email"), person.get("name"),
+                        f"{karte}:{fehler[0]['grund']}")
+            conn.commit()
+            return jsonify(fehler[0]), fehler[1]
+        email = str(person["email"]).lower()
+        name = str(person.get("name") or email)[:80]
+        name = re.sub(r'[\x00-\x1f\x7f"<>\\]', "", name) or "Unbekannt"
+        gruppen = json.dumps(sorted({str(g).lower() for g in (person.get("groups") or [])}))
+        _telefon_abmelden(conn, ext, f"abgeloest:{karte}")
+        conn.execute("INSERT INTO telefon_sitzungen (ext, user_id, email, name, gruppen) VALUES (?,?,?,?,?)",
+                     (ext, str(person.get("user_id") or ""), email, name, gruppen))
+        _karten_log(conn, ext, "an", email, name, karte)
+        conn.commit()
+        s = conn.execute("SELECT name, email, seit, gruppen FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+        return jsonify({"ok": True, "ext": ext, **_sitzung_json(s), **_apps_fuer(conn, s)})
+    finally:
+        conn.close()
+
+
+def _karten_verwalter():
+    """Geraet + angemeldete Person mit Technik/Praesident. -> (ext, sitzung, None) oder (.., .., response)."""
+    ext, deny = _geraet()
+    if deny:
+        return None, None, deny
+    conn = db.connect()
+    try:
+        s = conn.execute("SELECT name, email, gruppen FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+    finally:
+        conn.close()
+    try:
+        gruppen = {str(g).lower() for g in json.loads((s["gruppen"] if s else None) or "[]")}
+    except ValueError:
+        gruppen = set()
+    if not s or not (gruppen & KARTEN_VERWALTER):
+        return ext, None, (jsonify({"error": "nicht berechtigt"}), 403)
+    return ext, s, None
+
+
+def _karten_durch(ext, s):
+    return f"Telefon {ext} ({s['name']} <{s['email']}>)"
+
+
+def _karten_weiter(ext, s, ereignis, methode, pfad, daten, ziel_email=None):
+    try:
+        status, body = _haupt_karte(methode, pfad, daten)
+    except requests.RequestException as e:
+        app.logger.warning("Karten %s: Website nicht erreichbar (%s)", ext, type(e).__name__)
+        return jsonify({"error": "Keine Verbindung zur Anlage"}), 502
+    conn = db.connect()
+    try:
+        ziel = ziel_email or (body.get("person") or {}).get("email") or ""
+        karte = body.get("display_id") or (daten or {}).get("nfc_id") or pfad.rsplit("/", 1)[-1]
+        _karten_log(conn, ext, ereignis, s["email"], s["name"],
+                    f"karte:{karte}" + (f"->{ziel}" if ziel else "") + ("" if status == 200 else f":{status}"))
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(body), status
+
+
+@app.post("/api/telefon/karten/info")
+def telefon_karten_info():
+    ext, s, deny = _karten_verwalter()
+    if deny:
+        return deny
+    uid = _karten_uid((request.get_json(silent=True) or {}).get("uid"))
+    if not uid:
+        return jsonify({"error": "Karte nicht lesbar"}), 400
+    resp, status = _karten_weiter(ext, s, "karte-info", "GET", f"/api/pbx/karte/{uid}", None)
+    if status == 200:
+        # Gruppen und Website-ID braucht das Telefon nicht
+        d = resp.get_json() or {}
+        p = d.get("person")
+        if p:
+            d["person"] = {"name": p.get("name"), "email": p.get("email")}
+        d["uid"] = uid
+        return jsonify(d)
+    return resp, status
+
+
+@app.post("/api/telefon/karten/zuordnen")
+def telefon_karten_zuordnen():
+    ext, s, deny = _karten_verwalter()
+    if deny:
+        return deny
+    d = request.get_json(silent=True) or {}
+    uid = _karten_uid(d.get("uid"))
+    email = str(d.get("email") or "").strip().lower()
+    if not uid or not re.fullmatch(r"[^\s@]+@[^\s@]+", email):
+        return jsonify({"error": "Karte oder E-Mail fehlt"}), 400
+    return _karten_weiter(ext, s, "karte-zu", "POST", "/api/pbx/karte/zuordnen",
+                          {"nfc_id": uid, "email": email, "durch": _karten_durch(ext, s)}, ziel_email=email)
+
+
+@app.post("/api/telefon/karten/entziehen")
+def telefon_karten_entziehen():
+    ext, s, deny = _karten_verwalter()
+    if deny:
+        return deny
+    uid = _karten_uid((request.get_json(silent=True) or {}).get("uid"))
+    if not uid:
+        return jsonify({"error": "Karte nicht lesbar"}), 400
+    return _karten_weiter(ext, s, "karte-weg", "POST", "/api/pbx/karte/entziehen",
+                          {"nfc_id": uid, "durch": _karten_durch(ext, s)})
+
+
+@app.get("/api/telefon/karten/personen")
+def telefon_karten_personen():
+    """Auswahlliste fuer "Einer Person zuordnen": Personen aus dem Personen-Abgleich."""
+    _, _, deny = _karten_verwalter()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        rows = conn.execute("SELECT lower(email) AS email, MIN(name) AS name FROM personen_nummern "
+                            "WHERE aktiv = 1 AND email <> '' GROUP BY lower(email)").fetchall()
+    finally:
+        conn.close()
+    personen = sorted(({"name": r["name"], "email": r["email"]} for r in rows),
+                      key=lambda p: (p["name"] or "").lower())
+    return jsonify({"personen": personen})
+
+
 # ─── App-Katalog der geteilten Telefone ─────────────────────────────────────
 _PAKET = re.compile(r"(web\.[a-z0-9_]{1,40}|[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*){1,10})")
 
