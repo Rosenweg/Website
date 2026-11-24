@@ -239,6 +239,7 @@ Anlage (pbx-api, HTTP-Basic Nebenstelle:SIP-Passwort, nur Nebenstellen „geteil
 | POST | `/api/telefon/karten/info` | `{uid}` | `{found, assigned, status, display_id, access_name, person:{name,email}, uid}` |
 | POST | `/api/telefon/karten/zuordnen` | `{uid, email}` | `{ok, importiert?, schon?, display_id, name}`; 404 ohne Access-Benutzer, 409 `{error, besitzer:{name}}` |
 | POST | `/api/telefon/karten/entziehen` | `{uid}` | `{ok, schon?, display_id, name}`; 404 Karte unbekannt |
+| POST | `/api/telefon/karten/loeschen` | `{uid}` | `{ok, display_id}`; nur entzogene Karten (sonst 409), löscht aus dem Access-Bestand |
 | GET | `/api/telefon/karten/personen` | – | `{personen:[{name,email}]}` aus `personen_nummern` (Personen-Abgleich), nach Name |
 
 `/api/telefon/karten/*` nur, wenn die Sitzung der Nebenstelle die Gruppe technik,
@@ -250,7 +251,8 @@ Haupt-API (`X-PBX-Secret`, nur von der Anlage):
 |---|---|---|---|
 | GET | `/api/pbx/karte/:nfcId` | – | `{found:false}` oder `{found, assigned, status, display_id, access_name, person:{user_id, email, name, groups}}` |
 | POST | `/api/pbx/karte/zuordnen` | `{nfc_id, email, durch}` | siehe oben |
-| POST | `/api/pbx/karte/entziehen` | `{nfc_id, durch}` | siehe oben |
+| POST | `/api/pbx/karte/entziehen` | `{nfc_id, durch}` | siehe oben; Access: `PUT /users/{id}/nfc_cards/delete {token}` |
+| POST | `/api/pbx/karte/loeschen` | `{nfc_id, durch}` | Access: `DELETE /credentials/nfc_cards/tokens/{token}`; nur ohne Inhaber |
 
 Person zur Karte: Access-Benutzer → E-Mail → Website-Benutzer (`users`, Website-ID);
 Gruppen live aus Authentik, sonst `users.groups_json` (wie `/api/auth/me`).

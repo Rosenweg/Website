@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS telefon_apps (
 CREATE TABLE IF NOT EXISTS telefon_log (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     ext          TEXT NOT NULL,
-    ereignis     TEXT NOT NULL,            -- 'an' | 'ab' | 'karte-abgelehnt' | 'karte-info' | 'karte-zu' | 'karte-weg'
+    ereignis     TEXT NOT NULL,            -- 'an' | 'ab' | 'karte-abgelehnt' | 'karte-info' | 'karte-zu' | 'karte-weg' | 'karte-geloescht'
     email        TEXT,
     name         TEXT,
     durch        TEXT,                     -- wer es ausgeloest hat (Geraet, Person, Admin)
@@ -187,6 +187,18 @@ CREATE TABLE IF NOT EXISTS personen_nummern (
     aktiv        INTEGER NOT NULL DEFAULT 1,
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Persoenliches SIP-Konto in Rosenweg Telefon (Stefan 25.11.2026): pro Sitzung auf einem
+-- geteilten Telefon ein eigener pjsip-Zugang <nummer>-<ext> (endpoint/auth/aor gleichen
+-- Namens, pjsip_phones.conf). Entsteht beim Anmelden, verschwindet beim Abmelden — ein
+-- abgemeldetes Geraet klingelt so nie mehr fuer die Person. Passwort nie loggen.
+CREATE TABLE IF NOT EXISTS telefon_sip_person (
+    ext          TEXT PRIMARY KEY,         -- Geraet (Nebenstelle) der Sitzung
+    nummer       TEXT NOT NULL,            -- persoenliche Nummer 3HHWWP
+    email        TEXT NOT NULL,
+    passwort     TEXT NOT NULL,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- 4000er: Hausverwaltung (heute Immosense), 4000 Hauptnummer, 4001 ... Mitarbeiter.
