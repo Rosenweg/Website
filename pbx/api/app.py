@@ -1116,7 +1116,9 @@ def _telefon_abmelden(conn, ext, durch):
     if not s:
         return False
     conn.execute("DELETE FROM telefon_sitzungen WHERE ext = ?", (ext,))
-    _nextcloud_widerrufen(conn, ext)
+    # Nextcloud-Zugang noch nicht widerrufen: das Telefon laedt erst fertig hoch und meldet
+    # dann /api/telefon/nextcloud/fertig (spaetestens nach 24 h widerruft der stuendliche Lauf)
+    conn.execute("UPDATE telefon_nextcloud SET abgemeldet_at = datetime('now') WHERE ext = ?", (ext,))
     conn.execute("INSERT INTO telefon_log (ext, ereignis, email, name, durch) VALUES (?,?,?,?,?)",
                  (ext, "ab", s["email"], s["name"], durch))
     return True
@@ -1788,6 +1790,10 @@ def _personen_abgleich_schleife():
             personen_abgleichen()
         except Exception as e:
             app.logger.warning("Personen-Abgleich: %s", e)
+        try:
+            nextcloud_nachlauf_aufraeumen()
+        except Exception as e:
+            app.logger.warning("Nextcloud-Nachlauf: %s", e)
         time.sleep(3600)
 
 
@@ -1844,11 +1850,18 @@ def telefon_nextcloud():
     conn = db.connect()
     try:
         email, _ = _person_der_nebenstelle(conn, ext)
+        r = conn.execute("SELECT email, benutzer, pw_enc, abgemeldet_at FROM telefon_nextcloud WHERE ext = ?", (ext,)).fetchone()
         if not email:
+            # Nachlauf: abgemeldet, aber noch nicht alles hochgeladen (hoechstens 24 h)
+            if r and r["abgemeldet_at"] and conn.execute(
+                    "SELECT datetime('now', '-24 hours') < ?", (r["abgemeldet_at"],)).fetchone()[0]:
+                return jsonify({"server": NEXTCLOUD_SERVER, "benutzer": r["benutzer"], "nachlauf": True,
+                                "app_passwort": f.decrypt(r["pw_enc"].encode()).decode()})
             return jsonify({"error": "Niemand angemeldet"}), 409
         email = email.lower()
-        r = conn.execute("SELECT email, benutzer, pw_enc FROM telefon_nextcloud WHERE ext = ?", (ext,)).fetchone()
         if r and r["email"] == email:
+            conn.execute("UPDATE telefon_nextcloud SET abgemeldet_at = NULL WHERE ext = ?", (ext,))
+            conn.commit()
             return jsonify({"server": NEXTCLOUD_SERVER, "benutzer": r["benutzer"],
                             "app_passwort": f.decrypt(r["pw_enc"].encode()).decode()})
         if r:   # andere Person: altes Passwort weg
@@ -1870,6 +1883,38 @@ def telefon_nextcloud():
         conn.commit()
         app.logger.info("Nextcloud-Zugang ausgestellt (Nebenstelle %s)", ext)
         return jsonify({"server": NEXTCLOUD_SERVER, "benutzer": d["benutzer"], "app_passwort": d["app_passwort"]})
+    finally:
+        conn.close()
+
+
+@app.post("/api/telefon/nextcloud/fertig")
+def telefon_nextcloud_fertig():
+    """Das Telefon hat nach dem Abmelden alles hochgeladen: Nextcloud-Zugang jetzt widerrufen."""
+    ext, deny = _nebenstelle()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        if conn.execute("SELECT 1 FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone():
+            return jsonify({"ok": True, "widerrufen": False})   # wieder jemand angemeldet
+        _nextcloud_widerrufen(conn, ext)
+        conn.commit()
+        return jsonify({"ok": True, "widerrufen": True})
+    finally:
+        conn.close()
+
+
+def nextcloud_nachlauf_aufraeumen():
+    """Sicherung: Zugaenge, deren Abmeldung laenger als 24 h her ist, widerrufen."""
+    conn = db.connect()
+    try:
+        alt = [r["ext"] for r in conn.execute(
+            "SELECT ext FROM telefon_nextcloud WHERE abgemeldet_at IS NOT NULL "
+            "AND abgemeldet_at < datetime('now', '-24 hours')")]
+        for ext in alt:
+            _nextcloud_widerrufen(conn, ext)
+            app.logger.warning("Nextcloud-Zugang %s nach 24 h Nachlauf widerrufen", ext)
+        conn.commit()
     finally:
         conn.close()
 

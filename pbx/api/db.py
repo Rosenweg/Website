@@ -322,6 +322,9 @@ def init_db():
             conn.execute("ALTER TABLE ring_members ADD COLUMN internal_ext INTEGER")
         # immer=1: Werkzeug (Tastatur, Browser) — auch gesperrt verfuegbar, nie
         # ausgeblendet, Daten bleiben. Sonst gaebe es z.B. beim Anmelden keine Tastatur.
+        # Nextcloud-Zugang nach dem Abmelden: bleibt, bis das Telefon alles hochgeladen hat (max. 24 h)
+        if "abgemeldet_at" not in [r[1] for r in conn.execute("PRAGMA table_info(telefon_nextcloud)")]:
+            conn.execute("ALTER TABLE telefon_nextcloud ADD COLUMN abgemeldet_at TEXT")
         if "immer" not in [r[1] for r in conn.execute("PRAGMA table_info(telefon_apps)")]:
             conn.execute("ALTER TABLE telefon_apps ADD COLUMN immer INTEGER NOT NULL DEFAULT 0")
         # Gruppen der Person (fuer die App-Freigaben) an Ausweis und Sitzung.
