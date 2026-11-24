@@ -12,6 +12,8 @@
 - [x] **Nextcloud kam seit 22.11. nicht mehr in `/stweg1`–`/stweg3`** (sichtbar als readme.md „Permission denied“ im Log). Ursache: Ordnerrechte-Rollout 22.11. (`/root/ordnerrechte` auf CT 206/106) gibt nur benannten AD-Gruppen + `api-svc` Zugriff. Die Nextcloud liest aber als lokales `www-data`. Fix 24.11.: In CT 104 lokale Gruppe `technik` gid 11156, `www-data` als Mitglied, php-fpm neu gestartet. Lesen/Schreiben geprüft. README auf CT 206+106 ergänzt.
 - [ ] **Ordnerrechte sauber:** Nextcloud als eigener Eintrag in `tabelle.txt` statt über die lokale gid 11156 in CT 104. Dazu muss `anwenden.sh` numerische IDs (uid 33) annehmen. Prüfen, ob auf den Fileservern etwas als www-data läuft.
 - [ ] **Ordnerrechte-Skripte liegen nur auf CT 206/106**, nicht im Repo. Ins Repo holen.
+- [ ] **AD-Home als einziger persönlicher Ordner** (Entscheid Stefan 24.11.): Nextcloud zeigt `/userdata/home/$user` als „Persönlich“. Plan: [docs/plans/persoenlicher-ordner.md](docs/plans/persoenlicher-ordner.md).
+- [ ] **Rechte Nextcloud ↔ Fileserver angleichen:** Nextcloud-Einbindungen aus `tabelle.txt` erzeugen (Bewohner bei stweg3/6/meg fehlen, `allgemein` für Ausschüsse, `stweg8`/`vorlagen`/`anzeigen` nicht eingebunden).
 - [ ] **Nextcloud: „Error while generating metadata for fileid …“** bei mehreren Dateien (7659–7783), seit Cron wieder läuft sichtbar. Ursache noch nicht angeschaut.
 - [ ] **Nächtliche Sicherung (vzdump 01:00 → PBS) überlastet Ceph:** 2 OSDs „slow operations in BlueStore“, pve1 Load >30, Nextcloud antwortete 503. Sicherungsfenster/Bandbreite (`bwlimit`, Staffelung) und OSD-Zustand bei Tag ansehen.
 - [ ] **Ceph HEALTH_ERR wegen unsicherer aes-Schlüsseltypen** (Altlast, unabhängig vom Ausfall).
