@@ -30,6 +30,14 @@ Gerät oder eine Gruppe), **2100–2199 Geräte** (geteilte Telefone, Testgerät
 - Grundlage: `wohnungen` und `wohnungen_kontakte` (Postgres auf CT 128), 102 Wohnungen, 125 Personen
   mit E-Mail, höchstens 4 Personen pro Wohnung.
 - Wer umzieht, bekommt eine neue Nummer. Das ist bei diesem Schema so gewollt.
+- `WW` aus der Bezeichnung, wo sie eine Nummer trägt: `1305` → 05, `RW1-03` → 03. Sonst einmalig
+  nach Stockwerk durchnummeriert (`9.EG.1` …).
+- Firmen und Körperschaften als Eigentümer (AG, GmbH, Gemeinde …) bekommen keine persönliche Nummer.
+- Personen ohne E-Mail bekommen keine Nummer, weil sie sich nicht anmelden können.
+- Entwurf 24.11.: 118 Personen in 97 Wohnungen, davon 19 Vermieter. Erzeugt mit `nummernplan.py`.
+  Liste nicht im Repo, weil sie Personendaten enthält.
+- **4000er:** 4000 = Immosense AG (+41 61 225 45 50). Nur Festnetznummern (Entscheid);
+  Mitarbeiter mit Festnetz gibt es im Telefonbuch derzeit keine, Cyril Welti nur mobil.
 
 ## Persönliche Nummer: was sie kann
 
@@ -39,6 +47,9 @@ Gerät oder eine Gruppe), **2100–2199 Geräte** (geteilte Telefone, Testgerät
   - danach die Weiterleitung aus „Mein Profil“, sonst die persönliche Voicemail.
 - **Abgehend:** Wer an einem geteilten Telefon angemeldet ist, ruft intern mit seiner
   3000er-Nummer an (Rückruf erreicht die Person, nicht das Gerät).
+- **Name mitschicken (Entscheid 24.11.):** Bei ausgehenden Anrufen setzt die Anlage den Namen
+  der Person als Anrufer-Namen (`CALLERID(name)`), intern also z.B. „Stefan Müller“ mit 309093.
+  Nach außen nur, soweit der Anbieter den Namen weitergibt (meist nur die Nummer).
 - **Weiterleitung nach außen:** für alle erlaubt, standardmäßig aus.
 - Die öffentliche Nummer und die Klingelgruppen der STWEG bleiben unverändert. Notrufe sind
   nicht betroffen.
