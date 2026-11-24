@@ -20,6 +20,19 @@ Telefon-App hier nachlesen.
    App lädt selbst in die Nextcloud der Person hoch (gemeinsame Bibliothek im
    Commons-Fork, eigene Warteschlange). Rosenweg Konto wird genutzt, wenn es
    installiert ist; sonst meldet sich die App selbst an (Nextcloud-Login-Flow).
+6. **Die App zeigt ihre Daten aus der Nextcloud**, nicht nur das Lokale: Was
+   hochgeladen und lokal gelöscht ist, bleibt in der App sichtbar und nutzbar
+   (Liste aus `Persönlich/<App>`, Abspielen/Öffnen per Stream). Lokal noch nicht
+   Hochgeladenes erscheint daneben. Ohne Netz oder Anmeldung: nur das Lokale.
+7. **Die Einstellungen der App gehören der Person** und liegen in ihrer Nextcloud
+   (`Persönlich/.rosenweg/<paket>.json`). Beim Start und nach dem Anmelden
+   abgleichen, Änderungen sofort hochladen, die zuletzt geänderte Fassung gilt.
+   Gerätebezogenes (Widgets, Pfade, Zähler, „zuletzt …“) bleibt auf dem Gerät.
+
+Umsetzung: Bibliothek `ch.rosenweg4303:cloud` (commons-rosenweg/cloud) — `Hochladen`,
+`Ablage`, `Einstellungen`, `Hinweis` (einmal beim ersten Start, ablehnbar),
+`AnmeldenActivity`. Ziel jeder App: `Persönlich/<App>/<yyyy-MM>/` (Persönlich =
+AD-Home). Vorbild: Diktiergerät v31.
 
 | App | im Rosenweg-System | auf dem Telefon nur |
 |---|---|---|
@@ -33,9 +46,10 @@ Telefon-App hier nachlesen.
 | Einstellungen, Launcher-Anordnung | Nextcloud der Person | aktuelle Einstellungen |
 | Anrufliste | Anruf-Log der Anlage | Android-Anrufliste, beim Abmelden geleert |
 
-Stand 24.11.2026: das Hochladen in den Apps fehlt noch — bis dahin bleiben Fotos,
-Videos und Aufnahmen beim Abmelden auf dem Gerät; Downloads, Dokumente und Musik
-werden geleert.
+Stand 24.11.2026: Das Diktiergerät erfüllt 1–7 (v31), Rosenweg Files ist die
+Dateiansicht der Nextcloud (v28). Bei Kamera, Galerie, Notizen und Paint fehlt das
+Hochladen noch. Bis dahin bleiben Fotos und Videos beim Abmelden auf dem Gerät.
+Downloads, Dokumente und Musik werden geleert.
 
 ## Was Android oder Samsung nicht erlaubt
 
