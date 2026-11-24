@@ -1921,6 +1921,34 @@ def telefon_abmelden_web(ext):
         conn.close()
 
 
+@app.post("/api/telefon/<ext>/suchen")
+def telefon_suchen(ext):
+    """Verlegtes Telefon klingeln lassen: die Anlage ruft es mit 2099 "Telefon suchen" an,
+    die Geraete-App dreht dafuer die Klingellautstaerke voll auf. Die eigene Sitzung,
+    oder jedes Telefon fuer Technik/Praesident (auch ohne Anmeldung)."""
+    user = current_user()
+    if not user:
+        return jsonify({"error": "Nicht angemeldet"}), 401
+    if not re.fullmatch(r"[0-9]{2,8}", ext or ""):
+        return jsonify({"error": "Nebenstelle ungueltig"}), 400
+    conn = db.connect()
+    try:
+        if not conn.execute("SELECT 1 FROM sip_extensions WHERE ext = ? AND enabled = 1", (ext,)).fetchone():
+            return jsonify({"error": "Unbekanntes Telefon"}), 404
+        s = conn.execute("SELECT email FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+        eigene = bool(s and s["email"] and s["email"].lower() == (user.get("email") or "").lower())
+        if not eigene and not is_admin(user):
+            return jsonify({"error": "Nur das eigene Telefon"}), 403
+    finally:
+        conn.close()
+    try:
+        ami.originate(f"PJSIP/{ext}", "suchen", "s", callerid='"Telefon suchen" <2099>', timeout_ms=45000)
+    except Exception as e:
+        return jsonify({"error": f"Anlage: {type(e).__name__}"}), 502
+    app.logger.info("Telefon suchen: %s durch %s", ext, actor(user))
+    return jsonify({"ok": True})
+
+
 @app.get("/api/pbx/telefon-sitzungen")
 def telefon_sitzungen_admin():
     _, deny = require_admin()

@@ -131,6 +131,11 @@
       Anmelden: auf dem eigenen Handy <b class="mono">pbx.rosenweg4303.ch/telefon</b> öffnen und den Anmelde-QR vor die Kamera des gesperrten Telefons halten.</p>
     <table><thead><tr><th>Ext</th><th>Angemeldet</th><th>Konto</th><th>Seit (UTC)</th><th></th></tr></thead>
       <tbody id="tel_sitz"></tbody></table>
+    <div class="row" style="margin-top:.6rem;gap:.5rem;align-items:center">
+      <span class="muted" style="font-size:.85rem">Verlegtes Telefon klingeln lassen (auch ohne Anmeldung):</span>
+      <input id="tel_suchen_ext" class="mono" placeholder="Nebenstelle, z.B. 2002" style="width:11rem">
+      <button class="sec" onclick="telSuchen($('tel_suchen_ext').value.trim())">🔔 Klingeln</button>
+    </div>
     <div class="row" style="margin-top:.8rem;border-top:1px solid #f1f5f9;padding-top:.8rem">
       <label class="f" style="flex:1">Erlaubte Authentik-Gruppen (Komma)<input id="tel_gruppen"></label>
       <button onclick="saveTelGruppen()" style="align-self:flex-end">Speichern</button>
@@ -316,7 +321,8 @@ async function loadTelefone(){
   const d = await (await api('/api/pbx/telefon-sitzungen')).json();
   $('tel_sitz').innerHTML = (d.sitzungen||[]).map(s=>`<tr><td class="mono">${esc(s.ext)}</td><td>${esc(s.name)}</td>
     <td class="muted">${esc(s.email||'')}</td><td class="mono">${esc(String(s.seit||'').slice(0,16))}</td>
-    <td><button class="danger" onclick="telAbmelden('${esc(s.ext)}')">Abmelden</button></td></tr>`).join('')
+    <td><button class="sec" onclick="telSuchen('${esc(s.ext)}')" title="Telefon klingeln lassen">🔔</button>
+      <button class="danger" onclick="telAbmelden('${esc(s.ext)}')">Abmelden</button></td></tr>`).join('')
     || '<tr><td colspan="5" class="muted">Niemand angemeldet.</td></tr>';
   $('tel_log').innerHTML = (d.log||[]).map(l=>`<tr><td class="mono">${esc(String(l.zeit||'').slice(0,16))}</td><td class="mono">${esc(l.ext)}</td>
     <td>${l.ereignis==='an'?'angemeldet':'abgemeldet'}</td><td>${esc(l.name||'')}</td><td class="muted">${esc(l.durch||'')}</td></tr>`).join('')
@@ -337,6 +343,11 @@ async function telAbmelden(ext){
   const r = await api('/api/telefon/'+encodeURIComponent(ext)+'/abmelden',{method:'POST'});
   if(!r.ok){ showErr((await r.json()).error||'Fehler'); }
   loadTelefone();
+}
+async function telSuchen(ext){
+  if(!/^[0-9]{2,8}$/.test(ext||'')){ showErr('Nebenstelle angeben, z.B. 2002.'); return; }
+  const r = await api('/api/telefon/'+encodeURIComponent(ext)+'/suchen',{method:'POST'});
+  showErr(r.ok ? ('Telefon '+ext+' klingelt jetzt bis zu 45 Sekunden.') : ((await r.json().catch(()=>({}))).error||'Fehler'));
 }
 async function saveTelGruppen(){
   const r = await api('/api/pbx/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({telefon_gruppen:$('tel_gruppen').value})});
