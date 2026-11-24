@@ -32,6 +32,7 @@ from flask import Flask, Response, jsonify, request, send_file, send_from_direct
 
 import ami
 import db
+import nummernvergabe
 import voicemail
 
 PBX_SHARED_SECRET = os.environ.get("PBX_SHARED_SECRET", "")
@@ -1745,6 +1746,54 @@ def telefon_pin():
         conn.close()
 
 
+def personen_abgleichen(probe=False):
+    """Neue Personen (Website: Wohnungen + Kontakte) bekommen eine persoenliche Nummer.
+    Vergebene Nummern bleiben. -> {neu: [...], probleme: [...]}"""
+    r = requests.get(f"{MAIN_API_BASE}/api/pbx/personen",
+                     headers={"X-PBX-Secret": PBX_SHARED_SECRET}, timeout=20)
+    r.raise_for_status()
+    conn = db.connect()
+    try:
+        bestehende = db.rows_to_dicts(conn.execute(
+            "SELECT nummer, email, name, wohnung, haus FROM personen_nummern").fetchall())
+        neu, probleme = nummernvergabe.neue_nummern(r.json(), bestehende)
+        if not probe:
+            for n in neu:
+                conn.execute("INSERT INTO personen_nummern (nummer, email, name, wohnung, haus, art) "
+                             "VALUES (?,?,?,?,?,?)",
+                             (n["nummer"], n["email"], n["name"], n["wohnung"], n["haus"], n["art"]))
+                app.logger.info("Neue persoenliche Nummer %s (%s)", n["nummer"], n["art"])
+            conn.commit()
+        for p in probleme:
+            app.logger.warning("Nummernvergabe: %s", p)
+        return {"neu": neu, "probleme": probleme, "probe": probe}
+    finally:
+        conn.close()
+
+
+def _personen_abgleich_schleife():
+    """Stuendlich: neue Personen bekommen ihre Nummer (erster Lauf 2 Minuten nach dem Start)."""
+    time.sleep(120)
+    while True:
+        try:
+            personen_abgleichen()
+        except Exception as e:
+            app.logger.warning("Personen-Abgleich: %s", e)
+        time.sleep(3600)
+
+
+@app.post("/api/pbx/nummernplan/abgleich")
+def nummernplan_abgleich():
+    """Admin: Abgleich sofort ausloesen. ?probe=1 zeigt nur, was vergeben wuerde."""
+    _, deny = require_admin()
+    if deny:
+        return deny
+    try:
+        return jsonify(personen_abgleichen(probe=request.args.get("probe") == "1"))
+    except requests.RequestException as e:
+        return jsonify({"error": f"Website nicht erreichbar: {e}"}), 502
+
+
 @app.get("/api/pbx/nummernplan")
 def nummernplan_liste():
     """Admin: persoenliche Nummern (3000er) und Verwaltung (4000er)."""
@@ -1887,5 +1936,8 @@ def proxy_main_api(subpath):
 
 if __name__ == "__main__":
     db.init_db()
+    if PBX_SHARED_SECRET:
+        import threading
+        threading.Thread(target=_personen_abgleich_schleife, daemon=True, name="personen-abgleich").start()
     from waitress import serve
     serve(app, host="0.0.0.0", port=PORT)
