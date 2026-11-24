@@ -145,8 +145,16 @@ Wer Rosenweg-Apps auf dem privaten Handy nutzt, muss auch unterwegs Zugang haben
      Verlauf der Person über alle Geräte (getestet: Anruf von 2003 erscheint auf dem A15) und spielt
      persönliche Voicemails ab (getestet, Testaufnahme gelöscht). Die Geräte-App muss **vor**
      Rosenweg Telefon installiert sein, sonst wird die Signatur-Permission nicht erteilt.
-   - offen: Einstellungen pro Person über die Anlage (Schnittstelle steht); privates Handy
-     ohne Geräte-App (eigener Zugang, siehe „Zugang von außerhalb“).
+   - ✓ 24.11.: **Einstellungen pro Person** über die Anlage: Geräte-App v163 (`AnlageProvider.call`
+     `einstellungen_holen`/`einstellungen_senden`, Permission ausdrücklich geprüft), Rosenweg Telefon v26
+     (`AnlageEinstellungen`, zuletzt geänderte Fassung gilt, SIM-Zuordnung/Kontaktquellen bleiben am Gerät).
+     Beide Richtungen auf dem A15 getestet.
+   - ✓ 24.11.: **Persönliche PIN** für geteilte Telefone (Geräte-App v166–v169, siehe
+     `pbx/GETEILTE-TELEFONE.md`): verschlüsselt auf der Anlage, nach der Anmeldung als Bildschirmsperre
+     gesetzt; Neustart entfernt sie vor dem ersten Entsperren **und meldet ab**. Seitentaste lang =
+     Ausschaltmenü, Neustart ohne PIN (Samsung-Einstellungen per adb). Geräte-App heisst „Rosenweg Gerät“,
+     bleibt bei Updates angemeldet.
+   - offen: privates Handy ohne Geräte-App (eigener Zugang, siehe „Zugang von außerhalb“).
 4. SIP-Kern in Rosenweg Telefon, Einrichtung durch die Geräte-App bzw. per QR-Code.
 5. Geräte-App ohne eigenes SIP. Umstellung auf dem A15, Test nur mit internen Anrufen,
    **nie mit Notrufen**.
