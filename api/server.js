@@ -3719,7 +3719,7 @@ app.post('/api/access/users/:id/nfc', authMiddleware, adminOnly, async (req, res
   res.status(accessOk(r) ? 200 : r.status).json(r.body || {});
 });
 app.delete('/api/access/users/:id/nfc/:token', authMiddleware, adminOnly, async (req, res) => {
-  const r = await unifiAccessRaw('DELETE', `/users/${encodeURIComponent(req.params.id)}/nfc_cards/${encodeURIComponent(req.params.token)}`);
+  const r = await unifiAccessRaw('PUT', `/users/${encodeURIComponent(req.params.id)}/nfc_cards/delete`, { token: req.params.token });
   if (!accessGuard(res, r)) return;
   res.status(accessOk(r) ? 200 : r.status).json(r.body || {});
 });
@@ -4078,7 +4078,7 @@ app.post('/api/access/me/nfc/assign', authMiddleware, async (req, res) => {
 app.delete('/api/access/me/nfc/:token', authMiddleware, async (req, res) => {
   const u = await unifiUserByEmail(req.user?.email);
   if (!u) return res.status(404).json({ error: 'Kein UniFi-Benutzer gefunden' });
-  const r = await unifiAccessRaw('DELETE', `/users/${encodeURIComponent(u.id)}/nfc_cards/${encodeURIComponent(req.params.token)}`);
+  const r = await unifiAccessRaw('PUT', `/users/${encodeURIComponent(u.id)}/nfc_cards/delete`, { token: req.params.token });
   if (accessOk(r)) return res.json({ success: true });
   res.status(r.status === 0 ? 502 : r.status).json({ error: 'Entfernen fehlgeschlagen' });
 });
@@ -18624,7 +18624,7 @@ app.post('/api/pbx/karte/entziehen', requirePbxSecret, async (req, res) => {
     const besitzer = accessKartenBesitzerId(k);
     if (!besitzer) return res.json({ ok: true, schon: true, display_id: k.display_id || null });
     const wer = accessKartenBesitzerName(k);
-    const r = await unifiAccessRaw('DELETE', `/users/${encodeURIComponent(besitzer)}/nfc_cards/${encodeURIComponent(k.token)}`);
+    const r = await unifiAccessRaw('PUT', `/users/${encodeURIComponent(besitzer)}/nfc_cards/delete`, { token: k.token });
     accessKartenCacheLeeren();
     if (r.status === 0) throw Object.assign(new Error('UniFi Access nicht erreichbar'), { http: 502 });
     const ok = accessOk(r) && (!r.body?.code || r.body.code === 'SUCCESS');
