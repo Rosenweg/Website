@@ -69,6 +69,11 @@ Downloads, Dokumente und Musik werden geleert.
 
 ## Was der Device Owner nicht selbst darf (heute einmalig per adb)
 
+**Alles auf einmal:** `scripts/geteiltes-telefon-einrichten.sh <adb-seriennummer> [--device-owner]`
+führt jeden Schritt unten aus, prüft ihn und zeigt am Schluss eine Kontrolle. Es darf beliebig
+oft laufen (nach Updates, nach dem Nachinstallieren von Rosenweg Telefon). Neue einmalige
+Schritte gehören **immer** in die Tabelle **und** ins Skript.
+
 Wichtig für die geplante Einrichtung per QR ohne Kabel.
 
 | Was | Befehl heute | Offen für QR-Einrichtung |
