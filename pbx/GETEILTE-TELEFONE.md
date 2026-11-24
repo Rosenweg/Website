@@ -7,6 +7,36 @@ Diese Liste sammelt, was Android oder Samsung **nicht** zulässt, und wie die
 Rosenweg-Apps damit umgehen. Vor Änderungen an Ausblendliste, Launcher oder
 Telefon-App hier nachlesen.
 
+## Grundregel für alle Rosenweg-Apps
+
+**Daten liegen im Rosenweg-System, das Telefon hält nur Zwischenspeicher.**
+
+1. Gespeichert wird in der Nextcloud der Person bzw. auf der Anlage — lokal nur,
+   was für Offline-Betrieb und Tempo nötig ist.
+2. Hochladen sofort, nicht erst beim Abmelden; lokale Kopien danach entfernen.
+3. Beim Abmelden jeden Zwischenspeicher löschen — erst nach bestätigtem Hochladen.
+4. Dieselben Daten auf jedem Rosenweg-Telefon und auf privaten Handys.
+5. **Keine App setzt eine andere voraus** — vor allem nicht Rosenweg Files. Jede
+   App lädt selbst in die Nextcloud der Person hoch (gemeinsame Bibliothek im
+   Commons-Fork, eigene Warteschlange). Rosenweg Konto wird genutzt, wenn es
+   installiert ist; sonst meldet sich die App selbst an (Nextcloud-Login-Flow).
+
+| App | im Rosenweg-System | auf dem Telefon nur |
+|---|---|---|
+| Kamera / Galerie | Nextcloud, sofort hochgeladen | bis zum Hochladen |
+| Dateien | Nextcloud | geöffnete Dateien |
+| Notizen | Textdateien in der Nextcloud | nichts dauerhaft |
+| Diktiergerät, Paint | Nextcloud, von der App selbst hochgeladen | bis zum Hochladen |
+| Kalender | CalDAV (Nextcloud) | abgeglichene Kopie |
+| Kontakte | Rosenweg-Verzeichnis | abgeglichene Kopie |
+| Messenger | Message-Store der Anlage | Zwischenspeicher |
+| Einstellungen, Launcher-Anordnung | Nextcloud der Person | aktuelle Einstellungen |
+| Anrufliste | Anruf-Log der Anlage | Android-Anrufliste, beim Abmelden geleert |
+
+Stand 24.11.2026: das Hochladen in den Apps fehlt noch — bis dahin bleiben Fotos,
+Videos und Aufnahmen beim Abmelden auf dem Gerät; Downloads, Dokumente und Musik
+werden geleert.
+
 ## Was Android oder Samsung nicht erlaubt
 
 | # | Grenze | Grund | Lösung im Rosenweg-System |
@@ -33,7 +63,7 @@ Wichtig für die geplante Einrichtung per QR ohne Kabel.
 | Standard-Telefon-App | `adb shell cmd role add-role-holder android.app.role.DIALER ch.rosenweg4303.phone 0` | Knox oder Rückfrage beim Einrichten prüfen |
 | Standard-Browser | `adb shell cmd role add-role-holder android.app.role.BROWSER <paket> 0` | dito |
 | Akku-Optimierung ausnehmen | `adb shell dumpsys deviceidle whitelist +ch.rosenweg4303.telefon` | dito |
-| Zugriff auf alle Dateien (Aufräumen beim Abmelden) | `adb shell appops set ch.rosenweg4303.telefon MANAGE_EXTERNAL_STORAGE allow` | dito; Alternative: Aufräumen über Rosenweg Files |
+| Zugriff auf alle Dateien (Aufräumen beim Abmelden) | `adb shell appops set ch.rosenweg4303.telefon MANAGE_EXTERNAL_STORAGE allow` | dito |
 
 Samsung Knox (kostenlose Knox-Platform-Schnittstelle) kann einige dieser
 Punkte vermutlich lösen — vor dem Bau der QR-Einrichtung prüfen.

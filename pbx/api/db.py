@@ -186,6 +186,10 @@ DEFAULT_CONFIG = {
         "com.sec.android.app.sbrowser",              # Samsung Internet (Browser: Chrome bzw. spaeter Cromite)
         # Durch Rosenweg-Forks ersetzt (Fossify Camera, Contacts, File Manager):
         "com.samsung.android.app.contacts", "com.sec.android.app.myfiles",
+        "com.sec.android.gallery3d", "com.samsung.android.calendar",   # Fossify Gallery, Calendar
+        "com.sec.android.app.popupcalculator", "com.samsung.android.app.notes",   # Fossify Calculator, Notes
+        "com.sec.android.app.clockpackage",          # Fossify Clock
+        "com.sec.android.app.voicenote",             # Fossify Voice Recorder
     ]),
 }
 
