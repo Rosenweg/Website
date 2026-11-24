@@ -1919,6 +1919,47 @@ def nextcloud_nachlauf_aufraeumen():
         conn.close()
 
 
+MESSENGER_ANLAGE_SECRET = os.environ.get("MESSENGER_ANLAGE_SECRET", "")
+MESSENGER_TOKEN_STUNDEN = 12
+
+
+def _b64url(b):
+    import base64
+    return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+
+
+@app.get("/api/telefon/messenger")
+def telefon_messenger():
+    """Messenger-Zugang (Rosenweg Messenger) der Person, die auf diesem Geraet angemeldet ist:
+    kurzlebiges HS256-Token, das der message-store (CT 131) annimmt (iss rosenweg-anlage)."""
+    ext, deny = _nebenstelle()
+    if deny:
+        return deny
+    if not MESSENGER_ANLAGE_SECRET:
+        return jsonify({"error": "Messenger-Zugang nicht eingerichtet"}), 503
+    conn = db.connect()
+    try:
+        s = conn.execute("SELECT user_id, email, name, gruppen FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+    finally:
+        conn.close()
+    if not s or not s["user_id"]:
+        return jsonify({"error": "Niemand angemeldet"}), 409
+    try:
+        gruppen = [str(g) for g in json.loads(s["gruppen"] or "[]")]
+    except ValueError:
+        gruppen = []
+    uid = int(s["user_id"]) if str(s["user_id"]).isdigit() else s["user_id"]
+    jetzt = int(time.time())
+    kopf = _b64url(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
+    inhalt = _b64url(json.dumps({
+        "iss": "rosenweg-anlage", "sub": uid, "email": s["email"] or "", "name": s["name"] or "",
+        "groups": gruppen, "ext": ext, "iat": jetzt, "exp": jetzt + MESSENGER_TOKEN_STUNDEN * 3600,
+    }, separators=(",", ":"), ensure_ascii=False).encode())
+    sig = _b64url(hmac.new(MESSENGER_ANLAGE_SECRET.encode(), f"{kopf}.{inhalt}".encode(), hashlib.sha256).digest())
+    return jsonify({"token": f"{kopf}.{inhalt}.{sig}", "gueltig_bis": jetzt + MESSENGER_TOKEN_STUNDEN * 3600,
+                    "server": os.environ.get("MESSENGER_URL", "https://chat.rosenweg4303.ch")})
+
+
 @app.get("/api/pbx/nummernplan")
 def nummernplan_liste():
     """Admin: persoenliche Nummern (3000er) und Verwaltung (4000er)."""
