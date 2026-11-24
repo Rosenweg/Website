@@ -74,6 +74,17 @@ führt jeden Schritt unten aus, prüft ihn und zeigt am Schluss eine Kontrolle. 
 oft laufen (nach Updates, nach dem Nachinstallieren von Rosenweg Telefon). Neue einmalige
 Schritte gehören **immer** in die Tabelle **und** ins Skript.
 
+**Ohne Kabel (WLAN):** Auf dem Telefon Entwickleroptionen einschalten (7× auf die Build-Nummer),
+dann *Entwickleroptionen → Drahtloses Debugging → Mit Kopplungscode koppeln*. Vom Mac aus:
+
+    adb pair <ip>:<kopplungsport> <code>
+    adb connect <ip>:<port>          # Port aus "Drahtloses Debugging", nicht der Kopplungsport
+    scripts/geteiltes-telefon-einrichten.sh <ip>:<port> [--device-owner]
+
+Danach Drahtloses Debugging wieder ausschalten. **Später geplant:** Die Geräte-App koppelt sich
+selbst mit dem Drahtlosen Debugging des eigenen Telefons (wie Shizuku/LADB): Kopplungscode einmal
+in der App eingeben, sie führt alle Schritte selbst aus — Einrichtung ganz ohne Mac.
+
 Wichtig für die geplante Einrichtung per QR ohne Kabel.
 
 | Was | Befehl heute | Offen für QR-Einrichtung |
