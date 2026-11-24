@@ -6,13 +6,13 @@ Stand 24.11.2026. Entscheide von Stefan in diesem Gespräch.
 
 | Bereich | Wer | Beispiel |
 |---|---|---|
-| **2000er** | Rosenweg-eigene Dienste, auch der Hauswart und die geteilten Telefone | 2002 Rosenweg Smartphone 2 |
+| **2000er** | Rosenweg-eigene Dienste, auch der Hauswart und die geteilten Telefone | 2102 Rosenweg Smartphone 2 |
 | **3000er** | Personen: `3 HH WW P` (6 Stellen) | 309011 = Haus 9, Wohnung 01, Person 1 |
 | **4000er** | Hausverwaltung, heute Immosense: 4000 Hauptnummer, 4001 … Mitarbeiter | 4000 Immosense |
 
 2000er unterteilt (Entscheid 24.11.): **2000–2099 Dienste** (Hauswart, Technik …; dahinter ein
 Gerät oder eine Gruppe), **2100–2199 Geräte** (geteilte Telefone, Testgeräte). Die heutigen
-2000–2003 ziehen in Schritt 2 auf 2100–2103 um.
+2000–2003 sind am 24.11.2026 hart auf 2100–2103 umgezogen (ohne Übergangs-Aliase).
 
 ### 3000er: `3 HH WW P`
 
@@ -136,7 +136,11 @@ Wer Rosenweg-Apps auf dem privaten Handy nutzt, muss auch unterwegs Zugang haben
    - ✓ 24.11.: **Telefonbuch**: Die Anlage ergänzt beim Ausliefern an die Telefone (`/api/telefon/kontakte`)
      die persönliche Nummer (E-Mail **und** Name müssen passen) und die Verwaltungs-Kurzwahl beim Kontakt mit
      der Zielnummer. Geräte-App v161 beschriftet sie als „Rosenweg“. Auf dem A15: 152 Nummern.
-   - offen: Geräte 2000–2003 auf 2100–2103; neue Personen automatisch; Nummern auch ins
+   - erledigt 24.11.2026: Geräte 2000–2003 auf 2100–2103 (A15 = 2102 per `ADB_NEBENSTELLE`;
+     Linphone 2100 braucht neuen QR aus pbx-admin, Emulator 2103 bei Gebrauch per adb).
+     Lehre: zuerst das Telefon umstellen, dann die Anlage, sonst lehnt die Anlage das Telefon
+     ab (401) — vor Geräte-App v182 schaltete das auch adb ab.
+   - offen: neue Personen automatisch; Nummern auch ins
      Nextcloud-Adressbuch (Website-API, beim nächsten Ausrollen); Transkript für persönliche Voicemail.
 3. Rosenweg Telefon: Verlauf/Voicemail/Einstellungen aus der Anlage (zunächst über die
    heutige SIP-Anbindung der Geräte-App).
