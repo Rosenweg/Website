@@ -2,12 +2,14 @@
 # rw-web-ausrollen — eine Quelle, alle Frontends
 #
 # Verwendung:
-#   scripts/rw-web-ausrollen.sh [--pruefen] [--neu] DATEI…
+#   scripts/rw-web-ausrollen.sh [--pruefen] [--neu] [--nur CONTAINER] DATEI…
 #
 #   DATEI      Pfad relativ zum Repo, z. B. noc-fullscreen.html oder js/nav.js
 #   --pruefen  nur vergleichen und berichten, nichts schreiben
 #   --neu      eine Datei auch dorthin legen, wo sie noch fehlt
 #              (ohne --neu wird kein Bestand erweitert — auch fe-www nicht)
+#   --nur      nur diesen Container beliefern, z. B. --nur fe-www (mit --neu
+#              fuer neue Seiten, die nicht auf alle Frontends gehoeren)
 #
 # Umgebung:  RW_JUMP  Sprunghost      (Standard stefan@10.0.10.149)
 #            RW_NODE  ein Cluster-Knoten (Standard root@100.64.2.20)
@@ -40,12 +42,14 @@ set -u
 JUMP=${RW_JUMP:-stefan@10.0.10.149}
 NODE=${RW_NODE:-root@100.64.2.20}
 WEBROOT=/var/www/rosenweg
-PRUEFEN=0; NEU=0; DATEIEN=()
-for a in "$@"; do
+PRUEFEN=0; NEU=0; NUR=""; DATEIEN=()
+while [ $# -gt 0 ]; do
+  a=$1; shift
   case "$a" in
+    --nur)     NUR=${1:?--nur braucht einen Containernamen}; shift ;;
     --pruefen) PRUEFEN=1 ;;
     --neu)     NEU=1 ;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
     *)         DATEIEN+=("$a") ;;
   esac
 done
@@ -84,6 +88,10 @@ for r in sorted(json.loads(res), key=lambda x: x.get("name", "")):
     if r.get("name", "").startswith("fe-") and r.get("status") == "running":
         print(r["vmid"], r["name"], r["node"], ips.get(r["node"], ""))')
 [ -n "$CTS" ] || { echo "Keine laufenden fe-*-Container gefunden" >&2; exit 1; }
+if [ -n "$NUR" ]; then
+  CTS=$(printf '%s\n' "$CTS" | awk -v n="$NUR" '$2==n')
+  [ -n "$CTS" ] || { echo "Container $NUR laeuft nicht oder heisst anders" >&2; exit 1; }
+fi
 
 # ── 2. Ist-Zustand: Pruefsumme jeder Datei auf jedem Container ───────────
 # Ein ssh je Knoten, darin alle Container und Dateien.
