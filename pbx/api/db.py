@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS telefon_apps (
 CREATE TABLE IF NOT EXISTS telefon_log (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     ext          TEXT NOT NULL,
-    ereignis     TEXT NOT NULL,            -- 'an' | 'ab'
+    ereignis     TEXT NOT NULL,            -- 'an' | 'ab' | 'karte-abgelehnt' | 'karte-info' | 'karte-zu' | 'karte-weg'
     email        TEXT,
     name         TEXT,
     durch        TEXT,                     -- wer es ausgeloest hat (Geraet, Person, Admin)
@@ -291,7 +291,10 @@ def person_zur_zeit(conn, ext, zeit):
     if not ext or not zeit:
         return None
     r = conn.execute(
-        "SELECT ereignis, email FROM telefon_log WHERE ext = ? AND zeit <= ? ORDER BY zeit DESC, id DESC LIMIT 1",
+        # Nur An-/Abmeldungen: Karten-Eintraege (karte-info, karte-zu, ...) sagen nichts darueber,
+        # wer angemeldet war.
+        "SELECT ereignis, email FROM telefon_log WHERE ext = ? AND zeit <= ? AND ereignis IN ('an', 'ab') "
+        "ORDER BY zeit DESC, id DESC LIMIT 1",
         (str(ext), zeit)).fetchone()
     return r["email"] if r and r["ereignis"] == "an" and r["email"] else None
 

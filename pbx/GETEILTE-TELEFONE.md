@@ -147,3 +147,85 @@ Nextcloud-App-Passwort ausstellen und gibt es nur an dieses Gerät:
 - **Geräte-App** v172: `AnlageProvider.call("nextcloud_konto")`, nur im Speicher.
 - **cloud 0.5.0**: `KontoSpeicher.laden()` nimmt zuerst den Zugang von Rosenweg Gerät; Abmelden
   einzelner Apps ist dann ausgeblendet. Ohne Geräte-App (privates Handy) wie bisher Login-Flow.
+
+## Anmeldung per NFC-Karte (24.11.2026)
+
+Statt des Anmelde-QR genügt die eigene Rosenweg-Karte (UniFi Access, dieselbe wie für
+die Türen): hinten ans gesperrte Telefon halten. **Die Karte allein meldet an, ohne PIN**
+(Entscheid Stefan). Es gelten nur Karten, die in UniFi Access einer Person **zugeordnet**
+sind (`status = assigned`), deren Konto für geteilte Telefone freigeschaltet ist
+(`telefon_gruppen`, wie beim QR). Entzogene oder unbekannte Karten melden nicht an.
+
+- **Rosenweg Gerät** ab v186: Der Sperrbildschirm liest Karten im Reader-Modus
+  (NFC-A/B/F/V, ohne NDEF-Prüfung). Ist eine andere Activity vorne (Anmeldefenster),
+  nimmt `NfcKarte` (TECH_DISCOVERED) die Karte an. Ist schon jemand angemeldet,
+  wird die Karte ignoriert. Meldungen: „Karte nicht bekannt“, „Karte gesperrt“,
+  „Keine Verbindung zur Anlage“.
+- Gelesen wird nur die UID (`Tag.getId()` als Hex, z.B. `04D4C227C22A81`); sie ist in
+  Access die `nfc_id` der Karte. Verglichen wird ohne Gross-/Kleinschreibung und ohne
+  Trennzeichen.
+- Die Anlage fragt bei **jeder** Anmeldung live nach (Haupt-API → UniFi Access), es gibt
+  keinen eigenen Rechte-Speicher. Die Haupt-API hält nur die Kartenliste bis 30 s im
+  Speicher, um zur UID das Token zu finden; Status und Inhaber liest sie jedes Mal frisch
+  über `/credentials/nfc_cards/tokens/{token}`.
+- Fehlversuche: höchstens 10 pro Nebenstelle und Minute, danach 429.
+- Protokoll: `telefon_log` mit `durch = karte:<Inventarnummer>`; Abweisungen als
+  `karte-abgelehnt` (`karte:<nr>:unbekannt|gesperrt|nicht_freigeschaltet`).
+
+**Sicherheitshinweis:** Die UID ist nicht geheim und lässt sich mit jedem NFC-Telefon
+auslesen und auf eine beschreibbare Karte kopieren. Wer eine Karte verliert, meldet das
+sofort — die Karte wird in **Rosenweg Karten** (oder in UniFi Access) entzogen und gilt
+dann weder an den Türen noch an den Telefonen.
+
+### Kartenverwaltung: App „Rosenweg Karten“
+
+Eigene App `ch.rosenweg4303.karten` (Repo `~/Documents/rosenweg-karten`), nur für
+Technik/Präsident. Karte antippen zeigt Inhaber, Inventarnummer und Status; dazu
+„Einer Person zuordnen“ (durchsuchbare Liste) und „Entziehen“ (mit Rückfrage).
+
+- **Ohne INTERNET-Berechtigung und ohne Zugangsdaten**: alles läuft über den
+  `AnlageProvider` von Rosenweg Gerät (`ContentResolver.call`, Permission
+  `ch.rosenweg4303.permission.ANLAGE`, darum mit demselben Schlüssel signiert):
+  `karten_info(uid)`, `karten_zuordnen(uid, {email})`, `karten_entziehen(uid)`,
+  `karten_personen("personen")` → Bundle `json` (Antwort der Anlage) oder `fehler`
+  (+ `status`); `nicht_berechtigt = true`, wenn die angemeldete Person nicht Technik/
+  Präsident ist. Rosenweg Gerät prüft das live über `/api/telefon/status`, die Anlage
+  prüft nochmals an der Sitzung der Nebenstelle.
+- Katalog: als Android-App mit Gruppen `technik,präsident,praesident`.
+- Zuordnen: Kennt Access die Karte noch nicht, legt die Haupt-API sie als Fremdkarte an
+  (`POST /credentials/nfc_cards/import`, CSV im Feld `file`) und ordnet sie dann dem
+  Access-Benutzer mit dieser E-Mail zu. Hat die Person keinen Access-Benutzer, kommt eine
+  Fehlermeldung (Benutzer zuerst in UniFi Access anlegen). Gehört die Karte schon jemand
+  anderem: Fehler mit Namen, zuerst entziehen. Fremdkarten müssen in Access erlaubt sein
+  (Einstellungen › Card Inventory › Third-Party NFC Cards).
+- Entziehen löst nur die Zuordnung; die Karte bleibt in der Access-Inventur.
+- Türleser übernehmen Änderungen nach etwa 30 s.
+- Jede Änderung steht in der Haupt-DB (`access_karten_protokoll`: Aktion, Karte, Ziel,
+  durch „Telefon <Nebenstelle> (Name <E-Mail>)“) und in `telefon_log`
+  (`karte-info`, `karte-zu`, `karte-weg`).
+
+### Endpunkte
+
+Anlage (pbx-api, HTTP-Basic Nebenstelle:SIP-Passwort, nur Nebenstellen „geteilt“):
+
+| Methode | Pfad | Körper | Antwort |
+|---|---|---|---|
+| POST | `/api/telefon/karte` | `{uid}` | wie `/api/telefon/einloesen`: `{ok, ext, angemeldet, name, email, seit, apps}`; Fehler `{error, grund}` mit 400 `unlesbar`, 404 `unbekannt`, 403 `gesperrt`/`nicht_freigeschaltet`, 429 `gebremst`, 502 `verbindung` |
+| POST | `/api/telefon/karten/info` | `{uid}` | `{found, assigned, status, display_id, access_name, person:{name,email}, uid}` |
+| POST | `/api/telefon/karten/zuordnen` | `{uid, email}` | `{ok, importiert?, schon?, display_id, name}`; 404 ohne Access-Benutzer, 409 `{error, besitzer:{name}}` |
+| POST | `/api/telefon/karten/entziehen` | `{uid}` | `{ok, schon?, display_id, name}`; 404 Karte unbekannt |
+| GET | `/api/telefon/karten/personen` | – | `{personen:[{name,email}]}` aus `personen_nummern` (Personen-Abgleich), nach Name |
+
+`/api/telefon/karten/*` nur, wenn die Sitzung der Nebenstelle die Gruppe technik,
+präsident oder praesident hat (sonst 403 `{error: "nicht berechtigt"}`).
+
+Haupt-API (`X-PBX-Secret`, nur von der Anlage):
+
+| Methode | Pfad | Körper | Antwort |
+|---|---|---|---|
+| GET | `/api/pbx/karte/:nfcId` | – | `{found:false}` oder `{found, assigned, status, display_id, access_name, person:{user_id, email, name, groups}}` |
+| POST | `/api/pbx/karte/zuordnen` | `{nfc_id, email, durch}` | siehe oben |
+| POST | `/api/pbx/karte/entziehen` | `{nfc_id, durch}` | siehe oben |
+
+Person zur Karte: Access-Benutzer → E-Mail → Website-Benutzer (`users`, Website-ID);
+Gruppen live aus Authentik, sonst `users.groups_json` (wie `/api/auth/me`).
