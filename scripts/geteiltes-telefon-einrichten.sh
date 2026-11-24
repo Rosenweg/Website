@@ -38,9 +38,25 @@ a shell dpm list-owners 2>/dev/null | grep -q "$GERAET.*DeviceOwner" \
   || echo "WARNUNG  Rosenweg Gerät ist nicht Device Owner — mit --device-owner auf frisch zurückgesetztem Gerät"
 
 # Telefonie
-schritt "SIP-Anrufkonto aktiv" a shell telecom set-phone-account-enabled $GERAET/org.sipdroid.sipua.ui.SipConnectionService SipdroidCallProvider 0
+# Zwei SIP-Anrufkonten (25.11.2026): Rosenweg Gerät registriert die Nebenstelle des Geräts
+# (2102 …, "Telefon suchen", gesperrt nur Notrufe), Rosenweg Telefon ab v27 das persönliche
+# Konto der angemeldeten Person (<nummer>-<gerät>, nur während der Sitzung).
+SIPKONTO=org.sipdroid.sipua.ui.SipConnectionService
+schritt "SIP-Anrufkonto Gerät aktiv" a shell telecom set-phone-account-enabled $GERAET/$SIPKONTO SipdroidCallProvider 0
 if a shell pm path ch.rosenweg4303.phone >/dev/null 2>&1; then
   schritt "Standard-Telefon-App: Rosenweg Telefon" a shell cmd role add-role-holder android.app.role.DIALER ch.rosenweg4303.phone 0
+  if a shell dumpsys package ch.rosenweg4303.phone 2>/dev/null | grep -q "$SIPKONTO"; then
+    # Telecom kennt das Konto erst, wenn Rosenweg Telefon einmal lief (App-Start trägt es offline ein)
+    if ! a shell dumpsys telecom 2>/dev/null | grep -q "ch.rosenweg4303.phone/$SIPKONTO"; then
+      a shell am start -W -n ch.rosenweg4303.phone/org.fossify.phone.activities.MainActivity >/dev/null 2>&1
+      sleep 3
+    fi
+    schritt "SIP-Anrufkonto persönlich (Rosenweg Telefon) aktiv" a shell telecom set-phone-account-enabled ch.rosenweg4303.phone/$SIPKONTO SipdroidCallProvider 0
+    schritt "Akku-Optimierung aus (Rosenweg Telefon: SIP bleibt im Ruhemodus registriert)" a shell dumpsys deviceidle whitelist +ch.rosenweg4303.phone
+    schritt "Mikrofon für Rosenweg Telefon" a shell pm grant ch.rosenweg4303.phone android.permission.RECORD_AUDIO
+  else
+    echo "alt      Rosenweg Telefon ohne SIP-Kern (vor v27) — telefoniert über das Konto der Geräte-App"
+  fi
 else
   echo "später   Rosenweg Telefon noch nicht installiert (kommt aus dem Katalog) — Skript danach nochmals laufen lassen"
 fi
@@ -72,6 +88,7 @@ echo
 echo "Kontrolle:"
 echo "  Device Owner:     $(a shell dpm list-owners 2>/dev/null | grep -c DeviceOwner)"
 echo "  Telefon-App:      $(a shell cmd role get-role-holders android.app.role.DIALER | tr -d '\r')"
+echo "  SIP-Konten:       $(a shell dumpsys telecom 2>/dev/null | grep -c "$SIPKONTO" | tr -d '\r') Einträge (Gerät + persönlich; Details: dumpsys telecom | grep -A3 SipdroidCallProvider)"
 echo "  Browser:          $(a shell cmd role get-role-holders android.app.role.BROWSER | tr -d '\r')"
 echo "  Seitentaste:      $(a shell settings get global function_key_config_longpress_type | tr -d '\r')/$(a shell settings get global power_button_long_press | tr -d '\r') (soll 0/1)"
 echo "  Netz+Sicherheit:  $(a shell settings get secure lock_function_val | tr -d '\r') (soll 0)"

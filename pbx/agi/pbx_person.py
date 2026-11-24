@@ -2,8 +2,9 @@
 """
 AGI-Script: persoenliche Nummer (3HHWWP) im Dialplan aufloesen.
 
-Setzt PERSON_OK (1/0), PERSON_NAME, PERSON_DIAL (z.B. PJSIP/2002&PJSIP/2003 —
-alle Geraete, an denen die Person angemeldet ist), WL_MODUS (aus|immer|
+Setzt PERSON_OK (1/0), PERSON_NAME, PERSON_DIAL (z.B. PJSIP/310201-2102&PJSIP/2003 —
+alle Geraete, an denen die Person angemeldet ist: der persoenliche Zugang in Rosenweg
+Telefon, wenn er registriert ist, sonst die Nebenstelle des Geraets), WL_MODUS (aus|immer|
 nicht_erreichbar), WL_ZIEL, WL_SEK und PERSON_VM (1/0).
 
   exten = _3XXXXX,1,AGI(pbx_person.py,${EXTEN})
@@ -65,7 +66,8 @@ def main():
     consume_agi_env()
     nummer = sys.argv[1] if len(sys.argv) > 1 else ''
     # Anrufendes Geraet nicht mitklingeln lassen (wer sich selbst anruft, landet sonst bei sich)
-    ohne = sys.argv[2] if len(sys.argv) > 2 and re.fullmatch(r'[0-9]{2,8}', sys.argv[2]) else ''
+    # (Nebenstelle 2102 oder persoenlicher Zugang 310201-2102 aus Rosenweg Telefon)
+    ohne = sys.argv[2] if len(sys.argv) > 2 and re.fullmatch(r'[0-9]{2,8}(-[0-9]{2,8})?', sys.argv[2]) else ''
     for k in ('PERSON_OK', 'PERSON_NAME', 'PERSON_DIAL', 'WL_MODUS', 'WL_ZIEL', 'WL_SEK', 'PERSON_VM'):
         set_var(k, '')
     if not re.fullmatch(r'3[0-9]{5}', nummer):
@@ -82,7 +84,7 @@ def main():
         log(f'{nummer}: unbekannt')
         return
     dial = d.get('dial') or ''
-    if not re.fullmatch(r'(PJSIP/[0-9]{2,8})(&PJSIP/[0-9]{2,8})*', dial or 'x'):
+    if not re.fullmatch(r'(PJSIP/[0-9]{2,8}(-[0-9]{2,8})?)(&PJSIP/[0-9]{2,8}(-[0-9]{2,8})?)*', dial or 'x'):
         dial = ''
     ziel = d.get('ziel') or ''
     if not re.fullmatch(r'\+?[0-9]{8,15}', ziel or 'x'):
