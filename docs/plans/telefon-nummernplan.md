@@ -96,6 +96,17 @@ Gerät oder eine Gruppe), **2100–2199 Geräte** (geteilte Telefone, Testgerät
 **Ausrollen:** `/opt/pbx-api` auf CT 220 ist kein Git-Checkout. Vorher `app.py.vor-<thema>`
 sichern, Dateien per `pct push` einspielen, `systemctl restart pbx-api`. So war es bisher.
 
+## Zugang von außerhalb (private Telefone, Hinweis Stefan 24.11.)
+
+Wer Rosenweg-Apps auf dem privaten Handy nutzt, muss auch unterwegs Zugang haben.
+- Nextcloud (Files, Kamera, Notizen …): schon öffentlich (Cloudflare → Edge).
+- PBX-Schnittstelle `pbx.rosenweg4303.ch/api/telefon/*` (Verlauf, Voicemail, Einstellungen):
+  prüfen, ob von außen erreichbar und **nur** diese Pfade (Anmeldung mit Nebenstelle + Passwort).
+- **SIP und Sprache** von außen: heute nur intern (100.64.x). Optionen:
+  a) SIP über TLS + SRTP über den Edge (Port 5061 + RTP-Bereich auf CT 220, fail2ban/Ratenbegrenzung),
+  b) WireGuard pro privatem Gerät.
+  Sicherheitsentscheid mit Stefan, **bevor** etwas geöffnet wird.
+
 ## Reihenfolge
 
 1. ✓ 24.11.: Anlage: `calls.ext/person/ziel_ext/ziel_person` (bestehende Anrufe ueber `telefon_log`
