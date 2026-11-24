@@ -1138,7 +1138,15 @@ def telefon_status():
     try:
         row = conn.execute("SELECT name, email, seit, gruppen FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
         geraet = conn.execute("SELECT name FROM sip_extensions WHERE ext = ?", (ext,)).fetchone()
-        return jsonify({"ext": ext, "geraet": geraet["name"] if geraet else ext,
+        technik = False
+        if row:
+            try:
+                gr = [str(g).lower() for g in json.loads(row["gruppen"] or "[]")]
+                technik = any(g in gr for g in ("technik", "präsident", "praesident"))
+            except ValueError:
+                pass
+        # technik: Geraete-App sperrt die gefaehrlichen Einstellungen nur fuer alle anderen
+        return jsonify({"ext": ext, "geraet": geraet["name"] if geraet else ext, "technik": technik,
                         **_sitzung_json(row), **_apps_fuer(conn, row)})
     finally:
         conn.close()
