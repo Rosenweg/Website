@@ -131,6 +131,12 @@ Die Nextcloud-Einbindung ist leer, solange es keinen Home gibt. Heute legt Windo
     - Stefan (11184) kann sie lesen und ändern.
     - Fremde Person (11170) kommt nicht hinein, auch nicht mit gid 11156 (technik).
     Noch ungetestet: eine über Samba/Windows neu angelegte Datei (inherit acls).
-3. Mountpoint in CT 104 und Einbindung „Persönlich“, zuerst nur für `technik`, also Stefan testet.
+3. ✓ 24.11.: Mountpoint in CT 104 im laufenden Betrieb gesetzt:
+   `mp1: /mnt/pve/userdata/home,mp=/mnt/cephfs-userdata/home,backup=0`
+   (Sicherung `/root/104.conf.vor-home-mp-2026-11-24` auf pve1).
+   Einbindung **id 29** `/Persönlich` → `/mnt/cephfs-userdata/home/$user`, vorerst nur für stefan.mueller,
+   Teilen erlaubt. Erstes Einlesen: 112'073 Einträge in 2 Min., 0 Fehler.
+   Rosenweg Files v28 startet in „Persönlich“ und blendet versteckte Dateien aus.
+   Test: Ordner über die App anlegen → gehört uid 33, ACL `user:11184:rwx` und vererbte Default-ACL; löschen geht.
 4. Timer für fehlende Homes.
 5. Für alle freischalten, Apps anpassen, Nextcloud-Wurzel zurückdrängen.
