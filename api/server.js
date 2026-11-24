@@ -3895,10 +3895,29 @@ app.post('/api/access/sync', authMiddleware, adminOnly, async (req, res) => {
 
 // ── Self-Service (Bewohner via PWA): eigene NFC-Karten + erlaubte Türen öffnen ──
 // STRENG auf den eingeloggten User begrenzt (UniFi-User via E-Mail-Match; nie fremde).
+// Weitere Adressen einer Person (person_email_alias): Zusatzadresse -> Hauptadresse.
+async function hauptEmail(email) {
+  const e = String(email || '').toLowerCase().trim(); if (!e) return e;
+  try {
+    const r = await pool.query('SELECT haupt_email FROM person_email_alias WHERE LOWER(alias_email) = $1', [e]);
+    return r.rows[0] ? String(r.rows[0].haupt_email).toLowerCase().trim() : e;
+  } catch { return e; }
+}
+async function alleEmails(email) {
+  const e = String(email || '').toLowerCase().trim(); if (!e) return [];
+  try {
+    const r = await pool.query('SELECT LOWER(alias_email) AS a FROM person_email_alias WHERE LOWER(haupt_email) = $1', [e]);
+    return [e, ...r.rows.map(x => x.a)];
+  } catch { return [e]; }
+}
 async function unifiUserByEmail(email) {
-  const e = (email || '').toLowerCase().trim(); if (!e) return null;
+  const kandidaten = await alleEmails(email); if (!kandidaten.length) return null;
   const users = (await unifiAccessRaw('GET', '/users')).body?.data || [];
-  return users.find(u => (u.email || u.user_email || '').toLowerCase().trim() === e) || null;
+  for (const e of kandidaten) {
+    const u = users.find(u => (u.email || u.user_email || '').toLowerCase().trim() === e);
+    if (u) return u;
+  }
+  return null;
 }
 // Türen, die der eingeloggte User öffnen darf (nach unserem Grant-Modell + seinen Authentik-Gruppen).
 async function meAllowedDoorIds(email) {
@@ -3911,6 +3930,34 @@ async function meAllowedDoorIds(email) {
   }
   return allowed;
 }
+// ── Weitere E-Mail-Adressen einer Person (nur Technik/Praesident) ──────────
+app.get('/api/admin/email-alias', authMiddleware, adminOnly, async (_req, res) => {
+  const r = await pool.query('SELECT alias_email, haupt_email, notiz, erstellt_von, erstellt_am FROM person_email_alias ORDER BY haupt_email, alias_email');
+  res.json({ aliase: r.rows });
+});
+app.post('/api/admin/email-alias', authMiddleware, adminOnly, async (req, res) => {
+  const a = String(req.body?.alias_email || '').toLowerCase().trim();
+  const h = String(req.body?.haupt_email || '').toLowerCase().trim();
+  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!re.test(a) || !re.test(h)) return res.status(400).json({ error: 'Zwei gueltige E-Mail-Adressen noetig' });
+  if (a === h) return res.status(400).json({ error: 'Zusatz- und Hauptadresse sind gleich' });
+  const kette = await pool.query('SELECT 1 FROM person_email_alias WHERE LOWER(alias_email) = $1', [h]);
+  if (kette.rowCount) return res.status(400).json({ error: 'Die Hauptadresse ist selbst eine Zusatzadresse' });
+  await pool.query(
+    `INSERT INTO person_email_alias (alias_email, haupt_email, notiz, erstellt_von) VALUES ($1,$2,$3,$4)
+     ON CONFLICT (alias_email) DO UPDATE SET haupt_email = EXCLUDED.haupt_email, notiz = EXCLUDED.notiz,
+       erstellt_von = EXCLUDED.erstellt_von, erstellt_am = NOW()`,
+    [a, h, String(req.body?.notiz || '').slice(0, 200) || null, req.user?.email || null]);
+  console.log(`[email-alias] ${a} -> ${h} durch ${req.user?.email || '?'}`);
+  res.json({ ok: true });
+});
+app.delete('/api/admin/email-alias/:alias', authMiddleware, adminOnly, async (req, res) => {
+  const a = String(req.params.alias || '').toLowerCase().trim();
+  const r = await pool.query('DELETE FROM person_email_alias WHERE LOWER(alias_email) = $1', [a]);
+  console.log(`[email-alias] ${a} entfernt durch ${req.user?.email || '?'}`);
+  res.json({ ok: true, geloescht: r.rowCount });
+});
+
 app.get('/api/access/me', authMiddleware, async (req, res) => {
   const u = await unifiUserByEmail(req.user?.email);
   if (!u) return res.json({ found: false });
@@ -18426,8 +18473,10 @@ async function kartenPerson(accessUserId) {
   const r = await unifiAccessRaw('GET', `/users/${encodeURIComponent(accessUserId)}`);
   if (r.status === 0) throw Object.assign(new Error('UniFi Access nicht erreichbar'), { http: 502 });
   const au = r.body?.data;
-  const email = String(au?.email || au?.user_email || '').toLowerCase().trim();
-  if (!email) return null;
+  const accessEmail = String(au?.email || au?.user_email || '').toLowerCase().trim();
+  if (!accessEmail) return null;
+  // In Access kann eine Zusatzadresse stehen (z.B. Gmail des UI-Kontos): mit der Hauptadresse weiter.
+  const email = await hauptEmail(accessEmail);
   let zeile = null;
   try {
     zeile = (await pool.query(
@@ -27782,6 +27831,17 @@ async function initDB() {
         value TEXT NOT NULL,
         updated_at TIMESTAMP DEFAULT NOW()
       );
+
+      -- Weitere E-Mail-Adressen einer Person (z.B. Gmail des UI-Kontos in UniFi Access)
+      -- -> Hauptadresse = Rosenweg-Konto (Authentik). Pflege nur Technik/Praesident.
+      CREATE TABLE IF NOT EXISTS person_email_alias (
+        alias_email TEXT PRIMARY KEY,
+        haupt_email TEXT NOT NULL,
+        notiz TEXT,
+        erstellt_von TEXT,
+        erstellt_am TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_person_email_alias_haupt ON person_email_alias (LOWER(haupt_email));
 
       -- Access-Subsystem (UniFi Access) — primär; Waschküche konsumiert dies.
       CREATE TABLE IF NOT EXISTS access_settings (
