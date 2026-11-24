@@ -102,8 +102,12 @@ sichern, Dateien per `pct push` einspielen, `systemctl restart pbx-api`. So war 
    nachgetragen), `GET /api/telefon/anrufliste`, `GET|PUT /api/telefon/einstellungen?paket=`,
    Anmeldung mit Nebenstelle und Passwort fuer jede aktive Nebenstelle (`_nebenstelle()`).
    Ausgerollt auf CT 220 (Sicherungen `*.vor-anrufliste`, auch die SQLite-Datei), getestet ueber 2002.
-2. Nummernplan: `personen_nummern` erzeugen und prüfen (Stefan sieht die Liste, bevor sie gilt),
-   4000er für Immosense, Dialplan für 3/4.
+2. Nummernplan:
+   - ✓ 24.11.: Liste geprüft und angelegt. `personen_nummern` hat 124 Nummern (MEG als „Haus 00“: 300011–300041),
+     `verwaltung_nummern` hat 4000 = Immosense AG. Admin-Ansicht `GET /api/pbx/nummernplan`.
+     Sicherungen `*.vor-nummernplan` auf CT 220.
+   - offen: Dialplan für 3/4 (Klingeln an Geräten mit Sitzung, Weiterleitung, Voicemail),
+     Name als Anrufer-Name, Geräte 2000–2003 auf 2100–2103, Abgleich für neue Personen.
 3. Rosenweg Telefon: Verlauf/Voicemail/Einstellungen aus der Anlage (zunächst über die
    heutige SIP-Anbindung der Geräte-App).
 4. SIP-Kern in Rosenweg Telefon, Einrichtung durch die Geräte-App bzw. per QR-Code.

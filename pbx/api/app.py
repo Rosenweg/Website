@@ -1496,6 +1496,22 @@ def telefon_einstellungen():
         conn.close()
 
 
+@app.get("/api/pbx/nummernplan")
+def nummernplan_liste():
+    """Admin: persoenliche Nummern (3000er) und Verwaltung (4000er)."""
+    _, deny = require_admin()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        p = conn.execute("SELECT nummer, name, email, wohnung, haus, art, weiterleitung, voicemail, aktiv "
+                         "FROM personen_nummern ORDER BY nummer").fetchall()
+        v = conn.execute("SELECT nummer, name, ziel, notiz, aktiv FROM verwaltung_nummern ORDER BY nummer").fetchall()
+        return jsonify({"personen": db.rows_to_dicts(p), "verwaltung": db.rows_to_dicts(v)})
+    finally:
+        conn.close()
+
+
 @app.get("/api/telefon/meine")
 def telefon_meine():
     """Geraete, an denen die angemeldete Person gerade angemeldet ist."""

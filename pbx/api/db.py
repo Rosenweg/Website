@@ -147,6 +147,37 @@ CREATE TABLE IF NOT EXISTS telefon_einstellungen (
     PRIMARY KEY (email, paket)
 );
 
+-- Persoenliche Nummern 3 HH WW P (docs/plans/telefon-nummernplan.md, 24.11.2026).
+-- Einmal vergeben bleibt eine Nummer bei der Person (Import ueberschreibt nicht).
+-- weiterleitung: 'aus' | 'immer' | 'nicht_erreichbar' (nach weiterleitung_sekunden).
+CREATE TABLE IF NOT EXISTS personen_nummern (
+    nummer       TEXT PRIMARY KEY,
+    email        TEXT NOT NULL UNIQUE,
+    name         TEXT NOT NULL,
+    wohnung      TEXT,
+    haus         INTEGER,
+    art          TEXT,
+    weiterleitung          TEXT NOT NULL DEFAULT 'aus',
+    weiterleitung_ziel     TEXT,
+    weiterleitung_sekunden INTEGER NOT NULL DEFAULT 20,
+    voicemail    INTEGER NOT NULL DEFAULT 1,
+    aktiv        INTEGER NOT NULL DEFAULT 1,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 4000er: Hausverwaltung (heute Immosense), 4000 Hauptnummer, 4001 ... Mitarbeiter.
+-- Nur Festnetznummern (Entscheid 24.11.2026).
+CREATE TABLE IF NOT EXISTS verwaltung_nummern (
+    nummer       TEXT PRIMARY KEY,
+    name         TEXT NOT NULL,
+    ziel         TEXT NOT NULL,            -- externe Nummer (E.164)
+    notiz        TEXT,
+    aktiv        INTEGER NOT NULL DEFAULT 1,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_calls_started ON calls(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ring_enabled ON ring_members(enabled);
 CREATE INDEX IF NOT EXISTS idx_prov_ext ON prov_tokens(ext);
