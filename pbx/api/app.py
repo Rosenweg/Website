@@ -292,6 +292,17 @@ def _person_jetzt(conn, ext):
     return r["email"] if r and r["email"] else None
 
 
+def _nummer_der_person(conn, email, name):
+    """Persoenliche Nummer zu E-Mail + Name. Teilen sich mehrere Personen die E-Mail,
+    entscheidet der Name; sonst die erste (kleinste) Nummer."""
+    rows = conn.execute("SELECT nummer, name FROM personen_nummern WHERE lower(email) = lower(?) AND aktiv = 1 "
+                        "ORDER BY nummer", (email or "",)).fetchall()
+    for r in rows:
+        if _gleiche_person(r["name"], name):
+            return r["nummer"]
+    return rows[0]["nummer"] if rows else ""
+
+
 def _person_der_nummer(conn, nummer):
     """E-Mail zu einer persoenlichen Nummer (3HHWWP), sonst None."""
     if not nummer:
@@ -1493,10 +1504,65 @@ def telefon_kontakte():
             roh = json.dumps(karten, ensure_ascii=False, sort_keys=True)
             _KONTAKTE_CACHE.update(zeit=jetzt, daten={
                 "version": hashlib.sha256(roh.encode()).hexdigest()[:16], "kontakte": karten})
-    d = _KONTAKTE_CACHE["daten"]
+    d = _mit_internen_nummern(_KONTAKTE_CACHE["daten"])
     if request.args.get("version") == d["version"]:
         return jsonify({"version": d["version"], "unveraendert": True})
     return jsonify(d)
+
+
+def _name_teile(n):
+    return {t for t in re.split(r"[\s\-]+", (n or "").lower()) if len(t) > 1}
+
+
+def _gleiche_person(a, b):
+    """'Atesci Remzi' = 'Remzi Atesci', 'Claude Koller' = 'Claude Alexandre Koller':
+    die Namensteile des kuerzeren Namens stecken alle im laengeren."""
+    ta, tb = _name_teile(a), _name_teile(b)
+    if len(ta) < 2 or len(tb) < 2:
+        return False
+    firma = {"ag", "gmbh", "sa", "gemeinde", "einwohnergemeinde", "stiftung", "genossenschaft"}
+    if bool(ta & firma) != bool(tb & firma):
+        return False   # "Mehmet Peker AG" ist nicht "Mehmet Peker"
+    kurz, lang = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
+    return kurz <= lang
+
+
+def _mit_internen_nummern(d):
+    """Telefonbuch um die internen Nummern ergaenzen (Nummernplan 24.11.2026):
+    persoenliche Nummer (3HHWWP) bei der Person mit derselben E-Mail, Kurzwahl der
+    Verwaltung (4XXX) beim Kontakt mit der Ziel-Nummer. typ 'rosenweg' — das Telefon
+    beschriftet sie als 'Rosenweg'. Die Version enthaelt die Nummern, damit die
+    Telefone eine Aenderung sofort holen."""
+    conn = db.connect()
+    try:
+        personen = {}
+        for r in conn.execute("SELECT email, nummer, name FROM personen_nummern WHERE aktiv = 1"):
+            personen.setdefault(r["email"].lower(), []).append((r["nummer"], r["name"]))
+        verwaltung = {}
+        for r in conn.execute("SELECT nummer, ziel FROM verwaltung_nummern WHERE aktiv = 1"):
+            verwaltung.setdefault(re.sub(r"[^0-9+]", "", r["ziel"] or ""), []).append(r["nummer"])
+    finally:
+        conn.close()
+    if not personen and not verwaltung:
+        return d
+    karten = []
+    for k in d["kontakte"]:
+        intern = []
+        for m in k.get("emails") or []:
+            # Paare teilen sich oft eine E-Mail: nur die Nummer mit passendem Namen
+            for nr, name in personen.get(m.lower(), []):
+                if nr not in intern and _gleiche_person(name, k.get("name")):
+                    intern.append(nr)
+        for n in k.get("nummern") or []:
+            for kurz in verwaltung.get(n.get("nummer"), []):
+                if kurz not in intern:
+                    intern.append(kurz)
+        if intern:
+            vorhanden = {n.get("nummer") for n in k["nummern"]}
+            k = dict(k, nummern=[{"nummer": nr, "typ": "rosenweg"} for nr in intern if nr not in vorhanden] + k["nummern"])
+        karten.append(k)
+    roh = json.dumps(karten, ensure_ascii=False, sort_keys=True)
+    return {"version": hashlib.sha256(roh.encode()).hexdigest()[:16], "kontakte": karten}
 
 
 # ─── Rosenweg Telefon: Daten der Person aus der Anlage (Regel 6/7) ───────────
@@ -1704,9 +1770,7 @@ def telefon_sitzung_agi(ext):
         row = conn.execute("SELECT name, email, seit FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
         d = _sitzung_json(row)
         if row and row["email"]:
-            n = conn.execute("SELECT nummer FROM personen_nummern WHERE lower(email) = lower(?) AND aktiv = 1",
-                             (row["email"],)).fetchone()
-            d["nummer"] = n["nummer"] if n else ""
+            d["nummer"] = _nummer_der_person(conn, row["email"], row["name"])
         return jsonify(d)
     finally:
         conn.close()

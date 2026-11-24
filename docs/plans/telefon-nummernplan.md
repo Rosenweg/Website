@@ -116,8 +116,17 @@ sichern, Dateien per `pct push` einspielen, `systemctl restart pbx-api`. So war 
      - API: `/api/pbx/person/<nr>`, `/api/pbx/verwaltung/<nr>`, `/api/pbx/voicemail-person` (AGI),
        `/api/telefon/voicemail/<id>` (Person hört ihre Voicemail).
      - Notrufe unverändert. Getestet über die API (ohne echte Anrufe).
-   - offen: Test mit echtem Anruf; Geräte 2000–2003 auf 2100–2103; Abgleich für neue Personen;
-     3000er-Nummern ins Telefonbuch; Transkript für persönliche Voicemail.
+   - ✓ 24.11.: echter Test vom A15 auf 309093 (Sitzung, Dial ohne das anrufende Gerät,
+     Freizeichen, persönliche Voicemail, Zuordnung). Testaufnahmen gelöscht.
+   - ✓ 24.11.: **Eine Nummer pro Person**, nicht pro E-Mail: 23 E-Mail-Adressen werden von Paaren
+     geteilt. Dadurch fehlten 25 Personen. `personen_nummern` ist jetzt eindeutig auf (E-Mail, Name).
+     Nachgetragen, ohne dass sich eine bestehende Nummer geändert hat: **149 Nummern**.
+     Erzeugt mit `scripts/nummernplan.py` (liest CSV-Exporte, Ausgabe nicht ins Repo).
+   - ✓ 24.11.: **Telefonbuch**: Die Anlage ergänzt beim Ausliefern an die Telefone (`/api/telefon/kontakte`)
+     die persönliche Nummer (E-Mail **und** Name müssen passen) und die Verwaltungs-Kurzwahl beim Kontakt mit
+     der Zielnummer. Geräte-App v161 beschriftet sie als „Rosenweg“. Auf dem A15: 152 Nummern.
+   - offen: Geräte 2000–2003 auf 2100–2103; neue Personen automatisch; Nummern auch ins
+     Nextcloud-Adressbuch (Website-API, beim nächsten Ausrollen); Transkript für persönliche Voicemail.
 3. Rosenweg Telefon: Verlauf/Voicemail/Einstellungen aus der Anlage (zunächst über die
    heutige SIP-Anbindung der Geräte-App).
 4. SIP-Kern in Rosenweg Telefon, Einrichtung durch die Geräte-App bzw. per QR-Code.

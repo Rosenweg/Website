@@ -150,9 +150,11 @@ CREATE TABLE IF NOT EXISTS telefon_einstellungen (
 -- Persoenliche Nummern 3 HH WW P (docs/plans/telefon-nummernplan.md, 24.11.2026).
 -- Einmal vergeben bleibt eine Nummer bei der Person (Import ueberschreibt nicht).
 -- weiterleitung: 'aus' | 'immer' | 'nicht_erreichbar' (nach weiterleitung_sekunden).
+-- Eine Nummer pro PERSON: Paare teilen sich oft eine E-Mail (24.11.2026) —
+-- darum (email, name) eindeutig, nicht email allein.
 CREATE TABLE IF NOT EXISTS personen_nummern (
     nummer       TEXT PRIMARY KEY,
-    email        TEXT NOT NULL UNIQUE,
+    email        TEXT NOT NULL,
     name         TEXT NOT NULL,
     wohnung      TEXT,
     haus         INTEGER,
@@ -316,6 +318,16 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_calls_ziel_person ON calls(ziel_person)")
         if neu_calls:
             calls_nachtragen(conn)
+        # personen_nummern hatte anfangs email UNIQUE (eine Nummer je E-Mail) —
+        # umbauen auf (email, name), damit Paare mit gemeinsamer E-Mail je eine Nummer bekommen.
+        sql = (conn.execute("SELECT sql FROM sqlite_master WHERE name = 'personen_nummern'").fetchone() or [""])[0] or ""
+        if "email        TEXT NOT NULL UNIQUE" in sql:
+            conn.execute("ALTER TABLE personen_nummern RENAME TO personen_nummern_alt")
+            conn.executescript(SCHEMA)
+            conn.execute("INSERT INTO personen_nummern SELECT * FROM personen_nummern_alt")
+            conn.execute("DROP TABLE personen_nummern_alt")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_personen_email_name ON personen_nummern(lower(email), lower(name))")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_personen_email ON personen_nummern(lower(email))")
         for r in conn.execute("SELECT id FROM ring_members WHERE internal_ext IS NULL ORDER BY id").fetchall():
             conn.execute("UPDATE ring_members SET internal_ext = ? WHERE id = ?",
                          (next_ext(conn, "ring_members", "internal_ext", 1000), r[0]))
