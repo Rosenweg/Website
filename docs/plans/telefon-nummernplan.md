@@ -32,9 +32,10 @@ Gerät oder eine Gruppe), **2100–2199 Geräte** (geteilte Telefone, Testgerät
 - Wer umzieht, bekommt eine neue Nummer. Das ist bei diesem Schema so gewollt.
 - `WW` aus der Bezeichnung, wo sie eine Nummer trägt: `1305` → 05, `RW1-03` → 03. Sonst einmalig
   nach Stockwerk durchnummeriert (`9.EG.1` …).
-- Firmen und Körperschaften als Eigentümer (AG, GmbH, Gemeinde …) bekommen keine persönliche Nummer.
+- Firmen und Körperschaften als Eigentümer (AG, Gemeinde …) bekommen **auch** eine Nummer
+  (Entscheid 24.11.), nach denselben Regeln: Mehmet Peker AG 301051, Einwohnergemeinde 318021.
 - Personen ohne E-Mail bekommen keine Nummer, weil sie sich nicht anmelden können.
-- Entwurf 24.11.: 118 Personen in 97 Wohnungen, davon 19 Vermieter. Erzeugt mit `nummernplan.py`.
+- Entwurf 24.11.: 120 Nummern in 99 Wohnungen, davon 20 Vermieter. Erzeugt mit `nummernplan.py`.
   Liste nicht im Repo, weil sie Personendaten enthält.
 - **4000er:** 4000 = Immosense AG (+41 61 225 45 50). Nur Festnetznummern (Entscheid);
   Mitarbeiter mit Festnetz gibt es im Telefonbuch derzeit keine, Cyril Welti nur mobil.
@@ -49,7 +50,10 @@ Gerät oder eine Gruppe), **2100–2199 Geräte** (geteilte Telefone, Testgerät
   3000er-Nummer an (Rückruf erreicht die Person, nicht das Gerät).
 - **Name mitschicken (Entscheid 24.11.):** Bei ausgehenden Anrufen setzt die Anlage den Namen
   der Person als Anrufer-Namen (`CALLERID(name)`), intern also z.B. „Stefan Müller“ mit 309093.
-  Nach außen nur, soweit der Anbieter den Namen weitergibt (meist nur die Nummer).
+  **Auch extern** (Entscheid 24.11.): Name neben der Nummer mitschicken, wo möglich —
+  Anzeigename im `From` und `P-Asserted-Identity` zum Trunk. Ob er beim Angerufenen ankommt,
+  entscheidet der Anbieter bzw. das Netz des Angerufenen (in der Schweiz oft nur die Nummer);
+  mit dem Trunk testen.
 - **Weiterleitung nach außen:** für alle erlaubt, standardmäßig aus.
 - Die öffentliche Nummer und die Klingelgruppen der STWEG bleiben unverändert. Notrufe sind
   nicht betroffen.
