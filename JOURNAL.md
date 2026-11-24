@@ -9,7 +9,9 @@
 
 ### Offen
 - [ ] **Zentraler Log-Sammler (User 2026-11-24):** Logs aller CTs/VMs (Nextcloud, Traefik, Postfix/PMG, Asterisk, Authentik, Bots, Proxmox-Hosts) an einer Stelle sammeln, durchsuchen und mit Aufbewahrungsfrist versehen. Bisher liegt jedes Log nur im eigenen Container. Ein Fehler fällt erst auf, wenn er etwas lahmlegt; Beispiel: nextcloud.log mit 6,3 GB, unbemerkt. Varianten prüfen (z.B. Loki+Grafana oder VictoriaLogs; Versand per Vector/Alloy oder journald-remote). Dazu Alarme: Fehlerrate, Log-Wachstum, „Job läuft nicht mehr“.
-- [ ] **Nextcloud: externe Speicher `/mnt/cephfs-docs/stweg3/**/readme.md` Permission denied** (PHP-Warnung bei jedem Cron-Lauf, z.B. `08-dach/readme.md`, `13-haus/haussitzung/vorlagen/readme.md`). Rechte/Owner am CephFS prüfen.
+- [x] **Nextcloud kam seit 22.11. nicht mehr in `/stweg1`–`/stweg3`** (sichtbar als readme.md „Permission denied“ im Log). Ursache: Ordnerrechte-Rollout 22.11. (`/root/ordnerrechte` auf CT 206/106) gibt nur benannten AD-Gruppen + `api-svc` Zugriff. Die Nextcloud liest aber als lokales `www-data`. Fix 24.11.: In CT 104 lokale Gruppe `technik` gid 11156, `www-data` als Mitglied, php-fpm neu gestartet. Lesen/Schreiben geprüft. README auf CT 206+106 ergänzt.
+- [ ] **Ordnerrechte sauber:** Nextcloud als eigener Eintrag in `tabelle.txt` statt über die lokale gid 11156 in CT 104. Dazu muss `anwenden.sh` numerische IDs (uid 33) annehmen. Prüfen, ob auf den Fileservern etwas als www-data läuft.
+- [ ] **Ordnerrechte-Skripte liegen nur auf CT 206/106**, nicht im Repo. Ins Repo holen.
 - [ ] **Nextcloud: „Error while generating metadata for fileid …“** bei mehreren Dateien (7659–7783), seit Cron wieder läuft sichtbar. Ursache noch nicht angeschaut.
 - [ ] **Nächtliche Sicherung (vzdump 01:00 → PBS) überlastet Ceph:** 2 OSDs „slow operations in BlueStore“, pve1 Load >30, Nextcloud antwortete 503. Sicherungsfenster/Bandbreite (`bwlimit`, Staffelung) und OSD-Zustand bei Tag ansehen.
 - [ ] **Ceph HEALTH_ERR wegen unsicherer aes-Schlüsseltypen** (Altlast, unabhängig vom Ausfall).
