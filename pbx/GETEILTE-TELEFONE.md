@@ -81,9 +81,9 @@ dann *Entwickleroptionen → Drahtloses Debugging → Mit Kopplungscode koppeln*
     adb connect <ip>:<port>          # Port aus "Drahtloses Debugging", nicht der Kopplungsport
     scripts/geteiltes-telefon-einrichten.sh <ip>:<port> [--device-owner]
 
-Danach Drahtloses Debugging wieder ausschalten. **Später geplant:** Die Geräte-App koppelt sich
-selbst mit dem Drahtlosen Debugging des eigenen Telefons (wie Shizuku/LADB): Kopplungscode einmal
-in der App eingeben, sie führt alle Schritte selbst aus — Einrichtung ganz ohne Mac.
+Danach Drahtloses Debugging wieder ausschalten. **Später geplant (Entscheid Stefan 24.11.):**
+zentral über das Rosenweg-System — im pbx-Admin IP und Kopplungscode eingeben, ein Dienst im Netz
+koppelt per WLAN und führt dieses Skript aus. Einrichtung ganz ohne Mac.
 
 Wichtig für die geplante Einrichtung per QR ohne Kabel.
 
