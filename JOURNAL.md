@@ -5,6 +5,23 @@
 
 ---
 
+## 2026-11-24
+
+### Offen
+- [ ] **Zentraler Log-Sammler (User 2026-11-24):** Logs aller CTs/VMs (Nextcloud, Traefik, Postfix/PMG, Asterisk, Authentik, Bots, Proxmox-Hosts) an einer Stelle sammeln, durchsuchen und mit Aufbewahrungsfrist versehen. Bisher liegt jedes Log nur im eigenen Container. Ein Fehler fällt erst auf, wenn er etwas lahmlegt; Beispiel: nextcloud.log mit 6,3 GB, unbemerkt. Varianten prüfen (z.B. Loki+Grafana oder VictoriaLogs; Versand per Vector/Alloy oder journald-remote). Dazu Alarme: Fehlerrate, Log-Wachstum, „Job läuft nicht mehr“.
+- [ ] **Nextcloud: externe Speicher `/mnt/cephfs-docs/stweg3/**/readme.md` Permission denied** (PHP-Warnung bei jedem Cron-Lauf, z.B. `08-dach/readme.md`, `13-haus/haussitzung/vorlagen/readme.md`). Rechte/Owner am CephFS prüfen.
+- [ ] **Nextcloud: „Error while generating metadata for fileid …“** bei mehreren Dateien (7659–7783), seit Cron wieder läuft sichtbar. Ursache noch nicht angeschaut.
+- [ ] **Nächtliche Sicherung (vzdump 01:00 → PBS) überlastet Ceph:** 2 OSDs „slow operations in BlueStore“, pve1 Load >30, Nextcloud antwortete 503. Sicherungsfenster/Bandbreite (`bwlimit`, Staffelung) und OSD-Zustand bei Tag ansehen.
+- [ ] **Ceph HEALTH_ERR wegen unsicherer aes-Schlüsseltypen** (Altlast, unabhängig vom Ausfall).
+- [ ] **CT 128 API-Container mit `NODE_TLS_REJECT_UNAUTHORIZED=0`:** TLS-Prüfung global aus. Gezielt nur für die betroffene interne Verbindung lösen.
+
+### Erledigt
+- [x] **Nextcloud-Cron lief seit 19.10.2026 nicht** (Modus „cron“, aber keine Crontab/kein Timer → keine Hintergrund-Jobs, keine Log-Rotation). Neu: systemd `nextcloud-cron.timer` alle 5 min auf CT 104 (Nice 10, IO idle). Erster Lauf 24.11. ok (27 s CPU).
+- [x] **nextcloud.log 6,3 GB:** `loglevel` stand auf 0 (Debug) → auf 2 gesetzt, `log_rotate_size` 100 MB, altes Log nach Rotation gelöscht (Sicherung der Config: CT 104 `/root/config.php.vor-loglevel-2026-11-24`).
+- [x] **Euro-Office als Office der Nextcloud** (CT 139, siehe docs/euro-office.md).
+
+---
+
 ## 2026-07-22
 
 ### Offen
