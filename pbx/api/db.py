@@ -157,6 +157,17 @@ CREATE TABLE IF NOT EXISTS telefon_pin (
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Nextcloud-App-Passwort der Person auf einem geteilten Telefon (Entscheid 24.11.2026):
+-- ausgestellt von nc-token auf CT 104, weitergegeben ueber die Geraete-App an die
+-- Rosenweg-Apps, beim Abmelden widerrufen. Verschluesselt wie die PIN (PBX_PIN_KEY).
+CREATE TABLE IF NOT EXISTS telefon_nextcloud (
+    ext          TEXT PRIMARY KEY,
+    email        TEXT NOT NULL,
+    benutzer     TEXT NOT NULL,
+    pw_enc       TEXT NOT NULL,
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Persoenliche Nummern 3 HH WW P (docs/plans/telefon-nummernplan.md, 24.11.2026).
 -- Einmal vergeben bleibt eine Nummer bei der Person (Import ueberschreibt nicht).
 -- weiterleitung: 'aus' | 'immer' | 'nicht_erreichbar' (nach weiterleitung_sekunden).

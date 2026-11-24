@@ -1116,6 +1116,7 @@ def _telefon_abmelden(conn, ext, durch):
     if not s:
         return False
     conn.execute("DELETE FROM telefon_sitzungen WHERE ext = ?", (ext,))
+    _nextcloud_widerrufen(conn, ext)
     conn.execute("INSERT INTO telefon_log (ext, ereignis, email, name, durch) VALUES (?,?,?,?,?)",
                  (ext, "ab", s["email"], s["name"], durch))
     return True
@@ -1792,6 +1793,77 @@ def nummernplan_abgleich():
         return jsonify(personen_abgleichen(probe=request.args.get("probe") == "1"))
     except requests.RequestException as e:
         return jsonify({"error": f"Website nicht erreichbar: {e}"}), 502
+
+
+NC_TOKEN_URL = os.environ.get("NC_TOKEN_URL", "").rstrip("/")
+NC_TOKEN_SECRET = os.environ.get("NC_TOKEN_SECRET", "")
+NEXTCLOUD_SERVER = "https://nextcloud.rosenweg4303.ch"
+
+
+def _nc_name(ext):
+    return f"Rosenweg Geraet {ext}"
+
+
+def _nextcloud_widerrufen(conn, ext):
+    """App-Passwort der Person auf diesem Geraet loeschen (beim Abmelden). Im Hintergrund."""
+    r = conn.execute("SELECT email FROM telefon_nextcloud WHERE ext = ?", (ext,)).fetchone()
+    if not r:
+        return
+    conn.execute("DELETE FROM telefon_nextcloud WHERE ext = ?", (ext,))
+    email = r["email"]
+
+    def los():
+        try:
+            requests.post(f"{NC_TOKEN_URL}/widerrufen", json={"email": email, "name": _nc_name(ext)},
+                          headers={"X-NC-Token-Secret": NC_TOKEN_SECRET}, timeout=60)
+        except Exception as e:
+            app.logger.warning("Nextcloud-Widerruf %s: %s", ext, type(e).__name__)
+    if NC_TOKEN_URL:
+        import threading
+        threading.Thread(target=los, daemon=True).start()
+
+
+@app.get("/api/telefon/nextcloud")
+def telefon_nextcloud():
+    """Nextcloud-Zugang der Person, die auf diesem Geraet angemeldet ist (fuer die
+    Rosenweg-Apps ueber die Geraete-App). -> {server, benutzer, app_passwort}"""
+    ext, deny = _nebenstelle()
+    if deny:
+        return deny
+    f = _pin_fernet()
+    if f is None or not NC_TOKEN_URL:
+        return jsonify({"error": "Nextcloud-Zugang nicht eingerichtet"}), 503
+    conn = db.connect()
+    try:
+        email, _ = _person_der_nebenstelle(conn, ext)
+        if not email:
+            return jsonify({"error": "Niemand angemeldet"}), 409
+        email = email.lower()
+        r = conn.execute("SELECT email, benutzer, pw_enc FROM telefon_nextcloud WHERE ext = ?", (ext,)).fetchone()
+        if r and r["email"] == email:
+            return jsonify({"server": NEXTCLOUD_SERVER, "benutzer": r["benutzer"],
+                            "app_passwort": f.decrypt(r["pw_enc"].encode()).decode()})
+        if r:   # andere Person: altes Passwort weg
+            _nextcloud_widerrufen(conn, ext)
+        try:
+            a = requests.post(f"{NC_TOKEN_URL}/ausstellen", json={"email": email, "name": _nc_name(ext)},
+                              headers={"X-NC-Token-Secret": NC_TOKEN_SECRET}, timeout=60)
+        except requests.RequestException:
+            return jsonify({"error": "Nextcloud nicht erreichbar"}), 502
+        if a.status_code == 404:
+            return jsonify({"error": "Kein Nextcloud-Konto mit dieser E-Mail"}), 404
+        if a.status_code != 200:
+            return jsonify({"error": "Nextcloud-Zugang fehlgeschlagen"}), 502
+        d = a.json()
+        conn.execute("INSERT INTO telefon_nextcloud (ext, email, benutzer, pw_enc, updated_at) "
+                     "VALUES (?,?,?,?, datetime('now')) ON CONFLICT(ext) DO UPDATE SET email = excluded.email, "
+                     "benutzer = excluded.benutzer, pw_enc = excluded.pw_enc, updated_at = excluded.updated_at",
+                     (ext, email, d["benutzer"], f.encrypt(d["app_passwort"].encode()).decode()))
+        conn.commit()
+        app.logger.info("Nextcloud-Zugang ausgestellt (Nebenstelle %s)", ext)
+        return jsonify({"server": NEXTCLOUD_SERVER, "benutzer": d["benutzer"], "app_passwort": d["app_passwort"]})
+    finally:
+        conn.close()
 
 
 @app.get("/api/pbx/nummernplan")

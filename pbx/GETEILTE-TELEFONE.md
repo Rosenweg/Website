@@ -111,3 +111,21 @@ adb shell am broadcast -a ch.rosenweg4303.telefon.ADB_INSTALLATION \
 ```
 
 Geräte nicht per `adb reboot` neu starten, solange jemand daran arbeitet.
+
+## Nextcloud-Zugang der angemeldeten Person (24.11.2026)
+
+Die Rosenweg-Apps (cloud-Bibliothek ab 0.5.0) melden sich auf geteilten Telefonen nicht
+mehr selbst an. Beim Anmelden am Telefon lässt die Anlage für die Person ein
+Nextcloud-App-Passwort ausstellen und gibt es nur an dieses Gerät:
+
+- **CT 104** `nc-token` (`nextcloud/nc-token/`, systemd `nc-token`, Port 8097 auf 100.64.2.36):
+  `occ user:auth-tokens:add -n` (ohne Login-Passwort) bzw. `…:delete`. Nimmt nur Anfragen
+  von CT 220 (100.64.2.55) mit `X-NC-Token-Secret` an; Geheimnis in `/etc/default/nc-token`
+  und `/etc/default/pbx-api` (`NC_TOKEN_SECRET`, `NC_TOKEN_URL`). Zuordnung E-Mail → Nextcloud-Benutzer
+  über die E-Mail im Nextcloud-Konto.
+- **Anlage** `GET /api/telefon/nextcloud` (Nebenstelle der Person): stellt aus, speichert verschlüsselt
+  (`telefon_nextcloud`, `PBX_PIN_KEY`), widerruft beim Abmelden (`_telefon_abmelden`).
+  In der Nextcloud heisst das App-Passwort „Rosenweg Geraet <Nebenstelle>“.
+- **Geräte-App** v172: `AnlageProvider.call("nextcloud_konto")`, nur im Speicher.
+- **cloud 0.5.0**: `KontoSpeicher.laden()` nimmt zuerst den Zugang von Rosenweg Gerät; Abmelden
+  einzelner Apps ist dann ausgeblendet. Ohne Geräte-App (privates Handy) wie bisher Login-Flow.
