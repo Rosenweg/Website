@@ -342,6 +342,8 @@ def person_agi(nummer):
             "WHERE lower(s.email) = lower(?) AND e.enabled = 1 ORDER BY s.ext", (p["email"],))]
         if db.ist_nebenstelle(conn, nummer):
             ziele.append(str(nummer))   # Rosenweg Telefon auf dem privaten Handy
+        ohne = request.args.get("ohne") or ""
+        ziele = [z for z in ziele if z != ohne]   # anrufendes Geraet nicht mitklingeln lassen
         wl = p["weiterleitung"] if p["weiterleitung"] in ("aus", "immer", "nicht_erreichbar") else "aus"
         ziel = (p["weiterleitung_ziel"] or "").replace(" ", "")
         if wl != "aus" and not _ZIEL_RE.match(ziel):

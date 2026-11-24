@@ -64,13 +64,16 @@ def log(msg):
 def main():
     consume_agi_env()
     nummer = sys.argv[1] if len(sys.argv) > 1 else ''
+    # Anrufendes Geraet nicht mitklingeln lassen (wer sich selbst anruft, landet sonst bei sich)
+    ohne = sys.argv[2] if len(sys.argv) > 2 and re.fullmatch(r'[0-9]{2,8}', sys.argv[2]) else ''
     for k in ('PERSON_OK', 'PERSON_NAME', 'PERSON_DIAL', 'WL_MODUS', 'WL_ZIEL', 'WL_SEK', 'PERSON_VM'):
         set_var(k, '')
     if not re.fullmatch(r'3[0-9]{5}', nummer):
         log(f'ungueltige Nummer {nummer!r}')
         return
     try:
-        r = requests.get(f'{API_BASE}/api/pbx/person/{nummer}', headers={'X-PBX-Secret': PBX_SECRET}, timeout=4)
+        r = requests.get(f'{API_BASE}/api/pbx/person/{nummer}', params={'ohne': ohne},
+                         headers={'X-PBX-Secret': PBX_SECRET}, timeout=4)
         d = r.json() if r.ok else {}
     except Exception as e:  # noqa: BLE001
         log(f'API-Fehler: {e}')
