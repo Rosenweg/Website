@@ -225,6 +225,12 @@ DEFAULT_CONFIG = {
         "com.sec.android.app.samsungapps", "com.aura.oobe.samsung.gl",
         "com.einnovation.temu", "com.lazada.android", "com.block.juggle",
         "com.google.android.apps.bard",              # Gemini
+        # KI-Assistenten (Entscheid Stefan 24.11.2026: auf geteilten Telefonen
+        # gesperrt). Bixby Vision bleibt: die System-Kamera braucht es.
+        "com.samsung.android.bixby.agent", "com.samsung.android.bixby.wakeup",
+        "com.samsung.android.app.settings.bixby",
+        "com.openai.chatgpt", "com.microsoft.copilot", "ai.perplexity.app.android",
+        "com.anthropic.claude",
         "com.samsung.android.app.omcagent",          # Samsung-Nachinstallierer (ohne SIM unnoetig)
         "com.linkedin.android", "com.microsoft.office.officehubrow", "com.microsoft.appmanager",
         "com.mojang.minecraftpe", "com.nebula.mahjongtile",
