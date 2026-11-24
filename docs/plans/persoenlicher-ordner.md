@@ -138,5 +138,14 @@ Die Nextcloud-Einbindung ist leer, solange es keinen Home gibt. Heute legt Windo
    Teilen erlaubt. Erstes Einlesen: 112'073 Einträge in 2 Min., 0 Fehler.
    Rosenweg Files v28 startet in „Persönlich“ und blendet versteckte Dateien aus.
    Test: Ordner über die App anlegen → gehört uid 33, ACL `user:11184:rwx` und vererbte Default-ACL; löschen geht.
-4. Timer für fehlende Homes.
-5. Für alle freischalten, Apps anpassen, Nextcloud-Wurzel zurückdrängen.
+4. ✓ 24.11.: `/usr/local/sbin/homes-anlegen.sh` auf CT 206 und CT 106, Timer stündlich (:05 bzw. :35).
+   - **Personen:** aktive Konten in `rosenweg` mit Namen `vorname.nachname`. Das schliesst Dienst-,
+     Drucker- und Testkonten aus (api-svc, scanner, druckerr9…, acltest, stefan-test, akadmin, dienste, dimeba).
+   - Legt fehlende Homes an (Besitzer Person, Gruppe rosenweg, 700, ACL). Homes ohne Nextcloud-Eintrag
+     (z.B. von `logon.bat` angelegt) bekommen die ACL nachträglich, aber nur, wenn der Besitzer passt.
+   - Bricht ab, wenn das AD weniger als 10 Personen liefert.
+   - Erstlauf: 73 Homes angelegt (74 Personen).
+5. ✓ 24.11.: Einbindung 29 gilt für die Nextcloud-Gruppen `bewohner`, `eigentuemer`, `ausschuss`, `verwaltung`.
+   Nicht `technik`, denn darin ist das Dienstkonto `fileshare`.
+   Geprüft für elisabeth.mueller und joerg.herrmann.
+6. Offen: Nextcloud-Wurzel zurückdrängen (Quota oder Hinweis), Upload-Ziel der Apps `Persönlich/<App>`.
