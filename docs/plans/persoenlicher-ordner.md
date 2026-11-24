@@ -148,4 +148,6 @@ Die Nextcloud-Einbindung ist leer, solange es keinen Home gibt. Heute legt Windo
 5. ✓ 24.11.: Einbindung 29 gilt für die Nextcloud-Gruppen `bewohner`, `eigentuemer`, `ausschuss`, `verwaltung`.
    Nicht `technik`, denn darin ist das Dienstkonto `fileshare`.
    Geprüft für elisabeth.mueller und joerg.herrmann.
+5b. ✓ 24.11.: Einbindung 29 mit `filesystem_check_changes = 1`. Ohne das bemerkt die Nextcloud
+    Dateien nicht, die über Samba/Windows geändert wurden (Größe, ETag, Inhalt bleiben alt).
 6. Offen: Nextcloud-Wurzel zurückdrängen (Quota oder Hinweis), Upload-Ziel der Apps `Persönlich/<App>`.
