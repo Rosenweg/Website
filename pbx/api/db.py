@@ -147,6 +147,16 @@ CREATE TABLE IF NOT EXISTS telefon_einstellungen (
     PRIMARY KEY (email, paket)
 );
 
+-- Persoenliche PIN fuer die Bildschirmsperre geteilter Telefone (Entscheid
+-- 24.11.2026: auf der Anlage, verschluesselt). Die Geraete-App braucht die PIN im
+-- Klartext, um sie als Sperre zu setzen (resetPasswordWithToken) — darum kein Hash,
+-- sondern Fernet mit PBX_PIN_KEY (nur in /etc/default/pbx-api).
+CREATE TABLE IF NOT EXISTS telefon_pin (
+    email        TEXT PRIMARY KEY,
+    pin_enc      TEXT NOT NULL,
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Persoenliche Nummern 3 HH WW P (docs/plans/telefon-nummernplan.md, 24.11.2026).
 -- Einmal vergeben bleibt eine Nummer bei der Person (Import ueberschreibt nicht).
 -- weiterleitung: 'aus' | 'immer' | 'nicht_erreichbar' (nach weiterleitung_sekunden).

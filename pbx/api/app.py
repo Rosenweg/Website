@@ -1686,6 +1686,65 @@ def telefon_einstellungen():
         conn.close()
 
 
+def _pin_fernet():
+    """Fernet mit PBX_PIN_KEY, oder None wenn nicht eingerichtet."""
+    key = os.environ.get("PBX_PIN_KEY", "")
+    if not key:
+        return None
+    from cryptography.fernet import Fernet
+    return Fernet(key.encode())
+
+
+def _pin_zu_einfach(pin):
+    if len(set(pin)) == 1:
+        return True
+    ziffern = [int(z) for z in pin]
+    schritte = {b - a for a, b in zip(ziffern, ziffern[1:])}
+    return schritte in ({1}, {-1})
+
+
+@app.route("/api/telefon/pin", methods=["GET", "PUT", "DELETE"])
+def telefon_pin():
+    """Persoenliche PIN der auf diesem Geraet angemeldeten Person (Bildschirmsperre).
+    GET -> {gesetzt, pin}; PUT {pin}: 4-12 Ziffern; DELETE: PIN entfernen.
+    Nur die Nebenstelle, auf der die Person gerade angemeldet ist, bekommt sie."""
+    ext, deny = _nebenstelle()
+    if deny:
+        return deny
+    f = _pin_fernet()
+    if f is None:
+        return jsonify({"error": "PIN nicht eingerichtet"}), 503
+    conn = db.connect()
+    try:
+        email, _ = _person_der_nebenstelle(conn, ext)
+        if not email:
+            return jsonify({"error": "Niemand angemeldet"}), 409
+        email = email.lower()
+        if request.method == "GET":
+            r = conn.execute("SELECT pin_enc FROM telefon_pin WHERE email = ?", (email,)).fetchone()
+            if not r:
+                return jsonify({"gesetzt": False})
+            return jsonify({"gesetzt": True, "pin": f.decrypt(r["pin_enc"].encode()).decode()})
+        if request.method == "DELETE":
+            conn.execute("DELETE FROM telefon_pin WHERE email = ?", (email,))
+            conn.commit()
+            app.logger.info("PIN entfernt (Nebenstelle %s)", ext)
+            return jsonify({"ok": True})
+        pin = str((request.get_json(silent=True) or {}).get("pin") or "")
+        if not re.fullmatch(r"\d{4,12}", pin):
+            return jsonify({"error": "Die PIN braucht 4 bis 12 Ziffern."}), 400
+        if _pin_zu_einfach(pin):
+            return jsonify({"error": "Die PIN ist zu einfach (gleiche Ziffern oder Reihe)."}), 400
+        conn.execute("INSERT INTO telefon_pin (email, pin_enc, updated_at) VALUES (?,?, datetime('now')) "
+                     "ON CONFLICT(email) DO UPDATE SET pin_enc = excluded.pin_enc, updated_at = excluded.updated_at",
+                     (email, f.encrypt(pin.encode()).decode()))
+        conn.commit()
+        app.logger.info("PIN gesetzt (Nebenstelle %s)", ext)
+        return jsonify({"ok": True})
+    finally:
+        conn.close()
+
+
 @app.get("/api/pbx/nummernplan")
 def nummernplan_liste():
     """Admin: persoenliche Nummern (3000er) und Verwaltung (4000er)."""
