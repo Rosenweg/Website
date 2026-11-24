@@ -48,6 +48,11 @@ schritt "Standard-Browser: $BROWSER" a shell cmd role add-role-holder android.ap
 
 # Hintergrund und Rechte der Geräte-App
 schritt "Akku-Optimierung aus (Geräte-App)" a shell dumpsys deviceidle whitelist +$GERAET
+if a shell pm path ch.rosenweg4303.messages >/dev/null 2>&1; then
+  schritt "Akku-Optimierung aus (Rosenweg Messenger: Notfälle auch im Ruhemodus)" a shell dumpsys deviceidle whitelist +ch.rosenweg4303.messages
+else
+  echo "später   Rosenweg Messenger noch nicht installiert (Katalog) — Skript danach nochmals laufen lassen"
+fi
 schritt "Zugriff auf alle Dateien (Aufräumen beim Abmelden)" a shell appops set $GERAET MANAGE_EXTERNAL_STORAGE allow
 schritt "\"Nicht stören\" kurz ausschalten (Telefon suchen)" a shell cmd notification allow_dnd $GERAET
 
