@@ -8,7 +8,7 @@ Die Nextcloud zeigt ihn an, statt einen eigenen zu führen.
 | | AD-Home | Nextcloud persönlich |
 |---|---|---|
 | Ort | CephFS `/userdata/home/<name>` | Platte von CT 104, `data/<name>/files` |
-| Zugang heute | Windows (H:, Ordnerumleitung per GPO „Rosenweg-Folder Redirect“), Linux-Stationen | Browser, Rosenweg Files, Dateiauswahl am Telefon |
+| Zugang heute | Windows (H:, Ordnerumleitung per `logon.bat`, Testphase nur stefan.mueller), Linux-Stationen | Browser, Rosenweg Files, Dateiauswahl am Telefon |
 | Inhalt | nur `stefan.mueller` hat einen (42 GB) | praktisch leer (nur Testdateien) |
 | Rechte | `700`, Besitzer = Person (idmap-rid-uid, bei Stefan 11184), keine ACL | Nextcloud |
 | Sicherung | CT 134 liest `/userdata` (read-only, als root) | mit CT 104 |
@@ -49,7 +49,14 @@ default: dasselbe
 ```
 
 - Neue Dateien erben die ACL, egal ob die Person sie über Samba anlegt oder die Nextcloud (als www-data).
-  Unter Windows gehören Dateien, die die Nextcloud angelegt hat, damit trotzdem der Person.
+  Dateien, die die Nextcloud anlegt, **gehören www-data (uid 33)**, nicht der Person. Die Person hat
+  über den Eintrag `user:<uid>` trotzdem vollen Zugriff.
+- **Voraussetzung Samba:** `[home]` hat heute `create mask = 0600`, `directory mask = 0700`, `inherit acls = No`.
+  Damit bekäme alles, was über Samba neu angelegt wird, die Maske `---`, und die Nextcloud käme nicht heran.
+  Vor dem Anwenden `inherit acls = yes` in `[home]` auf **CT 106 und CT 206** setzen.
+- **Voraussetzung Nextcloud:** `localstorage.umask` ist nicht gesetzt (Standard 0022). Dadurch bekämen
+  Dateien der Nextcloud die Maske `r--`, und die Person könnte sie über Samba nicht ändern.
+  `'localstorage.umask' => 0007` in die config.php.
 - Für bestehende Inhalte (42 GB bei Stefan) wird die ACL rekursiv gesetzt.
 - Ablauf wie bei den Ordnerrechten: erst `getfacl`-Sicherung, dann Trockenlauf, dann anwenden.
   Dafür ein eigenes Skript `homes-rechte.sh` neben `/root/ordnerrechte/` (oder als neue Zeilenart dort).
@@ -94,11 +101,12 @@ Die Nextcloud-Einbindung ist leer, solange es keinen Home gibt. Heute legt Windo
 
 ## Risiken / zu prüfen
 
-- **Windows-Attribut READONLY an angepassten Ordnern** (desktop.ini): Linux nimmt dann das
-  Schreibrecht weg (siehe `scripts/desktop-schreibschutz-loesen.sh`). Mit ACL wirkt das über die
-  Maske auch für die Nextcloud. Prüfen, ob das Skript die Maske mitbehandelt.
-- **GPO „Grant the user exclusive rights“** in der Ordnerumleitung: Falls aktiv, setzt Windows beim
-  Anlegen umgeleiteter Ordner eigene Rechte. Vor dem Ausrollen in der GPO nachsehen.
+- ~~Windows-Attribut READONLY~~ **geprüft, kein Risiko:** Samba hat `map readonly = no` und
+  `store dos attributes = yes`. READONLY steht nur in `user.DOSATTRIB` und ändert den Unix-Modus nicht.
+  Die Nextcloud greift lokal aufs CephFS zu und ist davon nicht betroffen.
+- ~~GPO „Grant the user exclusive rights“~~ **geprüft:** Die GPO „Rosenweg-Folder Redirect“ ist leer
+  (Version 0, kein fdeploy.ini). Die Umleitung macht `logon.bat` (md, robocopy, `reg add` für
+  User Shell Folders, nur stefan.mueller). Dabei setzt Windows keine eigenen Rechte. Die leere GPO kann weg.
 - **Samba `inherit acls`** bläht neue ACLs auf (siehe Probelauf Ordnerrechte). Das ist kosmetisch,
   die wirksamen Rechte stimmen.
 - **Zugriff:** Wer root auf CT 104 hat, kann alle Homes lesen. Das gilt heute für die
@@ -108,8 +116,14 @@ Die Nextcloud-Einbindung ist leer, solange es keinen Home gibt. Heute legt Windo
 
 ## Reihenfolge und Freigaben
 
-1. Gruppe `nextcloud-dienst` anlegen und in CT 104 eintragen. *(Freigabe)*
-2. Sicherung und Trockenlauf der Home-ACL → Stefan sieht den Trockenlauf → anwenden. *(Freigabe)*
+1. ✓ 24.11.: AD-Gruppe `nextcloud-dienst` **gid 11280** (RID 1280), ohne Mitglieder; in CT 104 lokal mit
+   gid 11280, `www-data` Mitglied, php-fpm neu gestartet. Sicherung `/root/group.vor-nextcloud-dienst-2026-11-24`.
+2. ✓ 24.11.: Sicherung `/root/homes-rechte-sicherung/` (CT 206, 112'090 Einträge) und Trockenlauf
+   `/root/homes-rechte/anwenden.sh` (Standard `--trocken`, ändert nur mit `--ausfuehren`).
+   Ergebnis: 1 Home (stefan.mueller, uid 11184), 15'462 Ordner und 96'627 Dateien, keine Auffälligkeiten.
+   Kopie der Sicherung auf CT 106 fehlt noch.
+2b. Vor dem Anwenden: `inherit acls = yes` in `[home]` (CT 106 + 206) und `localstorage.umask` 0007. *(Freigabe)*
+2c. Anwenden. *(Freigabe)*
 3. Mountpoint in CT 104 und Einbindung „Persönlich“, zuerst nur für `technik`, also Stefan testet.
 4. Timer für fehlende Homes.
 5. Für alle freischalten, Apps anpassen, Nextcloud-Wurzel zurückdrängen.
