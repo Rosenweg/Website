@@ -18635,6 +18635,27 @@ app.post('/api/pbx/karte/entziehen', requirePbxSecret, async (req, res) => {
   } catch (e) { kartenFehler(res, e); }
 });
 
+// Karte aus dem Bestand von UniFi Access loeschen (defekt/verloren). Nur entzogene Karten
+// (ohne Inhaber); zugeordnete zuerst entziehen. {nfc_id, durch}
+app.post('/api/pbx/karte/loeschen', requirePbxSecret, async (req, res) => {
+  const nfcId = normNfcId(req.body?.nfc_id);
+  const durch = String(req.body?.durch || 'pbx').slice(0, 200);
+  if (!nfcIdGueltig(nfcId)) return res.status(400).json({ error: 'Ungueltige Karten-UID' });
+  try {
+    const k = await accessKarteZurUid(nfcId, true);
+    if (!k) return res.status(404).json({ error: 'Karte nicht bekannt' });
+    if (accessKartenBesitzerId(k)) return res.status(409).json({ error: 'Karte ist noch zugeordnet - zuerst entziehen' });
+    const r = await unifiAccessRaw('DELETE', `/credentials/nfc_cards/tokens/${encodeURIComponent(k.token)}`);
+    accessKartenCacheLeeren();
+    if (r.status === 0) throw Object.assign(new Error('UniFi Access nicht erreichbar'), { http: 502 });
+    const ok = accessOk(r) && (!r.body?.code || r.body.code === 'SUCCESS');
+    await kartenProtokollieren('loeschen', { nfcId, displayId: k.display_id, name: '', durch, erfolg: ok,
+      detail: ok ? '' : `${r.status} ${r.body?.msg || ''}` });
+    if (!ok) return res.status(502).json({ error: r.body?.msg || 'Loeschen in UniFi Access fehlgeschlagen' });
+    res.json({ ok: true, display_id: k.display_id || null });
+  } catch (e) { kartenFehler(res, e); }
+});
+
 app.get('/api/pbx/cnam/:number', requirePbxSecret, async (req, res) => {
   try {
     const raw = String(req.params.number || '').trim();
