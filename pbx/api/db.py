@@ -135,6 +135,18 @@ CREATE TABLE IF NOT EXISTS telefon_log (
     zeit         TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Einstellungen der Telefon-App pro Person (Regel 7: gehoeren der Person;
+-- Entscheid 24.11.2026: auf der Anlage statt in der Nextcloud). Es gilt die
+-- zuletzt geaenderte Fassung (geaendert = ms seit 1970, vom Telefon).
+CREATE TABLE IF NOT EXISTS telefon_einstellungen (
+    email        TEXT NOT NULL,
+    paket        TEXT NOT NULL,
+    werte        TEXT NOT NULL DEFAULT '{}',
+    geaendert    INTEGER NOT NULL DEFAULT 0,
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (email, paket)
+);
+
 CREATE INDEX IF NOT EXISTS idx_calls_started ON calls(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ring_enabled ON ring_members(enabled);
 CREATE INDEX IF NOT EXISTS idx_prov_ext ON prov_tokens(ext);
@@ -213,6 +225,33 @@ def next_ext(conn, table, col, start):
     return n
 
 
+def person_zur_zeit(conn, ext, zeit):
+    """E-Mail der Person, die zur Zeit `zeit` an Nebenstelle `ext` angemeldet war
+    (aus telefon_log), sonst None."""
+    if not ext or not zeit:
+        return None
+    r = conn.execute(
+        "SELECT ereignis, email FROM telefon_log WHERE ext = ? AND zeit <= ? ORDER BY zeit DESC, id DESC LIMIT 1",
+        (str(ext), zeit)).fetchone()
+    return r["email"] if r and r["ereignis"] == "an" and r["email"] else None
+
+
+def ist_nebenstelle(conn, nummer):
+    return bool(nummer) and conn.execute(
+        "SELECT 1 FROM sip_extensions WHERE ext = ?", (str(nummer),)).fetchone() is not None
+
+
+def calls_nachtragen(conn):
+    """Einmalig: bestehende Anrufe ueber das Sitzungsprotokoll Personen zuordnen."""
+    for c in conn.execute("SELECT id, direction, caller_id, dialed, answered_by, started_at FROM calls").fetchall():
+        ext = c["caller_id"] if c["direction"] in ("internal", "outbound") and ist_nebenstelle(conn, c["caller_id"]) else (
+            c["answered_by"] if ist_nebenstelle(conn, c["answered_by"]) else None)
+        ziel = c["dialed"] if c["direction"] == "internal" and ist_nebenstelle(conn, c["dialed"]) else None
+        conn.execute("UPDATE calls SET ext = ?, person = ?, ziel_ext = ?, ziel_person = ? WHERE id = ?",
+                     (ext, person_zur_zeit(conn, ext, c["started_at"]), ziel,
+                      person_zur_zeit(conn, ziel, c["started_at"]), c["id"]))
+
+
 def init_db():
     conn = connect()
     try:
@@ -235,6 +274,17 @@ def init_db():
         # client-Spalte (2026-11-23): Android SIP braucht eine eigene SDP-Variante.
         if "client" not in [r[1] for r in conn.execute("PRAGMA table_info(sip_extensions)")]:
             conn.execute("ALTER TABLE sip_extensions ADD COLUMN client TEXT NOT NULL DEFAULT 'linphone'")
+        # Anrufe einer Person zuordnen (24.11.2026, Anrufliste in Rosenweg Telefon):
+        # ext/person = Seite der Person, die anruft bzw. abnimmt; ziel_* = angerufene
+        # interne Seite. person = E-Mail der zur Zeit angemeldeten Person.
+        calls_cols = [r[1] for r in conn.execute("PRAGMA table_info(calls)")]
+        neu_calls = [c for c in ("ext", "person", "ziel_ext", "ziel_person") if c not in calls_cols]
+        for c in neu_calls:
+            conn.execute(f"ALTER TABLE calls ADD COLUMN {c} TEXT")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_calls_person ON calls(person)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_calls_ziel_person ON calls(ziel_person)")
+        if neu_calls:
+            calls_nachtragen(conn)
         for r in conn.execute("SELECT id FROM ring_members WHERE internal_ext IS NULL ORDER BY id").fetchall():
             conn.execute("UPDATE ring_members SET internal_ext = ? WHERE id = ?",
                          (next_ext(conn, "ring_members", "internal_ext", 1000), r[0]))

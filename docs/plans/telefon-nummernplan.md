@@ -10,8 +10,9 @@ Stand 24.11.2026. Entscheide von Stefan in diesem Gespräch.
 | **3000er** | Personen: `3 HH WW P` (6 Stellen) | 309011 = Haus 9, Wohnung 01, Person 1 |
 | **4000er** | Hausverwaltung, heute Immosense: 4000 Hauptnummer, 4001 … Mitarbeiter | 4000 Immosense |
 
-Offen: den 2000er-Bereich unterteilen? Vorschlag: 2000–2099 Dienste (Hauswart, Technik …),
-2100–2199 Geräte. Die heutigen 2000–2003 würden dann umziehen.
+2000er unterteilt (Entscheid 24.11.): **2000–2099 Dienste** (Hauswart, Technik …; dahinter ein
+Gerät oder eine Gruppe), **2100–2199 Geräte** (geteilte Telefone, Testgeräte). Die heutigen
+2000–2003 ziehen in Schritt 2 auf 2100–2103 um.
 
 ### 3000er: `3 HH WW P`
 
@@ -82,8 +83,10 @@ sichern, Dateien per `pct push` einspielen, `systemctl restart pbx-api`. So war 
 
 ## Reihenfolge
 
-1. Anlage: `calls.ext/person`, Anrufliste/Einstellungen-Schnittstellen (nutzbar mit den
-   heutigen Nebenstellen).
+1. ✓ 24.11.: Anlage: `calls.ext/person/ziel_ext/ziel_person` (bestehende Anrufe ueber `telefon_log`
+   nachgetragen), `GET /api/telefon/anrufliste`, `GET|PUT /api/telefon/einstellungen?paket=`,
+   Anmeldung mit Nebenstelle und Passwort fuer jede aktive Nebenstelle (`_nebenstelle()`).
+   Ausgerollt auf CT 220 (Sicherungen `*.vor-anrufliste`, auch die SQLite-Datei), getestet ueber 2002.
 2. Nummernplan: `personen_nummern` erzeugen und prüfen (Stefan sieht die Liste, bevor sie gilt),
    4000er für Immosense, Dialplan für 3/4.
 3. Rosenweg Telefon: Verlauf/Voicemail/Einstellungen aus der Anlage (zunächst über die

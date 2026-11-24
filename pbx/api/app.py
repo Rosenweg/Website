@@ -245,11 +245,16 @@ def call_event():
                 (b.get("direction", "inbound"), b.get("caller_id"), b.get("dialed"), uid,
                  b.get("started_at"), json.dumps(b.get("meta") or {})),
             )
+            _call_personen(conn, uid, b.get("direction", "inbound"), b.get("caller_id"), b.get("dialed"))
         elif event == "answer":
             conn.execute(
                 "UPDATE calls SET answered_at = COALESCE(?, datetime('now')), answered_by = ? WHERE uniqueid = ?",
                 (b.get("answered_at"), b.get("answered_by"), uid),
             )
+            # eingehend: wer abgenommen hat, ist die Person dieses Anrufs
+            if db.ist_nebenstelle(conn, b.get("answered_by")):
+                conn.execute("UPDATE calls SET ext = ?, person = ? WHERE uniqueid = ? AND ext IS NULL",
+                             (str(b.get("answered_by")), _person_jetzt(conn, b.get("answered_by")), uid))
         elif event == "end":
             conn.execute(
                 "UPDATE calls SET ended_at = COALESCE(?, datetime('now')), hangup_cause = ?, "
@@ -269,10 +274,30 @@ def call_event():
                 (b.get("direction", "internal"), b.get("caller_id"), b.get("dialed"), uid,
                  b.get("started_at"), b.get("duration_seconds"), b.get("hangup_cause")),
             )
+            _call_personen(conn, uid, b.get("direction", "internal"), b.get("caller_id"), b.get("dialed"))
         conn.commit()
         return jsonify({"ok": True})
     finally:
         conn.close()
+
+
+def _person_jetzt(conn, ext):
+    """E-Mail der Person, die gerade an `ext` angemeldet ist (geteilte Telefone)."""
+    if not ext:
+        return None
+    r = conn.execute("SELECT email FROM telefon_sitzungen WHERE ext = ?", (str(ext),)).fetchone()
+    return r["email"] if r and r["email"] else None
+
+
+def _call_personen(conn, uid, direction, caller_id, dialed):
+    """Anruf den Personen zuordnen: anrufende Nebenstelle (intern/ausgehend) und
+    angerufene Nebenstelle (intern). Bereits gesetzte Werte bleiben."""
+    ext = str(caller_id) if direction in ("internal", "outbound") and db.ist_nebenstelle(conn, caller_id) else None
+    ziel = str(dialed) if direction == "internal" and db.ist_nebenstelle(conn, dialed) else None
+    conn.execute(
+        "UPDATE calls SET ext = COALESCE(ext, ?), person = COALESCE(person, ?), "
+        "ziel_ext = COALESCE(ziel_ext, ?), ziel_person = COALESCE(ziel_person, ?) WHERE uniqueid = ?",
+        (ext, _person_jetzt(conn, ext), ziel, _person_jetzt(conn, ziel), uid))
 
 
 @app.post("/api/pbx/voicemail")
@@ -1369,6 +1394,106 @@ def telefon_kontakte():
     if request.args.get("version") == d["version"]:
         return jsonify({"version": d["version"], "unveraendert": True})
     return jsonify(d)
+
+
+# ─── Rosenweg Telefon: Daten der Person aus der Anlage (Regel 6/7) ───────────
+def _nebenstelle():
+    """HTTP-Basic ext:secret irgendeiner aktiven Nebenstelle (nicht nur geteilt):
+    Rosenweg Telefon weist sich mit seinem SIP-Zugang aus. -> (ext, None) | (None, response)"""
+    a = request.authorization
+    nein = (jsonify({"error": "Nebenstelle nicht berechtigt"}), 401)
+    if not a or not a.username or not a.password:
+        return None, nein
+    conn = db.connect()
+    try:
+        row = conn.execute("SELECT ext, secret FROM sip_extensions WHERE ext = ? AND enabled = 1",
+                           (a.username,)).fetchone()
+    finally:
+        conn.close()
+    if not row or not hmac.compare_digest(str(row["secret"]).encode(), a.password.encode()):
+        return None, nein
+    return row["ext"], None
+
+
+def _person_der_nebenstelle(conn, ext):
+    """Person hinter einer Nebenstelle: Sitzung (geteilte Telefone). Persoenliche
+    3000er-Nummern kommen mit dem Nummernplan (docs/plans/telefon-nummernplan.md)."""
+    r = conn.execute("SELECT email, name FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+    return (r["email"], r["name"]) if r and r["email"] else (None, None)
+
+
+@app.get("/api/telefon/anrufliste")
+def telefon_anrufliste():
+    """Anrufe der Person, die an dieser Nebenstelle angemeldet ist — ueber alle Geraete."""
+    ext, deny = _nebenstelle()
+    if deny:
+        return deny
+    limit = min(int(request.args.get("limit", 200) or 200), 500)
+    conn = db.connect()
+    try:
+        email, name = _person_der_nebenstelle(conn, ext)
+        if not email:
+            return jsonify({"angemeldet": False, "anrufe": []})
+        rows = conn.execute(
+            "SELECT id, direction, caller_id, dialed, ext, person, ziel_ext, ziel_person, started_at, "
+            "answered_at, duration_seconds, hangup_cause, voicemail_summary "
+            "FROM calls WHERE lower(person) = lower(?) OR lower(ziel_person) = lower(?) "
+            "ORDER BY started_at DESC LIMIT ?", (email, email, limit)).fetchall()
+        anrufe = []
+        for r in rows:
+            ich_rufe = (r["person"] or "").lower() == email.lower() and r["direction"] in ("internal", "outbound")
+            angenommen = bool(r["answered_at"]) or (r["hangup_cause"] or "").upper() == "ANSWERED"
+            anrufe.append({
+                "id": r["id"],
+                # aus Sicht der Person
+                "richtung": "ausgehend" if ich_rufe else ("eingehend" if angenommen else "verpasst"),
+                "nummer": r["dialed"] if ich_rufe else r["caller_id"],
+                "ueber": r["ext"] if ich_rufe else (r["ziel_ext"] or r["ext"]),
+                "beginn": r["started_at"],
+                "dauer": r["duration_seconds"],
+                "voicemail": r["voicemail_summary"],
+            })
+        return jsonify({"angemeldet": True, "name": name, "anrufe": anrufe})
+    finally:
+        conn.close()
+
+
+@app.route("/api/telefon/einstellungen", methods=["GET", "PUT"])
+def telefon_einstellungen():
+    """Einstellungen einer App pro Person (?paket=...). PUT {geaendert, werte}:
+    gespeichert, wenn neuer als die Fassung auf der Anlage."""
+    ext, deny = _nebenstelle()
+    if deny:
+        return deny
+    paket = (request.args.get("paket") or "").strip()
+    if not paket or len(paket) > 100:
+        return jsonify({"error": "paket fehlt"}), 400
+    conn = db.connect()
+    try:
+        email, _ = _person_der_nebenstelle(conn, ext)
+        if not email:
+            return jsonify({"error": "Niemand angemeldet"}), 409
+        alt = conn.execute("SELECT werte, geaendert FROM telefon_einstellungen WHERE email = ? AND paket = ?",
+                           (email.lower(), paket)).fetchone()
+        if request.method == "GET":
+            if not alt:
+                return jsonify({"geaendert": 0, "werte": {}})
+            return jsonify({"geaendert": alt["geaendert"], "werte": json.loads(alt["werte"])})
+        b = request.get_json(silent=True) or {}
+        werte, geaendert = b.get("werte"), int(b.get("geaendert") or 0)
+        if not isinstance(werte, dict) or len(json.dumps(werte)) > 64_000:
+            return jsonify({"error": "werte ungueltig"}), 400
+        if alt and alt["geaendert"] >= geaendert:
+            return jsonify({"ok": True, "uebernommen": False, "geaendert": alt["geaendert"]})
+        conn.execute(
+            "INSERT INTO telefon_einstellungen (email, paket, werte, geaendert, updated_at) "
+            "VALUES (?,?,?,?, datetime('now')) ON CONFLICT(email, paket) DO UPDATE SET "
+            "werte = excluded.werte, geaendert = excluded.geaendert, updated_at = excluded.updated_at",
+            (email.lower(), paket, json.dumps(werte, ensure_ascii=False), geaendert))
+        conn.commit()
+        return jsonify({"ok": True, "uebernommen": True, "geaendert": geaendert})
+    finally:
+        conn.close()
 
 
 @app.get("/api/telefon/meine")
