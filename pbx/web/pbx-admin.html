@@ -140,6 +140,10 @@
         <textarea id="tel_aus" rows="3" style="padding:.45rem .6rem;border:1px solid #d1d5db;border-radius:8px;font-family:ui-monospace,monospace;font-size:.8rem"></textarea></label>
       <button onclick="saveTelAus()" style="align-self:flex-end">Speichern</button>
     </div>
+    <div class="row" style="margin-top:.6rem">
+      <label class="f" style="flex:1">Nur unsichtbar (bleiben funktionsfähig, z.B. System-Telefon für Notrufe, System-Kamera für „Foto aufnehmen")
+        <textarea id="tel_unsichtbar" rows="2" style="padding:.45rem .6rem;border:1px solid #d1d5db;border-radius:8px;font-family:ui-monospace,monospace;font-size:.8rem"></textarea></label>
+    </div>
     <details style="margin-top:.8rem"><summary class="muted" style="cursor:pointer;font-size:.82rem">Verlauf</summary>
       <table style="margin-top:.5rem"><thead><tr><th>Zeit (UTC)</th><th>Ext</th><th>Was</th><th>Wer</th><th>Durch</th></tr></thead>
         <tbody id="tel_log"></tbody></table></details>
@@ -319,10 +323,12 @@ async function loadTelefone(){
     || '<tr><td colspan="5" class="muted">Noch nichts.</td></tr>';
   $('tel_gruppen').value = (d.gruppen||[]).join(', ');
   $('tel_aus').value = (d.ausblenden||'').split(',').map(s=>s.trim()).filter(Boolean).join(',\n');
+  $('tel_unsichtbar').value = (d.unsichtbar||'').split(',').map(s=>s.trim()).filter(Boolean).join(',\n');
 }
 async function saveTelAus(){
   const v = $('tel_aus').value.split(/[,\s]+/).map(s=>s.trim()).filter(Boolean).join(',');
-  const r = await api('/api/pbx/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({telefon_ausblenden:v})});
+  const u = $('tel_unsichtbar').value.split(/[,\s]+/).map(s=>s.trim()).filter(Boolean).join(',');
+  const r = await api('/api/pbx/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({telefon_ausblenden:v, telefon_unsichtbar:u})});
   if(!r.ok){ showErr((await r.json()).error||'Fehler'); return; }
   showErr('Gespeichert — die Telefone übernehmen es beim nächsten Abgleich.'); loadTelefone();
 }

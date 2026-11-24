@@ -147,6 +147,10 @@ DEFAULT_CONFIG = {
     "weekdays": "mon-sun",
     # Wer sich an geteilten Telefonen anmelden darf (Authentik-Gruppen, klein).
     "telefon_gruppen": "technik,präsident,praesident",
+    # Bleiben installiert und funktionsfaehig, aber der Rosenweg Launcher zeigt sie
+    # nicht: Android verlangt fuer Notrufe die System-Telefon-App und fuer
+    # "Foto aufnehmen" (IMAGE_CAPTURE, seit Android 11) die System-Kamera.
+    "telefon_unsichtbar": "com.samsung.android.dialer,com.sec.android.app.camera",
     # System-Apps, die geteilte Telefone immer ausblenden (Device Owner).
     # Lebenswichtiges (WebView, Telefonie, Notruf) schuetzt die App selbst.
     "telefon_ausblenden": ",".join([
@@ -179,6 +183,9 @@ DEFAULT_CONFIG = {
         # Voice Access, Samsung-Sprachdienst.
         "com.samsung.android.honeyboard", "com.google.android.tts",
         "com.google.android.apps.accessibility.voiceaccess", "com.samsung.android.intellivoiceservice",
+        "com.sec.android.app.sbrowser",              # Samsung Internet (Browser: Chrome bzw. spaeter Cromite)
+        # Durch Rosenweg-Forks ersetzt (Fossify Camera, Contacts, File Manager):
+        "com.samsung.android.app.contacts", "com.sec.android.app.myfiles",
     ]),
 }
 

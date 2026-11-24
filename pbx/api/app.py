@@ -508,7 +508,8 @@ def config_put():
     if deny:
         return deny
     b = request.get_json(silent=True) or {}
-    allowed = {"hours_open_from", "hours_open_to", "ring_timeout", "weekdays", "telefon_gruppen", "telefon_ausblenden"}
+    allowed = {"hours_open_from", "hours_open_to", "ring_timeout", "weekdays", "telefon_gruppen",
+               "telefon_ausblenden", "telefon_unsichtbar"}
     import re as _re
     hhmm = _re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
     for k, v in b.items():
@@ -518,7 +519,7 @@ def config_put():
             return jsonify({"error": f"{k} muss HH:MM sein"}), 400
         if k == "ring_timeout" and not (str(v).isdigit() and 5 <= int(v) <= 120):
             return jsonify({"error": "ring_timeout muss 5-120 sein"}), 400
-        if k == "telefon_ausblenden" and not _re.fullmatch(r"[A-Za-z0-9_.,\s]{0,4000}", str(v)):
+        if k in ("telefon_ausblenden", "telefon_unsichtbar") and not _re.fullmatch(r"[A-Za-z0-9_.,\s]{0,4000}", str(v)):
             return jsonify({"error": "telefon_ausblenden: Paketnamen durch Komma getrennt"}), 400
         if k == "telefon_gruppen" and not _re.fullmatch(r"[\w äöüÄÖÜ,.-]{0,300}", str(v)):
             return jsonify({"error": "telefon_gruppen: Gruppennamen durch Komma getrennt"}), 400
@@ -995,7 +996,9 @@ def telefon_status():
     conn = db.connect()
     try:
         row = conn.execute("SELECT name, email, seit, gruppen FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
-        return jsonify({"ext": ext, **_sitzung_json(row), **_apps_fuer(conn, row)})
+        geraet = conn.execute("SELECT name FROM sip_extensions WHERE ext = ?", (ext,)).fetchone()
+        return jsonify({"ext": ext, "geraet": geraet["name"] if geraet else ext,
+                        **_sitzung_json(row), **_apps_fuer(conn, row)})
     finally:
         conn.close()
 
@@ -1147,8 +1150,10 @@ def telefon_katalog():
     conn = db.connect()
     try:
         rows = conn.execute("SELECT * FROM telefon_apps WHERE aktiv = 1 ORDER BY reihenfolge, name").fetchall()
-        aus = [p.strip() for p in re.split(r"[,\s]+", _cfg(conn).get("telefon_ausblenden", "")) if p.strip()]
-        return jsonify({"apps": [_app_json(r) for r in rows], "ausblenden": aus})
+        cfg = _cfg(conn)
+        aus = [p.strip() for p in re.split(r"[,\s]+", cfg.get("telefon_ausblenden", "")) if p.strip()]
+        unsichtbar = [p.strip() for p in re.split(r"[,\s]+", cfg.get("telefon_unsichtbar", "")) if p.strip()]
+        return jsonify({"apps": [_app_json(r) for r in rows], "ausblenden": aus, "unsichtbar": unsichtbar})
     finally:
         conn.close()
 
@@ -1417,7 +1422,8 @@ def telefon_sitzungen_admin():
                            "ORDER BY id DESC LIMIT 30").fetchall()
         return jsonify({"sitzungen": db.rows_to_dicts(sitz), "log": db.rows_to_dicts(log),
                         "gruppen": sorted(_telefon_gruppen(conn)),
-                        "ausblenden": _cfg(conn).get("telefon_ausblenden", "")})
+                        "ausblenden": _cfg(conn).get("telefon_ausblenden", ""),
+                        "unsichtbar": _cfg(conn).get("telefon_unsichtbar", "")})
     finally:
         conn.close()
 
