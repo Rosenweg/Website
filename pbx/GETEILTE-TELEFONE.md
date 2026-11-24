@@ -94,10 +94,20 @@ Wichtig für die geplante Einrichtung per QR ohne Kabel.
 | Standard-Browser | `adb shell cmd role add-role-holder android.app.role.BROWSER <paket> 0` | dito |
 | Akku-Optimierung ausnehmen | `adb shell dumpsys deviceidle whitelist +ch.rosenweg4303.telefon` | dito |
 | Akku-Optimierung für Rosenweg Messenger ausnehmen (MQTT bleibt im Ruhemodus offen, Notfälle kommen an) | `adb shell dumpsys deviceidle whitelist +ch.rosenweg4303.messages` | dito |
+| Messenger darf „Nicht stören“ für den Notfall-Alarm kurz ausschalten | `adb shell cmd notification allow_dnd ch.rosenweg4303.messages` | dito |
+| Rotes Notfall-Fenster über dem Sperrbildschirm (Android 14 erteilt es nicht von selbst) | `adb shell appops set ch.rosenweg4303.messages USE_FULL_SCREEN_INTENT allow` | dito |
+| Exakte Wecker: Notfall-Erinnerung alle 2 min bis gelesen, auch im Tiefschlaf | `adb shell appops set ch.rosenweg4303.messages SCHEDULE_EXACT_ALARM allow` | dito |
 | Zugriff auf alle Dateien (Aufräumen beim Abmelden) | `adb shell appops set ch.rosenweg4303.telefon MANAGE_EXTERNAL_STORAGE allow` | dito |
 | Geräte-App darf „Nicht stören“ kurz ausschalten (Telefon suchen: klingelt auch bei Nicht stören) | `adb shell cmd notification allow_dnd ch.rosenweg4303.telefon` | dito; ohne: Suchanruf klingelt nur bei stumm/vibrieren, nicht bei „Nicht stören“ |
 | Rosenweg Launcher darf Widgets ohne Rückfrage einbinden (Uhr-Widget auf der Startseite, die sich nicht bearbeiten lässt) | `adb shell appwidget grantbind --package ch.rosenweg4303.home --user 0` | dito; ohne: Android fragt einmal nach |
 | Seitentaste lang = Ausschaltmenü statt KI-Assistent (Neustart auch im gesperrten Zustand: wer vergisst, sich abzumelden, wird durch den Neustart abgemeldet, die PIN ist weg) | `adb shell settings put global function_key_config_longpress_type 0` und `adb shell settings put global power_button_long_press 1` (Samsung prüft beide; 103 = digitaler Assistent), dazu `adb shell settings put secure lock_function_val 0` (Samsung „Netzwerk und Sicherheit sperren“ aus — sonst verlangt das Ausschaltmenü vor dem Neustart die PIN; getestet 24.11.2026) | dito; Notlösung ohne Menü: Leiser + Seitentaste ~7 s (erzwungener Neustart) |
+
+**Achtung — Ausblenden setzt diese Rechte zurück** (gefunden 24.11.2026): Android behandelt eine
+ausgeblendete App (`setApplicationHidden`) wie deinstalliert und vergisst dabei App-Ops
+(`USE_FULL_SCREEN_INTENT`, `SCHEDULE_EXACT_ALARM`), den „Nicht stören“-Zugriff und die
+Akku-Ausnahme; `clearApplicationUserData` ebenso. Apps, die solche adb-Rechte brauchen, stehen
+darum im Katalog auf **„immer“** (bleiben sichtbar) und löschen die Daten der Person selbst
+(siehe „Rosenweg Messenger auf geteilten Telefonen“).
 
 Samsung Knox (kostenlose Knox-Platform-Schnittstelle) kann einige dieser
 Punkte vermutlich lösen — vor dem Bau der QR-Einrichtung prüfen.
@@ -172,6 +182,21 @@ sind (`status = assigned`), deren Konto für geteilte Telefone freigeschaltet is
 - Protokoll: `telefon_log` mit `durch = karte:<Inventarnummer>`; Abweisungen als
   `karte-abgelehnt` (`karte:<nr>:unbekannt|gesperrt|nicht_freigeschaltet`).
 
+**Stolpersteine aus dem ersten Einsatz (24.11.2026):**
+- **Läuft eine Kamera, erkennt das A15 keine NFC-Karten** (Antenne neben der Kamera; auch die
+  vordere blockiert). Der Sperrbildschirm zeigt darum „Rosenweg-Karte hinten ans Telefon halten“;
+  die Kamera für den Anmelde-QR startet erst mit „QR-Code scannen“ (hintere Kamera, nach 60 s
+  wieder aus). Rosenweg Gerät ab v189.
+- Die System-Tag-App `com.android.apps.tag` steht in `telefon_ausblenden`, sonst fragt Android bei
+  jeder Karte, welche App sie bekommen soll.
+- **E-Mail-Adresse:** Die Anlage findet die Person über die E-Mail des Access-Benutzers. Bewohner
+  kommen per LDAP aus dem Rosenweg-Verzeichnis nach UniFi, ihre Adresse passt von selbst. Lokale
+  UniFi-Konten (z.B. das an das UI-Konto gebundene mit Gmail, `r9admin`) brauchen eine
+  **Verknüpfung** in der Website-Tabelle `person_email_alias` (Zusatzadresse → Hauptadresse des
+  Rosenweg-Kontos; `GET/POST/DELETE /api/admin/email-alias`, nur Technik/Präsident). Ohne sie
+  meldet die Anlage „Dein Konto ist für geteilte Telefone nicht freigeschaltet“.
+- `telefon_gruppen` = `technik,präsident,praesident,bewohner` (Bewohner freigeschaltet 24.11.2026).
+
 **Sicherheitshinweis:** Die UID ist nicht geheim und lässt sich mit jedem NFC-Telefon
 auslesen und auf eine beschreibbare Karte kopieren. Wer eine Karte verliert, meldet das
 sofort — die Karte wird in **Rosenweg Karten** (oder in UniFi Access) entzogen und gilt
@@ -229,3 +254,37 @@ Haupt-API (`X-PBX-Secret`, nur von der Anlage):
 
 Person zur Karte: Access-Benutzer → E-Mail → Website-Benutzer (`users`, Website-ID);
 Gruppen live aus Authentik, sonst `users.groups_json` (wie `/api/auth/me`).
+
+## Rosenweg Messenger auf geteilten Telefonen (24.11.2026)
+
+- **Katalog „immer“:** Der Messenger bleibt sichtbar, auch wenn niemand angemeldet ist (der
+  Sperrbildschirm im Kiosk-Modus lässt ohnehin nicht an die Apps). Grund: Ausblenden setzt die
+  Notfall-Rechte zurück (siehe oben).
+- **Anmelden:** Rosenweg Gerät schickt `ch.rosenweg4303.ANGEMELDET` mit
+  `FLAG_INCLUDE_STOPPED_PACKAGES` (nach dem Löschen sind Apps „gestoppt“ und bekämen den Broadcast
+  sonst nicht). Der Messenger (`RosenwegAnmeldungReceiver`) startet seine Verbindung sofort —
+  Nachrichten und Notfälle kommen an, ohne dass jemand die App öffnet. Ab Messenger v43,
+  Rosenweg Gerät v191.
+- **Abmelden:** Statt `clearApplicationUserData` (das auch die Sonderrechte löscht) schickt Rosenweg
+  Gerät `ch.rosenweg4303.ABGEMELDET`; der Messenger löscht selbst alle Daten der Person (Datenbanken,
+  Einstellungen, Dateien, Geräteschlüssel, Benachrichtigungen) und bestätigt über
+  `content://ch.rosenweg4303.messages.rosenweg.loeschen` → `call("gewischt")` = `{ok, zeit}`.
+  Kommt innert 10 s keine Bestätigung, löscht Rosenweg Gerät wie früher komplett (Datenschutz vor
+  Komfort). Liste der Apps, die selbst löschen: `Katalog.LOESCHT_SELBST`. Ab Messenger v44,
+  Rosenweg Gerät v194. Getestet: Daten weg (≈200 ms), alle Rechte bleiben.
+- **Nach dem Anmelden** holt der Messenger den Verlauf der Person neu vom Server. Ältere
+  Direktnachrichten zeigen „🔒 Vor der Anmeldung an diesem Gerät verschlüsselt“ (neuer
+  Geräteschlüssel); andere Geräte der Person können sie nachliefern.
+- **Geräteschlüssel:** feste Geräte-ID pro Telefon und Person, nach jeder Anmeldung ein neuer
+  Schlüssel. Der message-store behält pro Gerät nur den neuesten (`POST /api/devices`), sonst
+  verschlüsseln Absender mit dem alten.
+- **Notfall** (Kanal `notfall` oder `priority: emergency`): rotes Vollbild über allem, Sirene über
+  den Wecker-Kanal (auch bei stumm und „Nicht stören“), je Alarm 30 s, Wiederholung alle 2 min bis
+  „Verstanden“ (= Lesebestätigung), höchstens 60 min. Schreiben dürfen im Kanal Notfall nur Technik
+  und Präsident, in Ankündigungen zusätzlich der Ausschuss.
+
+## Anzeige in Rosenweg Gerät
+
+Angemeldet steht dort „Interne Telefonnummer: <persönliche Nummer>“ (mit ihr ruft die Person intern
+an; `nummer` aus `/api/telefon/status`) und „Gerät: Nebenstelle 21xx“ (Adresse des Geräts für Telefon
+suchen, Fern-Abmelden, Einrichtung). Extern geht die Nummer des Anlagen-Anschlusses raus.
