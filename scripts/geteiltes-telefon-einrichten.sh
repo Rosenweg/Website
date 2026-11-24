@@ -52,6 +52,7 @@ if a shell pm path ch.rosenweg4303.messages >/dev/null 2>&1; then
   schritt "Akku-Optimierung aus (Rosenweg Messenger: Notfälle auch im Ruhemodus)" a shell dumpsys deviceidle whitelist +ch.rosenweg4303.messages
   schritt "\"Nicht stören\" kurz ausschalten (Notfall-Alarm im Messenger)" a shell cmd notification allow_dnd ch.rosenweg4303.messages
   schritt "Notfall-Fenster über dem Sperrbildschirm (Messenger)" a shell appops set ch.rosenweg4303.messages USE_FULL_SCREEN_INTENT allow
+  schritt "Exakte Wecker (Notfall-Erinnerung alle 2 Minuten bis gelesen)" a shell appops set ch.rosenweg4303.messages SCHEDULE_EXACT_ALARM allow
 else
   echo "später   Rosenweg Messenger noch nicht installiert (Katalog) — Skript danach nochmals laufen lassen"
 fi
