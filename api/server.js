@@ -2524,13 +2524,30 @@ app.get('/api/users', authMiddleware, adminOnly, async (req, res) => {
   }
 });
 
+// Dienst-Zugang des message-store (CT 131) fuer Personen, die am geteilten Telefon ueber die
+// Anlage angemeldet sind (kein Website-Login auf dem Geraet): Kopf X-Messenger-Service mit
+// MESSENGER_SERVICE_SECRET und X-Messenger-User = users.id. Gilt NUR fuer die zwei
+// /api/messenger/*-Lesezugriffe unten (docs: rosenweg-messenger docs/android-app.md, 24.11.2026).
+const MESSENGER_SERVICE_SECRET = process.env.MESSENGER_SERVICE_SECRET || '';
+function messengerAuth(req, res, next) {
+  const s = req.headers['x-messenger-service'];
+  if (MESSENGER_SERVICE_SECRET && typeof s === 'string' && s.length === MESSENGER_SERVICE_SECRET.length &&
+      crypto.timingSafeEqual(Buffer.from(s), Buffer.from(MESSENGER_SERVICE_SECRET))) {
+    const uid = parseInt(String(req.headers['x-messenger-user'] || ''), 10);
+    if (!Number.isInteger(uid) || uid <= 0) return res.status(400).json({ error: 'X-Messenger-User fehlt' });
+    req.user = { id: uid, user_id: uid, messengerDienst: true };
+    return next();
+  }
+  return authMiddleware(req, res, next);
+}
+
 // GET /api/messenger/directory — schlanke Personenliste für den Personen-Picker
 // der Messenger-PWA (chat.rosenweg4303.ch). Jeder EINGELOGGTE User darf die
 // Siedlungs-Mitglieder als Verzeichnis sehen (wie WhatsApp-Kontakte innerhalb der
 // Genossenschaft); nur unkritische Felder (id/name/stweg, KEINE Rolle/Balance).
 // Die id ist users.id — derselbe Namespace wie /api/auth/me → passt zu
 // conversation_members.user_id im message-store.
-app.get('/api/messenger/directory', authMiddleware, async (req, res) => {
+app.get('/api/messenger/directory', messengerAuth, async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT id, name, stweg, avatar_url FROM users
@@ -2550,7 +2567,7 @@ app.get('/api/messenger/directory', authMiddleware, async (req, res) => {
 // das Haus kodiert (18.2OG.1→18, RW17-01→17, 1305→13). Best-effort: was nicht
 // eindeutig zu einer bekannten Hausnummer der STWEG passt, wird verworfen (kein
 // Fehl-Join). STWEG→Häuser aus site-config.json (Wohngebäude 1–7).
-app.get('/api/messenger/house-membership', authMiddleware, async (req, res) => {
+app.get('/api/messenger/house-membership', messengerAuth, async (req, res) => {
   const STWEG_HOUSES = { 1: ['17', '18'], 2: ['13', '14', '16'], 3: ['9'], 4: ['10', '12'], 5: ['5', '6', '8'], 6: ['1'], 7: ['2', '4'] };
   const parseHouse = (bez, stweg) => {
     if (!bez) return null;
