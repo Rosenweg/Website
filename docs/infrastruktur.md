@@ -72,6 +72,7 @@ ausserhalb über den Sprunghost `ssh -J stefan@10.0.10.149 …`.
 | 104 | nextcloud | pve1 | 100.64.2.36 | Nextcloud | – |
 | 105 | rk-mqtt-server | pve1 | 100.64.2.51 | MQTT-Broker (1883, 9001) | `mqtt-*.md` |
 | 106 | fileserver | pve2 | 100.64.2.28 (Dienstadresse `files.ad…` = 100.64.2.29, keepalived) | Samba, Dokumentenablage, Git-Backup | [`active-directory.md`](active-directory.md), [`../fileserver-lxc/README.md`](../fileserver-lxc/README.md) |
+| 139 | euro-office | pve2 | 100.64.2.58 | Euro-Office DocumentServer für Nextcloud | [`euro-office.md`](euro-office.md) |
 | 206 | fileserver2 | pve2 | 100.64.2.27 | Replikat (BACKUP für `.29`) | dito |
 | 108 | dc1 | pve2 | 100.64.2.30 | Samba-AD-DC, Passwort-API (8446), Avatar-Sync | [`active-directory.md`](active-directory.md) |
 | 136 | dc2 | pve3 | – | zweiter DC | [`../ad-dc/README.md`](../ad-dc/README.md) |

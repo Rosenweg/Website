@@ -18317,6 +18317,37 @@ function cnamSauber(name) {
   return s || null;
 }
 
+// Personen fuer die persoenlichen Nummern der Anlage (3HHWWP, docs/plans/telefon-nummernplan.md).
+// Die pbx-api holt das regelmaessig und vergibt fehlenden Personen eine Nummer;
+// vergebene Nummern aendert sie nie. Gleiche Abfragen wie beim ersten Nummernplan (24.11.2026).
+app.get('/api/pbx/personen', requirePbxSecret, async (_req, res) => {
+  try {
+    const wohnungen = await pool.query(
+      `SELECT id, stweg, bezeichnung AS bez, COALESCE(stockwerk,'') AS stock, COALESCE(bewohnt_von,'') AS bewohnt
+         FROM wohnungen WHERE deleted_at IS NULL AND typ = 'Wohnung' ORDER BY bezeichnung`);
+    const kontakte = await pool.query(
+      `SELECT w.id AS wid, k.id AS kid, k.rolle, COALESCE(k.name,'') AS name, LOWER(COALESCE(k.email,'')) AS email,
+              COALESCE(k.sort_order,0) AS sort, k.created_at AS created
+         FROM wohnungen w JOIN wohnungen_kontakte k ON k.wohnung_id = w.id
+        WHERE w.deleted_at IS NULL AND w.typ = 'Wohnung' AND k.deleted_at IS NULL AND k.archiviert_am IS NULL
+        ORDER BY w.bezeichnung, k.sort_order, k.created_at`);
+    const meg = await pool.query(
+      `WITH aktiv AS (
+         SELECT k.*, w.typ, w.bezeichnung FROM wohnungen_kontakte k JOIN wohnungen w ON w.id = k.wohnung_id
+          WHERE k.deleted_at IS NULL AND k.archiviert_am IS NULL AND w.deleted_at IS NULL
+            AND COALESCE(k.email,'') <> '' AND k.rolle <> 'verwalter'),
+       mit_wohnung AS (SELECT DISTINCT LOWER(email) e FROM aktiv WHERE typ = 'Wohnung')
+       SELECT LOWER(a.email) AS email, MIN(a.name) AS name, STRING_AGG(DISTINCT a.bezeichnung, ', ') AS einheiten,
+              MIN(a.created_at) AS created
+         FROM aktiv a WHERE LOWER(a.email) NOT IN (SELECT e FROM mit_wohnung)
+        GROUP BY LOWER(a.email) ORDER BY MIN(a.created_at)`);
+    res.json({ wohnungen: wohnungen.rows, kontakte: kontakte.rows, meg: meg.rows });
+  } catch (e) {
+    console.error('[pbx-personen]', e.message);
+    res.status(500).json({ error: 'Abfrage fehlgeschlagen' });
+  }
+});
+
 app.get('/api/pbx/cnam/:number', requirePbxSecret, async (req, res) => {
   try {
     const raw = String(req.params.number || '').trim();

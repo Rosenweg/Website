@@ -5,6 +5,29 @@
 
 ---
 
+## 2026-11-24
+
+### Offen
+- [ ] **Zentraler Log-Sammler (User 2026-11-24):** Logs aller CTs/VMs (Nextcloud, Traefik, Postfix/PMG, Asterisk, Authentik, Bots, Proxmox-Hosts) an einer Stelle sammeln, durchsuchen und mit Aufbewahrungsfrist versehen. Bisher liegt jedes Log nur im eigenen Container. Ein Fehler fällt erst auf, wenn er etwas lahmlegt; Beispiel: nextcloud.log mit 6,3 GB, unbemerkt. Varianten prüfen (z.B. Loki+Grafana oder VictoriaLogs; Versand per Vector/Alloy oder journald-remote). Dazu Alarme: Fehlerrate, Log-Wachstum, „Job läuft nicht mehr“.
+- [x] **Nextcloud kam seit 22.11. nicht mehr in `/stweg1`–`/stweg3`** (sichtbar als readme.md „Permission denied“ im Log). Ursache: Ordnerrechte-Rollout 22.11. (`/root/ordnerrechte` auf CT 206/106) gibt nur benannten AD-Gruppen + `api-svc` Zugriff. Die Nextcloud liest aber als lokales `www-data`. Fix 24.11.: In CT 104 lokale Gruppe `technik` gid 11156, `www-data` als Mitglied, php-fpm neu gestartet. Lesen/Schreiben geprüft. README auf CT 206+106 ergänzt.
+- [ ] **Ordnerrechte sauber:** Nextcloud als eigener Eintrag in `tabelle.txt` statt über die lokale gid 11156 in CT 104. Dazu muss `anwenden.sh` numerische IDs (uid 33) annehmen. Prüfen, ob auf den Fileservern etwas als www-data läuft.
+- [x] **Nextcloud sieht Samba-Änderungen in den Ablage-Einbindungen nicht:** Bei externen „Local“-Einbindungen ist `filesystem_check_changes` nicht gesetzt (= nie prüfen). Wird eine Datei über Windows/Samba/CephFS direkt geändert, zeigt die Nextcloud weiter alte Größe/ETag/Inhalt-Vorschau. Für „Persönlich“ (id 29) am 24.11. auf 1 gesetzt (bei jedem direkten Zugriff prüfen) — damit funktioniert der Notizen-Abgleich. Am 24.11. auf Stefans Anweisung für **alle 25 Einbindungen** gesetzt (`occ files_external:option <id> filesystem_check_changes 1`). **Regel: bei jeder neuen Einbindung mitsetzen.**
+- [ ] **win11-1: Drucker-Verbinden beim Anmelden scheitert** (24.11. 12:44, „Verbindung mit DruckerR9 an 100.64.2.32“, CT 111 cups-server). Samba/CUPS auf CT 111 laufen, DruckerR9 idle, nichts im Log. Wahrscheinlich `logon.bat`/Point-and-Print. Nicht durch den Home-Umbau.
+- [ ] **Ordnerrechte-Skripte liegen nur auf CT 206/106**, nicht im Repo. Ins Repo holen.
+- [x] **AD-Home als einziger persönlicher Ordner** (Entscheid Stefan 24.11.): Nextcloud zeigt `/userdata/home/$user` als „Persönlich“, für alle Personen freigeschaltet. 74 Homes, Timer `homes-anlegen` auf CT 106/206. Offen: Nextcloud-Wurzel zurückdrängen, Windows-Test (inherit acls). Plan: [docs/plans/persoenlicher-ordner.md](docs/plans/persoenlicher-ordner.md).
+- [ ] **Rechte Nextcloud ↔ Fileserver angleichen:** Nextcloud-Einbindungen aus `tabelle.txt` erzeugen (Bewohner bei stweg3/6/meg fehlen, `allgemein` für Ausschüsse, `stweg8`/`vorlagen`/`anzeigen` nicht eingebunden).
+- [ ] **Nextcloud: „Error while generating metadata for fileid …“** bei mehreren Dateien (7659–7783), seit Cron wieder läuft sichtbar. Ursache noch nicht angeschaut.
+- [ ] **Nächtliche Sicherung (vzdump 01:00 → PBS) überlastet Ceph:** 2 OSDs „slow operations in BlueStore“, pve1 Load >30, Nextcloud antwortete 503. Sicherungsfenster/Bandbreite (`bwlimit`, Staffelung) und OSD-Zustand bei Tag ansehen.
+- [ ] **Ceph HEALTH_ERR wegen unsicherer aes-Schlüsseltypen** (Altlast, unabhängig vom Ausfall).
+- [ ] **CT 128 API-Container mit `NODE_TLS_REJECT_UNAUTHORIZED=0`:** TLS-Prüfung global aus. Gezielt nur für die betroffene interne Verbindung lösen.
+
+### Erledigt
+- [x] **Nextcloud-Cron lief seit 19.10.2026 nicht** (Modus „cron“, aber keine Crontab/kein Timer → keine Hintergrund-Jobs, keine Log-Rotation). Neu: systemd `nextcloud-cron.timer` alle 5 min auf CT 104 (Nice 10, IO idle). Erster Lauf 24.11. ok (27 s CPU).
+- [x] **nextcloud.log 6,3 GB:** `loglevel` stand auf 0 (Debug) → auf 2 gesetzt, `log_rotate_size` 100 MB, altes Log nach Rotation gelöscht (Sicherung der Config: CT 104 `/root/config.php.vor-loglevel-2026-11-24`).
+- [x] **Euro-Office als Office der Nextcloud** (CT 139, siehe docs/euro-office.md).
+
+---
+
 ## 2026-07-22
 
 ### Offen

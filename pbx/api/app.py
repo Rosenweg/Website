@@ -15,8 +15,10 @@ Abhaengigkeit zur Haupt-API fuer den Betrieb. Zwei Auth-Welten:
 SIP-Telefone (LAN/VPN): aus der sip_extensions-Tabelle generiert die API
 /etc/asterisk/pjsip_phones.conf und triggert 'pjsip reload' via AMI.
 """
+import hashlib
 import hmac
 import json
+import time
 import os
 import re
 import secrets as pysecrets
@@ -26,10 +28,11 @@ from zoneinfo import ZoneInfo
 
 import requests
 import segno
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_file, send_from_directory
 
 import ami
 import db
+import nummernvergabe
 import voicemail
 
 PBX_SHARED_SECRET = os.environ.get("PBX_SHARED_SECRET", "")
@@ -64,6 +67,28 @@ PROV_CARDDAV_PASS = os.environ.get("PBX_CARDDAV_PASS", "")
 # AuthInfo ueber Realm + Domain, nicht ueber die URL.
 PROV_CARDDAV_REALM = os.environ.get("PBX_CARDDAV_REALM", "")
 PROV_CARDDAV_NAME = os.environ.get("PBX_CARDDAV_NAME", "Rosenweg")
+
+# ─── SIP-Clients ────────────────────────────────────────────────────────────
+# Welche App an einer Nebenstelle haengt, bestimmt zwei Dinge: was Asterisk im
+# SDP anbietet und welche Datei die Provisionierung ausliefert.
+#
+# android-sip (github.com/hell3lazer/Android-SIP, Sipdroid-Fork mit nativer
+# Telecom-Anbindung — die Anrufe laufen ueber die normale Telefon-App):
+#   * Seine SDP-Antwort fuehrt die DTMF-Payload (101) im m=-Feld, ohne die
+#     zugehoerige a=rtpmap-Zeile. pjproject verwirft so eine Antwort mit
+#     PJMEDIA_SDP_EMISSINGRTPMAP und bricht JEDEN eingehenden Anruf ab, noch
+#     waehrend es klingelt. Bietet Asterisk kein telephone-event an
+#     (dtmf_mode=inband), kommt die 101 gar nicht erst zurueck.
+#   * Opus kann die App nicht; ohne ihn bleibt das Angebot kuerzer.
+#   Getestet am 23.11.2026 mit einem Galaxy A15 (Android 16), App 1.4.
+CLIENTS = ("linphone", "android-sip")
+ENDPOINT_PROFILE = {
+    "linphone": ["allow=opus,g722,alaw,ulaw"],
+    "android-sip": ["allow=g722,alaw,ulaw", "dtmf_mode=inband"],
+}
+
+# Persoenliche Voicemails (3000er-Nummern), getrennt von der STWEG-Voicemail.
+VM_PERSON_DIR = os.environ.get("PBX_VM_PERSON_DIR", "/var/spool/asterisk/voicemail/personen")
 
 app = Flask(__name__)
 
@@ -224,11 +249,16 @@ def call_event():
                 (b.get("direction", "inbound"), b.get("caller_id"), b.get("dialed"), uid,
                  b.get("started_at"), json.dumps(b.get("meta") or {})),
             )
+            _call_personen(conn, uid, b.get("direction", "inbound"), b.get("caller_id"), b.get("dialed"))
         elif event == "answer":
             conn.execute(
                 "UPDATE calls SET answered_at = COALESCE(?, datetime('now')), answered_by = ? WHERE uniqueid = ?",
                 (b.get("answered_at"), b.get("answered_by"), uid),
             )
+            # eingehend: wer abgenommen hat, ist die Person dieses Anrufs
+            if db.ist_nebenstelle(conn, b.get("answered_by")):
+                conn.execute("UPDATE calls SET ext = ?, person = ? WHERE uniqueid = ? AND ext IS NULL",
+                             (str(b.get("answered_by")), _person_jetzt(conn, b.get("answered_by")), uid))
         elif event == "end":
             conn.execute(
                 "UPDATE calls SET ended_at = COALESCE(?, datetime('now')), hangup_cause = ?, "
@@ -248,6 +278,137 @@ def call_event():
                 (b.get("direction", "internal"), b.get("caller_id"), b.get("dialed"), uid,
                  b.get("started_at"), b.get("duration_seconds"), b.get("hangup_cause")),
             )
+            _call_personen(conn, uid, b.get("direction", "internal"), b.get("caller_id"), b.get("dialed"))
+        conn.commit()
+        return jsonify({"ok": True})
+    finally:
+        conn.close()
+
+
+def _person_jetzt(conn, ext):
+    """E-Mail der Person, die gerade an `ext` angemeldet ist (geteilte Telefone)."""
+    if not ext:
+        return None
+    r = conn.execute("SELECT email FROM telefon_sitzungen WHERE ext = ?", (str(ext),)).fetchone()
+    return r["email"] if r and r["email"] else None
+
+
+def _nummer_der_person(conn, email, name):
+    """Persoenliche Nummer zu E-Mail + Name. Teilen sich mehrere Personen die E-Mail,
+    entscheidet der Name; sonst die erste (kleinste) Nummer."""
+    rows = conn.execute("SELECT nummer, name FROM personen_nummern WHERE lower(email) = lower(?) AND aktiv = 1 "
+                        "ORDER BY nummer", (email or "",)).fetchall()
+    for r in rows:
+        if _gleiche_person(r["name"], name):
+            return r["nummer"]
+    return rows[0]["nummer"] if rows else ""
+
+
+def _person_der_nummer(conn, nummer):
+    """E-Mail zu einer persoenlichen Nummer (3HHWWP), sonst None."""
+    if not nummer:
+        return None
+    r = conn.execute("SELECT email FROM personen_nummern WHERE nummer = ?", (str(nummer),)).fetchone()
+    return r["email"] if r else None
+
+
+def _call_personen(conn, uid, direction, caller_id, dialed):
+    """Anruf den Personen zuordnen: anrufende Seite (intern/ausgehend) und angerufene
+    Seite (intern) — als Nebenstelle (Person aus der Sitzung) oder als persoenliche
+    Nummer (3HHWWP). Bereits gesetzte Werte bleiben."""
+    ext = person = ziel = ziel_person = None
+    if direction in ("internal", "outbound"):
+        if db.ist_nebenstelle(conn, caller_id):
+            ext, person = str(caller_id), _person_jetzt(conn, caller_id)
+        else:
+            person = _person_der_nummer(conn, caller_id)
+    if direction == "internal":
+        if db.ist_nebenstelle(conn, dialed):
+            ziel, ziel_person = str(dialed), _person_jetzt(conn, dialed)
+        else:
+            ziel_person = _person_der_nummer(conn, dialed)
+    conn.execute(
+        "UPDATE calls SET ext = COALESCE(ext, ?), person = COALESCE(person, ?), "
+        "ziel_ext = COALESCE(ziel_ext, ?), ziel_person = COALESCE(ziel_person, ?) WHERE uniqueid = ?",
+        (ext, person, ziel, ziel_person, uid))
+
+
+# ─── Nummernplan im Dialplan (AGI) ──────────────────────────────────────────
+_ZIEL_RE = re.compile(r"^(\+[1-9][0-9]{6,14}|0[1-9][0-9]{7,12})$")
+
+
+@app.get("/api/pbx/person/<nummer>")
+def person_agi(nummer):
+    """AGI: wohin klingelt eine persoenliche Nummer? Alle Geraete, an denen die
+    Person angemeldet ist, plus ein eigenes Endgeraet mit dieser Nummer."""
+    err = require_agi()
+    if err:
+        return err
+    conn = db.connect()
+    try:
+        p = conn.execute("SELECT * FROM personen_nummern WHERE nummer = ? AND aktiv = 1", (nummer,)).fetchone()
+        if not p:
+            return jsonify({"ok": False})
+        ziele = [r["ext"] for r in conn.execute(
+            "SELECT s.ext FROM telefon_sitzungen s JOIN sip_extensions e ON e.ext = s.ext "
+            "WHERE lower(s.email) = lower(?) AND e.enabled = 1 ORDER BY s.ext", (p["email"],))]
+        if db.ist_nebenstelle(conn, nummer):
+            ziele.append(str(nummer))   # Rosenweg Telefon auf dem privaten Handy
+        ohne = request.args.get("ohne") or ""
+        ziele = [z for z in ziele if z != ohne]   # anrufendes Geraet nicht mitklingeln lassen
+        wl = p["weiterleitung"] if p["weiterleitung"] in ("aus", "immer", "nicht_erreichbar") else "aus"
+        ziel = (p["weiterleitung_ziel"] or "").replace(" ", "")
+        if wl != "aus" and not _ZIEL_RE.match(ziel):
+            wl = "aus"   # ohne gueltiges Ziel keine Weiterleitung
+        return jsonify({
+            "ok": True, "name": p["name"],
+            "dial": "&".join(f"PJSIP/{z}" for z in ziele),
+            "weiterleitung": wl, "ziel": ziel if wl != "aus" else "",
+            "sekunden": max(5, min(int(p["weiterleitung_sekunden"] or 20), 60)),
+            "voicemail": 1 if p["voicemail"] else 0,
+        })
+    finally:
+        conn.close()
+
+
+@app.get("/api/pbx/verwaltung/<nummer>")
+def verwaltung_agi(nummer):
+    """AGI: 4000er Kurzwahl der Hausverwaltung -> externe Nummer."""
+    err = require_agi()
+    if err:
+        return err
+    conn = db.connect()
+    try:
+        r = conn.execute("SELECT name, ziel FROM verwaltung_nummern WHERE nummer = ? AND aktiv = 1", (nummer,)).fetchone()
+        ziel = (r["ziel"] or "").replace(" ", "") if r else ""
+        if not r or not _ZIEL_RE.match(ziel):
+            return jsonify({"ok": False})
+        return jsonify({"ok": True, "name": r["name"], "ziel": ziel})
+    finally:
+        conn.close()
+
+
+@app.post("/api/pbx/voicemail-person")
+def voicemail_person_agi():
+    """AGI: persoenliche Voicemail aufgenommen. Gehoert nur der Person — nicht in
+    die Technik-Gruppe (die Analyse/WhatsApp-Pipeline von /api/pbx/voicemail)."""
+    err = require_agi()
+    if err:
+        return err
+    b = request.get_json(silent=True) or {}
+    uid, nummer, pfad = str(b.get("uniqueid") or "")[:60], str(b.get("nummer") or ""), str(b.get("pfad") or "")
+    if not uid or not re.fullmatch(r"3[0-9]{5}", nummer) or not pfad.startswith(VM_PERSON_DIR + "/"):
+        return jsonify({"error": "ungueltig"}), 400
+    conn = db.connect()
+    try:
+        email = _person_der_nummer(conn, nummer)
+        if not email:
+            return jsonify({"error": "Nummer unbekannt"}), 404
+        cur = conn.execute("UPDATE calls SET ziel_person = COALESCE(ziel_person, ?), voicemail_path = ? WHERE uniqueid = ?",
+                           (email, pfad, uid))
+        if cur.rowcount == 0:
+            conn.execute("INSERT INTO calls (direction, caller_id, dialed, uniqueid, ziel_person, voicemail_path) "
+                         "VALUES ('internal', ?, ?, ?, ?, ?)", (b.get("caller_id"), nummer, uid, email, pfad))
         conn.commit()
         return jsonify({"ok": True})
     finally:
@@ -487,7 +648,8 @@ def config_put():
     if deny:
         return deny
     b = request.get_json(silent=True) or {}
-    allowed = {"hours_open_from", "hours_open_to", "ring_timeout", "weekdays"}
+    allowed = {"hours_open_from", "hours_open_to", "ring_timeout", "weekdays", "telefon_gruppen",
+               "telefon_ausblenden", "telefon_unsichtbar"}
     import re as _re
     hhmm = _re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
     for k, v in b.items():
@@ -497,6 +659,10 @@ def config_put():
             return jsonify({"error": f"{k} muss HH:MM sein"}), 400
         if k == "ring_timeout" and not (str(v).isdigit() and 5 <= int(v) <= 120):
             return jsonify({"error": "ring_timeout muss 5-120 sein"}), 400
+        if k in ("telefon_ausblenden", "telefon_unsichtbar") and not _re.fullmatch(r"[A-Za-z0-9_.,\s]{0,4000}", str(v)):
+            return jsonify({"error": "telefon_ausblenden: Paketnamen durch Komma getrennt"}), 400
+        if k == "telefon_gruppen" and not _re.fullmatch(r"[\w äöüÄÖÜ,.-]{0,300}", str(v)):
+            return jsonify({"error": "telefon_gruppen: Gruppennamen durch Komma getrennt"}), 400
     conn = db.connect()
     try:
         for k, v in b.items():
@@ -531,12 +697,15 @@ def calls_list():
 
 # ─── SIP-Extensions (interne Telefone, LAN/VPN) ─────────────────────────────
 # Kontexte, in die ein internes Telefon gehoeren darf (extensions.conf).
-SIP_KONTEXTE = {"internal"}
+# 'geteilt' = geteiltes Telefon: ohne Anmeldung nur Notrufe (extensions.conf [geteilt]).
+SIP_KONTEXTE = {"internal", "geteilt"}
 
 
 def regenerate_phones_conf(conn):
     """Schreibt /etc/asterisk/pjsip_phones.conf aus der DB + triggert pjsip reload."""
-    rows = conn.execute("SELECT ext, name, secret, context FROM sip_extensions WHERE enabled = 1 ORDER BY ext").fetchall()
+    rows = conn.execute(
+        "SELECT ext, name, secret, context, client FROM sip_extensions WHERE enabled = 1 ORDER BY ext"
+    ).fetchall()
     lines = [
         "; AUTO-GENERIERT von pbx-api (app.py) aus sip_extensions — NICHT manuell editieren.",
         "; Quelle of truth: SQLite. Aenderungen ueber das pbx-admin Web-UI.",
@@ -564,7 +733,7 @@ def regenerate_phones_conf(conn):
             "type=endpoint",
             f"context={ctx}",
             "disallow=all",
-            "allow=opus,g722,alaw,ulaw",
+            *ENDPOINT_PROFILE.get(r["client"], ENDPOINT_PROFILE["linphone"]),
             f"auth={ext}",
             f"aors={ext}",
             f"callerid={name} <{ext}>",
@@ -602,7 +771,8 @@ def sip_ext_list():
     conn = db.connect()
     try:
         rows = conn.execute(
-            "SELECT ext, name, secret, context, enabled, created_at, updated_at FROM sip_extensions ORDER BY ext"
+            "SELECT ext, name, secret, context, client, enabled, created_at, updated_at "
+            "FROM sip_extensions ORDER BY ext"
         ).fetchall()
         exts = db.rows_to_dicts(rows)
         try:
@@ -637,13 +807,16 @@ def sip_ext_create():
     ctx = str(b.get("context") or "internal").strip()
     if ctx not in SIP_KONTEXTE:
         return jsonify({"error": "context nicht erlaubt"}), 400
+    client = str(b.get("client") or "linphone").strip()
+    if client not in CLIENTS:
+        return jsonify({"error": "Unbekannter Client"}), 400
     conn = db.connect()
     try:
         if not ext:
             ext = str(db.next_ext(conn, "sip_extensions", "ext", 2000))  # fortlaufend ab 2000
         conn.execute(
-            "INSERT INTO sip_extensions (ext, name, secret, context) VALUES (?,?,?,?)",
-            (ext, name, secret, ctx),
+            "INSERT INTO sip_extensions (ext, name, secret, context, client) VALUES (?,?,?,?,?)",
+            (ext, name, secret, ctx, client),
         )
         conn.commit()
         regenerate_phones_conf(conn)
@@ -651,6 +824,43 @@ def sip_ext_create():
         return jsonify({"extension": dict(row)})
     except db.sqlite3.IntegrityError:
         return jsonify({"error": "Extension existiert bereits"}), 409
+    finally:
+        conn.close()
+
+
+@app.put("/api/pbx/sip-extensions/<ext>")
+def sip_ext_update(ext):
+    """Aendert App (client) und/oder Kontext einer Nebenstelle (Name/Passwort bleiben)."""
+    user, deny = require_admin()
+    if deny:
+        return deny
+    b = request.get_json(silent=True) or {}
+    felder = {}
+    if "client" in b:
+        client = str(b.get("client") or "").strip()
+        if client not in CLIENTS:
+            return jsonify({"error": "Unbekannter Client"}), 400
+        felder["client"] = client
+    if "context" in b:
+        ctx = str(b.get("context") or "").strip()
+        if ctx not in SIP_KONTEXTE:
+            return jsonify({"error": "context nicht erlaubt"}), 400
+        felder["context"] = ctx
+    if not felder:
+        return jsonify({"error": "nichts zu aendern"}), 400
+    conn = db.connect()
+    try:
+        sets = ", ".join(f"{k} = ?" for k in felder)  # Schluessel stammen aus der Liste oben
+        cur = conn.execute(f"UPDATE sip_extensions SET {sets} WHERE ext = ?", (*felder.values(), ext))
+        if not cur.rowcount:
+            return jsonify({"error": "Nebenstelle unbekannt"}), 404
+        db.touch(conn, "sip_extensions", "ext", ext)
+        if felder.get("context") == "internal":
+            # Kein geteiltes Telefon mehr: eine offene Anmeldung waere sonst Altlast.
+            _telefon_abmelden(conn, ext, f"admin:{actor(user)}")
+        conn.commit()
+        regenerate_phones_conf(conn)
+        return jsonify({"ok": True, "ext": ext, **felder})
     finally:
         conn.close()
 
@@ -731,6 +941,38 @@ def _prov_xml(ext, name, secret):
     return "\n".join(teile) + "\n"
 
 
+def _androidsip_xml(ext, secret):
+    """Einstellungsdatei fuer Android SIP (Menue -> Import).
+
+    Das Format ist das, was die App selbst exportiert: ein SharedPreferences-
+    <map>. Schluessel aus Settings.java. Die App kennt keine Abruf-URL, darum
+    wird die Datei im Browser geladen und in der App importiert.
+    """
+    host = PROV_SIP_HOST
+    werte = [
+        ("boolean", "account_enabled", "true"),
+        ("string", "username", str(ext)),
+        ("string", "password", secret),
+        ("string", "server", host),
+        ("string", "domain", host),
+        ("string", "port", "5060"),
+        # tls schaltet die App intern stillschweigend auf tcp um — also gleich tcp.
+        ("string", "protocol", "tcp"),
+        ("boolean", "wlan", "true"),
+        ("boolean", "vpn", "true"),
+        ("string", "pref", "SIP"),
+        ("boolean", "MWI_enabled", "false"),
+    ]
+    teile = ["<?xml version='1.0' encoding='utf-8' standalone='yes' ?>", "<map>"]
+    for typ, k, v in werte:
+        if typ == "string":
+            teile.append(f'<string name="{xesc(k)}">{xesc(v)}</string>')
+        else:
+            teile.append(f'<{typ} name="{xesc(k)}" value="{xesc(v)}" />')
+    teile.append("</map>")
+    return "\n".join(teile) + "\n"
+
+
 @app.post("/api/pbx/sip-extensions/<ext>/provisioning")
 def prov_create(ext):
     """Erzeugt einen Einmal-Link + QR-Code fuer die Linphone-Einrichtung."""
@@ -739,7 +981,7 @@ def prov_create(ext):
         return deny
     conn = db.connect()
     try:
-        row = conn.execute("SELECT ext, name FROM sip_extensions WHERE ext = ?", (ext,)).fetchone()
+        row = conn.execute("SELECT ext, name, client FROM sip_extensions WHERE ext = ?", (ext,)).fetchone()
         if not row:
             return jsonify({"error": "Nebenstelle unbekannt"}), 404
         token = pysecrets.token_urlsafe(24)
@@ -761,7 +1003,7 @@ def prov_create(ext):
     url = f"https://{PUBLIC_HOST}/prov/{token}"
     qr = segno.make(url, error="m").svg_inline(scale=5, dark="#1f2937")
     return jsonify({
-        "ext": ext, "name": row["name"], "url": url, "qr_svg": qr,
+        "ext": ext, "name": row["name"], "client": row["client"], "url": url, "qr_svg": qr,
         "expires_at": gueltig_bis.isoformat(timespec="seconds"),
         "ttl_minutes": PROV_TTL_MIN,
         # Fuer das synchronisierte Adressbuch der App: das ist eine FriendList,
@@ -783,7 +1025,7 @@ def prov_fetch(token):
     conn = db.connect()
     try:
         row = conn.execute(
-            "SELECT p.token, p.ext, p.expires_at, p.used_at, e.name, e.secret, e.enabled "
+            "SELECT p.token, p.ext, p.expires_at, p.used_at, e.name, e.secret, e.enabled, e.client "
             "FROM prov_tokens p LEFT JOIN sip_extensions e ON e.ext = p.ext "
             "WHERE p.token = ?", (token,)
         ).fetchone()
@@ -798,11 +1040,853 @@ def prov_fetch(token):
         conn.commit()
         if cur.rowcount != 1:
             return jsonify({"error": "Link ungueltig oder abgelaufen"}), 404
-        xml = _prov_xml(row["ext"], row["name"], row["secret"])
+        client = row["client"]
+        if client == "android-sip":
+            xml = _androidsip_xml(row["ext"], row["secret"])
+        else:
+            xml = _prov_xml(row["ext"], row["name"], row["secret"])
     finally:
         conn.close()
-    return Response(xml, mimetype="application/xml",
-                    headers={"Cache-Control": "no-store"})
+    headers = {"Cache-Control": "no-store"}
+    if client == "android-sip":
+        # Der Browser soll die Datei speichern (Downloads), nicht anzeigen —
+        # von dort holt sie der Import-Dialog der App.
+        headers["Content-Disposition"] = f'attachment; filename="androidsip-{row["ext"]}.xml"'
+    return Response(xml, mimetype="application/xml", headers=headers)
+
+
+# ─── Geteilte Telefone: Anmeldung pro Person ────────────────────────────────
+# Ablauf:
+#   1. Die Person oeffnet /telefon auf dem EIGENEN Handy, meldet sich mit
+#      Authentik an und bekommt einen persoenlichen Anmelde-QR
+#      (POST /api/telefon/ausweis): einmalig, 90 s gueltig, Inhalt
+#      "RWTEL1:<token>" — bewusst keine URL, eine fremde Kamera-App kann damit
+#      nichts anfangen.
+#   2. Das gesperrte Telefon scannt den QR mit seiner Kamera und loest ihn ein
+#      (POST /api/telefon/einloesen). Es weist sich mit seinen SIP-Zugangsdaten
+#      aus (HTTP Basic ext:secret) — die hat es ohnehin.
+#   3. Ab dann ist die Person an diesem Geraet angemeldet, bis sie sich von Hand
+#      abmeldet (Geraet, /telefon oder Admin).
+# Der QR muss physisch vor die Kamera: das belegt, dass die Person davorsteht.
+# Der Dialplan ([geteilt]) fragt bei jedem Anruf /api/pbx/telefon/<ext>/sitzung
+# ab; ohne Sitzung gehen nur Notrufe.
+TELEFON_AUSWEIS_TTL_S = int(os.environ.get("PBX_TELEFON_AUSWEIS_TTL_S", "90"))
+# APKs fuer die geteilten Telefone (App-Katalog, art='apk').
+TELEFON_APPS_DIR = os.environ.get("PBX_TELEFON_APPS_DIR", "/var/lib/pbx-api/apps")
+TELEFON_APK_MAX = 300 * 1024 * 1024
+TELEFON_QR_PRAEFIX = "RWTEL1:"
+
+
+def _jetzt_iso():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _telefon_gruppen(conn):
+    roh = _cfg(conn).get("telefon_gruppen", "")
+    return {g.strip().lower() for g in roh.split(",") if g.strip()}
+
+
+def _telefon_darf(conn, user):
+    erlaubt = _telefon_gruppen(conn)
+    gruppen = {str(g).lower() for g in (user or {}).get("groups", [])}
+    return bool(erlaubt & gruppen)
+
+
+def _geraet():
+    """HTTP-Basic ext:secret eines geteilten Telefons. Gibt (ext, None) oder (None, response)."""
+    a = request.authorization
+    nein = (jsonify({"error": "Geraet nicht berechtigt"}), 401)
+    if not a or not a.username or not a.password:
+        return None, nein
+    conn = db.connect()
+    try:
+        row = conn.execute(
+            "SELECT ext, secret FROM sip_extensions WHERE ext = ? AND enabled = 1 AND context = 'geteilt'",
+            (a.username,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row or not hmac.compare_digest(str(row["secret"]).encode(), a.password.encode()):
+        return None, nein
+    return row["ext"], None
+
+
+def _telefon_abmelden(conn, ext, durch):
+    s = conn.execute("SELECT email, name FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+    if not s:
+        return False
+    conn.execute("DELETE FROM telefon_sitzungen WHERE ext = ?", (ext,))
+    conn.execute("INSERT INTO telefon_log (ext, ereignis, email, name, durch) VALUES (?,?,?,?,?)",
+                 (ext, "ab", s["email"], s["name"], durch))
+    return True
+
+
+def _sitzung_json(row):
+    if not row:
+        return {"angemeldet": False}
+    return {"angemeldet": True, "name": row["name"], "email": row["email"], "seit": row["seit"]}
+
+
+
+@app.get("/api/telefon/status")
+def telefon_status():
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        row = conn.execute("SELECT name, email, seit, gruppen FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+        geraet = conn.execute("SELECT name FROM sip_extensions WHERE ext = ?", (ext,)).fetchone()
+        return jsonify({"ext": ext, "geraet": geraet["name"] if geraet else ext,
+                        **_sitzung_json(row), **_apps_fuer(conn, row)})
+    finally:
+        conn.close()
+
+
+@app.post("/api/telefon/abmelden")
+def telefon_abmelden_geraet():
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        _telefon_abmelden(conn, ext, "geraet")
+        conn.commit()
+        return jsonify({"ok": True, "angemeldet": False})
+    finally:
+        conn.close()
+
+
+def _token_hash(token):
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+@app.post("/api/telefon/ausweis")
+def telefon_ausweis():
+    """Persoenlicher Anmelde-QR fuer die Person, die gerade auf /telefon angemeldet ist."""
+    user = current_user()
+    if not user:
+        return jsonify({"error": "Nicht angemeldet"}), 401
+    conn = db.connect()
+    try:
+        if not _telefon_darf(conn, user):
+            return jsonify({"error": "Dein Konto ist fuer geteilte Telefone nicht freigeschaltet"}), 403
+        jetzt = _jetzt_iso()
+        email = user.get("email") or ""
+        # Pro Person gilt nur der neueste QR; alte und abgelaufene weg.
+        conn.execute("DELETE FROM telefon_ausweise WHERE lower(email) = lower(?) OR expires_at < ?", (email, jetzt))
+        token = pysecrets.token_urlsafe(24)
+        bis = (datetime.now(timezone.utc) + timedelta(seconds=TELEFON_AUSWEIS_TTL_S)).isoformat(timespec="seconds")
+        name = str(user.get("name") or user.get("username") or actor(user))[:80]
+        name = re.sub(r'[\x00-\x1f\x7f"<>\\]', "", name) or "Unbekannt"
+        gruppen = json.dumps(sorted({str(g).lower() for g in (user.get("groups") or [])}))
+        conn.execute("INSERT INTO telefon_ausweise (token_hash, user_id, email, name, durch, expires_at, gruppen) "
+                     "VALUES (?,?,?,?,?,?,?)",
+                     (_token_hash(token), str(user.get("id") or ""), email, name, actor(user), bis, gruppen))
+        conn.commit()
+    finally:
+        conn.close()
+    inhalt = TELEFON_QR_PRAEFIX + token
+    qr = segno.make(inhalt, error="m").svg_inline(scale=8, dark="#000000", light="#ffffff", border=2)
+    # "inhalt" braucht die Anmeldeseite, wenn sie IM geteilten Telefon laeuft
+    # (Login direkt mit Authentik): sie reicht ihn ueber die JS-Bruecke an die App.
+    return jsonify({"qr_svg": qr, "inhalt": inhalt, "expires_at": bis, "ttl_seconds": TELEFON_AUSWEIS_TTL_S})
+
+
+@app.post("/api/telefon/einloesen")
+def telefon_einloesen():
+    """Das gesperrte Telefon hat einen Anmelde-QR gescannt."""
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    roh = str((request.get_json(silent=True) or {}).get("token", "")).strip()
+    if roh.startswith(TELEFON_QR_PRAEFIX):
+        roh = roh[len(TELEFON_QR_PRAEFIX):]
+    if not re.fullmatch(r"[A-Za-z0-9_-]{20,64}", roh):
+        return jsonify({"error": "Das ist kein Rosenweg-Anmeldecode"}), 400
+    h = _token_hash(roh)
+    conn = db.connect()
+    try:
+        a = conn.execute("SELECT user_id, email, name, durch, expires_at, gruppen FROM telefon_ausweise "
+                         "WHERE token_hash = ?", (h,)).fetchone()
+        # Atomar verbrauchen: nur wer die Zeile loescht, meldet sich an.
+        if not a or conn.execute("DELETE FROM telefon_ausweise WHERE token_hash = ?", (h,)).rowcount != 1:
+            return jsonify({"error": "Code unbekannt oder schon benutzt — auf dem Handy neu laden"}), 404
+        if a["expires_at"] < _jetzt_iso():
+            conn.commit()
+            return jsonify({"error": "Code abgelaufen — auf dem Handy neu laden"}), 404
+        _telefon_abmelden(conn, ext, f"abgeloest:{a['durch']}")
+        conn.execute("INSERT INTO telefon_sitzungen (ext, user_id, email, name, gruppen) VALUES (?,?,?,?,?)",
+                     (ext, a["user_id"], a["email"], a["name"], a["gruppen"] or "[]"))
+        conn.execute("INSERT INTO telefon_log (ext, ereignis, email, name, durch) VALUES (?,?,?,?,?)",
+                     (ext, "an", a["email"], a["name"], a["durch"]))
+        conn.commit()
+        s = conn.execute("SELECT name, email, seit, gruppen FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+        return jsonify({"ok": True, "ext": ext, **_sitzung_json(s), **_apps_fuer(conn, s)})
+    finally:
+        conn.close()
+
+
+# ─── App-Katalog der geteilten Telefone ─────────────────────────────────────
+_PAKET = re.compile(r"(web\.[a-z0-9_]{1,40}|[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*){1,10})")
+
+
+def _app_json(r, mit_intern=False):
+    d = {"paket": r["paket"], "name": r["name"], "art": r["art"], "persoenlich": bool(r["persoenlich"]),
+         "immer": bool(r["immer"]), "reihenfolge": r["reihenfolge"]}
+    if r["art"] == "web":
+        d["url"] = r["url"]
+    else:
+        d.update({"sha256": r["sha256"], "groesse": r["groesse"],
+                  "download": f"/api/telefon/apk/{r['paket']}" if r["apk_datei"] else None})
+    if mit_intern:
+        d.update({"gruppen": r["gruppen"], "konfig": r["konfig"], "aktiv": bool(r["aktiv"]),
+                  "apk_datei": r["apk_datei"], "updated_at": r["updated_at"]})
+    return d
+
+
+def _konfig_fuer(roh, sitzung):
+    """Platzhalter {email} {name} {benutzer} in den Werten der Managed Configuration fuellen."""
+    try:
+        k = json.loads(roh or "{}")
+    except ValueError:
+        return {}
+    email = sitzung["email"] or ""
+    werte = {"email": email, "name": sitzung["name"] or "", "benutzer": email.split("@")[0]}
+    out = {}
+    for key, v in (k.items() if isinstance(k, dict) else []):
+        if isinstance(v, str):
+            for ph, w in werte.items():
+                v = v.replace("{" + ph + "}", w)
+        out[str(key)] = v
+    return out
+
+
+def _apps_fuer(conn, sitzung):
+    """Welche Katalog-Apps die angemeldete Person sieht (+ ihre Einstellungen)."""
+    if not sitzung:
+        return {"apps": []}
+    try:
+        gruppen = {str(g).lower() for g in json.loads(sitzung["gruppen"] or "[]")}
+    except (ValueError, IndexError, KeyError):
+        gruppen = set()
+    out = []
+    for r in conn.execute("SELECT * FROM telefon_apps WHERE aktiv = 1 ORDER BY reihenfolge, name"):
+        erlaubt = {g.strip().lower() for g in (r["gruppen"] or "").split(",") if g.strip()}
+        if erlaubt and not (erlaubt & gruppen):
+            continue
+        d = _app_json(r)
+        d["konfig"] = _konfig_fuer(r["konfig"], sitzung)
+        out.append(d)
+    return {"apps": out}
+
+
+@app.get("/api/telefon/katalog")
+def telefon_katalog():
+    """Alle aktiven Apps — das Geraet installiert die APKs vorab und haelt sie versteckt."""
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        rows = conn.execute("SELECT * FROM telefon_apps WHERE aktiv = 1 ORDER BY reihenfolge, name").fetchall()
+        cfg = _cfg(conn)
+        aus = [p.strip() for p in re.split(r"[,\s]+", cfg.get("telefon_ausblenden", "")) if p.strip()]
+        unsichtbar = [p.strip() for p in re.split(r"[,\s]+", cfg.get("telefon_unsichtbar", "")) if p.strip()]
+        return jsonify({"apps": [_app_json(r) for r in rows], "ausblenden": aus, "unsichtbar": unsichtbar})
+    finally:
+        conn.close()
+
+
+@app.get("/api/telefon/apk/<paket>")
+def telefon_apk(paket):
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        r = conn.execute("SELECT apk_datei FROM telefon_apps WHERE paket = ? AND art = 'apk' AND aktiv = 1",
+                         (paket,)).fetchone()
+    finally:
+        conn.close()
+    if not r or not r["apk_datei"]:
+        return jsonify({"error": "unbekannt"}), 404
+    return send_from_directory(TELEFON_APPS_DIR, r["apk_datei"],
+                               mimetype="application/vnd.android.package-archive")
+
+
+@app.get("/api/pbx/telefon-apps")
+def telefon_apps_liste():
+    _, deny = require_admin()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        rows = conn.execute("SELECT * FROM telefon_apps ORDER BY reihenfolge, name").fetchall()
+        return jsonify({"apps": [_app_json(r, True) for r in rows]})
+    finally:
+        conn.close()
+
+
+@app.put("/api/pbx/telefon-apps/<paket>")
+def telefon_app_speichern(paket):
+    """Anlegen oder aendern (ohne APK-Datei; die kommt per POST .../apk)."""
+    user, deny = require_admin()
+    if deny:
+        return deny
+    if not _PAKET.fullmatch(paket):
+        return jsonify({"error": "Paketname ungueltig (z.B. com.nextcloud.client oder web.portal)"}), 400
+    b = request.get_json(silent=True) or {}
+    art = "web" if paket.startswith("web.") else "apk"
+    name = str(b.get("name") or "").strip()
+    if not name or len(name) > 60 or _STEUERZEICHEN.search(name):
+        return jsonify({"error": "name ungueltig"}), 400
+    url = str(b.get("url") or "").strip() if art == "web" else None
+    if art == "web" and not re.fullmatch(r"https://[A-Za-z0-9.-]+(:[0-9]+)?(/[^\s]*)?", url or ""):
+        return jsonify({"error": "url muss mit https:// beginnen"}), 400
+    gruppen = str(b.get("gruppen") or "").strip()
+    if not re.fullmatch(r"[\w äöüÄÖÜ,.-]{0,300}", gruppen):
+        return jsonify({"error": "gruppen: Namen durch Komma getrennt"}), 400
+    konfig = b.get("konfig", {})
+    if isinstance(konfig, str):
+        try:
+            konfig = json.loads(konfig or "{}")
+        except ValueError:
+            return jsonify({"error": "konfig ist kein gueltiges JSON"}), 400
+    if not isinstance(konfig, dict) or not all(isinstance(v, (str, int, bool)) for v in konfig.values()):
+        return jsonify({"error": "konfig: flaches JSON-Objekt mit Text/Zahl/Ja-Nein"}), 400
+    try:
+        reihenfolge = int(b.get("reihenfolge", 100))
+    except (TypeError, ValueError):
+        return jsonify({"error": "reihenfolge muss eine Zahl sein"}), 400
+    conn = db.connect()
+    try:
+        conn.execute(
+            "INSERT INTO telefon_apps (paket, name, art, url, gruppen, persoenlich, konfig, reihenfolge, aktiv, immer) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(paket) DO UPDATE SET name=excluded.name, url=excluded.url, "
+            "gruppen=excluded.gruppen, persoenlich=excluded.persoenlich, konfig=excluded.konfig, "
+            "reihenfolge=excluded.reihenfolge, aktiv=excluded.aktiv, immer=excluded.immer, updated_at=datetime('now')",
+            (paket, name, art, url, gruppen, 1 if b.get("persoenlich", True) else 0,
+             json.dumps(konfig, ensure_ascii=False), reihenfolge, 1 if b.get("aktiv", True) else 0,
+             1 if b.get("immer", False) else 0))
+        conn.commit()
+        r = conn.execute("SELECT * FROM telefon_apps WHERE paket = ?", (paket,)).fetchone()
+        return jsonify({"app": _app_json(r, True)})
+    finally:
+        conn.close()
+
+
+@app.post("/api/pbx/telefon-apps/<paket>/apk")
+def telefon_app_apk_hochladen(paket):
+    """APK hochladen (Rohdaten im Body oder multipart 'apk'). Ersetzt die bisherige Datei."""
+    _, deny = require_admin()
+    if deny:
+        return deny
+    f = request.files.get("apk")
+    daten = f.read(TELEFON_APK_MAX + 1) if f else request.get_data(cache=False)
+    if not daten or len(daten) > TELEFON_APK_MAX or daten[:2] != b"PK":
+        return jsonify({"error": "keine APK-Datei (ZIP) oder zu gross"}), 400
+    conn = db.connect()
+    try:
+        r = conn.execute("SELECT art, apk_datei FROM telefon_apps WHERE paket = ?", (paket,)).fetchone()
+        if not r or r["art"] != "apk":
+            return jsonify({"error": "zuerst die App (art apk) anlegen"}), 404
+        sha = hashlib.sha256(daten).hexdigest()
+        os.makedirs(TELEFON_APPS_DIR, exist_ok=True)
+        datei = f"{paket}-{sha[:12]}.apk"
+        tmp = os.path.join(TELEFON_APPS_DIR, datei + ".tmp")
+        with open(tmp, "wb") as out:
+            out.write(daten)
+        os.replace(tmp, os.path.join(TELEFON_APPS_DIR, datei))
+        conn.execute("UPDATE telefon_apps SET apk_datei=?, sha256=?, groesse=?, updated_at=datetime('now') "
+                     "WHERE paket=?", (datei, sha, len(daten), paket))
+        conn.commit()
+        alt = r["apk_datei"]
+        if alt and alt != datei:
+            try:
+                os.remove(os.path.join(TELEFON_APPS_DIR, alt))
+            except OSError:
+                pass
+        return jsonify({"ok": True, "paket": paket, "sha256": sha, "groesse": len(daten)})
+    finally:
+        conn.close()
+
+
+@app.delete("/api/pbx/telefon-apps/<paket>")
+def telefon_app_loeschen(paket):
+    _, deny = require_admin()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        r = conn.execute("SELECT apk_datei FROM telefon_apps WHERE paket = ?", (paket,)).fetchone()
+        conn.execute("DELETE FROM telefon_apps WHERE paket = ?", (paket,))
+        conn.commit()
+        if r and r["apk_datei"]:
+            try:
+                os.remove(os.path.join(TELEFON_APPS_DIR, r["apk_datei"]))
+            except OSError:
+                pass
+        return jsonify({"ok": True})
+    finally:
+        conn.close()
+
+
+# ─── Telefonbuch fuer die geteilten Telefone ────────────────────────────────
+# Die Geraete bekommen das Rosenweg-Verzeichnis (Nextcloud, contacts-sync) als
+# schlanke Liste und schreiben es ins Android-Adressbuch (eigenes Konto
+# "Rosenweg"). Die CardDAV-Zugangsdaten bleiben hier auf der Anlage.
+_KONTAKTE_CACHE = {"zeit": 0.0, "daten": None}
+_KONTAKTE_TTL_S = 600
+
+
+def _vcard_wert(v):
+    return (v.replace("\\n", " ").replace("\\,", ",").replace("\\;", ";").replace("\\\\", "\\")).strip()
+
+
+def _vcards_lesen(text):
+    """Minimaler vCard-Leser: FN, ORG, TEL (mit TYPE), EMAIL. Gefaltete Zeilen werden zusammengesetzt."""
+    zeilen = []
+    for z in text.replace("\r\n", "\n").split("\n"):
+        if z[:1] in (" ", "\t") and zeilen:
+            zeilen[-1] += z[1:]
+        else:
+            zeilen.append(z)
+    karten, k = [], None
+    for z in zeilen:
+        if z.upper() == "BEGIN:VCARD":
+            k = {"name": "", "org": "", "nummern": [], "emails": []}
+        elif z.upper() == "END:VCARD" and k is not None:
+            if k["name"] and (k["nummern"] or k["emails"]):
+                karten.append(k)
+            k = None
+        elif k is not None and ":" in z:
+            kopf, wert = z.split(":", 1)
+            teile = kopf.split(";")
+            feld = teile[0].split(".")[-1].upper()   # "item1.TEL" -> TEL
+            params = ";".join(teile[1:]).upper()
+            if feld == "FN":
+                k["name"] = _vcard_wert(wert)[:120]
+            elif feld == "ORG":
+                k["org"] = _vcard_wert(wert.replace(";", " ")).strip()[:120]
+            elif feld == "TEL":
+                nummer = re.sub(r"[^0-9+*#]", "", wert)
+                if 3 <= len(nummer) <= 25:
+                    typ = ("mobil" if "CELL" in params else "arbeit" if "WORK" in params
+                           else "privat" if "HOME" in params else "andere")
+                    k["nummern"].append({"nummer": nummer, "typ": typ})
+            elif feld == "EMAIL":
+                mail = _vcard_wert(wert)
+                if "@" in mail and len(mail) <= 200:
+                    k["emails"].append(mail)
+    karten.sort(key=lambda x: x["name"].lower())
+    return karten
+
+
+@app.get("/api/telefon/kontakte")
+def telefon_kontakte():
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    if not PROV_CARDDAV_URL:
+        return jsonify({"version": "", "kontakte": []})
+    jetzt = time.time()
+    if _KONTAKTE_CACHE["daten"] is None or jetzt - _KONTAKTE_CACHE["zeit"] > _KONTAKTE_TTL_S:
+        try:
+            r = requests.get(PROV_CARDDAV_URL.rstrip("/") + "/?export",
+                             auth=(PROV_CARDDAV_USER, PROV_CARDDAV_PASS), timeout=20)
+            r.raise_for_status()
+            r.encoding = "utf-8"
+            karten = _vcards_lesen(r.text)
+        except requests.RequestException as e:
+            if _KONTAKTE_CACHE["daten"] is None:
+                return jsonify({"error": f"Verzeichnis nicht erreichbar: {type(e).__name__}"}), 502
+        else:
+            roh = json.dumps(karten, ensure_ascii=False, sort_keys=True)
+            _KONTAKTE_CACHE.update(zeit=jetzt, daten={
+                "version": hashlib.sha256(roh.encode()).hexdigest()[:16], "kontakte": karten})
+    d = _mit_internen_nummern(_KONTAKTE_CACHE["daten"])
+    if request.args.get("version") == d["version"]:
+        return jsonify({"version": d["version"], "unveraendert": True})
+    return jsonify(d)
+
+
+def _name_teile(n):
+    return {t for t in re.split(r"[\s\-]+", (n or "").lower()) if len(t) > 1}
+
+
+def _gleiche_person(a, b):
+    """'Atesci Remzi' = 'Remzi Atesci', 'Claude Koller' = 'Claude Alexandre Koller':
+    die Namensteile des kuerzeren Namens stecken alle im laengeren."""
+    ta, tb = _name_teile(a), _name_teile(b)
+    if len(ta) < 2 or len(tb) < 2:
+        return False
+    firma = {"ag", "gmbh", "sa", "gemeinde", "einwohnergemeinde", "stiftung", "genossenschaft"}
+    if bool(ta & firma) != bool(tb & firma):
+        return False   # "Mehmet Peker AG" ist nicht "Mehmet Peker"
+    kurz, lang = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
+    return kurz <= lang
+
+
+def _mit_internen_nummern(d):
+    """Telefonbuch um die internen Nummern ergaenzen (Nummernplan 24.11.2026):
+    persoenliche Nummer (3HHWWP) bei der Person mit derselben E-Mail, Kurzwahl der
+    Verwaltung (4XXX) beim Kontakt mit der Ziel-Nummer. typ 'rosenweg' — das Telefon
+    beschriftet sie als 'Rosenweg'. Die Version enthaelt die Nummern, damit die
+    Telefone eine Aenderung sofort holen."""
+    conn = db.connect()
+    try:
+        personen = {}
+        for r in conn.execute("SELECT email, nummer, name FROM personen_nummern WHERE aktiv = 1"):
+            personen.setdefault(r["email"].lower(), []).append((r["nummer"], r["name"]))
+        verwaltung = {}
+        for r in conn.execute("SELECT nummer, ziel FROM verwaltung_nummern WHERE aktiv = 1"):
+            verwaltung.setdefault(re.sub(r"[^0-9+]", "", r["ziel"] or ""), []).append(r["nummer"])
+    finally:
+        conn.close()
+    if not personen and not verwaltung:
+        return d
+    karten = []
+    for k in d["kontakte"]:
+        intern = []
+        for m in k.get("emails") or []:
+            # Paare teilen sich oft eine E-Mail: nur die Nummer mit passendem Namen
+            for nr, name in personen.get(m.lower(), []):
+                if nr not in intern and _gleiche_person(name, k.get("name")):
+                    intern.append(nr)
+        for n in k.get("nummern") or []:
+            for kurz in verwaltung.get(n.get("nummer"), []):
+                if kurz not in intern:
+                    intern.append(kurz)
+        if intern:
+            vorhanden = {n.get("nummer") for n in k["nummern"]}
+            k = dict(k, nummern=[{"nummer": nr, "typ": "rosenweg"} for nr in intern if nr not in vorhanden] + k["nummern"])
+        karten.append(k)
+    roh = json.dumps(karten, ensure_ascii=False, sort_keys=True)
+    return {"version": hashlib.sha256(roh.encode()).hexdigest()[:16], "kontakte": karten}
+
+
+# ─── Rosenweg Telefon: Daten der Person aus der Anlage (Regel 6/7) ───────────
+def _nebenstelle():
+    """HTTP-Basic ext:secret irgendeiner aktiven Nebenstelle (nicht nur geteilt):
+    Rosenweg Telefon weist sich mit seinem SIP-Zugang aus. -> (ext, None) | (None, response)"""
+    a = request.authorization
+    nein = (jsonify({"error": "Nebenstelle nicht berechtigt"}), 401)
+    if not a or not a.username or not a.password:
+        return None, nein
+    conn = db.connect()
+    try:
+        row = conn.execute("SELECT ext, secret FROM sip_extensions WHERE ext = ? AND enabled = 1",
+                           (a.username,)).fetchone()
+    finally:
+        conn.close()
+    if not row or not hmac.compare_digest(str(row["secret"]).encode(), a.password.encode()):
+        return None, nein
+    return row["ext"], None
+
+
+def _person_der_nebenstelle(conn, ext):
+    """Person hinter einer Nebenstelle: Sitzung (geteilte Telefone). Persoenliche
+    3000er-Nummern kommen mit dem Nummernplan (docs/plans/telefon-nummernplan.md)."""
+    r = conn.execute("SELECT email, name FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+    return (r["email"], r["name"]) if r and r["email"] else (None, None)
+
+
+@app.get("/api/telefon/anrufliste")
+def telefon_anrufliste():
+    """Anrufe der Person, die an dieser Nebenstelle angemeldet ist — ueber alle Geraete."""
+    ext, deny = _nebenstelle()
+    if deny:
+        return deny
+    limit = min(int(request.args.get("limit", 200) or 200), 500)
+    conn = db.connect()
+    try:
+        email, name = _person_der_nebenstelle(conn, ext)
+        if not email:
+            return jsonify({"angemeldet": False, "anrufe": []})
+        rows = conn.execute(
+            "SELECT id, direction, caller_id, dialed, ext, person, ziel_ext, ziel_person, started_at, "
+            "answered_at, duration_seconds, hangup_cause, voicemail_summary, voicemail_path "
+            "FROM calls WHERE lower(person) = lower(?) OR lower(ziel_person) = lower(?) "
+            "ORDER BY started_at DESC LIMIT ?", (email, email, limit)).fetchall()
+        anrufe = []
+        for r in rows:
+            ich_rufe = (r["person"] or "").lower() == email.lower() and r["direction"] in ("internal", "outbound")
+            angenommen = bool(r["answered_at"]) or (r["hangup_cause"] or "").upper() == "ANSWERED"
+            anrufe.append({
+                "id": r["id"],
+                # aus Sicht der Person
+                "richtung": "ausgehend" if ich_rufe else ("eingehend" if angenommen else "verpasst"),
+                "nummer": r["dialed"] if ich_rufe else r["caller_id"],
+                "ueber": r["ext"] if ich_rufe else (r["ziel_ext"] or r["ext"]),
+                "beginn": r["started_at"],
+                "dauer": r["duration_seconds"],
+                "voicemail": r["voicemail_summary"],
+                "voicemail_audio": bool(r["voicemail_path"]) and (r["ziel_person"] or "").lower() == email.lower(),
+            })
+        return jsonify({"angemeldet": True, "name": name, "anrufe": anrufe})
+    finally:
+        conn.close()
+
+
+@app.get("/api/telefon/voicemail/<int:call_id>")
+def telefon_voicemail(call_id):
+    """Persoenliche Voicemail anhoeren — nur die Person, der sie gehoert."""
+    ext, deny = _nebenstelle()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        email, _ = _person_der_nebenstelle(conn, ext)
+        r = conn.execute("SELECT voicemail_path, ziel_person FROM calls WHERE id = ?", (call_id,)).fetchone()
+        if not email or not r or not r["voicemail_path"] or (r["ziel_person"] or "").lower() != email.lower():
+            return jsonify({"error": "Nicht gefunden"}), 404
+        pfad = os.path.realpath(r["voicemail_path"])
+        if not pfad.startswith(VM_PERSON_DIR + "/") or not os.path.isfile(pfad):
+            return jsonify({"error": "Nicht gefunden"}), 404
+        return send_file(pfad, mimetype="audio/wav")
+    finally:
+        conn.close()
+
+
+@app.route("/api/telefon/einstellungen", methods=["GET", "PUT"])
+def telefon_einstellungen():
+    """Einstellungen einer App pro Person (?paket=...). PUT {geaendert, werte}:
+    gespeichert, wenn neuer als die Fassung auf der Anlage."""
+    ext, deny = _nebenstelle()
+    if deny:
+        return deny
+    paket = (request.args.get("paket") or "").strip()
+    if not paket or len(paket) > 100:
+        return jsonify({"error": "paket fehlt"}), 400
+    conn = db.connect()
+    try:
+        email, _ = _person_der_nebenstelle(conn, ext)
+        if not email:
+            return jsonify({"error": "Niemand angemeldet"}), 409
+        alt = conn.execute("SELECT werte, geaendert FROM telefon_einstellungen WHERE email = ? AND paket = ?",
+                           (email.lower(), paket)).fetchone()
+        if request.method == "GET":
+            if not alt:
+                return jsonify({"geaendert": 0, "werte": {}})
+            return jsonify({"geaendert": alt["geaendert"], "werte": json.loads(alt["werte"])})
+        b = request.get_json(silent=True) or {}
+        werte, geaendert = b.get("werte"), int(b.get("geaendert") or 0)
+        if not isinstance(werte, dict) or len(json.dumps(werte)) > 64_000:
+            return jsonify({"error": "werte ungueltig"}), 400
+        if alt and alt["geaendert"] >= geaendert:
+            return jsonify({"ok": True, "uebernommen": False, "geaendert": alt["geaendert"]})
+        conn.execute(
+            "INSERT INTO telefon_einstellungen (email, paket, werte, geaendert, updated_at) "
+            "VALUES (?,?,?,?, datetime('now')) ON CONFLICT(email, paket) DO UPDATE SET "
+            "werte = excluded.werte, geaendert = excluded.geaendert, updated_at = excluded.updated_at",
+            (email.lower(), paket, json.dumps(werte, ensure_ascii=False), geaendert))
+        conn.commit()
+        return jsonify({"ok": True, "uebernommen": True, "geaendert": geaendert})
+    finally:
+        conn.close()
+
+
+def _pin_fernet():
+    """Fernet mit PBX_PIN_KEY, oder None wenn nicht eingerichtet."""
+    key = os.environ.get("PBX_PIN_KEY", "")
+    if not key:
+        return None
+    from cryptography.fernet import Fernet
+    return Fernet(key.encode())
+
+
+def _pin_zu_einfach(pin):
+    if len(set(pin)) == 1:
+        return True
+    ziffern = [int(z) for z in pin]
+    schritte = {b - a for a, b in zip(ziffern, ziffern[1:])}
+    return schritte in ({1}, {-1})
+
+
+@app.route("/api/telefon/pin", methods=["GET", "PUT", "DELETE"])
+def telefon_pin():
+    """Persoenliche PIN der auf diesem Geraet angemeldeten Person (Bildschirmsperre).
+    GET -> {gesetzt, pin}; PUT {pin}: 4-12 Ziffern; DELETE: PIN entfernen.
+    Nur die Nebenstelle, auf der die Person gerade angemeldet ist, bekommt sie."""
+    ext, deny = _nebenstelle()
+    if deny:
+        return deny
+    f = _pin_fernet()
+    if f is None:
+        return jsonify({"error": "PIN nicht eingerichtet"}), 503
+    conn = db.connect()
+    try:
+        email, _ = _person_der_nebenstelle(conn, ext)
+        if not email:
+            return jsonify({"error": "Niemand angemeldet"}), 409
+        email = email.lower()
+        if request.method == "GET":
+            r = conn.execute("SELECT pin_enc FROM telefon_pin WHERE email = ?", (email,)).fetchone()
+            if not r:
+                return jsonify({"gesetzt": False})
+            return jsonify({"gesetzt": True, "pin": f.decrypt(r["pin_enc"].encode()).decode()})
+        if request.method == "DELETE":
+            conn.execute("DELETE FROM telefon_pin WHERE email = ?", (email,))
+            conn.commit()
+            app.logger.info("PIN entfernt (Nebenstelle %s)", ext)
+            return jsonify({"ok": True})
+        pin = str((request.get_json(silent=True) or {}).get("pin") or "")
+        if not re.fullmatch(r"\d{4,12}", pin):
+            return jsonify({"error": "Die PIN braucht 4 bis 12 Ziffern."}), 400
+        if _pin_zu_einfach(pin):
+            return jsonify({"error": "Die PIN ist zu einfach (gleiche Ziffern oder Reihe)."}), 400
+        conn.execute("INSERT INTO telefon_pin (email, pin_enc, updated_at) VALUES (?,?, datetime('now')) "
+                     "ON CONFLICT(email) DO UPDATE SET pin_enc = excluded.pin_enc, updated_at = excluded.updated_at",
+                     (email, f.encrypt(pin.encode()).decode()))
+        conn.commit()
+        app.logger.info("PIN gesetzt (Nebenstelle %s)", ext)
+        return jsonify({"ok": True})
+    finally:
+        conn.close()
+
+
+def personen_abgleichen(probe=False):
+    """Neue Personen (Website: Wohnungen + Kontakte) bekommen eine persoenliche Nummer.
+    Vergebene Nummern bleiben. -> {neu: [...], probleme: [...]}"""
+    r = requests.get(f"{MAIN_API_BASE}/api/pbx/personen",
+                     headers={"X-PBX-Secret": PBX_SHARED_SECRET}, timeout=20)
+    r.raise_for_status()
+    conn = db.connect()
+    try:
+        bestehende = db.rows_to_dicts(conn.execute(
+            "SELECT nummer, email, name, wohnung, haus FROM personen_nummern").fetchall())
+        neu, probleme = nummernvergabe.neue_nummern(r.json(), bestehende)
+        if not probe:
+            for n in neu:
+                conn.execute("INSERT INTO personen_nummern (nummer, email, name, wohnung, haus, art) "
+                             "VALUES (?,?,?,?,?,?)",
+                             (n["nummer"], n["email"], n["name"], n["wohnung"], n["haus"], n["art"]))
+                app.logger.info("Neue persoenliche Nummer %s (%s)", n["nummer"], n["art"])
+            conn.commit()
+        for p in probleme:
+            app.logger.warning("Nummernvergabe: %s", p)
+        return {"neu": neu, "probleme": probleme, "probe": probe}
+    finally:
+        conn.close()
+
+
+def _personen_abgleich_schleife():
+    """Stuendlich: neue Personen bekommen ihre Nummer (erster Lauf 2 Minuten nach dem Start)."""
+    time.sleep(120)
+    while True:
+        try:
+            personen_abgleichen()
+        except Exception as e:
+            app.logger.warning("Personen-Abgleich: %s", e)
+        time.sleep(3600)
+
+
+@app.post("/api/pbx/nummernplan/abgleich")
+def nummernplan_abgleich():
+    """Admin: Abgleich sofort ausloesen. ?probe=1 zeigt nur, was vergeben wuerde."""
+    _, deny = require_admin()
+    if deny:
+        return deny
+    try:
+        return jsonify(personen_abgleichen(probe=request.args.get("probe") == "1"))
+    except requests.RequestException as e:
+        return jsonify({"error": f"Website nicht erreichbar: {e}"}), 502
+
+
+@app.get("/api/pbx/nummernplan")
+def nummernplan_liste():
+    """Admin: persoenliche Nummern (3000er) und Verwaltung (4000er)."""
+    _, deny = require_admin()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        p = conn.execute("SELECT nummer, name, email, wohnung, haus, art, weiterleitung, voicemail, aktiv "
+                         "FROM personen_nummern ORDER BY nummer").fetchall()
+        v = conn.execute("SELECT nummer, name, ziel, notiz, aktiv FROM verwaltung_nummern ORDER BY nummer").fetchall()
+        return jsonify({"personen": db.rows_to_dicts(p), "verwaltung": db.rows_to_dicts(v)})
+    finally:
+        conn.close()
+
+
+@app.get("/api/telefon/meine")
+def telefon_meine():
+    """Geraete, an denen die angemeldete Person gerade angemeldet ist."""
+    user = current_user()
+    if not user:
+        return jsonify({"error": "Nicht angemeldet"}), 401
+    conn = db.connect()
+    try:
+        rows = conn.execute(
+            "SELECT s.ext, e.name AS geraet, s.seit FROM telefon_sitzungen s "
+            "JOIN sip_extensions e ON e.ext = s.ext WHERE lower(s.email) = lower(?) ORDER BY s.ext",
+            (user.get("email") or "",)).fetchall()
+        return jsonify({"name": user.get("name"), "darf": _telefon_darf(conn, user),
+                        "sitzungen": db.rows_to_dicts(rows)})
+    finally:
+        conn.close()
+
+
+@app.post("/api/telefon/<ext>/abmelden")
+def telefon_abmelden_web(ext):
+    """Abmelden aus dem Browser: die eigene Sitzung, oder jede fuer Technik/Praesident."""
+    user = current_user()
+    if not user:
+        return jsonify({"error": "Nicht angemeldet"}), 401
+    conn = db.connect()
+    try:
+        s = conn.execute("SELECT email FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+        if not s:
+            return jsonify({"ok": True, "angemeldet": False})
+        eigene = (s["email"] or "").lower() == (user.get("email") or "").lower() and s["email"]
+        if not eigene and not is_admin(user):
+            return jsonify({"error": "Nur die eigene Anmeldung"}), 403
+        _telefon_abmelden(conn, ext, ("person:" if eigene else "admin:") + actor(user))
+        conn.commit()
+        return jsonify({"ok": True, "angemeldet": False})
+    finally:
+        conn.close()
+
+
+@app.get("/api/pbx/telefon-sitzungen")
+def telefon_sitzungen_admin():
+    _, deny = require_admin()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        sitz = conn.execute("SELECT ext, name, email, seit FROM telefon_sitzungen ORDER BY ext").fetchall()
+        log = conn.execute("SELECT ext, ereignis, name, durch, zeit FROM telefon_log "
+                           "ORDER BY id DESC LIMIT 30").fetchall()
+        return jsonify({"sitzungen": db.rows_to_dicts(sitz), "log": db.rows_to_dicts(log),
+                        "gruppen": sorted(_telefon_gruppen(conn)),
+                        "ausblenden": _cfg(conn).get("telefon_ausblenden", ""),
+                        "unsichtbar": _cfg(conn).get("telefon_unsichtbar", "")})
+    finally:
+        conn.close()
+
+
+@app.get("/api/pbx/telefon/<ext>/sitzung")
+def telefon_sitzung_agi(ext):
+    """AGI (Dialplan [geteilt]): wer ist an diesem Geraet angemeldet?"""
+    err = require_agi()
+    if err:
+        return err
+    conn = db.connect()
+    try:
+        row = conn.execute("SELECT name, email, seit FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+        d = _sitzung_json(row)
+        if row and row["email"]:
+            d["nummer"] = _nummer_der_person(conn, row["email"], row["name"])
+        return jsonify(d)
+    finally:
+        conn.close()
+
+
+@app.get("/telefon")
+def serve_telefon():
+    return send_from_directory(os.path.abspath(WEB_DIR), "telefon.html")
 
 
 # ─── Web-UI + Reverse-Proxy fuer den Login-Flow ─────────────────────────────
@@ -852,5 +1936,8 @@ def proxy_main_api(subpath):
 
 if __name__ == "__main__":
     db.init_db()
+    if PBX_SHARED_SECRET:
+        import threading
+        threading.Thread(target=_personen_abgleich_schleife, daemon=True, name="personen-abgleich").start()
     from waitress import serve
     serve(app, host="0.0.0.0", port=PORT)
