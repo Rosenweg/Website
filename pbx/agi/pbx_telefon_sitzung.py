@@ -68,6 +68,7 @@ def main():
     consume_agi_env()
     ext = sys.argv[1] if len(sys.argv) > 1 else ''
     set_var('TELEFON_NAME', '')
+    set_var('TELEFON_NUMMER', '')
     if not re.fullmatch(r'[0-9]{2,8}', ext):
         log(f'ungueltiger Endpunkt {ext!r}')
         return
@@ -80,6 +81,8 @@ def main():
         return
     if d.get('angemeldet'):
         set_var('TELEFON_NAME', d.get('name') or '')
+        if re.fullmatch(r'3[0-9]{5}', d.get('nummer') or ''):
+            set_var('TELEFON_NUMMER', d['nummer'])  # persoenliche Nummer (3HHWWP)
         log(f'{ext}: angemeldet {d.get("name")}')
     else:
         log(f'{ext}: niemand angemeldet')

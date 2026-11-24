@@ -28,7 +28,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 import segno
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_file, send_from_directory
 
 import ami
 import db
@@ -85,6 +85,9 @@ ENDPOINT_PROFILE = {
     "linphone": ["allow=opus,g722,alaw,ulaw"],
     "android-sip": ["allow=g722,alaw,ulaw", "dtmf_mode=inband"],
 }
+
+# Persoenliche Voicemails (3000er-Nummern), getrennt von der STWEG-Voicemail.
+VM_PERSON_DIR = os.environ.get("PBX_VM_PERSON_DIR", "/var/spool/asterisk/voicemail/personen")
 
 app = Flask(__name__)
 
@@ -289,15 +292,113 @@ def _person_jetzt(conn, ext):
     return r["email"] if r and r["email"] else None
 
 
+def _person_der_nummer(conn, nummer):
+    """E-Mail zu einer persoenlichen Nummer (3HHWWP), sonst None."""
+    if not nummer:
+        return None
+    r = conn.execute("SELECT email FROM personen_nummern WHERE nummer = ?", (str(nummer),)).fetchone()
+    return r["email"] if r else None
+
+
 def _call_personen(conn, uid, direction, caller_id, dialed):
-    """Anruf den Personen zuordnen: anrufende Nebenstelle (intern/ausgehend) und
-    angerufene Nebenstelle (intern). Bereits gesetzte Werte bleiben."""
-    ext = str(caller_id) if direction in ("internal", "outbound") and db.ist_nebenstelle(conn, caller_id) else None
-    ziel = str(dialed) if direction == "internal" and db.ist_nebenstelle(conn, dialed) else None
+    """Anruf den Personen zuordnen: anrufende Seite (intern/ausgehend) und angerufene
+    Seite (intern) — als Nebenstelle (Person aus der Sitzung) oder als persoenliche
+    Nummer (3HHWWP). Bereits gesetzte Werte bleiben."""
+    ext = person = ziel = ziel_person = None
+    if direction in ("internal", "outbound"):
+        if db.ist_nebenstelle(conn, caller_id):
+            ext, person = str(caller_id), _person_jetzt(conn, caller_id)
+        else:
+            person = _person_der_nummer(conn, caller_id)
+    if direction == "internal":
+        if db.ist_nebenstelle(conn, dialed):
+            ziel, ziel_person = str(dialed), _person_jetzt(conn, dialed)
+        else:
+            ziel_person = _person_der_nummer(conn, dialed)
     conn.execute(
         "UPDATE calls SET ext = COALESCE(ext, ?), person = COALESCE(person, ?), "
         "ziel_ext = COALESCE(ziel_ext, ?), ziel_person = COALESCE(ziel_person, ?) WHERE uniqueid = ?",
-        (ext, _person_jetzt(conn, ext), ziel, _person_jetzt(conn, ziel), uid))
+        (ext, person, ziel, ziel_person, uid))
+
+
+# ─── Nummernplan im Dialplan (AGI) ──────────────────────────────────────────
+_ZIEL_RE = re.compile(r"^(\+[1-9][0-9]{6,14}|0[1-9][0-9]{7,12})$")
+
+
+@app.get("/api/pbx/person/<nummer>")
+def person_agi(nummer):
+    """AGI: wohin klingelt eine persoenliche Nummer? Alle Geraete, an denen die
+    Person angemeldet ist, plus ein eigenes Endgeraet mit dieser Nummer."""
+    err = require_agi()
+    if err:
+        return err
+    conn = db.connect()
+    try:
+        p = conn.execute("SELECT * FROM personen_nummern WHERE nummer = ? AND aktiv = 1", (nummer,)).fetchone()
+        if not p:
+            return jsonify({"ok": False})
+        ziele = [r["ext"] for r in conn.execute(
+            "SELECT s.ext FROM telefon_sitzungen s JOIN sip_extensions e ON e.ext = s.ext "
+            "WHERE lower(s.email) = lower(?) AND e.enabled = 1 ORDER BY s.ext", (p["email"],))]
+        if db.ist_nebenstelle(conn, nummer):
+            ziele.append(str(nummer))   # Rosenweg Telefon auf dem privaten Handy
+        wl = p["weiterleitung"] if p["weiterleitung"] in ("aus", "immer", "nicht_erreichbar") else "aus"
+        ziel = (p["weiterleitung_ziel"] or "").replace(" ", "")
+        if wl != "aus" and not _ZIEL_RE.match(ziel):
+            wl = "aus"   # ohne gueltiges Ziel keine Weiterleitung
+        return jsonify({
+            "ok": True, "name": p["name"],
+            "dial": "&".join(f"PJSIP/{z}" for z in ziele),
+            "weiterleitung": wl, "ziel": ziel if wl != "aus" else "",
+            "sekunden": max(5, min(int(p["weiterleitung_sekunden"] or 20), 60)),
+            "voicemail": 1 if p["voicemail"] else 0,
+        })
+    finally:
+        conn.close()
+
+
+@app.get("/api/pbx/verwaltung/<nummer>")
+def verwaltung_agi(nummer):
+    """AGI: 4000er Kurzwahl der Hausverwaltung -> externe Nummer."""
+    err = require_agi()
+    if err:
+        return err
+    conn = db.connect()
+    try:
+        r = conn.execute("SELECT name, ziel FROM verwaltung_nummern WHERE nummer = ? AND aktiv = 1", (nummer,)).fetchone()
+        ziel = (r["ziel"] or "").replace(" ", "") if r else ""
+        if not r or not _ZIEL_RE.match(ziel):
+            return jsonify({"ok": False})
+        return jsonify({"ok": True, "name": r["name"], "ziel": ziel})
+    finally:
+        conn.close()
+
+
+@app.post("/api/pbx/voicemail-person")
+def voicemail_person_agi():
+    """AGI: persoenliche Voicemail aufgenommen. Gehoert nur der Person — nicht in
+    die Technik-Gruppe (die Analyse/WhatsApp-Pipeline von /api/pbx/voicemail)."""
+    err = require_agi()
+    if err:
+        return err
+    b = request.get_json(silent=True) or {}
+    uid, nummer, pfad = str(b.get("uniqueid") or "")[:60], str(b.get("nummer") or ""), str(b.get("pfad") or "")
+    if not uid or not re.fullmatch(r"3[0-9]{5}", nummer) or not pfad.startswith(VM_PERSON_DIR + "/"):
+        return jsonify({"error": "ungueltig"}), 400
+    conn = db.connect()
+    try:
+        email = _person_der_nummer(conn, nummer)
+        if not email:
+            return jsonify({"error": "Nummer unbekannt"}), 404
+        cur = conn.execute("UPDATE calls SET ziel_person = COALESCE(ziel_person, ?), voicemail_path = ? WHERE uniqueid = ?",
+                           (email, pfad, uid))
+        if cur.rowcount == 0:
+            conn.execute("INSERT INTO calls (direction, caller_id, dialed, uniqueid, ziel_person, voicemail_path) "
+                         "VALUES ('internal', ?, ?, ?, ?, ?)", (b.get("caller_id"), nummer, uid, email, pfad))
+        conn.commit()
+        return jsonify({"ok": True})
+    finally:
+        conn.close()
 
 
 @app.post("/api/pbx/voicemail")
@@ -1436,7 +1537,7 @@ def telefon_anrufliste():
             return jsonify({"angemeldet": False, "anrufe": []})
         rows = conn.execute(
             "SELECT id, direction, caller_id, dialed, ext, person, ziel_ext, ziel_person, started_at, "
-            "answered_at, duration_seconds, hangup_cause, voicemail_summary "
+            "answered_at, duration_seconds, hangup_cause, voicemail_summary, voicemail_path "
             "FROM calls WHERE lower(person) = lower(?) OR lower(ziel_person) = lower(?) "
             "ORDER BY started_at DESC LIMIT ?", (email, email, limit)).fetchall()
         anrufe = []
@@ -1452,8 +1553,29 @@ def telefon_anrufliste():
                 "beginn": r["started_at"],
                 "dauer": r["duration_seconds"],
                 "voicemail": r["voicemail_summary"],
+                "voicemail_audio": bool(r["voicemail_path"]) and (r["ziel_person"] or "").lower() == email.lower(),
             })
         return jsonify({"angemeldet": True, "name": name, "anrufe": anrufe})
+    finally:
+        conn.close()
+
+
+@app.get("/api/telefon/voicemail/<int:call_id>")
+def telefon_voicemail(call_id):
+    """Persoenliche Voicemail anhoeren — nur die Person, der sie gehoert."""
+    ext, deny = _nebenstelle()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        email, _ = _person_der_nebenstelle(conn, ext)
+        r = conn.execute("SELECT voicemail_path, ziel_person FROM calls WHERE id = ?", (call_id,)).fetchone()
+        if not email or not r or not r["voicemail_path"] or (r["ziel_person"] or "").lower() != email.lower():
+            return jsonify({"error": "Nicht gefunden"}), 404
+        pfad = os.path.realpath(r["voicemail_path"])
+        if not pfad.startswith(VM_PERSON_DIR + "/") or not os.path.isfile(pfad):
+            return jsonify({"error": "Nicht gefunden"}), 404
+        return send_file(pfad, mimetype="audio/wav")
     finally:
         conn.close()
 
@@ -1578,7 +1700,12 @@ def telefon_sitzung_agi(ext):
     conn = db.connect()
     try:
         row = conn.execute("SELECT name, email, seit FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
-        return jsonify(_sitzung_json(row))
+        d = _sitzung_json(row)
+        if row and row["email"]:
+            n = conn.execute("SELECT nummer FROM personen_nummern WHERE lower(email) = lower(?) AND aktiv = 1",
+                             (row["email"],)).fetchone()
+            d["nummer"] = n["nummer"] if n else ""
+        return jsonify(d)
     finally:
         conn.close()
 

@@ -106,8 +106,18 @@ sichern, Dateien per `pct push` einspielen, `systemctl restart pbx-api`. So war 
    - ✓ 24.11.: Liste geprüft und angelegt. `personen_nummern` hat 124 Nummern (MEG als „Haus 00“: 300011–300041),
      `verwaltung_nummern` hat 4000 = Immosense AG. Admin-Ansicht `GET /api/pbx/nummernplan`.
      Sicherungen `*.vor-nummernplan` auf CT 220.
-   - offen: Dialplan für 3/4 (Klingeln an Geräten mit Sitzung, Weiterleitung, Voicemail),
-     Name als Anrufer-Name, Geräte 2000–2003 auf 2100–2103, Abgleich für neue Personen.
+   - ✓ 24.11.: Wählregeln ausgerollt (Sicherungen `*.vor-waehlregeln`):
+     - `_3XXXXX` → `pbx_person.py` → alle Geräte mit Sitzung der Person (+ eigenes Endgerät mit
+       dieser Nummer), dann Weiterleitung (`immer`/`nicht_erreichbar`) bzw. persönliche Voicemail.
+     - `[voicemail-person]` → Aufnahme in `/var/spool/asterisk/voicemail/personen/`, eingetragen
+       per `pbx_voicemail_person.py`. Geht **nicht** an die Technik-Gruppe.
+     - `_4XXX` → `pbx_verwaltung.py` → externe Festnetznummer.
+     - `[geteilt]`: intern Anrufer-Nummer = persönliche Nummer, Name immer (`TELEFON_NUMMER`).
+     - API: `/api/pbx/person/<nr>`, `/api/pbx/verwaltung/<nr>`, `/api/pbx/voicemail-person` (AGI),
+       `/api/telefon/voicemail/<id>` (Person hört ihre Voicemail).
+     - Notrufe unverändert. Getestet über die API (ohne echte Anrufe).
+   - offen: Test mit echtem Anruf; Geräte 2000–2003 auf 2100–2103; Abgleich für neue Personen;
+     3000er-Nummern ins Telefonbuch; Transkript für persönliche Voicemail.
 3. Rosenweg Telefon: Verlauf/Voicemail/Einstellungen aus der Anlage (zunächst über die
    heutige SIP-Anbindung der Geräte-App).
 4. SIP-Kern in Rosenweg Telefon, Einrichtung durch die Geräte-App bzw. per QR-Code.
