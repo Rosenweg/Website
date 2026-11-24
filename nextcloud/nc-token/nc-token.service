@@ -1,0 +1,12 @@
+[Unit]
+Description=Rosenweg: App-Passwoerter fuer geteilte Telefone (nur fuer die Anlage, CT 220)
+After=network-online.target
+
+[Service]
+EnvironmentFile=/etc/default/nc-token
+ExecStart=/usr/bin/python3 /opt/nc-token/nc_token.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

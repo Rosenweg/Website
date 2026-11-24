@@ -64,10 +64,26 @@ Downloads, Dokumente und Musik werden geleert.
 | 7 | **Bildschirmsperre pro Person** nur als PIN/Passwort, kein Muster, keine Biometrie | `resetPasswordWithToken` kennt nur PIN/Passwort; Biometrie gilt fürs ganze Gerät | persönliche PIN (24.11.2026): liegt verschlüsselt auf der Anlage (`/api/telefon/pin`, Fernet mit `PBX_PIN_KEY`), die Geräte-App setzt sie nach der Anmeldung per `resetPasswordWithToken` und entfernt sie beim Abmelden und direkt nach einem Neustart (`BootEntsperren`, vor dem ersten Entsperren) |
 | 8 | **Device Owner** nur auf Gerät ohne Konten, Entfernen nur per Werksreset | Android-Sicherheitsregel | einmalig beim Einrichten; Updates nur mit dem Rosenweg-Release-Schlüssel |
 | 9 | **Installationsverbot gilt auch für den Device Owner** | `DISALLOW_INSTALL_APPS` | Geräte-App hebt es für eigene Katalog-Installationen kurz auf; Wartung per adb (`ADB_INSTALLATION`) |
-| 10 | **Chrome-Updates** nur über den Play Store | Play Store ist ausgeblendet und gesperrt | Empfehlung: Cromite über den Katalog |
+| 10 | **Chrome-Updates** nur über den Play Store | Play Store ist ausgeblendet und gesperrt | Chrome bleibt (Cromite verworfen, Stefan 24.11.2026); seine Daten löscht die Geräte-App beim Abmelden (Verlauf, Cookies, Anmeldungen) |
 | 11 | **Root** löst Samsung Knox dauerhaft aus | eFuse | kein Root |
 
 ## Was der Device Owner nicht selbst darf (heute einmalig per adb)
+
+**Alles auf einmal:** `scripts/geteiltes-telefon-einrichten.sh <adb-seriennummer> [--device-owner]`
+führt jeden Schritt unten aus, prüft ihn und zeigt am Schluss eine Kontrolle. Es darf beliebig
+oft laufen (nach Updates, nach dem Nachinstallieren von Rosenweg Telefon). Neue einmalige
+Schritte gehören **immer** in die Tabelle **und** ins Skript.
+
+**Ohne Kabel (WLAN):** Auf dem Telefon Entwickleroptionen einschalten (7× auf die Build-Nummer),
+dann *Entwickleroptionen → Drahtloses Debugging → Mit Kopplungscode koppeln*. Vom Mac aus:
+
+    adb pair <ip>:<kopplungsport> <code>
+    adb connect <ip>:<port>          # Port aus "Drahtloses Debugging", nicht der Kopplungsport
+    scripts/geteiltes-telefon-einrichten.sh <ip>:<port> [--device-owner]
+
+Danach Drahtloses Debugging wieder ausschalten. **Später geplant (Entscheid Stefan 24.11.):**
+zentral über das Rosenweg-System — im pbx-Admin IP und Kopplungscode eingeben, ein Dienst im Netz
+koppelt per WLAN und führt dieses Skript aus. Einrichtung ganz ohne Mac.
 
 Wichtig für die geplante Einrichtung per QR ohne Kabel.
 
@@ -78,6 +94,8 @@ Wichtig für die geplante Einrichtung per QR ohne Kabel.
 | Standard-Browser | `adb shell cmd role add-role-holder android.app.role.BROWSER <paket> 0` | dito |
 | Akku-Optimierung ausnehmen | `adb shell dumpsys deviceidle whitelist +ch.rosenweg4303.telefon` | dito |
 | Zugriff auf alle Dateien (Aufräumen beim Abmelden) | `adb shell appops set ch.rosenweg4303.telefon MANAGE_EXTERNAL_STORAGE allow` | dito |
+| Geräte-App darf „Nicht stören“ kurz ausschalten (Telefon suchen: klingelt auch bei Nicht stören) | `adb shell cmd notification allow_dnd ch.rosenweg4303.telefon` | dito; ohne: Suchanruf klingelt nur bei stumm/vibrieren, nicht bei „Nicht stören“ |
+| Rosenweg Launcher darf Widgets ohne Rückfrage einbinden (Uhr-Widget auf der Startseite, die sich nicht bearbeiten lässt) | `adb shell appwidget grantbind --package ch.rosenweg4303.home --user 0` | dito; ohne: Android fragt einmal nach |
 | Seitentaste lang = Ausschaltmenü statt KI-Assistent (Neustart auch im gesperrten Zustand: wer vergisst, sich abzumelden, wird durch den Neustart abgemeldet, die PIN ist weg) | `adb shell settings put global function_key_config_longpress_type 0` und `adb shell settings put global power_button_long_press 1` (Samsung prüft beide; 103 = digitaler Assistent), dazu `adb shell settings put secure lock_function_val 0` (Samsung „Netzwerk und Sicherheit sperren“ aus — sonst verlangt das Ausschaltmenü vor dem Neustart die PIN; getestet 24.11.2026) | dito; Notlösung ohne Menü: Leiser + Seitentaste ~7 s (erzwungener Neustart) |
 
 Samsung Knox (kostenlose Knox-Platform-Schnittstelle) kann einige dieser
@@ -110,3 +128,21 @@ adb shell am broadcast -a ch.rosenweg4303.telefon.ADB_INSTALLATION \
 ```
 
 Geräte nicht per `adb reboot` neu starten, solange jemand daran arbeitet.
+
+## Nextcloud-Zugang der angemeldeten Person (24.11.2026)
+
+Die Rosenweg-Apps (cloud-Bibliothek ab 0.5.0) melden sich auf geteilten Telefonen nicht
+mehr selbst an. Beim Anmelden am Telefon lässt die Anlage für die Person ein
+Nextcloud-App-Passwort ausstellen und gibt es nur an dieses Gerät:
+
+- **CT 104** `nc-token` (`nextcloud/nc-token/`, systemd `nc-token`, Port 8097 auf 100.64.2.36):
+  `occ user:auth-tokens:add -n` (ohne Login-Passwort) bzw. `…:delete`. Nimmt nur Anfragen
+  von CT 220 (100.64.2.55) mit `X-NC-Token-Secret` an; Geheimnis in `/etc/default/nc-token`
+  und `/etc/default/pbx-api` (`NC_TOKEN_SECRET`, `NC_TOKEN_URL`). Zuordnung E-Mail → Nextcloud-Benutzer
+  über die E-Mail im Nextcloud-Konto.
+- **Anlage** `GET /api/telefon/nextcloud` (Nebenstelle der Person): stellt aus, speichert verschlüsselt
+  (`telefon_nextcloud`, `PBX_PIN_KEY`), widerruft beim Abmelden (`_telefon_abmelden`).
+  In der Nextcloud heisst das App-Passwort „Rosenweg Geraet <Nebenstelle>“.
+- **Geräte-App** v172: `AnlageProvider.call("nextcloud_konto")`, nur im Speicher.
+- **cloud 0.5.0**: `KontoSpeicher.laden()` nimmt zuerst den Zugang von Rosenweg Gerät; Abmelden
+  einzelner Apps ist dann ausgeblendet. Ohne Geräte-App (privates Handy) wie bisher Login-Flow.

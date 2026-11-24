@@ -127,6 +127,12 @@ async function abmelden(ext){
   ladeMeine();
 }
 
+async function suchen(ext){
+  const r = await api('/api/telefon/'+encodeURIComponent(ext)+'/suchen', {method:'POST'});
+  if (!r.ok) { const d = await r.json().catch(()=>({})); zeige('err', d.error || 'Klingeln fehlgeschlagen.'); return; }
+  zeige('ok','Das Telefon klingelt jetzt bis zu 45 Sekunden.');
+}
+
 async function ladeMeine(){
   const r = await api('/api/telefon/meine');
   const d = await r.json();
@@ -135,6 +141,7 @@ async function ladeMeine(){
   $('meineKarte').style.display = xs.length ? 'block' : 'none';
   $('meine').innerHTML = xs.map(s => `<li><div class="t"><b>${esc(s.geraet)}</b>
       <span>Nebenstelle ${esc(s.ext)} · seit ${esc(String(s.seit||'').slice(0,16))} UTC</span></div>
+      <button class="sec" onclick="suchen('${esc(s.ext)}')" title="Verlegt? Telefon klingeln lassen">🔔 Klingeln</button>
       <button class="sec" onclick="abmelden('${esc(s.ext)}')">Abmelden</button></li>`).join('');
 }
 
