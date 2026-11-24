@@ -140,6 +140,13 @@ Wer Rosenweg-Apps auf dem privaten Handy nutzt, muss auch unterwegs Zugang haben
      Nextcloud-Adressbuch (Website-API, beim nächsten Ausrollen); Transkript für persönliche Voicemail.
 3. Rosenweg Telefon: Verlauf/Voicemail/Einstellungen aus der Anlage (zunächst über die
    heutige SIP-Anbindung der Geräte-App).
+   - ✓ 24.11.: Geräte-App v162 mit `AnlageProvider` (`content://ch.rosenweg4303.telefon.anlage/…`,
+     Signatur-Permission `ch.rosenweg4303.permission.ANLAGE`). Rosenweg Telefon v25 zeigt den
+     Verlauf der Person über alle Geräte (getestet: Anruf von 2003 erscheint auf dem A15) und spielt
+     persönliche Voicemails ab (getestet, Testaufnahme gelöscht). Die Geräte-App muss **vor**
+     Rosenweg Telefon installiert sein, sonst wird die Signatur-Permission nicht erteilt.
+   - offen: Einstellungen pro Person über die Anlage (Schnittstelle steht); privates Handy
+     ohne Geräte-App (eigener Zugang, siehe „Zugang von außerhalb“).
 4. SIP-Kern in Rosenweg Telefon, Einrichtung durch die Geräte-App bzw. per QR-Code.
 5. Geräte-App ohne eigenes SIP. Umstellung auf dem A15, Test nur mit internen Anrufen,
    **nie mit Notrufen**.
