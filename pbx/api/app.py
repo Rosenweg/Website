@@ -1930,6 +1930,25 @@ def telefon_apk(paket):
                                mimetype="application/vnd.android.package-archive")
 
 
+# ─── Seite rosenweg4303.ch/smartphones (Stefan 25.11.2026) ───────────────────
+# Die Seite liegt auf www und ruft die Anlage direkt (Bearer-Token des Rosenweg-Logins,
+# keine Cookies). Erlaubt nur fuer die Website-Adressen und nur /api/telefon/* und /api/pbx/*.
+SEITEN_HERKUNFT = {"https://www.rosenweg4303.ch", "https://rosenweg4303.ch"}
+
+
+@app.after_request
+def _cors_seite(res):
+    herkunft = request.headers.get("Origin", "")
+    if herkunft in SEITEN_HERKUNFT and (request.path.startswith("/api/telefon/")
+                                        or request.path.startswith("/api/pbx/")):
+        res.headers["Access-Control-Allow-Origin"] = herkunft
+        res.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+        res.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        res.headers["Access-Control-Max-Age"] = "600"
+        res.headers.add("Vary", "Origin")
+    return res
+
+
 # ─── Oeffentliche Downloads (Apps-Seite, Updater der Apps auf privaten Handys) ───
 # Stefan 25.11.2026: "auf die apps seite die releases zum download anbieten" und "alle apps
 # brauchen updater wenn geraet nicht da ist". Quelle ist der App-Katalog der geteilten Telefone;
@@ -2789,6 +2808,46 @@ def telefon_wlan_debug(ext):
         app.logger.warning("Wartung wecken %s: %s", ext, type(e).__name__)
     app.logger.info("WLAN-Debugging %s: %s durch %s", ext, f"{minuten} min" if minuten else "aus", actor(user))
     return jsonify({"ok": True, "wlan_debug_bis": bis, "geweckt": geweckt})
+
+
+@app.get("/api/pbx/smartphones")
+def smartphones_uebersicht():
+    """Technik/Praesident: alles fuer rosenweg4303.ch/smartphones in einer Antwort, ohne
+    Geheimnisse - geteilte Telefone (Registrierung, Anmeldung, WLAN-Debugging), eigene Handys
+    mit Rosenweg Telefon, Verlauf und die erlaubten Gruppen."""
+    _, deny = require_admin()
+    if deny:
+        return deny
+    try:
+        regs = ami.registered_aors()
+    except Exception:  # noqa: BLE001
+        regs = set()
+    jetzt = time.time()
+    conn = db.connect()
+    try:
+        sitz = {r["ext"]: r for r in conn.execute("SELECT ext, name, seit FROM telefon_sitzungen")}
+        wart = {r["ext"]: r for r in conn.execute("SELECT ext, wlan_debug_bis, durch FROM telefon_wartung")}
+        telefone = []
+        for e in conn.execute("SELECT ext, name, client, enabled FROM sip_extensions "
+                              "WHERE context = 'geteilt' ORDER BY ext"):
+            s, w = sitz.get(e["ext"]), wart.get(e["ext"])
+            bis = int(w["wlan_debug_bis"] or 0) if w else 0
+            telefone.append({
+                "ext": e["ext"], "name": e["name"], "client": e["client"], "aktiv": bool(e["enabled"]),
+                "registriert": str(e["ext"]) in regs,
+                "angemeldet": s["name"] if s else None, "seit": s["seit"] if s else None,
+                "wlan_debug_bis": bis if bis > jetzt else 0,
+            })
+        privat = [{"id": r["id"], "kennung": f"{r['nummer']}-p{r['id']}", "nummer": r["nummer"],
+                   "geraet": r["geraet"], "seit": r["created_at"],
+                   "registriert": f"{r['nummer']}-p{r['id']}" in regs}
+                  for r in conn.execute("SELECT id, nummer, geraet, created_at FROM telefon_sip_privat ORDER BY nummer, id")]
+        log = db.rows_to_dicts(conn.execute("SELECT ext, ereignis, name, durch, zeit FROM telefon_log "
+                                            "ORDER BY id DESC LIMIT 40").fetchall())
+        return jsonify({"telefone": telefone, "privat": privat, "log": log,
+                        "gruppen": sorted(_telefon_gruppen(conn))})
+    finally:
+        conn.close()
 
 
 @app.get("/api/pbx/telefon-sitzungen")
