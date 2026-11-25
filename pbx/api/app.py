@@ -2666,10 +2666,46 @@ def telefon_meine():
             "SELECT s.ext, e.name AS geraet, s.seit FROM telefon_sitzungen s "
             "JOIN sip_extensions e ON e.ext = s.ext WHERE lower(s.email) = lower(?) ORDER BY s.ext",
             (user.get("email") or "",)).fetchall()
+        # eigene Handys mit Rosenweg Telefon (telefon_sip_privat): ueber die E-Mail oder die Nummer
+        email = (user.get("email") or "").lower()
+        nummer = str(_nummer_der_person(conn, email, user.get("name")) or "")
+        try:
+            regs = ami.registered_aors()
+        except Exception:  # noqa: BLE001
+            regs = set()
+        privat = [{"id": r["id"], "kennung": f"{r['nummer']}-p{r['id']}", "geraet": r["geraet"], "seit": r["created_at"],
+                   "registriert": f"{r['nummer']}-p{r['id']}" in regs}
+                  for r in conn.execute("SELECT id, nummer, geraet, created_at FROM telefon_sip_privat "
+                                        "WHERE lower(email) = ? OR (? <> '' AND nummer = ?) ORDER BY id",
+                                        (email, nummer, nummer))]
         return jsonify({"name": user.get("name"), "darf": _telefon_darf(conn, user),
-                        "sitzungen": db.rows_to_dicts(rows)})
+                        "sitzungen": db.rows_to_dicts(rows), "privat": privat})
     finally:
         conn.close()
+
+
+@app.delete("/api/telefon/privat/<int:zid>")
+def telefon_privat_entfernen(zid):
+    """Aus dem Browser: eigenes Handy abmelden (Zugang sperren), Technik/Praesident jedes."""
+    user = current_user()
+    if not user:
+        return jsonify({"error": "Nicht angemeldet"}), 401
+    conn = db.connect()
+    try:
+        r = conn.execute("SELECT email, nummer FROM telefon_sip_privat WHERE id = ?", (zid,)).fetchone()
+        if not r:
+            return jsonify({"error": "Nicht gefunden"}), 404
+        email = (user.get("email") or "").lower()
+        eigene = (r["email"] or "").lower() == email or str(_nummer_der_person(conn, email, user.get("name")) or "") == r["nummer"]
+        if not eigene and not is_admin(user):
+            return jsonify({"error": "Nur das eigene Handy"}), 403
+        conn.execute("DELETE FROM telefon_sip_privat WHERE id = ?", (zid,))
+        conn.commit()
+    finally:
+        conn.close()
+    app.logger.info("Handy-Zugang p%d entfernt durch %s", zid, actor(user))
+    _sip_person_neu_laden()
+    return jsonify({"ok": True})
 
 
 @app.post("/api/telefon/<ext>/abmelden")

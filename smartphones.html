@@ -135,12 +135,16 @@ function tick() {
 async function ladeMeine() {
     const d = await json(await api('/api/telefon/meine'));
     if (d.darf === false) { $('qr').innerHTML = ''; $('frist').textContent = 'Dein Konto ist für geteilte Telefone nicht freigeschaltet.'; bisMs = 0; }
-    const xs = d.sitzungen || [];
-    $('meine').innerHTML = xs.length ? xs.map(s => `<li class="py-2 flex items-center gap-2">
-        <div class="flex-1"><b>${esc(s.geraet)}</b><div class="text-xs text-slate-500">Nebenstelle ${esc(s.ext)} · seit ${esc(zeit(s.seit))}</div></div>
+    const xs = d.sitzungen || [], ps = d.privat || [];
+    const punkt = ok => `<span class="punkt" style="background:${ok ? '#16a34a' : '#cbd5e1'}"></span>`;
+    $('meine').innerHTML = (xs.map(s => `<li class="py-2 flex items-center gap-2">
+        <div class="flex-1"><b>${esc(s.geraet)}</b><div class="text-xs text-slate-500">Geteiltes Telefon · Nebenstelle ${esc(s.ext)} · seit ${esc(zeit(s.seit))}</div></div>
         <button class="knopf" onclick="klingeln('${esc(s.ext)}')">🔔 Klingeln</button>
         <button class="knopf" onclick="abmelden('${esc(s.ext)}')">Abmelden</button></li>`).join('')
-        : '<li class="py-2 text-slate-500">An keinem Telefon.</li>';
+      + ps.map(p => `<li class="py-2 flex items-center gap-2">
+        <div class="flex-1"><b>${esc(p.geraet || 'Eigenes Handy')}</b><div class="text-xs text-slate-500">${punkt(p.registriert)} Rosenweg Telefon · ${esc(p.kennung)} · seit ${esc(zeit(p.seit))}</div></div>
+        <button class="knopf" onclick="handyAbmelden(${Number(p.id)}, '${esc(p.geraet || p.kennung)}')">Abmelden</button></li>`).join(''))
+        || '<li class="py-2 text-slate-500">An keinem Telefon.</li>';
 }
 
 // ── Aktionen ──
@@ -169,6 +173,12 @@ async function wlanDebug(ext, minuten) {
                     + (d.geweckt ? ' – das Telefon wird kurz angerufen.' : ' – Telefon nicht erreicht, es übernimmt den Stand beim nächsten Kontakt.')
                   : 'WLAN-Debugging an ' + ext + ' wird ausgeschaltet.');
     lade();
+}
+async function handyAbmelden(id, name) {
+    if (!confirm(name + ' abmelden? Deine Nummer klingelt dort dann nicht mehr; in der App wieder „Mit Rosenweg anmelden“.')) return;
+    const r = await api('/api/telefon/privat/' + id, {method: 'DELETE'});
+    melde(r.ok ? name + ' abgemeldet.' : ((await json(r)).error || 'Fehler'), !r.ok);
+    ladeMeine().catch(() => {}); lade().catch(() => {});
 }
 async function privatSperren(id, kennung) {
     if (!confirm('Zugang ' + kennung + ' sperren? Das Handy telefoniert danach nicht mehr über die Anlage.')) return;
