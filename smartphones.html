@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smartphones - Rosenweg</title>
+    <link rel="icon" href="/logo-rosenweg.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=5"></script>
+    <script src="/js/nav.js?v=3"></script>
+    <style>
+        .qr { background:#fff; border-radius:14px; padding:12px; width:min(100%, 300px); aspect-ratio:1; margin:0 auto; }
+        .qr svg { width:100%; height:100%; display:block; }
+        .qr.alt { opacity:.25; }
+        .knopf { padding:.35rem .7rem; border-radius:.5rem; font-size:.85rem; background:#e2e8f0; white-space:nowrap; }
+        .knopf:hover { background:#cbd5e1; }
+        .knopf.rot { background:#fee2e2; color:#991b1b; }
+        .punkt { display:inline-block; width:.6rem; height:.6rem; border-radius:50%; }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800">
+<nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+<script>RosenwegNav.init({ active: 'smartphones' });</script>
+
+<main class="max-w-5xl mx-auto px-4 py-6 space-y-5">
+    <div class="flex items-center gap-3">
+        <img src="/logo-rosenweg.png" alt="" class="w-12 h-12">
+        <div>
+            <h1 class="text-2xl font-bold">Smartphones</h1>
+            <div class="text-sm text-slate-500">Geteilte Rosenweg-Telefone und Rosenweg Telefon auf eigenen Handys</div>
+        </div>
+    </div>
+
+    <div id="meldung" class="hidden rounded-lg px-4 py-3 text-sm"></div>
+
+    <div id="gate" class="hidden bg-white rounded-xl shadow p-5">
+        <p class="mb-3">Bitte zuerst mit dem Rosenweg-Konto anmelden.</p>
+        <button onclick="AuthentikAuth.login(location.pathname)" class="px-4 py-2 rounded-lg bg-blue-600 text-white">Mit Rosenweg-Konto anmelden</button>
+    </div>
+
+    <div id="inhalt" class="hidden space-y-5">
+        <div class="grid md:grid-cols-2 gap-5">
+            <section class="bg-white rounded-xl shadow p-5">
+                <h2 class="font-semibold mb-1">Dein Anmelde-QR</h2>
+                <p class="text-sm text-slate-500 mb-3">Vor die Kamera eines gesperrten Telefons halten („QR-Code scannen“). Gilt einmal und nur kurz, die Seite holt von selbst einen neuen. Einfacher: Rosenweg-Karte hinten ans Telefon halten.</p>
+                <div class="qr" id="qr"></div>
+                <div class="text-center text-sm text-slate-500 mt-2" id="frist"></div>
+            </section>
+            <section class="bg-white rounded-xl shadow p-5">
+                <h2 class="font-semibold mb-2">Hier bist du angemeldet</h2>
+                <ul id="meine" class="divide-y text-sm"><li class="py-2 text-slate-500">An keinem Telefon.</li></ul>
+                <h2 class="font-semibold mt-5 mb-1">Rosenweg Telefon auf dem eigenen Handy</h2>
+                <p class="text-sm text-slate-600">App von der <a href="/apps" class="text-red-700 underline">Apps-Seite</a> laden,
+                    im Menü „Mit Rosenweg anmelden“. Deine Nummer klingelt dann auch dort.</p>
+            </section>
+        </div>
+
+        <div id="technik" class="hidden space-y-5">
+            <section class="bg-white rounded-xl shadow p-5">
+                <div class="flex items-center gap-3 mb-3">
+                    <h2 class="font-semibold flex-1">Geteilte Telefone</h2>
+                    <button class="knopf" onclick="lade()">Neu laden</button>
+                </div>
+                <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="text-left text-slate-500"><tr>
+                        <th class="py-1 pr-2">Nebenstelle</th><th class="pr-2">Gerät</th><th class="pr-2">Anlage</th>
+                        <th class="pr-2">Angemeldet</th><th class="pr-2">WLAN-Debugging</th><th></th></tr></thead>
+                    <tbody id="telefone" class="divide-y"></tbody>
+                </table>
+                </div>
+                <p class="text-xs text-slate-500 mt-3">WLAN-Debugging: das Telefon wird kurz von 2098 „Wartung“ angerufen und schaltet es ein.
+                    Im WLAN „Rosenweg“ bestätigt Rosenweg Gerät die Android-Abfrage selbst, in anderen WLANs muss jemand am Telefon „Zulassen“ tippen.
+                    Am Mac: <code>adb mdns services</code>, dann <code>adb connect &lt;IP&gt;:&lt;Port&gt;</code>.</p>
+            </section>
+
+            <section class="bg-white rounded-xl shadow p-5">
+                <h2 class="font-semibold mb-3">Eigene Handys mit Rosenweg Telefon</h2>
+                <table class="w-full text-sm">
+                    <thead class="text-left text-slate-500"><tr><th class="py-1 pr-2">Zugang</th><th class="pr-2">Handy</th><th class="pr-2">Anlage</th><th class="pr-2">Seit</th><th></th></tr></thead>
+                    <tbody id="privat" class="divide-y"></tbody>
+                </table>
+            </section>
+
+            <section class="bg-white rounded-xl shadow p-5">
+                <h2 class="font-semibold mb-1">Verlauf</h2>
+                <p class="text-xs text-slate-500 mb-2">Erlaubte Gruppen für geteilte Telefone: <span id="gruppen"></span> · ändern in der
+                    <a href="https://pbx.rosenweg4303.ch" class="text-red-700 underline">PBX-Verwaltung</a> (dort auch App-Katalog und Nebenstellen).</p>
+                <ul id="log" class="divide-y text-sm"></ul>
+            </section>
+        </div>
+    </div>
+</main>
+
+<script>
+const PBX = 'https://pbx.rosenweg4303.ch';
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const zeit = t => t ? new Date(String(t).replace(' ', 'T') + (/[zZ+]/.test(String(t).slice(10)) ? '' : 'Z'))
+                       .toLocaleString('de-CH', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) : '';
+let bisMs = 0, holt = false;
+
+function melde(text, fehler) {
+    const m = $('meldung');
+    m.textContent = text;
+    m.className = 'rounded-lg px-4 py-3 text-sm ' + (fehler ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800');
+}
+async function api(pfad, opts) {
+    const r = await AuthentikAuth.apiFetch(PBX + pfad, opts);
+    if (r.status === 401) { zeigeGate(); throw new Error('auth'); }
+    return r;
+}
+async function json(r) { return r.json().catch(() => ({})); }
+
+// ── Anmelde-QR und eigene Sitzungen (wie pbx.rosenweg4303.ch/telefon) ──
+async function holeQr() {
+    if (holt) return; holt = true;
+    try {
+        const r = await api('/api/telefon/ausweis', {method: 'POST'});
+        const d = await json(r);
+        if (!r.ok) { $('qr').innerHTML = ''; $('frist').textContent = d.error || 'Kein Anmelde-QR.'; bisMs = 0; return; }
+        $('qr').innerHTML = d.qr_svg;   // vom Server erzeugtes SVG
+        $('qr').classList.remove('alt');
+        bisMs = Date.now() + (d.ttl_seconds || 90) * 1000;
+    } catch (e) { if (e.message !== 'auth') $('frist').textContent = 'Keine Verbindung zur Telefonanlage.'; }
+    finally { holt = false; }
+}
+function tick() {
+    if (document.hidden) return;
+    const s = Math.round((bisMs - Date.now()) / 1000);
+    if (bisMs && s > 0) $('frist').textContent = 'gültig noch ' + s + ' s';
+    else { $('frist').textContent = 'wird erneuert …'; $('qr').classList.add('alt'); }
+    if (s <= 10) holeQr();
+}
+async function ladeMeine() {
+    const d = await json(await api('/api/telefon/meine'));
+    if (d.darf === false) { $('qr').innerHTML = ''; $('frist').textContent = 'Dein Konto ist für geteilte Telefone nicht freigeschaltet.'; bisMs = 0; }
+    const xs = d.sitzungen || [];
+    $('meine').innerHTML = xs.length ? xs.map(s => `<li class="py-2 flex items-center gap-2">
+        <div class="flex-1"><b>${esc(s.geraet)}</b><div class="text-xs text-slate-500">Nebenstelle ${esc(s.ext)} · seit ${esc(zeit(s.seit))}</div></div>
+        <button class="knopf" onclick="klingeln('${esc(s.ext)}')">🔔 Klingeln</button>
+        <button class="knopf" onclick="abmelden('${esc(s.ext)}')">Abmelden</button></li>`).join('')
+        : '<li class="py-2 text-slate-500">An keinem Telefon.</li>';
+}
+
+// ── Aktionen ──
+async function klingeln(ext) {
+    const r = await api('/api/telefon/' + encodeURIComponent(ext) + '/suchen', {method: 'POST'});
+    if (!r.ok) { melde((await json(r)).error || 'Klingeln fehlgeschlagen.', true); return; }
+    melde('Telefon ' + ext + ' klingelt jetzt bis zu 45 Sekunden.');
+    for (let i = 0; i < 20; i++) {
+        await new Promise(res => setTimeout(res, 3000));
+        const s = await api('/api/telefon/' + encodeURIComponent(ext) + '/suchen').catch(() => null);
+        const d = s && s.ok ? await json(s) : {};
+        if (d.gefunden) { melde('Telefon ' + ext + ' gefunden um ' + zeit(d.gefunden) + (d.gefunden_von ? ' (' + d.gefunden_von + ')' : '') + '.'); lade(); return; }
+    }
+}
+async function abmelden(ext) {
+    if (!confirm('Anmeldung an ' + ext + ' beenden?')) return;
+    const r = await api('/api/telefon/' + encodeURIComponent(ext) + '/abmelden', {method: 'POST'});
+    melde(r.ok ? 'Abgemeldet.' : ((await json(r)).error || 'Abmelden fehlgeschlagen.'), !r.ok);
+    ladeMeine().catch(() => {}); lade();
+}
+async function wlanDebug(ext, minuten) {
+    const r = await api('/api/telefon/' + encodeURIComponent(ext) + '/wlan-debug', {method: 'POST', body: {minuten}});
+    const d = await json(r);
+    if (!r.ok) { melde(d.error || 'Fehler', true); return; }
+    melde(minuten ? 'WLAN-Debugging an ' + ext + ' bis ' + new Date(d.wlan_debug_bis * 1000).toLocaleTimeString('de-CH', {hour:'2-digit', minute:'2-digit'})
+                    + (d.geweckt ? ' – das Telefon wird kurz angerufen.' : ' – Telefon nicht erreicht, es übernimmt den Stand beim nächsten Kontakt.')
+                  : 'WLAN-Debugging an ' + ext + ' wird ausgeschaltet.');
+    lade();
+}
+async function privatSperren(id, kennung) {
+    if (!confirm('Zugang ' + kennung + ' sperren? Das Handy telefoniert danach nicht mehr über die Anlage.')) return;
+    const r = await api('/api/pbx/sip-privat/' + id, {method: 'DELETE'});
+    melde(r.ok ? 'Zugang ' + kennung + ' gesperrt.' : ((await json(r)).error || 'Fehler'), !r.ok);
+    lade();
+}
+
+// ── Technik-Übersicht ──
+async function lade() {
+    const r = await api('/api/pbx/smartphones');
+    if (r.status === 403) { $('technik').classList.add('hidden'); return; }
+    const d = await json(r);
+    if (!r.ok) { melde(d.error || 'Übersicht nicht verfügbar.', true); return; }
+    $('technik').classList.remove('hidden');
+    const punkt = ok => `<span class="punkt" style="background:${ok ? '#16a34a' : '#cbd5e1'}"></span>`;
+    $('telefone').innerHTML = (d.telefone || []).map(t => `<tr>
+        <td class="py-2 pr-2 font-mono">${esc(t.ext)}</td>
+        <td class="pr-2">${esc(t.name)}</td>
+        <td class="pr-2">${punkt(t.registriert)} ${t.registriert ? 'erreichbar' : 'nicht erreichbar'}</td>
+        <td class="pr-2">${t.angemeldet ? esc(t.angemeldet) + '<div class="text-xs text-slate-500">seit ' + esc(zeit(t.seit)) + '</div>' : '<span class="text-slate-400">niemand</span>'}</td>
+        <td class="pr-2">${t.wlan_debug_bis ? 'an bis ' + new Date(t.wlan_debug_bis * 1000).toLocaleTimeString('de-CH', {hour:'2-digit', minute:'2-digit'})
+                         + ` <button class="knopf" onclick="wlanDebug('${esc(t.ext)}', 0)">aus</button>`
+                         : `<button class="knopf" onclick="wlanDebug('${esc(t.ext)}', 60)">🛠 1 Std.</button>`}</td>
+        <td class="text-right space-x-1 whitespace-nowrap">
+            <button class="knopf" onclick="klingeln('${esc(t.ext)}')">🔔 Klingeln</button>
+            ${t.angemeldet ? `<button class="knopf" onclick="abmelden('${esc(t.ext)}')">Abmelden</button>` : ''}</td></tr>`).join('')
+        || '<tr><td class="py-2 text-slate-500" colspan="6">Keine geteilten Telefone.</td></tr>';
+    $('privat').innerHTML = (d.privat || []).map(p => `<tr>
+        <td class="py-2 pr-2 font-mono">${esc(p.kennung)}</td><td class="pr-2">${esc(p.geraet || '–')}</td>
+        <td class="pr-2">${punkt(p.registriert)} ${p.registriert ? 'erreichbar' : 'nicht erreichbar'}</td>
+        <td class="pr-2">${esc(zeit(p.seit))}</td>
+        <td class="text-right"><button class="knopf rot" onclick="privatSperren(${Number(p.id)}, '${esc(p.kennung)}')">Sperren</button></td></tr>`).join('')
+        || '<tr><td class="py-2 text-slate-500" colspan="5">Noch keine.</td></tr>';
+    $('gruppen').textContent = (d.gruppen || []).join(', ') || '–';
+    $('log').innerHTML = (d.log || []).map(l => `<li class="py-1 flex gap-3"><span class="text-slate-500 w-24 shrink-0">${esc(zeit(l.zeit))}</span>
+        <span class="font-mono w-12 shrink-0">${esc(l.ext)}</span><span class="flex-1">${esc(l.ereignis)}${l.name ? ' · ' + esc(l.name) : ''}</span>
+        <span class="text-slate-500">${esc(l.durch || '')}</span></li>`).join('');
+}
+
+function zeigeGate() { $('inhalt').classList.add('hidden'); $('gate').classList.remove('hidden'); }
+
+(async () => {
+    AuthentikAuth.handleCallback();
+    if (AuthentikAuth.ready) await AuthentikAuth.ready;
+    if (!AuthentikAuth.isLoggedIn()) { zeigeGate(); return; }
+    $('inhalt').classList.remove('hidden');
+    try { await ladeMeine(); } catch (e) {}
+    await holeQr();
+    setInterval(tick, 1000);
+    lade().catch(() => {});
+    setInterval(() => { if (!document.hidden) { ladeMeine().catch(() => {}); lade().catch(() => {}); } }, 10000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) holeQr(); });
+})();
+</script>
+</body>
+</html>
