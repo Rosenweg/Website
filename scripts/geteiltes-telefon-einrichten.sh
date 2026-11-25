@@ -54,8 +54,26 @@ adb_tcp() {
     echo "FEHLER  adb über TCP Port 5555 (Telefon $SERIE nicht wieder erreichbar)"; FEHLER=$((FEHLER+1))
   fi
 }
+# C (Stefan 25.11.2026): Rosenweg Geraet stellt Port 5555 nach einem Neustart selbst wieder her
+# (libadb). Dafuer seinen eigenen adb-Schluessel einmal freigeben, solange 5555 offen ist; die
+# Rueckfrage bestaetigt die Bedienungshilfe (nur dieser Fingerabdruck). Freigaben sollen nicht
+# nach 7 Tagen ohne Verbindung verfallen (Android-Vorgabe), sonst klappt es nach langer Zeit nicht.
+adb_selbst() {
+  schritt "adb-Freigaben verfallen nicht (adb_allowed_connection_time 0)" a shell settings put global adb_allowed_connection_time 0
+  a shell input keyevent 224 >/dev/null 2>&1   # Bildschirm an, sonst erscheint die Rueckfrage nicht
+  a logcat -c >/dev/null 2>&1
+  a shell am broadcast -a $GERAET.ADB_SELBST_FREIGEBEN -n $GERAET/org.sipdroid.sipua.rosenweg.AdbFreigabe >/dev/null 2>&1
+  local erg=""
+  for _ in $(seq 1 50); do
+    erg=$(a logcat -d -s RosenwegAdbSelbst 2>/dev/null | grep -o "freigeben: .*" | tail -1)
+    [ -n "$erg" ] && break; sleep 2
+  done
+  if [ "$erg" = "freigeben: OK" ]; then echo "ok      Rosenweg Gerät: eigener adb-Schlüssel freigegeben (Port 5555 nach Neustart ohne USB)"
+  else echo "FEHLER  Rosenweg Gerät: eigener adb-Schlüssel ${erg:-keine Antwort (Gerät ab v224?)}"; FEHLER=$((FEHLER+1)); fi
+}
 if [ $NUR_ADB = 1 ]; then
   adb_tcp
+  adb_selbst
   [ $FEHLER = 0 ] && echo "Fertig: adb connect <adresse>:5555 (Adresse auf /smartphones)" || exit 1
   exit 0
 fi
@@ -118,6 +136,7 @@ schritt "Seitentaste lang = Ausschaltmenü (2/2)" a shell settings put global po
 schritt "\"Netzwerk und Sicherheit sperren\" aus (Neustart ohne PIN)" a shell settings put secure lock_function_val 0
 
 adb_tcp
+adb_selbst
 
 # Kontrolle
 echo

@@ -347,11 +347,16 @@ Daten gelöscht — die Akku-Ausnahme und die Freigabe des Anrufkontos gingen ve
 ### Wartung per adb über das Netz (ab Rosenweg Gerät v217)
 
 - **Klassisches adb auf Port 5555** statt „Debugging über WLAN“. Grund: Android merkt sich vertraute WLANs pro Zugangspunkt-Kennung (BSSID) und schaltet „Debugging über WLAN“ bei jedem neuen Zugangspunkt ab (schon beim Wechsel 2,4 → 5 GHz am selben Gerät). Die nötige Bestätigung fragt es bei gesperrtem Bildschirm gar nicht erst (`startConfirmationForNetwork: isLockScreenMode`).
-- Einmal per USB: `adb tcpip 5555` (macht `geteiltes-telefon-einrichten.sh`). Nach einem Neustart des Telefons ist der Port weg: `scripts/geteiltes-telefon-einrichten.sh <seriennummer> --nur-adb` per USB setzt nur ihn wieder.
+- Einmal per USB: `adb tcpip 5555` (macht `geteiltes-telefon-einrichten.sh`). Nach einem Neustart des Telefons ist der Port zuerst weg; Gerät stellt ihn selbst wieder her (siehe unten, C). Nur wenn das nicht geht: `scripts/geteiltes-telefon-einrichten.sh <seriennummer> --nur-adb` per USB.
 - /smartphones „🛠 1 Std.“ / „aus“ schaltet zentral nur adb selbst (Gerät setzt `ADB_ENABLED` als Device Owner, Weckanruf 2098). Aus = kein adbd, auch nicht per USB. Geht bei gesperrtem Bildschirm, ohne Rückfrage; getestet: aus in 2 s, an in 3 s.
 - Verbinden darf nur ein Rechner, dessen Schlüssel das Telefon kennt.
 - Gerät meldet Adresse und Port (`POST /api/telefon/adb`); /smartphones zeigt `adb connect <adresse>:5555`. Ist Port 5555 nicht offen (nach Neustart), sucht Gerät ersatzweise ein von Hand eingeschaltetes „Debugging über WLAN“ per mDNS.
 - Schaltet etwas adb ab, solange es zentral an ist, stellt Gerät es sofort wieder her; zusätzlich prüft es alle 5 Minuten nach.
+- **Nach einem Neustart ohne USB (C, ab Gerät v224):** Gerät stellt Port 5555 selbst wieder her – beim Start und wenn die Wartung zentral eingeschaltet wird bzw. alle 5 Minuten, solange sie an ist. Es schaltet kurz „Debugging über WLAN“ ein, findet dessen TLS-Port per mDNS, verbindet sich mit seinem **eigenen adb-Schlüssel** (libadb-android) und schickt `tcpip:5555`; danach ist „Debugging über WLAN“ wieder aus. Getestet auf dem A15: 6 s, ohne Eingabe.
+  - Der eigene Schlüssel wird einmal freigegeben (`geteiltes-telefon-einrichten.sh`, Schritt „eigener adb-Schlüssel“): Gerät verbindet sich über 5555, die Bedienungshilfe bestätigt „USB-Debugging zulassen? / Von diesem Computer immer zulassen“ **nur bei genau seinem Fingerabdruck**. Im Kiosk lässt Gerät dafür kurz die SystemUI zu. adbd prüft beim TLS-Debugging gegen dieselben vertrauten Schlüssel, eine Kopplung mit Code braucht es nicht.
+  - `adb_allowed_connection_time 0`: Freigaben verfallen nicht nach 7 Tagen ohne Verbindung.
+  - Die Netz-Rückfrage von „Debugging über WLAN“ bestätigt die Bedienungshilfe nur im WLAN „Rosenweg“; in einem anderen, noch nicht vertrauten Netz (Zugangspunkt) muss sie einmal jemand bestätigen.
+  - Zum Testen per adb: `am broadcast -a ch.rosenweg4303.telefon.ADB_SELBST_WIEDERHERSTELLEN -n ch.rosenweg4303.telefon/org.sipdroid.sipua.rosenweg.AdbFreigabe` (Ergebnis im Log `RosenwegAdbSelbst`).
 
 ### Eigene Handys von außen: SIP über TLS (25. November 2026)
 
