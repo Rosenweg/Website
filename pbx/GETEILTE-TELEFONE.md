@@ -352,3 +352,14 @@ Daten gelöscht — die Akku-Ausnahme und die Freigabe des Anrufkontos gingen ve
 - Verbinden darf nur ein Rechner, dessen Schlüssel das Telefon kennt.
 - Gerät meldet Adresse und Port (`POST /api/telefon/adb`); /smartphones zeigt `adb connect <adresse>:5555`. Ist Port 5555 nicht offen (nach Neustart), sucht Gerät ersatzweise ein von Hand eingeschaltetes „Debugging über WLAN“ per mDNS.
 - Schaltet etwas adb ab, solange es zentral an ist, stellt Gerät es sofort wieder her; zusätzlich prüft es alle 5 Minuten nach.
+
+### Eigene Handys von außen: SIP über TLS (25. November 2026)
+
+Rosenweg Telefon ohne Rosenweg Gerät (eigenes Handy) registriert sich über **TLS auf Port 5061** bei `sip.rosenweg4303.ch`, drinnen wie draußen.
+
+- **DNS:** öffentlich `sip.rosenweg4303.ch` → CNAME `kooperation.rosenweg4303.ch` (WAN 37.17.232.133, nur DNS, kein Cloudflare-Proxy); intern zeigt der Name auf CT 220 (100.64.2.55). Das Let's-Encrypt-Zertifikat passt für beides.
+- **UniFi:** Portweiterleitung „Asterisk-SIP-TLS (Rosenweg Telefon)“ TCP 5061 → 100.64.2.55:5061; RTP 10000–10100 UDP war schon weitergeleitet. SIP über UDP/TCP 5060 bleibt von außen zu (nur der peoplefone-Trunk).
+- **Sperren:** SIP geht nicht über den Edge, deshalb läuft auf CT 220 ein eigener CrowdSec-Firewall-Bouncer (`ct220-sip-bouncer`, nftables, LAPI auf dem Edge). Er setzt dieselben Sperren um (8 Fehlversuche → 24 h, Szenario `rosenweg/sip-bf`) plus die Community-Liste.
+- **pbx-api:** `PBX_SIP_TRANSPORT_PRIVAT` (Vorgabe `tls`) bestimmt Transport und Port der eigenen Handys; geteilte Telefone bleiben bei `PBX_SIP_TRANSPORT`.
+- **`POST /api/telefon/privat/stand`** `{user, password}`: Rosenweg Telefon fragt regelmäßig nach. 200 = aktuelle Zugangsdaten (so kommt auch der Wechsel auf TLS aufs Handy), 401 = Zugang gibt es nicht mehr (im Web auf /smartphones abgemeldet) → die App meldet sich ab und fragt nicht weiter.
+- Sprache (RTP) ist noch unverschlüsselt; SRTP ist ein eigener Schritt.
