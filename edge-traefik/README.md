@@ -155,8 +155,25 @@ curl -sI https://heizung.rosenweg4303.ch/vis-2/ | grep -iE '^(HTTP|location)'
   die Adresse des Cloudflare-Knotens, nicht die des Clients.
 - `journalctl -u traefik -f`, `journalctl -u traefik-sync`
 
+## CrowdSec (Stand 25.11.2026)
+
+Laeuft auf CT 245 mit Traefik-Bouncer (echte IP aus `Cf-Connecting-Ip`), Firewall-Bouncer
+und dem PMG als weiterem Bouncer. Rosenweg-eigene Dateien in `crowdsec/`:
+
+| Datei | Ziel in CT 245 | Zweck |
+|---|---|---|
+| `rosenweg-anmeldung-bf.yaml` | `/etc/crowdsec/scenarios/` | 8 gescheiterte Anmeldungen (401) an der Anlage (`/api/telefon/`, `/api/pbx/`) |
+| `profil-rosenweg-anmeldung-24h.yaml` | Anfang von `/etc/crowdsec/profiles.yaml` | 24 h Sperre fuer `rosenweg/anmeldung-bf` und `rosenweg/authentik-bf` |
+| `rosenweg-intern-whitelist.yaml` | `/etc/crowdsec/parsers/s02-enrich/` | eigene Netze nie sperren: 100.64.0.0/10, WAN 37.17.232.133, 2a02:16a:1407::/48 |
+
+`rosenweg/authentik-bf` steht seit dem 25.11.2026 auf `capacity: 7` (Sperre ab dem 8. Fehlversuch).
+Stefan: "nach 8 Versuchen fehlgeschlagen 24 h sperren". Gezaehlt wird nur 401, nicht 403
+(angemeldet, aber nicht berechtigt). Seiten, die regelmaessig abfragen (smartphones.html,
+pbx-admin.html), hoeren nach einem 401 damit auf.
+
 ## Offen
 
-- CrowdSec/fail2ban sind auf dem Edge nicht installiert (`sicherheit.md`
-  Abschnitt 7.2).
+- Repo hinkt dem Ist-Stand nach: Live laufen auf CT 245 CrowdSec, der Traefik-Bouncer
+  (Plugin, vor allen HTTPS-Routern) und der Firewall-Bouncer; `traefik.yml` hier hat das
+  noch auskommentiert. Abgleichen.
 - `deploy.sh` verweist auf pve1 statt pve3 (siehe oben).

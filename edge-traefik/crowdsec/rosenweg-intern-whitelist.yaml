@@ -1,0 +1,10 @@
+# Rosenweg (25.11.2026): eigene Netze nie sperren - Tailnet/intern, die WAN-Adresse der
+# Siedlung (IPv4 hinter NAT teilen sie sich alle) und unser IPv6-Praefix.
+name: rosenweg/intern-whitelist
+description: "Rosenweg: eigene Netze nicht sperren"
+whitelist:
+  reason: "Rosenweg intern"
+  cidr:
+    - "100.64.0.0/10"
+    - "37.17.232.133/32"
+    - "2a02:16a:1407::/48"

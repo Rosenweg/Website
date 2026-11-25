@@ -1,0 +1,22 @@
+# Rosenweg (Stefan 25.11.2026): nach 8 gescheiterten Anmeldungen 24 h sperren (Dauer im
+# Profil rosenweg_anmeldung_24h). Nur 401 (falsche Zugangsdaten), nicht 403 (angemeldet,
+# aber nicht berechtigt - die Smartphones-Seite fragt regelmaessig ab).
+type: leaky
+name: rosenweg/anmeldung-bf
+description: "8 gescheiterte Anmeldungen an der Telefonanlage (pbx)"
+filter: >-
+  evt.Meta.log_type == 'http_access-log' && evt.Meta.http_status == '401' &&
+  (evt.Meta.http_path startsWith '/api/telefon/' || evt.Meta.http_path startsWith '/api/pbx/')
+groupby: evt.Meta.source_ip
+capacity: 7
+leakspeed: 10m
+blackhole: 1m
+labels:
+  service: http
+  confidence: 3
+  spoofable: 0
+  classification:
+    - attack.T1110
+  label: "Anmeldung an der Anlage erraten"
+  behavior: "http:bruteforce"
+  remediation: true

@@ -485,7 +485,9 @@ async function loadCalls(){
     <td>${c.duration_seconds!=null?c.duration_seconds+'s':'—'}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Noch keine Anrufe.</td></tr>';
 }
 
-function gate(){ $('content').style.display='none'; $('gate').style.display='block'; }
+// Nach einem 401 nicht weiter abfragen (CrowdSec sperrt nach 8 gescheiterten Versuchen 24 h)
+let abgelaufen = false;
+function gate(){ abgelaufen = true; $('content').style.display='none'; $('gate').style.display='block'; }
 async function start(){
   // Token aus dem #auth=-Fragment nach dem Authentik-Redirect in localStorage schreiben.
   AuthentikAuth.handleCallback();
@@ -499,7 +501,7 @@ async function start(){
   $('content').style.display='block';
   kindHint();
   try { await loadMembers(); await Promise.all([loadTrunk(),loadHours(),loadExts(),loadCalls(),loadTelefone(),loadApps()]); } catch(e){}
-  setInterval(()=>{ if(!document.hidden && AuthentikAuth.isLoggedIn()){ loadTrunk(); loadCalls(); } }, 15000);
+  setInterval(()=>{ if(!document.hidden && !abgelaufen && AuthentikAuth.isLoggedIn()){ loadTrunk(); loadCalls(); } }, 15000);
 }
 start();
 </script>
