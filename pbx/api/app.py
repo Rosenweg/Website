@@ -222,25 +222,6 @@ def conference_members():
         conn.close()
 
 
-@app.get("/api/pbx/ring-members/by-ext/<int:ext>")
-def ring_member_by_ext(ext):
-    """AGI: interne Direktwahl (ab 1000) -> Ziel des Ring-Mitglieds."""
-    err = require_agi()
-    if err:
-        return err
-    conn = db.connect()
-    try:
-        row = conn.execute(
-            "SELECT name, phone, kind FROM ring_members WHERE internal_ext = ? AND enabled = 1",
-            (ext,),
-        ).fetchone()
-        if not row:
-            return jsonify({"found": False}), 404
-        return jsonify({"found": True, **dict(row)})
-    finally:
-        conn.close()
-
-
 @app.post("/api/pbx/call-event")
 def call_event():
     err = require_agi()

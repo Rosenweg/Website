@@ -48,7 +48,7 @@ tar -C pbx/asterisk-config -cf - extensions.conf pjsip.conf confbridge.conf \
   | ssh root@100.64.2.22 'pct exec 220 -- tar -C /etc/asterisk -xf -'
 # AGI-Scripts
 tar -C pbx/agi -cf - pbx_get_ring_members.py pbx_check_hours.py pbx_log_call_event.py pbx_conf_invite.py \
-    pbx_dial_member.py pbx_cnam.py transcribe_voicemail.py \
+    pbx_cnam.py transcribe_voicemail.py \
   | ssh root@100.64.2.22 'pct exec 220 -- tar -C /var/lib/asterisk/agi-bin -xf -'
 ssh root@100.64.2.22 'pct exec 220 -- chmod +x /var/lib/asterisk/agi-bin/*.py'
 ```
