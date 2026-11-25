@@ -17,6 +17,7 @@ SIP-Telefone (LAN/VPN): aus der sip_extensions-Tabelle generiert die API
 """
 import hashlib
 import hmac
+import ipaddress
 import json
 import time
 import os
@@ -2903,6 +2904,33 @@ def telefon_wlan_debug(ext):
     return jsonify({"ok": True, "wlan_debug_bis": bis, "geweckt": geweckt})
 
 
+@app.post("/api/telefon/adb")
+def telefon_adb_melden():
+    """Rosenweg Geraet meldet Adresse und Port von "Debugging ueber WLAN" ({adresse, port};
+    port 0 = aus). Nur fuer die Anzeige "adb connect" auf /smartphones."""
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    b = request.get_json(silent=True) or {}
+    adresse = str(b.get("adresse") or "")
+    try:
+        port = int(b.get("port") or 0)
+        if adresse:
+            ipaddress.IPv4Address(adresse)
+    except (TypeError, ValueError):
+        return jsonify({"error": "adresse/port ungueltig"}), 400
+    if not 0 <= port <= 65535:
+        return jsonify({"error": "port ungueltig"}), 400
+    conn = db.connect()
+    try:
+        conn.execute("INSERT INTO telefon_adb (ext, adresse, port, gemeldet) VALUES (?,?,?,?) "
+                     "ON CONFLICT(ext) DO UPDATE SET adresse = excluded.adresse, port = excluded.port, "
+                     "gemeldet = excluded.gemeldet", (ext, adresse if port else "", port, int(time.time())))
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify({"ok": True})
+
 @app.get("/api/pbx/smartphones")
 def smartphones_uebersicht():
     """Technik/Praesident: alles fuer rosenweg4303.ch/smartphones in einer Antwort, ohne
@@ -2920,6 +2948,7 @@ def smartphones_uebersicht():
     try:
         sitz = {r["ext"]: r for r in conn.execute("SELECT ext, name, seit FROM telefon_sitzungen")}
         wart = {r["ext"]: r for r in conn.execute("SELECT ext, wlan_debug_bis, durch FROM telefon_wartung")}
+        adb = {r["ext"]: r for r in conn.execute("SELECT ext, adresse, port, gemeldet FROM telefon_adb")}
         telefone = []
         for e in conn.execute("SELECT ext, name, client, enabled FROM sip_extensions "
                               "WHERE context = 'geteilt' ORDER BY ext"):
@@ -2930,6 +2959,10 @@ def smartphones_uebersicht():
                 "registriert": str(e["ext"]) in regs,
                 "angemeldet": s["name"] if s else None, "seit": s["seit"] if s else None,
                 "wlan_debug_bis": bis if bis > jetzt else 0,
+                # "adb connect" nur, solange das Debugging an ist und die Meldung frisch (< 15 min)
+                "adb": (f"{adb[e['ext']]['adresse']}:{adb[e['ext']]['port']}"
+                        if e["ext"] in adb and adb[e["ext"]]["port"] and bis > jetzt
+                        and jetzt - int(adb[e["ext"]]["gemeldet"] or 0) < 900 else None),
             })
         privat = [{"id": r["id"], "kennung": f"{r['nummer']}-p{r['id']}", "nummer": r["nummer"],
                    "geraet": r["geraet"], "seit": r["created_at"],

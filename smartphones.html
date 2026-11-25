@@ -202,6 +202,8 @@ async function lade() {
         <td class="pr-2">${t.angemeldet ? esc(t.angemeldet) + '<div class="text-xs text-slate-500">seit ' + esc(zeit(t.seit)) + '</div>' : '<span class="text-slate-400">niemand</span>'}</td>
         <td class="pr-2">${t.wlan_debug_bis ? 'an bis ' + new Date(t.wlan_debug_bis * 1000).toLocaleTimeString('de-CH', {hour:'2-digit', minute:'2-digit'})
                          + ` <button class="knopf" onclick="wlanDebug('${esc(t.ext)}', 0)">aus</button>`
+                         + (t.adb ? `<div class="text-xs font-mono select-all mt-1" title="Port meldet Rosenweg Gerät">adb connect ${esc(t.adb)}</div>`
+                                  : '<div class="text-xs text-slate-500 mt-1">Port noch nicht gemeldet</div>')
                          : `<button class="knopf" onclick="wlanDebug('${esc(t.ext)}', 60)">🛠 1 Std.</button>`}</td>
         <td class="text-right space-x-1 whitespace-nowrap">
             <button class="knopf" onclick="klingeln('${esc(t.ext)}')">🔔 Klingeln</button>

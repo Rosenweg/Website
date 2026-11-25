@@ -224,6 +224,16 @@ CREATE TABLE IF NOT EXISTS telefon_wartung (
     geaendert      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Debug-Port der geteilten Telefone (Stefan 25.11.2026: "adb via Geraet stabiler"): Rosenweg Geraet
+-- findet den Port von "Debugging ueber WLAN" per mDNS bei sich selbst und meldet ihn mit der
+-- WLAN-Adresse; /smartphones zeigt daraus "adb connect". port 0 = aus.
+CREATE TABLE IF NOT EXISTS telefon_adb (
+    ext       TEXT PRIMARY KEY,
+    adresse   TEXT NOT NULL DEFAULT '',
+    port      INTEGER NOT NULL DEFAULT 0,
+    gemeldet  INTEGER NOT NULL DEFAULT 0        -- epoch Sekunden
+);
+
 -- WLAN der geteilten Telefone (Stefan 25.11.2026): SSID "Rosenweg" mit PPSK, das Passwort
 -- bestimmt das VLAN. Die Schluessel stehen NUR hier in der Datenbank (nie im Repo, nie im Log);
 -- Rosenweg Geraet holt seinen mit dem Geraete-Token und richtet das WLAN als Device Owner ein.
