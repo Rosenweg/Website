@@ -55,6 +55,10 @@ PORT = int(os.environ.get("PBX_API_PORT", "8095"))
 # XML das SIP-Passwort steht, ist die URL ein Einmal-Token mit kurzer Frist.
 PROV_SIP_HOST = os.environ.get("PBX_SIP_HOST", "sip.rosenweg4303.ch")
 PROV_TRANSPORT = os.environ.get("PBX_SIP_TRANSPORT", "tcp")
+# Eigene Handys (Rosenweg Telefon ohne Geraet) sind auch ausserhalb: SIP ueber TLS 5061 (Stefan
+# 25.11.2026: "SIP von aussen ja, via TLS"). sip.rosenweg4303.ch zeigt oeffentlich auf die WAN-
+# Adresse (UniFi leitet 5061 an CT 220), intern auf CT 220; das Zertifikat passt fuer beides.
+PROV_TRANSPORT_PRIVAT = os.environ.get("PBX_SIP_TRANSPORT_PRIVAT", "tls")
 # Anmeldung in den Rosenweg-Apps (Authentik "rosenweg-apps", oeffentlicher Client mit PKCE):
 # die Anlage prueft das Token selbst ueber userinfo (die Introspektion der Haupt-API kennt
 # nur Tokens ihres eigenen Clients).
@@ -1483,8 +1487,8 @@ def _rosenweg_konto():
 def _privat_antwort(r, name):
     kennung = f"{r['nummer']}-p{r['id']}"
     res = jsonify({
-        "server": PROV_SIP_HOST, "port": 5061 if PROV_TRANSPORT == "tls" else 5060,
-        "transport": PROV_TRANSPORT, "user": kennung, "auth_user": kennung,
+        "server": PROV_SIP_HOST, "port": 5061 if PROV_TRANSPORT_PRIVAT == "tls" else 5060,
+        "transport": PROV_TRANSPORT_PRIVAT, "user": kennung, "auth_user": kennung,
         "password": r["passwort"], "nummer": r["nummer"], "name": name, "id": r["id"],
     })
     res.headers["Cache-Control"] = "no-store"
@@ -1522,6 +1526,27 @@ def telefon_privat_anmelden():
         conn.close()
     _sip_person_neu_laden()
     return _privat_antwort(r, name)
+
+
+@app.post("/api/telefon/privat/stand")
+def telefon_privat_stand():
+    """Rosenweg Telefon fragt regelmaessig nach ({user, password} des eigenen Zugangs): 200 mit
+    den aktuellen Zugangsdaten (z.B. Wechsel auf TLS), 401 wenn es den Zugang nicht mehr gibt -
+    dann wurde das Handy im Web (/smartphones) abgemeldet, und die App meldet sich auch ab.
+    Die App fragt nach einem 401 nicht weiter (CrowdSec zaehlt 401)."""
+    b = request.get_json(silent=True) or {}
+    kennung, pw = str(b.get("user") or ""), str(b.get("password") or "")
+    if not SIP_PRIVAT_RE.fullmatch(kennung):
+        return jsonify({"error": "Unbekannter Zugang"}), 401
+    zid = int(kennung.split("-p", 1)[1])
+    conn = db.connect()
+    try:
+        r = conn.execute("SELECT id, nummer, passwort FROM telefon_sip_privat WHERE id = ?", (zid,)).fetchone()
+    finally:
+        conn.close()
+    if not r or not hmac.compare_digest(str(r["passwort"]), pw):
+        return jsonify({"error": "Unbekannter Zugang"}), 401
+    return _privat_antwort(r, "")
 
 
 @app.post("/api/telefon/privat/abmelden")
