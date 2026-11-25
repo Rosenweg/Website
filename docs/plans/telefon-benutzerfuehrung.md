@@ -1,6 +1,6 @@
 # Plan: Benutzerführung Telefon – „Mein Telefon“ und „Telefonanlage“
 
-Stand 25.11.2026, Entwurf zur Durchsicht mit Stefan. **Noch nichts davon ist gebaut.**
+Stand 25.11.2026, von Stefan durchgesehen (Entscheide unten). **Noch nichts davon ist gebaut.**
 Baut auf [telefon-nummernplan.md](telefon-nummernplan.md) auf (dort Schritt 6 „Mein Profil im Web“).
 
 ## Ziel
@@ -105,7 +105,7 @@ Reiter: **Nummern · Geräte · Amt · Apps · Protokoll**.
 
 Ein Klick öffnet die Nummer:
 
-- **Gruppe (1XXX):** Name, Mitglieder (Personen bevorzugt, sonst Gerät oder Handynummer), Reihenfolge
+- **Gruppe (1XXX):** Name, Mitglieder (Personen bevorzugt; auch Geräte und Externe mit Handynummer), Reihenfolge
   (gleiche Stufe = gleichzeitig), „klingelt immer“ je Mitglied, befristet bis. Heute: „Ring-Group
   Mitglieder“ in PBX-Admin.
 - **Dienst (20XX):** Name, Geschäftszeiten, welche Gruppe klingelt, **ausserhalb der Zeiten**:
@@ -115,9 +115,9 @@ Ein Klick öffnet die Nummer:
 - **Gerät (21XX):** Typ (geteiltes Telefon / SIP-Telefon / Linphone), Status, angemeldete Person,
   Wartung (adb, Port 5555), Klingeln, Abmelden, Einrichtungs-QR. Heute: PBX-Admin „SIP-Telefone“ und
   „Geteilte Telefone“ sowie /smartphones „Geteilte Telefone“.
-- **Person (3HHWWP):** ihre Geräte, Weiterleitung, Gruppen – **nur lesend**. Aktionen: „SIP-Telefon
-  für diese Person einrichten“ (Hilfe für Leute, die es nicht selbst können), Gerät entfernen
-  (z.B. verlorenes Handy). **Nicht** sichtbar: ihre Anrufe und Voicemails.
+- **Person (3HHWWP):** ihre Geräte, Weiterleitung, Gruppen. Aktionen: Erreichbarkeit ändern
+  (protokolliert), „SIP-Telefon für diese Person einrichten“ (Hilfe für Leute, die es nicht selbst
+  können), Gerät entfernen (z.B. verlorenes Handy). **Nicht** sichtbar: ihre Anrufe und Voicemails.
 - **Verwaltung (4XXX):** Name, Zielnummer.
 
 Weitere Reiter:
@@ -151,7 +151,7 @@ Weitere Reiter:
 
 | | Person | Technik / Präsident |
 |---|---|---|
-| eigene Nummer, Geräte, Weiterleitung, Voicemail an/aus | ändern | sehen (lesend), Gerät entfernen |
+| eigene Nummer, Geräte, Weiterleitung, Voicemail an/aus | ändern | sehen, Weiterleitung/Voicemail ändern (protokolliert), Gerät entfernen |
 | eigene Anrufe und Voicemails | sehen, anhören, löschen | **nein** |
 | Gruppen, Dienste, Geräte, Amt, Apps | sehen, wo sie selbst drin ist | ändern |
 | Anrufliste aller Anrufe, gemeinsame Voicemails der Dienste | nein | ja (Dienst-Voicemails gehen ohnehin an die Gruppe) |
@@ -206,15 +206,14 @@ Jeder Schritt ist für sich nutzbar und wird einzeln ausgerollt.
 5. **Anrufe und Nachrichten im Web:** eigene Anrufliste und Voicemail auf „Mein Telefon“.
 6. Später: Ansage, Nicht stören, Zeiten; Transkript für persönliche Voicemail (offen im Nummernplan).
 
-## Offene Fragen an Stefan
+## Entscheide (Stefan, 25.11.2026)
 
-1. Adressen: `/mein-telefon` und `/telefonanlage` – passt das, oder lieber unter `/smartphones`
-   bleiben (z.B. `/smartphones` = Telefonanlage, `/mein-telefon` neu)?
-2. Darf eine Person ihre **Weiterleitung auf jede Nummer** setzen (auch Ausland), oder nur Schweiz?
-   Kosten laufen über peoplefone.
-3. **SIP-Telefone selbst einrichten:** jede Person, oder nur mit Freigabe durch Technik?
-4. Soll Technik die **Weiterleitung einer Person ändern** können (z.B. für jemanden, der es nicht
-   kann), oder nur sehen?
-5. Gruppen-Mitglieder: nur noch **Personen** (empfohlen) oder weiterhin auch reine Handynummern
-   (z.B. externe Helfer ohne Rosenweg-Nummer)?
-6. Mehrere **Dienste** absehbar (Hauswart, Verwaltung)? Davon hängt ab, wie früh Schritt 4 kommt.
+1. Adressen: **`/mein-telefon`** und **`/telefonanlage`**.
+2. Weiterleitung: **auf jede Nummer**, auch Ausland.
+3. SIP-Telefone: **jede Person für sich selbst**; keine allgemeinen (nicht-persönlichen) SIP-Telefone
+   über „Mein Telefon“. Allgemeine Geräte (21XX) richtet nur Technik in der Telefonanlage ein.
+4. Technik darf die **Weiterleitung einer Person ändern** (nicht nur sehen). → Person-Ansicht in der
+   Telefonanlage: Erreichbarkeit bearbeitbar; Änderungen werden mit „durch <Technik-Person>“ protokolliert.
+5. In Gruppen dürfen auch **Externe** sein (Handynummern ohne Rosenweg-Nummer), neben Personen und Geräten.
+6. Weitere Dienste: Hauswart vermutlich nicht; Verwaltung ist schon 4000. → Dienste bleiben vorerst bei
+   **2000 Technik**; Schritt 4 (Gruppen und Dienste als Daten) hat keine Eile und kann schlank bleiben.
