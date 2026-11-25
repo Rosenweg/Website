@@ -164,7 +164,7 @@ und dem PMG als weiterem Bouncer. Rosenweg-eigene Dateien in `crowdsec/`:
 |---|---|---|
 | `rosenweg-anmeldung-bf.yaml` | `/etc/crowdsec/scenarios/` | 8 gescheiterte Anmeldungen (401) an der Anlage (`/api/telefon/`, `/api/pbx/`) |
 | `profil-rosenweg-anmeldung-24h.yaml` | Anfang von `/etc/crowdsec/profiles.yaml` | 24 h Sperre fuer `rosenweg/anmeldung-bf` und `rosenweg/authentik-bf` |
-| `rosenweg-intern-whitelist.yaml` | `/etc/crowdsec/parsers/s02-enrich/` | eigene Netze nie sperren: 100.64.0.0/10, WAN 37.17.232.133 und .136, 2a02:16a:1407::/48 |
+| `rosenweg-intern-whitelist.yaml` | `/etc/crowdsec/parsers/s02-enrich/` | eigene Netze nie sperren: 100.64.0.0/10, WAN 37.17.232.133, IPv6 2a02:16a:1400::/48 (laut UniFi; Juronetz bewusst nicht) |
 
 `rosenweg/authentik-bf` steht seit dem 25.11.2026 auf `capacity: 7` (Sperre ab dem 8. Fehlversuch).
 Stefan: "nach 8 Versuchen fehlgeschlagen 24 h sperren". Gezaehlt wird nur 401, nicht 403
