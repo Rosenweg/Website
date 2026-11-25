@@ -84,7 +84,7 @@ def main():
         log(f'{nummer}: unbekannt')
         return
     dial = d.get('dial') or ''
-    if not re.fullmatch(r'(PJSIP/[0-9]{2,8}(-[0-9]{2,8})?)(&PJSIP/[0-9]{2,8}(-[0-9]{2,8})?)*', dial or 'x'):
+    if not re.fullmatch(r'(PJSIP/[0-9]{2,8}(-p?[0-9]{1,8})?)(&PJSIP/[0-9]{2,8}(-p?[0-9]{1,8})?)*', dial or 'x'):
         dial = ''
     ziel = d.get('ziel') or ''
     if not re.fullmatch(r'\+?[0-9]{8,15}', ziel or 'x'):
