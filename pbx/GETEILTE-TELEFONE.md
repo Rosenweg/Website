@@ -347,7 +347,7 @@ Daten gelöscht — die Akku-Ausnahme und die Freigabe des Anrufkontos gingen ve
 ### Wartung per adb über das Netz (ab Rosenweg Gerät v217)
 
 - **Klassisches adb auf Port 5555** statt „Debugging über WLAN“. Grund: Android merkt sich vertraute WLANs pro Zugangspunkt-Kennung (BSSID) und schaltet „Debugging über WLAN“ bei jedem neuen Zugangspunkt ab (schon beim Wechsel 2,4 → 5 GHz am selben Gerät). Die nötige Bestätigung fragt es bei gesperrtem Bildschirm gar nicht erst (`startConfirmationForNetwork: isLockScreenMode`).
-- Einmal per USB: `adb tcpip 5555` (macht `geteiltes-telefon-einrichten.sh`). Nach einem Neustart des Telefons ist der Port weg und muss nochmals per USB gesetzt werden.
+- Einmal per USB: `adb tcpip 5555` (macht `geteiltes-telefon-einrichten.sh`). Nach einem Neustart des Telefons ist der Port weg: `scripts/geteiltes-telefon-einrichten.sh <seriennummer> --nur-adb` per USB setzt nur ihn wieder.
 - /smartphones „🛠 1 Std.“ / „aus“ schaltet zentral nur adb selbst (Gerät setzt `ADB_ENABLED` als Device Owner, Weckanruf 2098). Aus = kein adbd, auch nicht per USB. Geht bei gesperrtem Bildschirm, ohne Rückfrage; getestet: aus in 2 s, an in 3 s.
 - Verbinden darf nur ein Rechner, dessen Schlüssel das Telefon kennt.
 - Gerät meldet Adresse und Port (`POST /api/telefon/adb`); /smartphones zeigt `adb connect <adresse>:5555`. Ist Port 5555 nicht offen (nach Neustart), sucht Gerät ersatzweise ein von Hand eingeschaltetes „Debugging über WLAN“ per mDNS.
