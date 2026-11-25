@@ -1269,6 +1269,40 @@ def _telefon_abmelden(conn, ext, durch):
     return True
 
 
+# Sperrbild der geteilten Telefone je angemeldeter Person (Stefan 25.11.2026: "prio gruppe
+# danach haus"): Technik, dann Ausschuss/Praesident, dann das eigene Haus (rN-...), dann die
+# STWEG (stwegN-...), sonst das Rosenweg-Logo. Dateien liegen auf www.rosenweg4303.ch.
+_LOGO_HAUS = {
+    "1": "logo-stweg6-rosenweg1.png", "2": "logo-stweg7-rosenweg2.png", "4": "logo-stweg7-rosenweg4.png",
+    "5": "logo-stweg5-rosenweg5.png", "6": "logo-stweg5-rosenweg6.png", "8": "logo-stweg5-rosenweg8.png",
+    "9": "logo-stweg3-rosenweg9.png", "10": "logo-stweg4-rosenweg10.png", "12": "logo-stweg4-rosenweg12.png",
+    "13": "logo-stweg2-rosenweg13.png", "14": "logo-stweg2-rosenweg14.png", "16": "logo-stweg2-rosenweg16.png",
+    "17": "logo-stweg1-rosenweg17.png", "18": "logo-stweg1-rosenweg18.png",
+}
+_LOGO_STWEG = {
+    "1": "logo-stweg1-rosenweg17-18.png", "2": "logo-stweg2-rosenweg13-14-16.png", "3": "logo-stweg3-rosenweg9.png",
+    "4": "logo-stweg4-rosenweg10-12.png", "5": "logo-stweg5-rosenweg5-6-8.png", "6": "logo-stweg6-rosenweg1.png",
+    "7": "logo-stweg7-rosenweg2-4.png",
+}
+
+
+def _sperrbild(gruppen):
+    g = {str(x).lower() for x in gruppen or []}
+    if "technik" in g:
+        return "logo-rosenweg-technik.png"
+    if g & {"ausschuss", "präsident", "praesident"} or any(x.endswith("-ausschuss") for x in g):
+        return "logo-rosenweg-ausschuss.png"
+    for x in sorted(g):
+        m = re.fullmatch(r"r([0-9]{1,2})-(bewohner|eigentuemer)", x)
+        if m and m.group(1) in _LOGO_HAUS:
+            return _LOGO_HAUS[m.group(1)]
+    for x in sorted(g):
+        m = re.fullmatch(r"stweg([0-9])-(bewohner|eigentuemer)", x)
+        if m and m.group(1) in _LOGO_STWEG:
+            return _LOGO_STWEG[m.group(1)]
+    return "logo-rosenweg.png"
+
+
 def _sitzung_json(row):
     if not row:
         return {"angemeldet": False}
@@ -1283,8 +1317,12 @@ def _sitzung_json(row):
             c.close()
     except Exception as e:
         app.logger.warning("Nummer der Person: %s", e)
+    try:
+        gruppen = json.loads(row["gruppen"] or "[]")
+    except (ValueError, IndexError, KeyError):
+        gruppen = []
     return {"angemeldet": True, "name": row["name"], "email": row["email"], "seit": row["seit"],
-            "nummer": str(nummer)}
+            "nummer": str(nummer), "sperrbild": _sperrbild(gruppen)}
 
 
 
