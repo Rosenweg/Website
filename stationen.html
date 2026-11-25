@@ -510,27 +510,9 @@
                 const gesehen = vorZeit(s.last_seen_at);
                 const st = s.last_state || {};
                 const version = st.os_version ? `<div class="text-xs text-gray-400">OS ${escape(st.os_version)}</div>` : '';
-                const aktionen = s.revoked_at ? '<span class="text-gray-400 text-xs">—</span>' : (
-                    `<button onclick="jetztAktualisieren('${escape(s.id)}')" class="text-blue-600 hover:text-blue-800 font-medium">Aktualisieren</button>
-                     <span class="text-gray-300 mx-1">|</span>
-                     <button onclick="cfgOeffnen('${escape(s.id)}')" class="text-blue-600 hover:text-blue-800 font-medium">Einstellen</button>
-                     <span class="text-gray-300 mx-1">|</span>
-                     <button onclick="logsOeffnen('${escape(s.id)}')" class="text-blue-600 hover:text-blue-800 font-medium">Logs</button>
-                     <span class="text-gray-300 mx-1">|</span>` + (
-                        s.status === 'gesperrt'
-                            ? `<button onclick="entsperren('${escape(s.id)}')" class="text-green-700 hover:text-green-900 font-medium">Entsperren</button>`
-                            : `<button onclick="sperren('${escape(s.id)}')" class="text-red-600 hover:text-red-800 font-medium">Sperren</button>`
-                    ) +
-                    ` <span class="text-gray-300 mx-1">|</span>` + (
-                        (s.status === 'gesperrt' || s.ssh_wartung_bis) ? ''
-                            : `<button onclick="wartungFreigeben('${escape(s.id)}')" class="text-blue-600 hover:text-blue-800 font-medium">SSH-Wartung</button> <span class="text-gray-300 mx-1">|</span>`
-                    ) + (
-                        s.zuruecksetzen_angefordert
-                            ? `<button onclick="zuruecksetzenAbbrechen('${escape(s.id)}')" class="text-yellow-700 hover:text-yellow-900 font-medium">Zurücksetzen abbrechen</button>`
-                            : `<button onclick="zuruecksetzen('${escape(s.id)}')" class="text-orange-600 hover:text-orange-800 font-medium">Zurücksetzen</button>`
-                    ) +
-                    ` <span class="text-gray-300 mx-1">|</span>
-                      <button onclick="entfernen('${escape(s.id)}')" class="text-gray-500 hover:text-gray-700">Entfernen</button>`);
+                // Ein Menue je Zeile statt sieben Links nebeneinander (Stefan 25.11.2026)
+                const aktionen = s.revoked_at ? '<span class="text-gray-400 text-xs">—</span>'
+                    : `<button onclick="aktionsMenue(event, '${escape(s.id)}')" class="px-3 py-1 text-sm border rounded-lg hover:bg-gray-100">Aktionen ▾</button>`;
 
                 return `<tr class="border-b hover:bg-gray-50">
                     <td class="py-3 px-6 font-mono font-medium">${escape(s.id)}${version}</td>
@@ -1504,6 +1486,41 @@
             el.classList.remove('hidden');
             setTimeout(() => el.classList.add('hidden'), 5000);
         }
+
+        // ---- Aktionsmenue je Zeile ----
+        // Alltaegliches oben, Eingriffe in der Mitte, Gefaehrliches (rot) unten und durch Linien getrennt.
+        function aktionsMenue(ev, id) {
+            ev.stopPropagation();
+            const s = (stationen || []).find(x => x.id === id);
+            if (!s) return;
+            const m = document.getElementById('aktions-menue');
+            const e = (t, fn, klasse = 'text-gray-800') =>
+                `<button onclick="aktionsMenueZu(); ${fn}('${escape(id)}')" class="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100 ${klasse}">${t}</button>`;
+            const linie = '<div class="border-t my-1"></div>';
+            let h = e('Jetzt aktualisieren', 'jetztAktualisieren') + e('Einstellen …', 'cfgOeffnen') + e('Logs', 'logsOeffnen');
+            if (s.status !== 'gesperrt' && !s.ssh_wartung_bis) h += e('SSH-Wartung freigeben (2 h)', 'wartungFreigeben');
+            if (s.ssh_wartung_bis) h += e('SSH-Wartung beenden', 'wartungBeenden');
+            h += linie;
+            h += s.status === 'gesperrt' ? e('Entsperren', 'entsperren', 'text-green-700') : e('Sperren …', 'sperren', 'text-red-600');
+            h += s.zuruecksetzen_angefordert ? e('Zurücksetzen abbrechen', 'zuruecksetzenAbbrechen', 'text-yellow-700')
+                                             : e('Zurücksetzen …', 'zuruecksetzen', 'text-orange-600');
+            h += linie + e('Entfernen …', 'entfernen', 'text-gray-500');
+            m.innerHTML = h;
+            m.classList.remove('hidden');
+            const r = ev.currentTarget.getBoundingClientRect();
+            const breite = m.offsetWidth, hoehe = m.offsetHeight;
+            let links = Math.min(r.right - breite, window.innerWidth - breite - 8);
+            let oben = r.bottom + 4;
+            if (oben + hoehe > window.innerHeight - 8) oben = Math.max(8, r.top - hoehe - 4);
+            m.style.left = Math.max(8, links) + 'px';
+            m.style.top = oben + 'px';
+        }
+        function aktionsMenueZu() { document.getElementById('aktions-menue').classList.add('hidden'); }
+        document.addEventListener('click', aktionsMenueZu);
+        document.addEventListener('keydown', ev => { if (ev.key === 'Escape') aktionsMenueZu(); });
+        window.addEventListener('scroll', aktionsMenueZu, true);
+        window.addEventListener('resize', aktionsMenueZu);
     </script>
+    <div id="aktions-menue" class="hidden fixed z-50 bg-white border rounded-lg shadow-lg py-1 min-w-[14rem]" onclick="event.stopPropagation()"></div>
 </body>
 </html>
