@@ -349,13 +349,29 @@ def person_agi(nummer):
         p = conn.execute("SELECT * FROM personen_nummern WHERE nummer = ? AND aktiv = 1", (nummer,)).fetchone()
         if not p:
             return jsonify({"ok": False})
-        ziele = [r["ext"] for r in conn.execute(
+        sitzungen = [r["ext"] for r in conn.execute(
             "SELECT s.ext FROM telefon_sitzungen s JOIN sip_extensions e ON e.ext = s.ext "
             "WHERE lower(s.email) = lower(?) AND e.enabled = 1 ORDER BY s.ext", (p["email"],))]
-        if db.ist_nebenstelle(conn, nummer):
-            ziele.append(str(nummer))   # Rosenweg Telefon auf dem privaten Handy
+        # Rosenweg Telefon mit persoenlichem Zugang (<nummer>-<ext>) klingelt statt der
+        # Geraete-App. Ist er (noch) nicht registriert — alte App, kein Netz, AMI weg —,
+        # klingelt wie bisher die Nebenstelle des Geraets.
+        persoenlich = {r["ext"]: f"{r['nummer']}-{r['ext']}" for r in conn.execute(
+            "SELECT ext, nummer FROM telefon_sip_person WHERE nummer = ?", (nummer,))}
+        try:
+            registriert = ami.registered_aors() if persoenlich else set()
+        except Exception:  # noqa: BLE001
+            registriert = set()
         ohne = request.args.get("ohne") or ""
-        ziele = [z for z in ziele if z != ohne]   # anrufendes Geraet nicht mitklingeln lassen
+        # anrufendes Geraet nicht mitklingeln lassen (Nebenstelle oder persoenlicher Zugang)
+        ohne_ext = ohne.split("-", 1)[1] if SIP_PERSON_RE.fullmatch(ohne) else ohne
+        ziele = []
+        for ext in sitzungen:
+            if ext == ohne_ext:
+                continue
+            pz = persoenlich.get(ext)
+            ziele.append(pz if pz and pz in registriert else ext)
+        if db.ist_nebenstelle(conn, nummer) and str(nummer) != ohne:
+            ziele.append(str(nummer))   # Rosenweg Telefon auf dem privaten Handy
         wl = p["weiterleitung"] if p["weiterleitung"] in ("aus", "immer", "nicht_erreichbar") else "aus"
         ziel = (p["weiterleitung_ziel"] or "").replace(" ", "")
         if wl != "aus" and not _ZIEL_RE.match(ziel):
@@ -755,12 +771,115 @@ def regenerate_phones_conf(conn):
             "qualify_frequency=60",
             "",
         ]
+    lines += _sip_person_abschnitte(conn)
     with open(PHONES_CONF, "w") as f:
         f.write("\n".join(lines))
     try:
         ami.reload_pjsip()
     except Exception:  # noqa: BLE001
         pass  # reload best-effort; Datei ist geschrieben, naechster Asterisk-Reload zieht sie
+
+
+# ─── Persoenliches SIP-Konto in Rosenweg Telefon ────────────────────────────
+# Stefan 25.11.2026: Rosenweg Telefon registriert die persoenliche Nummer der
+# angemeldeten Person, die Geraete-App weiter die Nebenstelle des Geraets (2102 ...).
+# Pro Sitzung ein eigener Zugang <nummer>-<ext> (endpoint, auth und aor gleichen
+# Namens wie bei den Nebenstellen): Abmelden loescht ihn, die Registrierung des
+# abgemeldeten Geraets ist damit sofort weg und es klingelt nie mehr fuer die Person.
+# Ein gemeinsamer Endpunkt pro Nummer mit mehreren auth-Objekten haette das nicht:
+# die Contacts der AOR blieben nach dem Abmelden bis zum Ablauf stehen.
+# Gehende Anrufe: Kontext [person] (extensions.conf), Caller-ID "Name <nummer>".
+SIP_PERSON_RE = re.compile(r"3[0-9]{5}-[0-9]{2,8}")
+
+
+def _sip_person_abschnitte(conn):
+    """pjsip-Abschnitte fuer alle persoenlichen Zugaenge mit gueltiger Sitzung."""
+    rows = conn.execute(
+        "SELECT p.ext, p.nummer, p.passwort, n.name FROM telefon_sip_person p "
+        "JOIN telefon_sitzungen s ON s.ext = p.ext AND lower(s.email) = lower(p.email) "
+        "JOIN personen_nummern n ON n.nummer = p.nummer AND n.aktiv = 1 "
+        "JOIN sip_extensions e ON e.ext = p.ext AND e.enabled = 1 "
+        "ORDER BY p.ext").fetchall()
+    lines = ["; Persoenliche Zugaenge (telefon_sip_person): <nummer>-<geraet>, nur waehrend der Sitzung", ""]
+    for r in rows:
+        kennung = f"{r['nummer']}-{r['ext']}"
+        if not SIP_PERSON_RE.fullmatch(kennung) or not re.fullmatch(r"[A-Za-z0-9_-]{16,64}", str(r["passwort"] or "")):
+            print(f"[pbx-api] persoenlicher Zugang an {re.sub(r'[^0-9]', '?', str(r['ext']))[:12]} "
+                  "nicht geschrieben (ungueltig)", flush=True)
+            continue
+        name = re.sub(r'[\x00-\x1f\x7f"<>\[\];\\]', " ", str(r["name"] or ""))[:60]
+        lines += [
+            f"[{kennung}]",
+            "type=endpoint",
+            "context=person",
+            "disallow=all",
+            # Rosenweg Telefon nutzt denselben Sipdroid-Kern wie die Geraete-App
+            *ENDPOINT_PROFILE["android-sip"],
+            f"auth={kennung}",
+            f"aors={kennung}",
+            f"callerid={name} <{r['nummer']}>",
+            "direct_media=no",
+            "rewrite_contact=yes",
+            "force_rport=yes",
+            "rtp_symmetric=yes",
+            "",
+            f"[{kennung}]",
+            "type=auth",
+            "auth_type=userpass",
+            f"username={kennung}",
+            f"password={r['passwort']}",
+            "",
+            f"[{kennung}]",
+            "type=aor",
+            "max_contacts=1",
+            "remove_existing=yes",
+            "qualify_frequency=60",
+            "",
+        ]
+    return lines
+
+
+def _sip_person_anlegen(conn, ext):
+    """Nach dem Anmelden: neuer Zugang fuer die Person an diesem Geraet (altes Passwort weg).
+    Gibt die persoenliche Nummer zurueck oder None (Person ohne Nummer)."""
+    conn.execute("DELETE FROM telefon_sip_person WHERE ext = ?", (ext,))
+    s = conn.execute("SELECT email, name FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+    if not s or not s["email"]:
+        return None
+    nummer = str(_nummer_der_person(conn, s["email"], s["name"]) or "")
+    if not re.fullmatch(r"3[0-9]{5}", nummer):
+        return None
+    conn.execute("INSERT INTO telefon_sip_person (ext, nummer, email, passwort) VALUES (?,?,?,?)",
+                 (ext, nummer, str(s["email"]).lower(), pysecrets.token_urlsafe(24)))
+    return nummer
+
+
+def _sip_person_neu_laden():
+    """pjsip_phones.conf nach einem Sitzungswechsel neu schreiben (nach dem commit)."""
+    try:
+        c = db.connect()
+        try:
+            regenerate_phones_conf(c)
+        finally:
+            c.close()
+    except Exception as e:  # noqa: BLE001
+        app.logger.warning("pjsip_phones.conf nicht geschrieben: %s", type(e).__name__)
+
+
+def sip_person_aufraeumen():
+    """Sicherung (stuendlich): Zugaenge ohne passende Sitzung loeschen, z.B. wenn eine
+    Abmeldung an einem anderen Weg vorbeiging."""
+    conn = db.connect()
+    try:
+        n = conn.execute(
+            "DELETE FROM telefon_sip_person WHERE NOT EXISTS (SELECT 1 FROM telefon_sitzungen s "
+            "WHERE s.ext = telefon_sip_person.ext AND lower(s.email) = lower(telefon_sip_person.email))").rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    if n:
+        app.logger.warning("%d persoenliche SIP-Zugaenge ohne Sitzung entfernt", n)
+        _sip_person_neu_laden()
 
 
 @app.get("/api/pbx/sip-extensions")
@@ -873,6 +992,7 @@ def sip_ext_delete(ext):
     conn = db.connect()
     try:
         conn.execute("DELETE FROM sip_extensions WHERE ext = ?", (ext,))
+        conn.execute("DELETE FROM telefon_sip_person WHERE ext = ?", (ext,))
         conn.commit()
         regenerate_phones_conf(conn)
         return jsonify({"ok": True})
@@ -1116,6 +1236,8 @@ def _telefon_abmelden(conn, ext, durch):
     if not s:
         return False
     conn.execute("DELETE FROM telefon_sitzungen WHERE ext = ?", (ext,))
+    # Persoenlicher SIP-Zugang weg (pjsip_phones.conf schreibt der Aufrufer nach dem commit neu)
+    conn.execute("DELETE FROM telefon_sip_person WHERE ext = ?", (ext,))
     # Nextcloud-Zugang noch nicht widerrufen: das Telefon laedt erst fertig hoch und meldet
     # dann /api/telefon/nextcloud/fertig (spaetestens nach 24 h widerruft der stuendliche Lauf)
     conn.execute("UPDATE telefon_nextcloud SET abgemeldet_at = datetime('now') WHERE ext = ?", (ext,))
@@ -1166,6 +1288,44 @@ def telefon_status():
         conn.close()
 
 
+@app.get("/api/telefon/sip-person")
+def telefon_sip_person():
+    """Persoenlicher SIP-Zugang der angemeldeten Person fuer Rosenweg Telefon (ueber den
+    AnlageProvider der Geraete-App). 404, wenn niemand angemeldet ist oder die Person
+    keine persoenliche Nummer hat. Das Passwort gilt nur fuer diese Sitzung."""
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    conn = db.connect()
+    neu = False
+    try:
+        s = conn.execute("SELECT email, name FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+        if not s:
+            return jsonify({"error": "Niemand angemeldet"}), 404
+        sql = "SELECT nummer, passwort FROM telefon_sip_person WHERE ext = ? AND lower(email) = lower(?)"
+        r = conn.execute(sql, (ext, s["email"] or "")).fetchone()
+        if not r:
+            # Sitzung von vor diesem Update: Zugang jetzt anlegen
+            neu = bool(_sip_person_anlegen(conn, ext))
+            conn.commit()
+            r = conn.execute(sql, (ext, s["email"] or "")).fetchone()
+        if not r:
+            return jsonify({"error": "Keine persoenliche Nummer"}), 404
+        kennung = f"{r['nummer']}-{ext}"
+        antwort = {
+            "server": PROV_SIP_HOST, "port": 5061 if PROV_TRANSPORT == "tls" else 5060,
+            "transport": PROV_TRANSPORT, "user": kennung, "auth_user": kennung,
+            "password": r["passwort"], "nummer": r["nummer"], "name": s["name"],
+        }
+    finally:
+        conn.close()
+    if neu:
+        _sip_person_neu_laden()
+    res = jsonify(antwort)
+    res.headers["Cache-Control"] = "no-store"
+    return res
+
+
 @app.post("/api/telefon/abmelden")
 def telefon_abmelden_geraet():
     ext, deny = _geraet()
@@ -1173,8 +1333,10 @@ def telefon_abmelden_geraet():
         return deny
     conn = db.connect()
     try:
-        _telefon_abmelden(conn, ext, "geraet")
+        weg = _telefon_abmelden(conn, ext, "geraet")
         conn.commit()
+        if weg:
+            _sip_person_neu_laden()
         return jsonify({"ok": True, "angemeldet": False})
     finally:
         conn.close()
@@ -1243,7 +1405,9 @@ def telefon_einloesen():
                      (ext, a["user_id"], a["email"], a["name"], a["gruppen"] or "[]"))
         conn.execute("INSERT INTO telefon_log (ext, ereignis, email, name, durch) VALUES (?,?,?,?,?)",
                      (ext, "an", a["email"], a["name"], a["durch"]))
+        _sip_person_anlegen(conn, ext)
         conn.commit()
+        _sip_person_neu_laden()
         s = conn.execute("SELECT name, email, seit, gruppen FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
         return jsonify({"ok": True, "ext": ext, **_sitzung_json(s), **_apps_fuer(conn, s)})
     finally:
@@ -1337,7 +1501,9 @@ def telefon_karte():
         conn.execute("INSERT INTO telefon_sitzungen (ext, user_id, email, name, gruppen) VALUES (?,?,?,?,?)",
                      (ext, str(person.get("user_id") or ""), email, name, gruppen))
         _karten_log(conn, ext, "an", email, name, karte)
+        _sip_person_anlegen(conn, ext)
         conn.commit()
+        _sip_person_neu_laden()
         s = conn.execute("SELECT name, email, seit, gruppen FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
         return jsonify({"ok": True, "ext": ext, **_sitzung_json(s), **_apps_fuer(conn, s)})
     finally:
@@ -2017,6 +2183,10 @@ def _personen_abgleich_schleife():
             nextcloud_nachlauf_aufraeumen()
         except Exception as e:
             app.logger.warning("Nextcloud-Nachlauf: %s", e)
+        try:
+            sip_person_aufraeumen()
+        except Exception as e:
+            app.logger.warning("SIP-Zugaenge aufraeumen: %s", e)
         time.sleep(3600)
 
 
@@ -2233,6 +2403,7 @@ def telefon_abmelden_web(ext):
             return jsonify({"error": "Nur die eigene Anmeldung"}), 403
         _telefon_abmelden(conn, ext, ("person:" if eigene else "admin:") + actor(user))
         conn.commit()
+        _sip_person_neu_laden()
         return jsonify({"ok": True, "angemeldet": False})
     finally:
         conn.close()

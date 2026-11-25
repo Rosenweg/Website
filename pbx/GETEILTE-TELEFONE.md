@@ -89,7 +89,8 @@ Wichtig für die geplante Einrichtung per QR ohne Kabel.
 
 | Was | Befehl heute | Offen für QR-Einrichtung |
 |---|---|---|
-| SIP-Anrufkonto aktivieren | `adb shell telecom set-phone-account-enabled <komponente> SipdroidCallProvider 0` | entfällt vermutlich, sobald SIP in Rosenweg Phone steckt — prüfen |
+| SIP-Anrufkonten aktivieren (zwei: Nebenstelle des Geräts und persönliches Konto) | `adb shell telecom set-phone-account-enabled ch.rosenweg4303.telefon/org.sipdroid.sipua.ui.SipConnectionService SipdroidCallProvider 0` und ab Rosenweg Telefon v27 `adb shell telecom set-phone-account-enabled ch.rosenweg4303.phone/org.sipdroid.sipua.ui.SipConnectionService SipdroidCallProvider 0` (das Konto gibt es erst, wenn Rosenweg Telefon einmal lief; das Skript startet es dafür kurz) | bleibt: Android schaltet Anrufkonten fremder Apps nie selbst ein. Die Freigabe überlebt An- und Abmelden (das Konto wird nur offline geschaltet, nie ausgetragen) |
+| Akku-Optimierung für Rosenweg Telefon ausnehmen (persönliches SIP-Konto bleibt im Ruhemodus registriert) | `adb shell dumpsys deviceidle whitelist +ch.rosenweg4303.phone` | dito; geht beim Ausblenden/Daten-Löschen verloren → Rosenweg Telefon im Katalog auf „immer“ |
 | Standard-Telefon-App | `adb shell cmd role add-role-holder android.app.role.DIALER ch.rosenweg4303.phone 0` | Knox oder Rückfrage beim Einrichten prüfen |
 | Standard-Browser | `adb shell cmd role add-role-holder android.app.role.BROWSER <paket> 0` | dito |
 | Akku-Optimierung ausnehmen | `adb shell dumpsys deviceidle whitelist +ch.rosenweg4303.telefon` | dito |
@@ -290,3 +291,53 @@ Gruppen live aus Authentik, sonst `users.groups_json` (wie `/api/auth/me`).
 Angemeldet steht dort „Interne Telefonnummer: <persönliche Nummer>“ (mit ihr ruft die Person intern
 an; `nummer` aus `/api/telefon/status`) und „Gerät: Nebenstelle 21xx“ (Adresse des Geräts für Telefon
 suchen, Fern-Abmelden, Einrichtung). Extern geht die Nummer des Anlagen-Anschlusses raus.
+
+## Persönliches SIP-Konto in Rosenweg Telefon (25.11.2026)
+
+Entscheid Stefan: **zwei SIP-Konten pro geteiltem Telefon.**
+
+| | Rosenweg Gerät (`ch.rosenweg4303.telefon`) | Rosenweg Telefon (`ch.rosenweg4303.phone`, ab v27) |
+|---|---|---|
+| registriert | Nebenstelle des Geräts (2102 …), immer, auch gesperrt | persönlichen Zugang `<nummer>-<gerät>` (z.B. `310201-2102`), nur während einer Sitzung |
+| wofür | Telefon suchen (2099, laut), gesperrt nur Notrufe, Fallback | Anrufe an die persönliche Nummer, gehende Anrufe der Person |
+| Kontext | `[geteilt]` | `[person]` |
+| Anrufkonto | „Rosenweg“ | „Rosenweg persönlich“ |
+
+Beide nutzen denselben Sipdroid-Kern (in Rosenweg Telefon als Gradle-Modul `:sipdroid`, Pakete
+`org.sipdroid.*` unverändert; die Hinweise nach ADDITIONAL_TERMS stehen im Menü unter „Über
+Android SIP / Sipdroid“).
+
+**Anlage (pbx-api):** Beim Anmelden (`/api/telefon/einloesen`, `/api/telefon/karte`) legt die
+Anlage in `telefon_sip_person` einen Zugang pro (Gerät, Person) mit Zufallspasswort an und schreibt
+in `pjsip_phones.conf` endpoint/auth/aor `<nummer>-<gerät>` (Caller-ID „Name <nummer>“,
+`max_contacts=1`, Kontext `[person]`). `_telefon_abmelden` löscht ihn, `pjsip reload` folgt sofort;
+der stündliche Lauf entfernt Zugänge ohne passende Sitzung. Bewusst **ein Endpunkt pro Sitzung**
+statt eines Endpunkts pro Nummer mit mehreren `auth=`: so ist mit dem Abmelden auch die
+Registrierung des Geräts weg (beim gemeinsamen Endpunkt blieben die Contacts bis zum Ablauf
+stehen, das abgemeldete Telefon klingelte weiter für die Person). Mehrere Geräte einer Person =
+mehrere Zugänge, gewählt werden alle.
+
+**Wählen:** `3HHWWP` → `pbx_person.py` → je Gerät mit Sitzung `PJSIP/<nummer>-<gerät>`, wenn der
+Zugang registriert ist (`pjsip show contacts`), sonst wie bisher `PJSIP/<gerät>` (alte Telefon-App,
+kein Netz). Gehend aus `[person]`: intern mit der persönlichen Nummer, extern die Nummer des Trunks.
+
+**Übergabe:** `GET /api/telefon/sip-person` (Geräte-Zugang) → `AnlageProvider.call("sip_person")`
+(nur Rosenweg-Signatur) → Rosenweg Telefon. Server/Port/Transport nimmt die Geräte-App aus ihren
+eigenen SIP-Einstellungen (dieselbe Anlage). Die Geräte-App meldet jeden Wechsel mit dem Broadcast
+`ch.rosenweg4303.SIP_PERSON_GEAENDERT` (Permission ANLAGE); beim Abmelden vergisst Rosenweg
+Telefon den Zugang (auch auf `ch.rosenweg4303.ABGEMELDET`). Ohne Zugang registriert es nicht.
+Ohne Rosenweg Gerät (privates Handy) gibt es im Menü „SIP-Konto (privates Telefon)“.
+
+**Gehende Anrufe:** Rosenweg Telefon nimmt das persönliche Konto, sobald es registriert ist —
+außer bei Notrufen (die gehen immer über das Modem). Abgemeldet bleibt nur das Konto des Geräts.
+
+**Update-Reihenfolge (beide sicher):** Anlage zuerst (neue Tabelle, Kontext `[person]`, neuer
+Endpunkt; ohne neue Apps ändert sich nichts, `pbx_person.py` fällt auf die Nebenstelle zurück).
+Dann Apps in beliebiger Reihenfolge: neue Telefon-App mit alter Geräte-App bekommt keinen Zugang
+(alte Geräte-App kennt `sip_person` nicht) und registriert nicht; neue Geräte-App mit alter
+Telefon-App: der Zugang entsteht, wird aber nicht registriert → Fallback auf die Nebenstelle.
+Laufende Sitzungen von vor dem Update bekommen ihren Zugang beim ersten Abruf.
+
+**Rosenweg Telefon im Katalog auf „immer“:** sonst wird es beim Abmelden ausgeblendet und seine
+Daten gelöscht — die Akku-Ausnahme und die Freigabe des Anrufkontos gingen verloren.
+

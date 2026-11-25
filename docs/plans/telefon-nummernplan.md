@@ -67,11 +67,15 @@ Gerät oder eine Gruppe), **2100–2199 Geräte** (geteilte Telefone, Testgerät
 
 ## Rosenweg Telefon wird ein eigenes SIP-Telefon
 
-- Der SIP-Kern (sipdroid mit ConnectionService, heute in der Geräte-App `android-sip-rosenweg`)
-  kommt in Rosenweg Telefon (`ch.rosenweg4303.phone`).
-- **Geteiltes Telefon:** Die Geräte-App richtet Rosenweg Telefon ein. Sie übergibt
-  Nebenstelle, Passwort und Server über einen Weg, den nur Rosenweg-signierte Apps nutzen
-  können. Die Geräte-App behält Kiosk, Sitzung, Katalog und Abgleich, macht aber kein SIP mehr.
+- Der SIP-Kern (sipdroid mit ConnectionService aus der Geräte-App `android-sip-rosenweg`)
+  steckt als Kopie auch in Rosenweg Telefon (`ch.rosenweg4303.phone`, ab v27, Modul `:sipdroid`).
+- **Geteiltes Telefon (Entscheid Stefan 25.11.2026):** Die Geräte-App **behält** ihr SIP mit der
+  Nebenstelle des Geräts (Telefon suchen, gesperrt nur Notrufe, alles Gerätebezogene). Rosenweg
+  Telefon registriert zusätzlich das **persönliche Konto** der angemeldeten Person: Zugang
+  `<nummer>-<gerät>` mit Zufallspasswort, nur während der Sitzung (pbx-api `telefon_sip_person`,
+  `GET /api/telefon/sip-person`), übergeben über `AnlageProvider.call("sip_person")` — nur für
+  Rosenweg-signierte Apps. Anrufe an die persönliche Nummer klingeln dort, gehende Anrufe gehen
+  mit der persönlichen Nummer. Details: `pbx/GETEILTE-TELEFONE.md`, „Persönliches SIP-Konto“.
 - **Privates Handy:** Einrichtung per QR-Code (`/prov/<token>`, wie heute bei Linphone).
   Die Person meldet sich einmal an, die Sitzung bleibt.
 - **Daten aus der Anlage (Regel 6):** Rosenweg Telefon fragt die Anlage direkt mit Nebenstelle
