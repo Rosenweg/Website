@@ -1939,7 +1939,8 @@ def _app_json(r, mit_intern=False):
                   "download": f"/api/telefon/apk/{r['paket']}" if r["apk_datei"] else None})
     if mit_intern:
         d.update({"gruppen": r["gruppen"], "konfig": r["konfig"], "aktiv": bool(r["aktiv"]),
-                  "apk_datei": r["apk_datei"], "updated_at": r["updated_at"]})
+                  "apk_datei": r["apk_datei"], "updated_at": r["updated_at"],
+                  "version_code": r["version_code"], "version_name": r["version_name"]})
     return d
 
 

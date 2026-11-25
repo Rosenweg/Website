@@ -15,6 +15,7 @@
         .knopf { padding:.35rem .7rem; border-radius:.5rem; font-size:.85rem; background:#e2e8f0; white-space:nowrap; }
         .knopf:hover { background:#cbd5e1; }
         .knopf.rot { background:#fee2e2; color:#991b1b; }
+        .feld { display:block; width:100%; margin-top:.2rem; padding:.4rem .5rem; border:1px solid #cbd5e1; border-radius:.5rem; background:#fff; }
         .punkt { display:inline-block; width:.6rem; height:.6rem; border-radius:50%; }
     </style>
 </head>
@@ -69,9 +70,9 @@
                     <tbody id="telefone" class="divide-y"></tbody>
                 </table>
                 </div>
-                <p class="text-xs text-slate-500 mt-3">WLAN-Debugging: das Telefon wird kurz von 2098 „Wartung“ angerufen und schaltet es ein.
-                    Im WLAN „Rosenweg“ bestätigt Rosenweg Gerät die Android-Abfrage selbst, in anderen WLANs muss jemand am Telefon „Zulassen“ tippen.
-                    Am Mac: <code>adb mdns services</code>, dann <code>adb connect &lt;IP&gt;:&lt;Port&gt;</code>.</p>
+                <p class="text-xs text-slate-500 mt-3">Wartung per adb: das Telefon wird kurz von 2098 „Wartung“ angerufen und schaltet adb ein,
+                    erreichbar über das Netz mit <code>adb connect &lt;IP&gt;:5555</code> (steht in der Zeile, sobald das Telefon den Port meldet).
+                    Nach einem Neustart stellt Rosenweg Gerät Port 5555 selbst wieder her.</p>
             </section>
 
             <section class="bg-white rounded-xl shadow p-5">
@@ -83,9 +84,42 @@
             </section>
 
             <section class="bg-white rounded-xl shadow p-5">
+                <div class="flex items-center gap-3 mb-1">
+                    <h2 class="font-semibold flex-1">App-Katalog</h2>
+                    <button class="knopf" onclick="ladeKatalog()">Neu laden</button>
+                </div>
+                <p class="text-xs text-slate-500 mb-3">Geteilte Telefone installieren die APKs still; eigene Handys bekommen sie über die
+                    <a href="/apps" class="text-red-700 underline">Apps-Seite</a> und den Rosenweg Updater. Web-Apps (Paket <code>web.&lt;name&gt;</code>)
+                    erscheinen als Kachel. Gruppen leer = alle. Einstellungen als JSON, Platzhalter <code>{email} {name} {benutzer}</code>.</p>
+                <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="text-left text-slate-500"><tr>
+                        <th class="py-1 pr-2">App</th><th class="pr-2">Version</th><th class="pr-2">Für</th><th class="pr-2">Aktiv</th><th></th></tr></thead>
+                    <tbody id="katalog" class="divide-y"></tbody>
+                </table>
+                </div>
+                <details id="katalogForm" class="mt-4 border-t pt-3">
+                    <summary class="cursor-pointer text-sm font-medium">App hinzufügen oder bearbeiten</summary>
+                    <div class="grid sm:grid-cols-2 gap-3 mt-3 text-sm">
+                        <label class="block">Paket<input id="a_paket" class="feld" placeholder="web.portal / ch.rosenweg4303.app"></label>
+                        <label class="block">Name<input id="a_name" class="feld"></label>
+                        <label class="block">URL (nur Web-Apps)<input id="a_url" class="feld" placeholder="https://…rosenweg4303.ch/"></label>
+                        <label class="block">Gruppen<input id="a_gruppen" class="feld" placeholder="leer = alle"></label>
+                        <label class="block">Reihenfolge<input id="a_reihe" class="feld" type="number" value="100"></label>
+                        <label class="block">Einstellungen (JSON)<input id="a_konfig" class="feld" value="{}"></label>
+                        <label class="block">Persönlich<select id="a_pers" class="feld"><option value="1">ja – beim Abmelden löschen</option><option value="0">nein</option></select></label>
+                        <label class="block">Immer verfügbar<select id="a_immer" class="feld"><option value="0">nein – nur angemeldet</option><option value="1">ja – Werkzeug (Tastatur, Browser)</option></select></label>
+                        <label class="block">Aktiv<select id="a_aktiv" class="feld"><option value="1">ja</option><option value="0">nein</option></select></label>
+                    </div>
+                    <button class="knopf mt-3" style="background:#1e3a8a;color:#fff" onclick="speichereApp()">Speichern</button>
+                </details>
+                <input type="file" id="a_datei" accept=".apk" class="hidden" onchange="apkHoch(this)">
+            </section>
+
+            <section class="bg-white rounded-xl shadow p-5">
                 <h2 class="font-semibold mb-1">Verlauf</h2>
                 <p class="text-xs text-slate-500 mb-2">Erlaubte Gruppen für geteilte Telefone: <span id="gruppen"></span> · ändern in der
-                    <a href="https://pbx.rosenweg4303.ch" class="text-red-700 underline">PBX-Verwaltung</a> (dort auch App-Katalog und Nebenstellen).</p>
+                    <a href="https://pbx.rosenweg4303.ch" class="text-red-700 underline">PBX-Verwaltung</a> (dort auch die Nebenstellen).</p>
                 <ul id="log" class="divide-y text-sm"></ul>
             </section>
         </div>
@@ -188,12 +222,70 @@ async function privatSperren(id, kennung) {
 }
 
 // ── Technik-Übersicht ──
+// ── App-Katalog (frueher in der PBX-Verwaltung, Stefan 25.11.2026: gehoert hierher) ──
+let katalog = [], apkZiel = null;
+async function ladeKatalog() {
+    const r = await api('/api/pbx/telefon-apps');
+    if (!r.ok) return;
+    katalog = (await json(r)).apps || [];
+    const mb = b => Math.round((b || 0) / 1048576) + ' MB';
+    $('katalog').innerHTML = katalog.map((a, i) => `<tr>
+        <td class="py-2 pr-2"><div class="font-medium">${esc(a.name)}</div><div class="text-xs text-slate-500 font-mono">${esc(a.paket)}</div></td>
+        <td class="pr-2 text-xs">${a.art === 'web' ? 'Web-App' : (a.sha256 ? esc(a.version_name || '') + '<div class="text-slate-500 font-mono">' + esc(a.sha256.slice(0, 10)) + '… · ' + mb(a.groesse) + '</div>' : '<span class="text-slate-400">keine APK</span>')}</td>
+        <td class="pr-2 text-xs">${a.immer ? 'immer' : esc(a.gruppen || 'alle')}${a.persoenlich ? '<div class="text-slate-500">persönlich</div>' : ''}</td>
+        <td class="pr-2">${a.aktiv ? '✅' : '<span class="text-slate-400">aus</span>'}</td>
+        <td class="text-right"><div class="flex flex-wrap gap-1 justify-end">
+            <button class="knopf" onclick="bearbeiteApp(${i})">Bearbeiten</button>
+            ${a.art === 'apk' ? `<button class="knopf" onclick="apkWaehlen('${esc(a.paket)}')">APK</button>` : ''}
+            <button class="knopf rot" onclick="loescheApp('${esc(a.paket)}')">Löschen</button></div></td></tr>`).join('')
+        || '<tr><td colspan="5" class="py-2 text-slate-500">Noch keine Apps.</td></tr>';
+}
+function bearbeiteApp(i) {
+    const a = katalog[i];
+    $('a_paket').value = a.paket; $('a_name').value = a.name; $('a_url').value = a.url || '';
+    $('a_gruppen').value = a.gruppen || ''; $('a_reihe').value = a.reihenfolge; $('a_konfig').value = a.konfig || '{}';
+    $('a_pers').value = a.persoenlich ? '1' : '0'; $('a_aktiv').value = a.aktiv ? '1' : '0'; $('a_immer').value = a.immer ? '1' : '0';
+    $('katalogForm').open = true;
+    $('a_paket').scrollIntoView({behavior: 'smooth', block: 'center'});
+}
+async function speichereApp() {
+    const paket = $('a_paket').value.trim();
+    if (!paket) { melde('Paket fehlt.', true); return; }
+    let konfig; try { konfig = JSON.parse($('a_konfig').value || '{}'); } catch (e) { melde('Einstellungen sind kein gültiges JSON.', true); return; }
+    const body = {name: $('a_name').value.trim(), url: $('a_url').value.trim(), gruppen: $('a_gruppen').value.trim(),
+        reihenfolge: Number($('a_reihe').value || 100), konfig, persoenlich: $('a_pers').value === '1',
+        aktiv: $('a_aktiv').value === '1', immer: $('a_immer').value === '1'};
+    const r = await api('/api/pbx/telefon-apps/' + encodeURIComponent(paket),
+        {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    if (!r.ok) { melde((await json(r)).error || 'Speichern fehlgeschlagen.', true); return; }
+    ['a_paket', 'a_name', 'a_url', 'a_gruppen'].forEach(id => $(id).value = ''); $('a_konfig').value = '{}';
+    melde(paket + ' gespeichert.');
+    ladeKatalog();
+}
+function apkWaehlen(paket) { apkZiel = paket; $('a_datei').value = ''; $('a_datei').click(); }
+async function apkHoch(inp) {
+    const f = inp.files[0]; if (!f || !apkZiel) return;
+    melde('Lade ' + f.name + ' hoch …');
+    const r = await api('/api/pbx/telefon-apps/' + encodeURIComponent(apkZiel) + '/apk',
+        {method: 'POST', headers: {'Content-Type': 'application/vnd.android.package-archive'}, body: f});
+    if (!r.ok) { melde((await json(r)).error || 'Hochladen fehlgeschlagen.', true); return; }
+    melde('APK hochgeladen – die Telefone holen sie beim nächsten Abgleich, eigene Handys über den Updater.');
+    ladeKatalog();
+}
+async function loescheApp(paket) {
+    if (!confirm('App ' + paket + ' aus dem Katalog löschen?\nDie geteilten Telefone deinstallieren sie beim nächsten Abgleich.')) return;
+    const r = await api('/api/pbx/telefon-apps/' + encodeURIComponent(paket), {method: 'DELETE'});
+    if (!r.ok) melde((await json(r)).error || 'Löschen fehlgeschlagen.', true);
+    ladeKatalog();
+}
+
 async function lade() {
     const r = await api('/api/pbx/smartphones');
     if (r.status === 403) { $('technik').classList.add('hidden'); return; }
     const d = await json(r);
     if (!r.ok) { melde(d.error || 'Übersicht nicht verfügbar.', true); return; }
     $('technik').classList.remove('hidden');
+    ladeKatalog();
     const punkt = ok => `<span class="punkt" style="background:${ok ? '#16a34a' : '#cbd5e1'}"></span>`;
     $('telefone').innerHTML = (d.telefone || []).map(t => `<tr>
         <td class="py-2 pr-2 font-mono">${esc(t.ext)}</td>
