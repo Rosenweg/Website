@@ -1,41 +1,42 @@
-// ─── Tunnel für Rosenweg-Apps auf eigenen Geräten ───────────────────────────
+// ─── Tunnel für die App „Rosenweg Virtuelle Computer“ ───────────────────────
 //
-// Die App „Rosenweg Virtuelle Computer" baut ausser Haus selbst einen
-// WireGuard-Tunnel auf (im Prozess der App, ohne Systemtunnel), um an die
-// Proxmox-API und den SPICE-Proxy zu kommen. Dafür braucht sie einen Peer bei
-// wg-control — so wie eine Laptop-Station (POST /api/stations/:id/tunnel).
+// Die App erreicht Proxmox nie direkt, sondern nur über den vm-gateway (eigener
+// CT, Code im Repo Rosenweg/rosenweg-vm, Ordner gateway/). Dort endet ihr
+// WireGuard-Tunnel — getrennt von wg-control und den Wohnungs-VLANs
+// (Entscheid Stefan 25.11.2026: „ein CT, der direkt Verbindung zu den Hosts
+// aufbaut“). Durch den Tunnel erreicht die App nur zwei Ports des Gateways.
 //
-// Unterschied zur Station: Es gibt kein Stationstoken und keine App-Sitzung
-// mit AD-Passwort. Die App meldet die PERSON mit dem Rosenweg-Konto an
-// (Authentik, Anwendung "rosenweg-apps", öffentlicher Client mit PKCE) und
-// schickt deren Access-Token. Das prüfen wir hier über userinfo — die
-// Introspektion in lib/auth.js kennt nur Tokens des Website-Clients, so wie
-// es die PBX-Schnittstelle schon festgestellt hat (pbx/api/app.py).
+// Diese Route ist nur die öffentliche Tür: sie prüft das Token, begrenzt die
+// Rate und reicht die Anfrage an die Steuerung des Gateways im LAN weiter —
+// mit ZWEI Ausweisen: dem Steuer-Token (VM_GATEWAY_TOKEN, „kommt von der API“)
+// und dem Token der Person (X-Rosenweg-Token). Der Gateway prüft das Token
+// der Person selbst noch einmal; ein geleakter Steuer-Token allein reicht ihm
+// nicht.
 //
-// Was gleich bleibt wie bei den Laptops:
-//  - Der private Schlüssel entsteht auf dem Gerät; hierher kommt nur der
-//    öffentliche. wg-control kennt den privaten nie.
-//  - Nur das Hausnetz durch den Tunnel (100.64.0.0/16, wg-control hängt das
-//    Tunnelnetz 192.168.2.0/24 an), Internet bleibt direkt.
-//  - VLAN = Wohnung der Person (getUserVlanOptions), kein Technik-VLAN: die
-//    App braucht nur Proxmox, und ein Gerät ausser Haus soll nicht mehr dürfen
-//    als ein Gerät in der Wohnung.
-//  - Die Peers stehen in isp_vpn_accounts und lassen sich in der
-//    ISP-Verwaltung zurückziehen (Notausschalter bei verlorenem Gerät).
+// Anmeldung: Bearer-Token der Authentik-Anwendung "rosenweg-apps" (öffentlicher
+// Client mit PKCE), geprüft über userinfo — die Introspektion in lib/auth.js
+// kennt nur Tokens des Website-Clients (wie pbx/api/app.py festgestellt hat).
 //
-// Grenzen (docs/sicherheit.md, Abschnitt 5): 10 Anfragen pro Stunde und
-// höchstens 5 App-Tunnel je Konto. Ein zweiter Aufruf vom selben Gerät
-// ersetzt den eigenen alten Peer, statt einen weiteren anzulegen.
+// Der private Schlüssel entsteht auf dem Gerät, pro App-Start neu; hierher
+// kommt nur der öffentliche. Der Gateway hält die Peers nur im Speicher und
+// entfernt sie beim Schliessen der App bzw. nach wenigen Minuten ohne
+// Lebenszeichen. Deshalb gibt es hier keine Zeilen in isp_vpn_accounts: es
+// gibt keinen dauerhaften Zugang, der zurückgezogen werden müsste. Sperren
+// geht über das Konto (Authentik/users.active) — der Gateway prüft das Token
+// bei jeder Anfrage.
+//
+// Grenzen (docs/sicherheit.md, Abschnitt 5): 10 Anfragen pro Stunde je Konto;
+// höchstens 5 Geräte gleichzeitig je Person (prüft der Gateway).
 
 const crypto = require('crypto');
 const { AUTHENTIK_URL } = require('../lib/config');
 
 const APPS_CLIENT_ID = process.env.ROSENWEG_APPS_CLIENT_ID || 'rosenweg-apps';
+const VM_GATEWAY_URL = process.env.VM_GATEWAY_URL || '';
+const VM_GATEWAY_TOKEN = process.env.VM_GATEWAY_TOKEN || '';
 const GERAET_RE = /^[a-z0-9][a-z0-9-]{7,39}$/;
-const MAX_JE_KONTO = 5;
 
-// userinfo kurz merken: die App fragt beim Start einmal, nicht im Sekundentakt;
-// eine Minute reicht, damit ein Doppelklick Authentik nicht zweimal fragt.
+// userinfo kurz merken: die App fragt beim Start einmal, nicht im Sekundentakt.
 const kontoCache = new Map(); // sha256(token) -> { konto, zeit }
 setInterval(() => {
   const jetzt = Date.now();
@@ -53,14 +54,32 @@ function claimsLesen(token) {
   } catch { return null; }
 }
 
-function appTunnelRoutes(app, { pool, wgControl, getUserVlanOptions, rateLimitGuard, wgControlBereit }) {
+async function gatewayRuf(methode, pfad, personToken, body) {
+  const r = await fetch(VM_GATEWAY_URL + pfad, {
+    method: methode,
+    headers: {
+      Authorization: `Bearer ${VM_GATEWAY_TOKEN}`,
+      'X-Rosenweg-Token': personToken,
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(10000),
+  });
+  let daten = {};
+  try { daten = await r.json(); } catch { daten = {}; }
+  return { status: r.status, daten };
+}
+
+function appTunnelRoutes(app, { pool, rateLimitGuard }) {
   async function rosenwegKonto(req, res, next) {
     try {
       const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
       if (!token || token.length > 4096) return res.status(401).json({ error: 'Nicht angemeldet' });
       const schluessel = crypto.createHash('sha256').update(token).digest('hex');
       const gemerkt = kontoCache.get(schluessel);
-      if (gemerkt && Date.now() - gemerkt.zeit < 60 * 1000) { req.konto = gemerkt.konto; return next(); }
+      if (gemerkt && Date.now() - gemerkt.zeit < 60 * 1000) {
+        req.konto = gemerkt.konto; req.personToken = token; return next();
+      }
 
       const r = await fetch(`${AUTHENTIK_URL}/application/o/userinfo/`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -87,9 +106,10 @@ function appTunnelRoutes(app, { pool, wgControl, getUserVlanOptions, rateLimitGu
         console.warn(`[app-tunnel] abgewiesen: users-Zeile ${email} gehoert zu anderem Authentik-Konto`);
         return res.status(403).json({ error: 'Diese Mailadresse gehört zu einem anderen Konto' });
       }
-      const konto = { email, name: String(info.name || info.preferred_username || '') };
+      const konto = { email };
       kontoCache.set(schluessel, { konto, zeit: Date.now() });
       req.konto = konto;
+      req.personToken = token;
       next();
     } catch (e) {
       console.error('[app-tunnel] Anmeldung:', e.message);
@@ -97,33 +117,13 @@ function appTunnelRoutes(app, { pool, wgControl, getUserVlanOptions, rateLimitGu
     }
   }
 
-  // Name bei wg-control: eindeutig je Gerät und Person, nur unbedenkliche
-  // Zeichen (er landet als Kommentar in wg0.conf).
-  function peerName(geraet, email) {
-    const kurz = email.split('@')[0].replace(/[^a-z0-9._-]/gi, '').slice(0, 16);
-    const hash = crypto.createHash('sha256').update(email).digest('hex').slice(0, 8);
-    return `app-${geraet}-${kurz}-${hash}`;
-  }
-
-  async function eigeneAbraeumen(name, email) {
-    const alt = await pool.query(
-      `SELECT id, username FROM isp_vpn_accounts
-        WHERE bezeichnung = $1 AND active = true AND LOWER(user_email) = $2 AND notizen LIKE 'App %'`,
-      [name, email]);
-    for (const row of alt.rows) {
-      await wgControl('DELETE', `/peers/${row.username}`).catch(() => {});
-      // Löschen statt active=false: siehe Stations-Tunnel (sonst zählt das NOC
-      // Grabsteine als offene VPN-Anträge).
-      await pool.query('DELETE FROM isp_vpn_accounts WHERE id = $1', [row.id]);
-    }
-    return alt.rows.length;
-  }
+  const bereit = () => Boolean(VM_GATEWAY_URL && VM_GATEWAY_TOKEN);
 
   // POST /api/apps/tunnel  { geraet, geraet_name?, schluessel }
-  //   -> { tunnel: { peer, vlan, adresse, config } }
+  //   -> { tunnel: { config, adresse, gateway, endpoint_intern } }
   app.post('/api/apps/tunnel', rosenwegKonto, async (req, res) => {
     try {
-      if (!wgControlBereit()) return res.status(503).json({ error: 'wg-control nicht konfiguriert' });
+      if (!bereit()) return res.status(503).json({ error: 'vm-gateway nicht konfiguriert' });
       const email = req.konto.email;
       const geraet = String(req.body?.geraet || '').trim().toLowerCase();
       if (!GERAET_RE.test(geraet)) return res.status(400).json({ error: 'Ungültige Gerätekennung' });
@@ -133,54 +133,35 @@ function appTunnelRoutes(app, { pool, wgControl, getUserVlanOptions, rateLimitGu
         return res.status(400).json({ error: 'Öffentlicher Schlüssel fehlt oder ist ungültig' });
       }
       if (!rateLimitGuard('app-tunnel', email, 10, 60 * 60 * 1000).ok) {
-        return res.status(429).json({ error: 'Zu viele Tunnel-Anfragen — bitte später erneut.' });
+        return res.status(429).json({ error: 'Zu viele Verbindungsanfragen — bitte später erneut.' });
       }
-
-      const name = peerName(geraet, email);
-      await eigeneAbraeumen(name, email);
-
-      const bestand = await pool.query(
-        "SELECT COUNT(*)::int AS n FROM isp_vpn_accounts WHERE LOWER(user_email) = $1 AND notizen LIKE 'App %'", [email]);
-      if ((bestand.rows[0]?.n || 0) >= MAX_JE_KONTO) {
-        return res.status(429).json({ error: 'Zu viele Geräte mit Tunnel — bitte ein altes in der Verwaltung entfernen.' });
+      const { status, daten } = await gatewayRuf('POST', '/peers', req.personToken, { geraet, schluessel });
+      if (status !== 200) {
+        // Fehlertexte des Gateways sind für Menschen geschrieben (z. B.
+        // „höchstens 5 Geräte“); 5xx nicht weiterreichen.
+        if (status >= 500) return res.status(502).json({ error: 'Verbindung ins Haus nicht möglich' });
+        return res.status(status).json({ error: daten.error || 'Abgelehnt' });
       }
-
-      const optionen = await getUserVlanOptions(email);
-      const vlan = optionen[0]?.vlan || null;
-      if (!vlan) return res.status(400).json({ error: 'Keine Wohnung in der Objektverwaltung — Tunnel nicht möglich' });
-
-      const antwort = await wgControl('POST', '/peers', {
-        name, email, vlan, allowed_ips: '100.64.0.0/16', public_key: schluessel,
-      });
-      const peer = await antwort.json();
-      // Anzeigename nur für die Verwaltung, gekürzt und entschärft.
-      const anzeige = String(req.body?.geraet_name || '').replace(/[^\p{L}\p{N} ._()'-]/gu, ' ').trim().slice(0, 60);
-      await pool.query(
-        `INSERT INTO isp_vpn_accounts (user_email, backend, username, public_key, assigned_ip,
-                                       config_path, active, notizen, bezeichnung)
-         VALUES ($1, 'wireguard', $2, $3, $4, $5, true, $6, $7)`,
-        [email, peer.id, peer.public_key, peer.assigned_ip, `wg-control/${peer.id}`,
-          `App ${geraet}${anzeige ? ` (${anzeige})` : ''}, VLAN ${vlan}`, name]);
-
-      console.log(`[app-tunnel] ${email}: Gerät ${geraet}, VLAN ${vlan}`);
-      res.json({ tunnel: { peer: name, vlan, adresse: peer.assigned_ip, config: peer.config } });
+      console.log(`[app-tunnel] ${email}: Gerät ${geraet}, ${daten.adresse}`);
+      res.json({ tunnel: daten });
     } catch (err) {
       console.error('[app-tunnel]', err.message);
-      res.status(500).json({ error: 'Tunnel konnte nicht eingerichtet werden' });
+      res.status(502).json({ error: 'Verbindung ins Haus nicht möglich' });
     }
   });
 
-  // DELETE /api/apps/tunnel/:geraet — beim Abmelden in der App.
+  // DELETE /api/apps/tunnel/:geraet — Rückfallweg, falls die App den Gateway
+  // beim Schliessen nicht mehr erreicht hat.
   app.delete('/api/apps/tunnel/:geraet', rosenwegKonto, async (req, res) => {
     try {
-      if (!wgControlBereit()) return res.status(503).json({ error: 'wg-control nicht konfiguriert' });
+      if (!bereit()) return res.status(503).json({ error: 'vm-gateway nicht konfiguriert' });
       const geraet = String(req.params.geraet || '').toLowerCase();
       if (!GERAET_RE.test(geraet)) return res.status(400).json({ error: 'Ungültige Gerätekennung' });
-      const n = await eigeneAbraeumen(peerName(geraet, req.konto.email), req.konto.email);
-      res.json({ entfernt: n });
+      const { status, daten } = await gatewayRuf('DELETE', `/peers/${geraet}`, req.personToken);
+      res.status(status >= 500 ? 502 : status).json(daten);
     } catch (err) {
       console.error('[app-tunnel-delete]', err.message);
-      res.status(500).json({ error: 'Tunnel konnte nicht entfernt werden' });
+      res.status(502).json({ error: 'Verbindung ins Haus nicht möglich' });
     }
   });
 }

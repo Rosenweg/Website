@@ -17,15 +17,9 @@ Gleichstand und liefert jedem Zugang seine fertige Client-Konfiguration.
 |---|---|---|
 | ISP-Bereich, Zugang für eine Person | `POST /api/isp/vpn-accounts` | `0.0.0.0/0, ::/0` — alles |
 | Laptop-Station bei der Anmeldung | `POST /api/stations/:id/tunnel` | `100.64.0.0/16` — nur das Hausnetz |
-| App „Rosenweg Virtuelle Computer“ ausser Haus | `POST /api/apps/tunnel` (Rosenweg-Konto, Authentik `rosenweg-apps`) | `100.64.0.0/16` — nur das Hausnetz |
 
 Grenzen auf der API-Seite (Haupt-API): VPN-Konten 10 pro Stunde und höchstens
 10 Konten; Stations-Tunnel 10 pro Stunde und höchstens 20 je Konto.
-App-Tunnel 10 pro Stunde und höchstens 5 Geräte je Konto. Die App erzeugt das
-Schlüsselpaar selbst und schickt nur den öffentlichen Schlüssel; der Tunnel
-läuft im Prozess der App (wireguard-go mit Netzstapel im Benutzerraum), nicht
-als Systemtunnel. In `isp_vpn_accounts` stehen diese Peers mit
-`notizen = 'App <gerät> …, VLAN <n>'` und lassen sich dort zurückziehen.
 
 Den Unterschied der Routen macht ein optionales `allowed_ips` im Rumpf von
 `POST /peers`. Wer es weglässt, bekommt den vollen Tunnel — der ISP-Weg
