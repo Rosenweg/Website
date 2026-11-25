@@ -74,6 +74,10 @@ def dial_target(m):
         if not re.fullmatch(r'[A-Za-z0-9_-]{1,32}', phone):
             raise ValueError('ungueltige SIP-Extension')
         return f"PJSIP/{phone}"
+    if m.get('kind') == 'person':   # persoenliche Nummer: alle Geraete der Person (ohne Voicemail)
+        if not re.fullmatch(r'3[0-9]{5}', phone):
+            raise ValueError('ungueltige persoenliche Nummer')
+        return f"Local/{phone}@ring-person/n"
     if not re.fullmatch(r'\+?[0-9]{3,20}', phone):
         raise ValueError('ungueltige Telefonnummer')
     return f"PJSIP/{phone}@peoplefone"

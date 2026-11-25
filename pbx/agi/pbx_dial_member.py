@@ -78,13 +78,15 @@ def main():
             m = r.json()
             phone = str(m.get('phone') or '')
             # Ziel landet im Dial-String/AGI-Befehl: nur Nummer bzw. SIP-Name (D-5).
-            gueltig = re.fullmatch(r'[A-Za-z0-9_-]{1,32}', phone) if m.get('kind') == 'sip' \
+            gueltig = re.fullmatch(r'3[0-9]{5}', phone) if m.get('kind') == 'person' else \
+                re.fullmatch(r'[A-Za-z0-9_-]{1,32}', phone) if m.get('kind') == 'sip' \
                 else re.fullmatch(r'\+?[0-9]{3,20}', phone)
             if not gueltig:
                 set_var('MEMBER_DIAL', '')
                 log(f"{ext} -> ungueltiges Ziel, nicht gewaehlt")
                 return
-            target = f"PJSIP/{phone}" if m.get('kind') == 'sip' else f"PJSIP/{phone}@peoplefone"
+            target = (f"Local/{phone}@ring-person/n" if m.get('kind') == 'person'
+                      else f"PJSIP/{phone}" if m.get('kind') == 'sip' else f"PJSIP/{phone}@peoplefone")
             set_var('MEMBER_DIAL', target)
             log(f"{ext} -> {re.sub(r'[^A-Za-z0-9 ._-]', ' ', str(m.get('name') or ''))[:60]} ({target})")
         else:
