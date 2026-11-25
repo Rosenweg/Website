@@ -1932,11 +1932,14 @@ def telefon_apk(paket):
 # brauchen updater wenn geraet nicht da ist". Quelle ist der App-Katalog der geteilten Telefone;
 # Rosenweg Geraet gehoert nur auf verwaltete Telefone und ist darum nicht dabei.
 APPS_OEFFENTLICH_OHNE = {"ch.rosenweg4303.telefon"}
-APPS_HERKUNFT = os.environ.get("PBX_APPS_HERKUNFT", "https://www.rosenweg4303.ch")
+APPS_HERKUNFT = {"https://www.rosenweg4303.ch", "https://rosenweg4303.ch"}
 
 
 def _oeffentlich(res):
-    res.headers["Access-Control-Allow-Origin"] = APPS_HERKUNFT
+    herkunft = request.headers.get("Origin", "")
+    if herkunft in APPS_HERKUNFT:
+        res.headers["Access-Control-Allow-Origin"] = herkunft
+        res.headers["Vary"] = "Origin"
     res.headers["Cache-Control"] = "public, max-age=300"
     return res
 
