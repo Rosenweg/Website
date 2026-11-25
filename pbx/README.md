@@ -368,7 +368,11 @@ LXC-Snapshot taeglich via Proxmox (PVE GUI → CT 220 → Backup). Voicemail-Rec
 
 **Löschfrist Voicemail (25.11.2026): 90 Tage.** `voicemail_aufraeumen.py` (Timer `pbx-voicemail-aufraeumen.timer`, täglich 03:30) löscht ältere Aufnahmen in `recordings/` und `personen/` und leert Pfad, Abschrift und Zusammenfassung in der Anrufliste; der Anruf bleibt. `VOICEMAIL_TAGE` in `/etc/default/pbx-api` ändert die Frist. Die nächtlichen Sicherungen auf PBS-Rosenweg (keep-all) behalten alte Stände.
 
-**Ring-Group mit persönlichen Nummern (25.11.2026):** Mitglieds-Typ **Person** mit der Nummer 3HHWWP. Gewählt über `Local/<nummer>@ring-person/n`: klingelt auf allen Geräten, an denen die Person angemeldet ist (Rosenweg Telefon, geteilte Telefone); ihre Weiterleitung aufs Handy gilt („immer“ sofort, „nicht erreichbar“ nach der eingestellten Zeit oder wenn kein Gerät da ist), ihre **persönliche Voicemail nicht** – sonst nähme sie den Anruf an und die übrigen Mitglieder klingelten nicht mehr. Gilt auch für die Technik-Konferenz (*100). Die Direktwahl 1XXX gibt es nicht mehr (doppelt zu 3HHWWP/2XXX).
+**Ring-Group mit persönlichen Nummern (25.11.2026):** Mitglieds-Typ **Person** mit der Nummer 3HHWWP. Gewählt über `Local/<nummer>@ring-person/n`: klingelt auf allen Geräten, an denen die Person angemeldet ist (Rosenweg Telefon, geteilte Telefone); ihre Weiterleitung aufs Handy gilt („immer“ sofort, „nicht erreichbar“ nach der eingestellten Zeit oder wenn kein Gerät da ist), ihre **persönliche Voicemail nicht** – sonst nähme sie den Anruf an und die übrigen Mitglieder klingelten nicht mehr. Gilt auch für die Technik-Konferenz (*100). Die Direktwahl einzelner Mitglieder (1XXX) gibt es nicht mehr (doppelt zu 3HHWWP/21XX).
+
+**Interne Nummern Technik (25.11.2026, Nummernplan: 1XXX Gruppen, 2000–2099 Dienste, 2100–2199 Geräte):**
+- **1000 = Ring-Group Technik:** klingelt bei allen Mitgliedern, ohne Geschäftszeiten, ohne Voicemail.
+- **2000 = Dienst Technik:** wie die Amtsnummer – Geschäftszeiten, Ring-Group, sonst gemeinsame Voicemail (Abschrift, WhatsApp an Technik, Auto-Reklamation).
 
 ## Phase 2 (Roadmap)
 
