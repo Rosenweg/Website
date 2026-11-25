@@ -1930,6 +1930,57 @@ def telefon_apk(paket):
                                mimetype="application/vnd.android.package-archive")
 
 
+# ─── Oeffentliche Downloads (Apps-Seite, Updater der Apps auf privaten Handys) ───
+# Stefan 25.11.2026: "auf die apps seite die releases zum download anbieten" und "alle apps
+# brauchen updater wenn geraet nicht da ist". Quelle ist der App-Katalog der geteilten Telefone;
+# Rosenweg Geraet gehoert nur auf verwaltete Telefone und ist darum nicht dabei.
+APPS_OEFFENTLICH_OHNE = {"ch.rosenweg4303.telefon"}
+APPS_HERKUNFT = {"https://www.rosenweg4303.ch", "https://rosenweg4303.ch"}
+
+
+def _oeffentlich(res):
+    herkunft = request.headers.get("Origin", "")
+    if herkunft in APPS_HERKUNFT:
+        res.headers["Access-Control-Allow-Origin"] = herkunft
+        res.headers["Vary"] = "Origin"
+    res.headers["Cache-Control"] = "public, max-age=300"
+    return res
+
+
+@app.get("/api/apps/index.json")
+def apps_index():
+    conn = db.connect()
+    try:
+        rows = conn.execute("SELECT paket, name, sha256, groesse, version_code, version_name, updated_at "
+                            "FROM telefon_apps WHERE art = 'apk' AND aktiv = 1 AND apk_datei IS NOT NULL "
+                            "ORDER BY reihenfolge, name").fetchall()
+    finally:
+        conn.close()
+    apps = [{"paket": r["paket"], "name": r["name"], "sha256": r["sha256"], "groesse": r["groesse"],
+             "version_code": r["version_code"], "version_name": r["version_name"], "stand": r["updated_at"],
+             "url": f"/api/apps/{r['paket']}.apk"}
+            for r in rows if r["paket"] not in APPS_OEFFENTLICH_OHNE]
+    return _oeffentlich(jsonify({"apps": apps, "signatur_sha256": "7b3bac26e82b6103546b96861dcf1bb89b3239424ff11fdf684975cf78c5a5ae"}))
+
+
+@app.get("/api/apps/<paket>.apk")
+def apps_download(paket):
+    if not re.fullmatch(r"[a-z][a-z0-9_]*(\.[a-z0-9_]+)+", paket) or paket in APPS_OEFFENTLICH_OHNE:
+        return jsonify({"error": "unbekannt"}), 404
+    conn = db.connect()
+    try:
+        r = conn.execute("SELECT name, apk_datei, version_name FROM telefon_apps "
+                         "WHERE paket = ? AND art = 'apk' AND aktiv = 1", (paket,)).fetchone()
+    finally:
+        conn.close()
+    if not r or not r["apk_datei"]:
+        return jsonify({"error": "unbekannt"}), 404
+    name = re.sub(r"[^A-Za-z0-9]+", "-", f"{r['name']}-{r['version_name'] or ''}").strip("-").lower()
+    return _oeffentlich(send_from_directory(TELEFON_APPS_DIR, r["apk_datei"], as_attachment=True,
+                                            download_name=f"{name}.apk",
+                                            mimetype="application/vnd.android.package-archive"))
+
+
 @app.get("/api/pbx/telefon-apps")
 def telefon_apps_liste():
     _, deny = require_admin()

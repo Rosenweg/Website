@@ -25,6 +25,11 @@
         ul.apps b { display: block; }
         ul.apps span { color: var(--leise); font-size: .9rem; }
         .leise { color: var(--leise); font-size: .9rem; }
+        table.dl { width: 100%; border-collapse: collapse; }
+        table.dl td { padding: 8px 4px; border-bottom: 1px solid var(--linie); vertical-align: middle; }
+        table.dl td.v { color: var(--leise); font-size: .9rem; white-space: nowrap; }
+        a.knopf { display: inline-block; padding: 6px 12px; border-radius: 8px; background: var(--rot); color: #fff; text-decoration: none; font-size: .9rem; white-space: nowrap; }
+        code { font-size: .8rem; word-break: break-all; }
     </style>
 </head>
 <body>
@@ -68,6 +73,17 @@
         </ul>
     </div>
 
+    <h2>Herunterladen</h2>
+    <div class="karte">
+        <p>Für dein eigenes Android-Handy. Auf den geteilten Telefonen hält Rosenweg Gerät die Apps selbst aktuell.</p>
+        <table class="dl"><tbody id="downloads"><tr><td class="leise">Lade die Liste …</td></tr></tbody></table>
+        <p class="leise">Installieren: APK auf dem Handy öffnen; beim ersten Mal fragt Android, ob der Browser Apps
+        installieren darf. Alle Apps sind mit dem Rosenweg-Schlüssel signiert (SHA-256
+        <code id="signatur">7b3bac26e82b6103546b96861dcf1bb89b3239424ff11fdf684975cf78c5a5ae</code>);
+        Updates lassen sich nur über eine App mit derselben Signatur einspielen.
+        Rosenweg Telefon: nach dem Installieren im Menü „Mit Rosenweg anmelden“.</p>
+    </div>
+
     <h2>Grundlage: Fossify</h2>
     <div class="karte">
         <p>Die meisten Rosenweg-Apps sind Anpassungen der freien Apps von
@@ -82,5 +98,39 @@
 
     <p class="leise" style="margin-top:32px">Fragen und Probleme: Ressort Technik, <a href="/hilfe.html">Hilfe &amp; Anleitungen</a>.</p>
 </main>
+<script>
+(async () => {
+    const ziel = document.getElementById('downloads');
+    const basis = 'https://pbx.rosenweg4303.ch';
+    try {
+        const r = await fetch(basis + '/api/apps/index.json', { cache: 'no-store' });
+        if (!r.ok) throw new Error(r.status);
+        const d = await r.json();
+        if (d.signatur_sha256) document.getElementById('signatur').textContent = d.signatur_sha256;
+        ziel.textContent = '';
+        for (const a of d.apps) {
+            const tr = document.createElement('tr');
+            const name = document.createElement('td');
+            name.textContent = a.name;
+            const v = document.createElement('td');
+            v.className = 'v';
+            v.textContent = [a.version_name ? 'Version ' + a.version_name : '',
+                             a.groesse ? (a.groesse / 1048576).toFixed(1) + ' MB' : ''].filter(Boolean).join(' · ');
+            const k = document.createElement('td');
+            k.style.textAlign = 'right';
+            const link = document.createElement('a');
+            link.className = 'knopf';
+            link.href = basis + a.url;
+            link.textContent = 'Laden';
+            link.setAttribute('download', '');
+            k.appendChild(link);
+            tr.append(name, v, k);
+            ziel.appendChild(tr);
+        }
+    } catch (e) {
+        ziel.innerHTML = '<tr><td class="leise">Die Liste ist gerade nicht erreichbar.</td></tr>';
+    }
+})();
+</script>
 </body>
 </html>
