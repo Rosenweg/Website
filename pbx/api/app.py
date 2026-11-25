@@ -1475,7 +1475,8 @@ def _rosenweg_konto():
     if not email:
         app.logger.warning("Rosenweg-Anmeldung: keine E-Mail im Konto")
         return None
-    return {"email": email, "name": str(u.get("name") or u.get("preferred_username") or "")}
+    return {"email": email, "name": str(u.get("name") or u.get("preferred_username") or ""),
+            "groups": [str(g) for g in (u.get("groups") or [])]}
 
 
 def _privat_antwort(r, name):
@@ -1767,7 +1768,19 @@ def telefon_karte():
 
 
 def _karten_verwalter():
-    """Geraet + angemeldete Person mit Technik/Praesident. -> (ext, sitzung, None) oder (.., .., response)."""
+    """Geraet + angemeldete Person mit Technik/Praesident. -> (ext, sitzung, None) oder (.., .., response).
+    Ohne Geraet (Rosenweg Karten auf dem eigenen Handy, Stefan 25.11.2026): Bearer-Token der
+    Rosenweg-Anmeldung (Website-Login oder Authentik rosenweg-apps) mit Technik/Praesident."""
+    if not request.authorization and _bearer():
+        person = current_user()
+        if not person:
+            person = _rosenweg_konto()
+        if not person:
+            return None, None, (jsonify({"error": "Rosenweg-Anmeldung ungueltig"}), 401)
+        gruppen = {str(g).lower() for g in (person.get("groups") or [])}
+        if not (gruppen & KARTEN_VERWALTER):
+            return "App", None, (jsonify({"error": "nicht berechtigt"}), 403)
+        return "App", {"name": person.get("name") or "", "email": person.get("email") or ""}, None
     ext, deny = _geraet()
     if deny:
         return None, None, deny
@@ -1786,6 +1799,8 @@ def _karten_verwalter():
 
 
 def _karten_durch(ext, s):
+    if ext == "App":
+        return f"Rosenweg Karten ({s['name']} <{s['email']}>)"
     return f"Telefon {ext} ({s['name']} <{s['email']}>)"
 
 
