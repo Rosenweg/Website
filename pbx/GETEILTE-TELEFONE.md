@@ -344,7 +344,11 @@ Laufende Sitzungen von vor dem Update bekommen ihren Zugang beim ersten Abruf.
 **Rosenweg Telefon im Katalog auf „immer“:** sonst wird es beim Abmelden ausgeblendet und seine
 Daten gelöscht — die Akku-Ausnahme und die Freigabe des Anrufkontos gingen verloren.
 
-### Debugging über WLAN: Port und Nachprüfen (ab Rosenweg Gerät v215)
+### Wartung per adb über das Netz (ab Rosenweg Gerät v217)
 
-- Gerät sucht den Port von „Debugging über WLAN“ per mDNS bei sich selbst (`_adb-tls-connect._tcp`) und meldet Adresse und Port an die Anlage (`POST /api/telefon/adb`). /smartphones zeigt dann `adb connect <adresse>:<port>`, solange das Debugging zentral an ist (Meldung höchstens 15 Min. alt).
-- Solange es zentral an ist, prüft Gerät alle 5 Minuten nach: hat Android es abgeschaltet (WLAN-Wechsel, Dialog nicht bestätigt), schaltet Gerät es bis zum Ablauf wieder ein (höchstens alle 5 Min., damit der Android-Dialog nicht dauernd aufgeht).
+- **Klassisches adb auf Port 5555** statt „Debugging über WLAN“. Grund: Android merkt sich vertraute WLANs pro Zugangspunkt-Kennung (BSSID) und schaltet „Debugging über WLAN“ bei jedem neuen Zugangspunkt ab (schon beim Wechsel 2,4 → 5 GHz am selben Gerät). Die nötige Bestätigung fragt es bei gesperrtem Bildschirm gar nicht erst (`startConfirmationForNetwork: isLockScreenMode`).
+- Einmal per USB: `adb tcpip 5555` (macht `geteiltes-telefon-einrichten.sh`). Nach einem Neustart des Telefons ist der Port weg und muss nochmals per USB gesetzt werden.
+- /smartphones „🛠 1 Std.“ / „aus“ schaltet zentral nur adb selbst (Gerät setzt `ADB_ENABLED` als Device Owner, Weckanruf 2098). Aus = kein adbd, auch nicht per USB. Geht bei gesperrtem Bildschirm, ohne Rückfrage; getestet: aus in 2 s, an in 3 s.
+- Verbinden darf nur ein Rechner, dessen Schlüssel das Telefon kennt.
+- Gerät meldet Adresse und Port (`POST /api/telefon/adb`); /smartphones zeigt `adb connect <adresse>:5555`. Ist Port 5555 nicht offen (nach Neustart), sucht Gerät ersatzweise ein von Hand eingeschaltetes „Debugging über WLAN“ per mDNS.
+- Schaltet etwas adb ab, solange es zentral an ist, stellt Gerät es sofort wieder her; zusätzlich prüft es alle 5 Minuten nach.

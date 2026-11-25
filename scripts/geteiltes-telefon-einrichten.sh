@@ -87,6 +87,14 @@ schritt "Seitentaste lang = Ausschaltmenü (1/2)" a shell settings put global fu
 schritt "Seitentaste lang = Ausschaltmenü (2/2)" a shell settings put global power_button_long_press 1
 schritt "\"Netzwerk und Sicherheit sperren\" aus (Neustart ohne PIN)" a shell settings put secure lock_function_val 0
 
+# Wartung per adb über das Netz (Stefan 25.11.2026): klassisches adb auf Port 5555. Zentral
+# geschaltet wird nur adb selbst (/smartphones, Gerät setzt ADB_ENABLED). Hält auch bei
+# gesperrtem Bildschirm und beim Wechsel des Zugangspunkts. Nach einem Neustart des Telefons
+# ist der Port weg: dieses Skript (oder nur "adb tcpip 5555") nochmals per USB.
+schritt "adb über TCP Port 5555 (Wartung über /smartphones)" a tcpip 5555
+sleep 3
+a wait-for-device
+
 # Kontrolle
 echo
 echo "Kontrolle:"
@@ -96,4 +104,5 @@ echo "  SIP-Konten:       $(a shell dumpsys telecom 2>/dev/null | grep -c "$SIPK
 echo "  Browser:          $(a shell cmd role get-role-holders android.app.role.BROWSER | tr -d '\r')"
 echo "  Seitentaste:      $(a shell settings get global function_key_config_longpress_type | tr -d '\r')/$(a shell settings get global power_button_long_press | tr -d '\r') (soll 0/1)"
 echo "  Netz+Sicherheit:  $(a shell settings get secure lock_function_val | tr -d '\r') (soll 0)"
+echo "  adb über TCP:     Port $(a shell getprop service.adb.tcp.port | tr -d '\r') (soll 5555)"
 [ $FEHLER = 0 ] && echo "Fertig, alle Schritte ok." || { echo "$FEHLER Schritt(e) fehlgeschlagen."; exit 1; }
