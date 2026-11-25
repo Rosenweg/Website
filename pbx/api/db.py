@@ -355,6 +355,12 @@ def init_db():
             conn.execute("ALTER TABLE telefon_nextcloud ADD COLUMN abgemeldet_at TEXT")
         if "immer" not in [r[1] for r in conn.execute("PRAGMA table_info(telefon_apps)")]:
             conn.execute("ALTER TABLE telefon_apps ADD COLUMN immer INTEGER NOT NULL DEFAULT 0")
+        # Version der APK (fuer die Downloads auf der Apps-Seite und den Updater der Apps)
+        spalten = [r[1] for r in conn.execute("PRAGMA table_info(telefon_apps)")]
+        if "version_code" not in spalten:
+            conn.execute("ALTER TABLE telefon_apps ADD COLUMN version_code INTEGER")
+        if "version_name" not in spalten:
+            conn.execute("ALTER TABLE telefon_apps ADD COLUMN version_name TEXT")
         # Gruppen der Person (fuer die App-Freigaben) an Ausweis und Sitzung.
         for tab in ("telefon_ausweise", "telefon_sitzungen"):
             if "gruppen" not in [r[1] for r in conn.execute(f"PRAGMA table_info({tab})")]:
