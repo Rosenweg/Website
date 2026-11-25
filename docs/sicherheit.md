@@ -417,7 +417,7 @@ ins Repo:
 - Zertifikat `contacts.rosenweg4303.ch` ist abgelaufen.
 - `PRINT_AR_AUTHSERV_ID` an einer echten Mail prüfen (oberster
   `Authentication-Results`-Kopf).
-- CrowdSec/fail2ban auf dem Edge-Proxy sind nicht installiert.
+- CrowdSec laeuft auf dem Edge (CT 245) seit spaetestens Nov. 2026 (Traefik- und Firewall-Bouncer); Details und Rosenweg-Regeln in `edge-traefik/README.md`. Offen: MQTT und Nextcloud melden gescheiterte Anmeldungen noch nicht an CrowdSec.
 - ioBroker läuft mit `auth=false` (nur noch hinter Authentik erreichbar).
 - Kiosk: Änderungen wirken erst nach erneutem `setup-kiosk.sh`; `root_password`
   in der Kiosk-Konfiguration setzen.

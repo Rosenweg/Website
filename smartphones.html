@@ -98,7 +98,7 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const zeit = t => t ? new Date(String(t).replace(' ', 'T') + (/[zZ+]/.test(String(t).slice(10)) ? '' : 'Z'))
                        .toLocaleString('de-CH', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) : '';
-let bisMs = 0, holt = false;
+let bisMs = 0, holt = false, abgelaufen = false;
 
 function melde(text, fehler) {
     const m = $('meldung');
@@ -107,7 +107,7 @@ function melde(text, fehler) {
 }
 async function api(pfad, opts) {
     const r = await AuthentikAuth.apiFetch(PBX + pfad, opts);
-    if (r.status === 401) { zeigeGate(); throw new Error('auth'); }
+    if (r.status === 401) { abgelaufen = true; zeigeGate(); throw new Error('auth'); }
     return r;
 }
 async function json(r) { return r.json().catch(() => ({})); }
@@ -228,10 +228,12 @@ function zeigeGate() { $('inhalt').classList.add('hidden'); $('gate').classList.
     $('inhalt').classList.remove('hidden');
     try { await ladeMeine(); } catch (e) {}
     await holeQr();
-    setInterval(tick, 1000);
+    // Nach einem 401 (Login abgelaufen) nicht weiter abfragen: jede Abfrage waere ein
+    // gescheiterter Versuch, und nach 8 sperrt CrowdSec 24 h (rosenweg/anmeldung-bf).
+    setInterval(() => { if (!abgelaufen) tick(); }, 1000);
     lade().catch(() => {});
-    setInterval(() => { if (!document.hidden) { ladeMeine().catch(() => {}); lade().catch(() => {}); } }, 10000);
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) holeQr(); });
+    setInterval(() => { if (!document.hidden && !abgelaufen) { ladeMeine().catch(() => {}); lade().catch(() => {}); } }, 10000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && !abgelaufen) holeQr(); });
 })();
 </script>
 </body>

@@ -1529,14 +1529,15 @@ def telefon_privat_abmelden():
     der Zugang selbst ist der Ausweis)."""
     b = request.get_json(silent=True) or {}
     kennung, pw = str(b.get("user") or ""), str(b.get("password") or "")
+    # 401 (nicht 404): falsche Zugangsdaten zaehlen fuer CrowdSec (rosenweg/anmeldung-bf)
     if not SIP_PRIVAT_RE.fullmatch(kennung):
-        return jsonify({"error": "Unbekannter Zugang"}), 404
+        return jsonify({"error": "Unbekannter Zugang"}), 401
     zid = int(kennung.split("-p", 1)[1])
     conn = db.connect()
     try:
         r = conn.execute("SELECT passwort FROM telefon_sip_privat WHERE id = ?", (zid,)).fetchone()
         if not r or not hmac.compare_digest(str(r["passwort"]), pw):
-            return jsonify({"error": "Unbekannter Zugang"}), 404
+            return jsonify({"error": "Unbekannter Zugang"}), 401
         conn.execute("DELETE FROM telefon_sip_privat WHERE id = ?", (zid,))
         conn.commit()
     finally:
