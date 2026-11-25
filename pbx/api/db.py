@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS telefon_apps (
 CREATE TABLE IF NOT EXISTS telefon_log (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     ext          TEXT NOT NULL,
-    ereignis     TEXT NOT NULL,            -- 'an' | 'ab' | 'karte-abgelehnt' | 'karte-info' | 'karte-zu' | 'karte-weg' | 'karte-geloescht'
+    ereignis     TEXT NOT NULL,            -- 'an' | 'ab' | 'karte-abgelehnt' | 'karte-info' | 'karte-zu' | 'karte-weg' | 'karte-geloescht' | 'gefunden'
     email        TEXT,
     name         TEXT,
     durch        TEXT,                     -- wer es ausgeloest hat (Geraet, Person, Admin)

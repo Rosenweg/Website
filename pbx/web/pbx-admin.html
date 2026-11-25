@@ -325,7 +325,7 @@ async function loadTelefone(){
       <button class="danger" onclick="telAbmelden('${esc(s.ext)}')">Abmelden</button></td></tr>`).join('')
     || '<tr><td colspan="5" class="muted">Niemand angemeldet.</td></tr>';
   $('tel_log').innerHTML = (d.log||[]).map(l=>`<tr><td class="mono">${esc(String(l.zeit||'').slice(0,16))}</td><td class="mono">${esc(l.ext)}</td>
-    <td>${({an:'angemeldet',ab:'abgemeldet','karte-abgelehnt':'Karte abgelehnt','karte-info':'Karte abgefragt','karte-zu':'Karte zugeordnet','karte-weg':'Karte entzogen','karte-geloescht':'Karte gelöscht'})[l.ereignis]||esc(l.ereignis)}</td><td>${esc(l.name||'')}</td><td class="muted">${esc(l.durch||'')}</td></tr>`).join('')
+    <td>${({an:'angemeldet',ab:'abgemeldet','karte-abgelehnt':'Karte abgelehnt','karte-info':'Karte abgefragt','karte-zu':'Karte zugeordnet','karte-weg':'Karte entzogen','karte-geloescht':'Karte gelöscht',gefunden:'Telefon gefunden'})[l.ereignis]||esc(l.ereignis)}</td><td>${esc(l.name||'')}</td><td class="muted">${esc(l.durch||'')}</td></tr>`).join('')
     || '<tr><td colspan="5" class="muted">Noch nichts.</td></tr>';
   $('tel_gruppen').value = (d.gruppen||[]).join(', ');
   $('tel_aus').value = (d.ausblenden||'').split(',').map(s=>s.trim()).filter(Boolean).join(',\n');
@@ -348,6 +348,18 @@ async function telSuchen(ext){
   if(!/^[0-9]{2,8}$/.test(ext||'')){ showErr('Nebenstelle angeben, z.B. 2002.'); return; }
   const r = await api('/api/telefon/'+encodeURIComponent(ext)+'/suchen',{method:'POST'});
   showErr(r.ok ? ('Telefon '+ext+' klingelt jetzt bis zu 45 Sekunden.') : ((await r.json().catch(()=>({}))).error||'Fehler'));
+  if (!r.ok) return;
+  for (let i = 0; i < 20; i++) {
+    await new Promise(res => setTimeout(res, 3000));
+    const s = await api('/api/telefon/'+encodeURIComponent(ext)+'/suchen').catch(() => null);
+    const d = s && s.ok ? await s.json().catch(() => ({})) : {};
+    if (d.gefunden) {
+      showErr('Telefon '+ext+' gefunden um '+new Date(d.gefunden).toLocaleTimeString('de-CH',{hour:'2-digit',minute:'2-digit'})
+        +(d.gefunden_von ? ' ('+d.gefunden_von+')' : '')+'.');
+      loadTelefone();
+      return;
+    }
+  }
 }
 async function saveTelGruppen(){
   const r = await api('/api/pbx/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({telefon_gruppen:$('tel_gruppen').value})});

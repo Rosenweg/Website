@@ -131,6 +131,22 @@ async function suchen(ext){
   const r = await api('/api/telefon/'+encodeURIComponent(ext)+'/suchen', {method:'POST'});
   if (!r.ok) { const d = await r.json().catch(()=>({})); zeige('err', d.error || 'Klingeln fehlgeschlagen.'); return; }
   zeige('ok','Das Telefon klingelt jetzt bis zu 45 Sekunden.');
+  warteAufGefunden(ext, (t) => zeige('ok', t));
+}
+
+// Nach "Klingeln": bis 60 s nachfragen, ob am Telefon "Gefunden" getippt wurde.
+async function warteAufGefunden(ext, melde){
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 3000));
+    const r = await api('/api/telefon/'+encodeURIComponent(ext)+'/suchen').catch(() => null);
+    if (!r || !r.ok) continue;
+    const d = await r.json().catch(() => ({}));
+    if (d.gefunden) {
+      const zeit = new Date(d.gefunden).toLocaleTimeString('de-CH', {hour:'2-digit', minute:'2-digit'});
+      melde('Gefunden um ' + zeit + (d.gefunden_von ? ' (' + d.gefunden_von + ')' : '') + '.');
+      return;
+    }
+  }
 }
 
 async function ladeMeine(){
