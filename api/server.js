@@ -16357,11 +16357,54 @@ function msgTopicAllowed(prefixes, topic) {
   return prefixes.some((p) => p === '#' || t === p || t === p + '/msg' || t.startsWith(p + '/'));
 }
 
+// Messenger-Sitzungen (Stefan 25.11.2026): Clients melden sich mit dem JWT als PASSWORT und
+// dem neutralen Benutzernamen "msg-<sub>" an - Mosquitto loggt Benutzernamen (fuer CrowdSec
+// noetig), Passwoerter nie. go-auth schickt bei superuser/aclcheck nur den Benutzernamen, darum
+// merken wir uns die Claims bis zum Ablauf des JWT unter diesem Namen.
+let msgSitzungTabelle = null;
+function msgSitzungBereit() {
+  if (!msgSitzungTabelle) {
+    msgSitzungTabelle = pool.query(`CREATE TABLE IF NOT EXISTS mqtt_msg_sitzungen (
+      username TEXT PRIMARY KEY, claims_json TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL)`)
+      .catch(e => { msgSitzungTabelle = null; throw e; });
+  }
+  return msgSitzungTabelle;
+}
+async function msgSitzungMerken(username, claims) {
+  await msgSitzungBereit();
+  const bis = claims.exp ? new Date(claims.exp * 1000) : new Date(Date.now() + 24 * 3600 * 1000);
+  await pool.query(
+    `INSERT INTO mqtt_msg_sitzungen (username, claims_json, expires_at) VALUES ($1, $2, $3)
+     ON CONFLICT (username) DO UPDATE SET claims_json = EXCLUDED.claims_json, expires_at = EXCLUDED.expires_at`,
+    [username, JSON.stringify(claims), bis]);
+}
+async function msgSitzungClaims(username) {
+  const u = String(username || '');
+  if (!u.startsWith('msg-')) return null;
+  try {
+    await msgSitzungBereit();
+    const r = await pool.query(`SELECT claims_json FROM mqtt_msg_sitzungen WHERE username = $1 AND expires_at > NOW()`, [u]);
+    return r.rows[0] ? JSON.parse(r.rows[0].claims_json) : null;
+  } catch { return null; }
+}
+let msgAltAnmeldungen = 0;   // Clients, die das JWT noch als Benutzernamen schicken (Uebergang)
+
 app.post('/api/mqtt/getuser', mqttBrokerGuard, async (req, res) => {
   try {
     const { username, password } = req.body || {};
-    // Messenger-JWT (chat.) → gültige Signatur genügt.
-    if (messengerJwtClaims(username) || messengerJwtClaims(password)) return res.status(200).end();
+    // Messenger neu: Benutzername "msg-<sub>", JWT als Passwort. Der Name muss zum JWT passen,
+    // sonst koennte jemand Claims unter fremdem Namen hinterlegen.
+    const pwClaims = messengerJwtClaims(password);
+    if (pwClaims && String(username || '') === 'msg-' + String(pwClaims.sub || '')) {
+      await msgSitzungMerken(String(username), pwClaims);
+      return res.status(200).end();
+    }
+    // Messenger alt: JWT als Benutzername (Uebergang, bis alle Clients umgestellt sind).
+    if (messengerJwtClaims(username)) {
+      if (++msgAltAnmeldungen % 20 === 1) console.log(`[mqtt] Messenger meldet sich noch mit JWT als Benutzername an (${msgAltAnmeldungen} seit Start)`);
+      return res.status(200).end();
+    }
+    if (pwClaims) return res.status(403).end();   // JWT als Passwort, aber falscher Name
     if (!password) return res.status(403).end();
     const hash = crypto.createHash('sha256').update(password).digest('hex');
     const r = await pool.query(
@@ -16406,7 +16449,7 @@ app.post('/api/mqtt/superuser', mqttBrokerGuard, async (req, res) => {
   try {
     const { username, password } = req.body || {};
     // Messenger: nur das Backend-Token (backend:true) ist Superuser; per-User nein.
-    const mj = messengerJwtClaims(username) || messengerJwtClaims(password);
+    const mj = messengerJwtClaims(username) || messengerJwtClaims(password) || await msgSitzungClaims(username);
     if (mj) return res.status(mj.backend === true ? 200 : 403).end();
     const u = await mqttUserByUsername(username);
     return res.status(u && u.is_technik ? 200 : 403).end();
@@ -16430,7 +16473,7 @@ app.post('/api/mqtt/aclcheck', mqttBrokerGuard, async (req, res) => {
     }
     // Messenger-JWT → Topic gegen sub_topics/pub_topics-Claims (acc 1/4=read/sub,
     // 2=write, 3=readwrite). Backend-Token darf alles.
-    const mj = messengerJwtClaims(username) || messengerJwtClaims(password);
+    const mj = messengerJwtClaims(username) || messengerJwtClaims(password) || await msgSitzungClaims(username);
     if (mj) {
       if (mj.backend === true) return res.status(200).end();
       const a = Number(acc);
