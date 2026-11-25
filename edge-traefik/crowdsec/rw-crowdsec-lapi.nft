@@ -1,0 +1,13 @@
+#!/usr/sbin/nft -f
+# Edge CT 245: CrowdSec-API (8080) nur fuer lokale Bouncer, PMG (Bouncer) und Melder (CT 220 Anlage) - PMG (Bouncer
+# fuer Submission 587, die direkt vom UDM zum PMG geht).
+table inet rw_crowdsec_lapi
+delete table inet rw_crowdsec_lapi
+table inet rw_crowdsec_lapi {
+	chain input {
+		type filter hook input priority filter - 5; policy accept;
+		tcp dport 8080 ip saddr { 127.0.0.1, 100.64.2.31, 100.64.2.55 } accept
+		tcp dport 8080 ip6 saddr ::1 accept
+		tcp dport 8080 drop
+	}
+}
