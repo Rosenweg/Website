@@ -53,7 +53,12 @@ PORT = int(os.environ.get("PBX_API_PORT", "8095"))
 # linphonerc-XML (Assistent -> "Fetch Remote Configuration"). Weil in dieser
 # XML das SIP-Passwort steht, ist die URL ein Einmal-Token mit kurzer Frist.
 PROV_SIP_HOST = os.environ.get("PBX_SIP_HOST", "sip.rosenweg4303.ch")
-PROV_TRANSPORT = os.environ.get("PBX_SIP_TRANSPORT", "tcp")  # tcp haelt die Registrierung im Doze
+PROV_TRANSPORT = os.environ.get("PBX_SIP_TRANSPORT", "tcp")
+# Anmeldung in den Rosenweg-Apps (Authentik "rosenweg-apps", oeffentlicher Client mit PKCE):
+# die Anlage prueft das Token selbst ueber userinfo (die Introspektion der Haupt-API kennt
+# nur Tokens ihres eigenen Clients).
+AUTHENTIK_USERINFO = os.environ.get("AUTHENTIK_USERINFO_URL",
+                                    "https://authentik.rosenweg4303.ch/application/o/userinfo/")  # tcp haelt die Registrierung im Doze
 PROV_EXPIRES = os.environ.get("PBX_SIP_REG_EXPIRES", "120")
 PROV_TTL_MIN = int(os.environ.get("PBX_PROV_TTL_MIN", "15"))
 # CardDAV-Verzeichnis (zentrales Telefonbuch). Leer = nicht mitprovisionieren.
@@ -370,6 +375,15 @@ def person_agi(nummer):
                 continue
             pz = persoenlich.get(ext)
             ziele.append(pz if pz and pz in registriert else ext)
+        # Rosenweg Telefon auf eigenen Handys (<nummer>-p<id>), nur wenn registriert
+        privat = [f"{r['nummer']}-p{r['id']}" for r in conn.execute(
+            "SELECT id, nummer FROM telefon_sip_privat WHERE nummer = ? ORDER BY id", (nummer,))]
+        if privat:
+            try:
+                registriert = registriert or ami.registered_aors()
+            except Exception:  # noqa: BLE001
+                pass
+            ziele += [k for k in privat if k in registriert and k != ohne]
         if db.ist_nebenstelle(conn, nummer) and str(nummer) != ohne:
             ziele.append(str(nummer))   # Rosenweg Telefon auf dem privaten Handy
         wl = p["weiterleitung"] if p["weiterleitung"] in ("aus", "immer", "nicht_erreichbar") else "aus"
@@ -772,6 +786,7 @@ def regenerate_phones_conf(conn):
             "",
         ]
     lines += _sip_person_abschnitte(conn)
+    lines += _sip_privat_abschnitte(conn)
     with open(PHONES_CONF, "w") as f:
         f.write("\n".join(lines))
     try:
@@ -792,6 +807,42 @@ def regenerate_phones_conf(conn):
 SIP_PERSON_RE = re.compile(r"3[0-9]{5}-[0-9]{2,8}")
 
 
+def _zugang_abschnitte(kennung, passwort, name, nummer):
+    """endpoint/auth/aor eines persoenlichen Zugangs (Kontext [person], Caller-ID der Person)."""
+    name = re.sub(r'[\x00-\x1f\x7f"<>\[\];\\]', " ", str(name or ""))[:60]
+    return [
+        f"[{kennung}]",
+        "type=endpoint",
+        "context=person",
+        "disallow=all",
+        # Rosenweg Telefon nutzt denselben Sipdroid-Kern wie die Geraete-App
+        *ENDPOINT_PROFILE["android-sip"],
+        f"auth={kennung}",
+        f"aors={kennung}",
+        f"callerid={name} <{nummer}>",
+        "direct_media=no",
+        "rewrite_contact=yes",
+        "force_rport=yes",
+        "rtp_symmetric=yes",
+        "",
+        f"[{kennung}]",
+        "type=auth",
+        "auth_type=userpass",
+        f"username={kennung}",
+        f"password={passwort}",
+        "",
+        f"[{kennung}]",
+        "type=aor",
+        "max_contacts=1",
+        "remove_existing=yes",
+        "qualify_frequency=60",
+        "",
+    ]
+
+
+_PASSWORT_RE = re.compile(r"[A-Za-z0-9_-]{16,64}")
+
+
 def _sip_person_abschnitte(conn):
     """pjsip-Abschnitte fuer alle persoenlichen Zugaenge mit gueltiger Sitzung."""
     rows = conn.execute(
@@ -803,39 +854,11 @@ def _sip_person_abschnitte(conn):
     lines = ["; Persoenliche Zugaenge (telefon_sip_person): <nummer>-<geraet>, nur waehrend der Sitzung", ""]
     for r in rows:
         kennung = f"{r['nummer']}-{r['ext']}"
-        if not SIP_PERSON_RE.fullmatch(kennung) or not re.fullmatch(r"[A-Za-z0-9_-]{16,64}", str(r["passwort"] or "")):
+        if not SIP_PERSON_RE.fullmatch(kennung) or not _PASSWORT_RE.fullmatch(str(r["passwort"] or "")):
             print(f"[pbx-api] persoenlicher Zugang an {re.sub(r'[^0-9]', '?', str(r['ext']))[:12]} "
                   "nicht geschrieben (ungueltig)", flush=True)
             continue
-        name = re.sub(r'[\x00-\x1f\x7f"<>\[\];\\]', " ", str(r["name"] or ""))[:60]
-        lines += [
-            f"[{kennung}]",
-            "type=endpoint",
-            "context=person",
-            "disallow=all",
-            # Rosenweg Telefon nutzt denselben Sipdroid-Kern wie die Geraete-App
-            *ENDPOINT_PROFILE["android-sip"],
-            f"auth={kennung}",
-            f"aors={kennung}",
-            f"callerid={name} <{r['nummer']}>",
-            "direct_media=no",
-            "rewrite_contact=yes",
-            "force_rport=yes",
-            "rtp_symmetric=yes",
-            "",
-            f"[{kennung}]",
-            "type=auth",
-            "auth_type=userpass",
-            f"username={kennung}",
-            f"password={r['passwort']}",
-            "",
-            f"[{kennung}]",
-            "type=aor",
-            "max_contacts=1",
-            "remove_existing=yes",
-            "qualify_frequency=60",
-            "",
-        ]
+        lines += _zugang_abschnitte(kennung, r["passwort"], r["name"], r["nummer"])
     return lines
 
 
@@ -1324,6 +1347,152 @@ def telefon_sip_person():
     res = jsonify(antwort)
     res.headers["Cache-Control"] = "no-store"
     return res
+
+
+# ─── Rosenweg Telefon auf dem eigenen Handy ─────────────────────────────────
+# Stefan 25.11.2026: "wieso kann ich mich auf dem telefon nicht einfach anmelden wie im
+# rosenweg". Die App meldet sich mit dem Rosenweg-Konto an (Authentik "rosenweg-apps",
+# PKCE) und holt hier einen festen Zugang <nummer>-p<id>. Ohne Sitzung an einem geteilten
+# Telefon; er bleibt, bis die App abmeldet, Technik ihn loescht oder die Nummer inaktiv wird.
+SIP_PRIVAT_RE = re.compile(r"3[0-9]{5}-p[0-9]{1,6}")
+SIP_PRIVAT_MAX = 5   # Handys pro Person
+
+
+def _sip_privat_abschnitte(conn):
+    rows = conn.execute(
+        "SELECT p.id, p.nummer, p.passwort, n.name FROM telefon_sip_privat p "
+        "JOIN personen_nummern n ON n.nummer = p.nummer AND n.aktiv = 1 "
+        "AND lower(n.email) = lower(p.email) ORDER BY p.id").fetchall()
+    lines = ["; Eigene Handys (telefon_sip_privat): <nummer>-p<id>, Anmeldung in Rosenweg Telefon", ""]
+    for r in rows:
+        kennung = f"{r['nummer']}-p{r['id']}"
+        if not SIP_PRIVAT_RE.fullmatch(kennung) or not _PASSWORT_RE.fullmatch(str(r["passwort"] or "")):
+            print(f"[pbx-api] Handy-Zugang p{int(r['id'])} nicht geschrieben (ungueltig)", flush=True)
+            continue
+        lines += _zugang_abschnitte(kennung, r["passwort"], r["name"], r["nummer"])
+    return lines
+
+
+def _rosenweg_konto():
+    """Person hinter dem Authentik-Token (Bearer) per userinfo; None wenn ungueltig."""
+    token = _bearer()
+    if not token or len(token) > 4096:
+        return None
+    try:
+        r = requests.get(AUTHENTIK_USERINFO, headers={"Authorization": f"Bearer {token}"}, timeout=6)
+        if not r.ok:
+            return None
+        u = r.json()
+    except (requests.RequestException, ValueError):
+        return None
+    email = str(u.get("email") or "").strip().lower()
+    if not email or not u.get("email_verified", True):
+        return None
+    return {"email": email, "name": str(u.get("name") or u.get("preferred_username") or "")}
+
+
+def _privat_antwort(r, name):
+    kennung = f"{r['nummer']}-p{r['id']}"
+    res = jsonify({
+        "server": PROV_SIP_HOST, "port": 5061 if PROV_TRANSPORT == "tls" else 5060,
+        "transport": PROV_TRANSPORT, "user": kennung, "auth_user": kennung,
+        "password": r["passwort"], "nummer": r["nummer"], "name": name, "id": r["id"],
+    })
+    res.headers["Cache-Control"] = "no-store"
+    return res
+
+
+@app.post("/api/telefon/privat/anmelden")
+def telefon_privat_anmelden():
+    """Rosenweg Telefon auf dem eigenen Handy: Bearer = Authentik-Access-Token der App.
+    Body {geraet}: Anzeigename des Handys. Antwort wie /api/telefon/sip-person."""
+    konto = _rosenweg_konto()
+    if not konto:
+        return jsonify({"error": "Rosenweg-Anmeldung ungueltig"}), 401
+    b = request.get_json(silent=True) or {}
+    geraet = re.sub(r"[\x00-\x1f\x7f]", " ", str(b.get("geraet") or ""))[:60].strip()
+    conn = db.connect()
+    try:
+        p = conn.execute("SELECT nummer, name FROM personen_nummern WHERE lower(email) = ? AND aktiv = 1 "
+                         "ORDER BY nummer", (konto["email"],)).fetchall()
+        nummer = str(_nummer_der_person(conn, konto["email"], konto["name"]) or "")
+        if not p or not re.fullmatch(r"3[0-9]{5}", nummer):
+            return jsonify({"error": "Keine persoenliche Telefonnummer fuer dieses Rosenweg-Konto"}), 404
+        name = next((x["name"] for x in p if x["nummer"] == nummer), konto["name"])
+        n = conn.execute("SELECT COUNT(*) FROM telefon_sip_privat WHERE lower(email) = ?",
+                         (konto["email"],)).fetchone()[0]
+        if n >= SIP_PRIVAT_MAX:
+            return jsonify({"error": f"Schon {SIP_PRIVAT_MAX} Handys angemeldet - eines in der "
+                                     "Telefon-Verwaltung abmelden"}), 409
+        cur = conn.execute("INSERT INTO telefon_sip_privat (nummer, email, geraet, passwort) VALUES (?,?,?,?)",
+                           (nummer, konto["email"], geraet, pysecrets.token_urlsafe(24)))
+        conn.commit()
+        r = conn.execute("SELECT * FROM telefon_sip_privat WHERE id = ?", (cur.lastrowid,)).fetchone()
+        app.logger.info("Handy-Zugang %s-p%d angelegt", nummer, r["id"])
+    finally:
+        conn.close()
+    _sip_person_neu_laden()
+    return _privat_antwort(r, name)
+
+
+@app.post("/api/telefon/privat/abmelden")
+def telefon_privat_abmelden():
+    """Die App meldet ab: Body {user, password} des eigenen Zugangs (kein Token noetig,
+    der Zugang selbst ist der Ausweis)."""
+    b = request.get_json(silent=True) or {}
+    kennung, pw = str(b.get("user") or ""), str(b.get("password") or "")
+    if not SIP_PRIVAT_RE.fullmatch(kennung):
+        return jsonify({"error": "Unbekannter Zugang"}), 404
+    zid = int(kennung.split("-p", 1)[1])
+    conn = db.connect()
+    try:
+        r = conn.execute("SELECT passwort FROM telefon_sip_privat WHERE id = ?", (zid,)).fetchone()
+        if not r or not hmac.compare_digest(str(r["passwort"]), pw):
+            return jsonify({"error": "Unbekannter Zugang"}), 404
+        conn.execute("DELETE FROM telefon_sip_privat WHERE id = ?", (zid,))
+        conn.commit()
+    finally:
+        conn.close()
+    _sip_person_neu_laden()
+    return jsonify({"ok": True})
+
+
+@app.get("/api/pbx/sip-privat")
+def sip_privat_liste():
+    """Technik: angemeldete eigene Handys (ohne Passwort)."""
+    _, deny = require_admin()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        rows = conn.execute("SELECT id, nummer, email, geraet, created_at FROM telefon_sip_privat "
+                            "ORDER BY nummer, id").fetchall()
+        try:
+            regs = ami.registered_aors()
+        except Exception:  # noqa: BLE001
+            regs = set()
+        return jsonify([{**dict(r), "kennung": f"{r['nummer']}-p{r['id']}",
+                         "registriert": f"{r['nummer']}-p{r['id']}" in regs} for r in rows])
+    finally:
+        conn.close()
+
+
+@app.delete("/api/pbx/sip-privat/<int:zid>")
+def sip_privat_loeschen(zid):
+    """Technik: Handy-Zugang sperren (z.B. Handy verloren)."""
+    _, deny = require_admin()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        n = conn.execute("DELETE FROM telefon_sip_privat WHERE id = ?", (zid,)).rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    if not n:
+        return jsonify({"error": "Nicht gefunden"}), 404
+    _sip_person_neu_laden()
+    return jsonify({"ok": True})
 
 
 @app.post("/api/telefon/abmelden")

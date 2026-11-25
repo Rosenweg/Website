@@ -66,8 +66,8 @@ def main():
     consume_agi_env()
     nummer = sys.argv[1] if len(sys.argv) > 1 else ''
     # Anrufendes Geraet nicht mitklingeln lassen (wer sich selbst anruft, landet sonst bei sich)
-    # (Nebenstelle 2102 oder persoenlicher Zugang 310201-2102 aus Rosenweg Telefon)
-    ohne = sys.argv[2] if len(sys.argv) > 2 and re.fullmatch(r'[0-9]{2,8}(-[0-9]{2,8})?', sys.argv[2]) else ''
+    # (Nebenstelle 2102, persoenlicher Zugang 310201-2102 oder eigenes Handy 310201-p3)
+    ohne = sys.argv[2] if len(sys.argv) > 2 and re.fullmatch(r'[0-9]{2,8}(-p?[0-9]{1,8})?', sys.argv[2]) else ''
     for k in ('PERSON_OK', 'PERSON_NAME', 'PERSON_DIAL', 'WL_MODUS', 'WL_ZIEL', 'WL_SEK', 'PERSON_VM'):
         set_var(k, '')
     if not re.fullmatch(r'3[0-9]{5}', nummer):
