@@ -7,15 +7,18 @@
 #   --device-owner   Rosenweg Gerät als Device Owner setzen (nur frisch zurückgesetzt,
 #                    ohne Google-/Samsung-Konto; Geräte-App muss installiert sein)
 #   --browser        Standard-Browser (Vorgabe: com.android.chrome)
+#   --nur-adb        nur adb über TCP Port 5555 wieder setzen (nach einem Neustart des
+#                    Telefons ist er weg; per USB: Seriennummer aus "adb devices")
 #
 # Notrufe werden nie getestet. Das Telefon wird nicht neu gestartet.
 set -u
 SERIE=${1:?Seriennummer fehlt (adb devices)}; shift
-DO=0; BROWSER=com.android.chrome
+DO=0; BROWSER=com.android.chrome; NUR_ADB=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --device-owner) DO=1 ;;
     --browser) BROWSER=$2; shift ;;
+    --nur-adb) NUR_ADB=1 ;;
     *) echo "Unbekannt: $1"; exit 2 ;;
   esac; shift
 done
@@ -28,7 +31,34 @@ schritt() {   # schritt "Beschreibung" befehl…
   if out=$("$@" 2>&1); then echo "ok      $was"; else echo "FEHLER  $was: $(echo "$out" | tail -1)"; FEHLER=$((FEHLER+1)); fi
 }
 
-a get-state >/dev/null 2>&1 || { echo "Telefon $SERIE nicht erreichbar (adb devices, USB-Debugging)"; exit 1; }
+a get-state >/dev/null 2>&1 || { echo "Telefon $SERIE nicht erreichbar (adb devices, USB-Debugging; über das Netz: auf /smartphones zuerst \"1 Std.\")"; exit 1; }
+
+# Wartung per adb über das Netz (Stefan 25.11.2026): klassisches adb auf Port 5555. Zentral
+# geschaltet wird nur adb selbst (/smartphones, Gerät setzt ADB_ENABLED). Hält auch bei
+# gesperrtem Bildschirm und beim Wechsel des Zugangspunkts. Nach einem Neustart des Telefons
+# ist der Port weg: --nur-adb per USB.
+adb_tcp() {
+  if [ "$(a shell getprop service.adb.tcp.port 2>/dev/null | tr -d '\r')" = 5555 ]; then
+    echo "ok      adb über TCP Port 5555 (war schon)"; return
+  fi
+  a tcpip 5555 >/dev/null 2>&1   # adbd startet neu, die Verbindung bricht kurz ab
+  case "$SERIE" in
+    *:*) # selbst über das Netz verbunden: neu verbinden, danach über Port 5555 weiter
+         sleep 3; SERIE="${SERIE%:*}:5555"; "$ADB" connect "$SERIE" >/dev/null 2>&1 ;;
+    *)   sleep 2 ;;
+  esac
+  for _ in 1 2 3 4 5 6 7 8 9 10; do a get-state >/dev/null 2>&1 && break; sleep 2; done
+  if [ "$(a shell getprop service.adb.tcp.port 2>/dev/null | tr -d '\r')" = 5555 ]; then
+    echo "ok      adb über TCP Port 5555"
+  else
+    echo "FEHLER  adb über TCP Port 5555 (Telefon $SERIE nicht wieder erreichbar)"; FEHLER=$((FEHLER+1))
+  fi
+}
+if [ $NUR_ADB = 1 ]; then
+  adb_tcp
+  [ $FEHLER = 0 ] && echo "Fertig: adb connect <adresse>:5555 (Adresse auf /smartphones)" || exit 1
+  exit 0
+fi
 a shell pm path $GERAET >/dev/null 2>&1 || { echo "Rosenweg Gerät ($GERAET) ist nicht installiert — zuerst installieren."; exit 1; }
 
 if [ $DO = 1 ]; then
@@ -87,13 +117,7 @@ schritt "Seitentaste lang = Ausschaltmenü (1/2)" a shell settings put global fu
 schritt "Seitentaste lang = Ausschaltmenü (2/2)" a shell settings put global power_button_long_press 1
 schritt "\"Netzwerk und Sicherheit sperren\" aus (Neustart ohne PIN)" a shell settings put secure lock_function_val 0
 
-# Wartung per adb über das Netz (Stefan 25.11.2026): klassisches adb auf Port 5555. Zentral
-# geschaltet wird nur adb selbst (/smartphones, Gerät setzt ADB_ENABLED). Hält auch bei
-# gesperrtem Bildschirm und beim Wechsel des Zugangspunkts. Nach einem Neustart des Telefons
-# ist der Port weg: dieses Skript (oder nur "adb tcpip 5555") nochmals per USB.
-schritt "adb über TCP Port 5555 (Wartung über /smartphones)" a tcpip 5555
-sleep 3
-a wait-for-device
+adb_tcp
 
 # Kontrolle
 echo
