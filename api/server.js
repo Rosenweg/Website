@@ -22856,6 +22856,14 @@ app.delete('/api/stations/:id/tunnel', stationsRouter.stationAuth, async (req, r
   }
 });
 
+// Tunnel fuer Rosenweg-Apps auf eigenen Geraeten (App "Rosenweg Virtuelle
+// Computer"): wie der Stations-Tunnel, aber angemeldet mit dem Rosenweg-Konto
+// (Authentik rosenweg-apps). Begruendung und Grenzen in routes/app-tunnel.js.
+require('./routes/app-tunnel').appTunnelRoutes(app, {
+  pool, wgControl, getUserVlanOptions, rateLimitGuard,
+  wgControlBereit: () => Boolean(WG_CONTROL_TOKEN),
+});
+
 app.post('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
   try {
     if (!WG_CONTROL_TOKEN) return res.status(503).json({ error: 'wg-control nicht konfiguriert (WG_CONTROL_TOKEN fehlt)' });
