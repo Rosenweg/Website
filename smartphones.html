@@ -112,7 +112,7 @@ async function api(pfad, opts) {
 }
 async function json(r) { return r.json().catch(() => ({})); }
 
-// ── Anmelde-QR und eigene Sitzungen (wie pbx.rosenweg4303.ch/telefon) ──
+// ── Anmelde-QR und eigene Sitzungen (frueher pbx.rosenweg4303.ch/telefon) ──
 async function holeQr() {
     if (holt) return; holt = true;
     try {

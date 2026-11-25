@@ -84,6 +84,9 @@ let bisMs = 0, qrTakt = null, holt = false;
 // am geteilten Telefon), gibt es die Bruecke window.RosenwegTelefon: dann kein
 // QR, sondern direkt anmelden.
 const AM_GERAET = typeof window.RosenwegTelefon !== 'undefined';
+// Im Browser ersetzt rosenweg4303.ch/smartphones diese Seite (Stefan 25.11.2026). Sie bleibt nur
+// fuer das Anmeldefenster von Rosenweg Geraet ("Mit Rosenweg-Konto anmelden" am Telefon).
+if (!AM_GERAET) location.replace('https://www.rosenweg4303.ch/smartphones');
 
 function zeige(art, text){ const m=$('msg'); m.className='msg '+art; m.textContent=text; }
 
