@@ -135,6 +135,8 @@
       <span class="muted" style="font-size:.85rem">Verlegtes Telefon klingeln lassen (auch ohne Anmeldung):</span>
       <input id="tel_suchen_ext" class="mono" placeholder="Nebenstelle, z.B. 2002" style="width:11rem">
       <button class="sec" onclick="telSuchen($('tel_suchen_ext').value.trim())">🔔 Klingeln</button>
+      <button class="sec" onclick="telWlanDebug($('tel_suchen_ext').value.trim(), 60)" title="Debugging über WLAN für 1 Stunde (Wartung, auch ohne Anmeldung)">🛠 WLAN-Debugging 1 Std.</button>
+      <button class="sec" onclick="telWlanDebug($('tel_suchen_ext').value.trim(), 0)">aus</button>
     </div>
     <div class="row" style="margin-top:.8rem;border-top:1px solid #f1f5f9;padding-top:.8rem">
       <label class="f" style="flex:1">Erlaubte Authentik-Gruppen (Komma)<input id="tel_gruppen"></label>
@@ -360,6 +362,17 @@ async function telSuchen(ext){
       return;
     }
   }
+}
+async function telWlanDebug(ext, minuten){
+  if(!/^[0-9]{2,8}$/.test(ext||'')){ showErr('Nebenstelle angeben, z.B. 2002.'); return; }
+  const r = await api('/api/telefon/'+encodeURIComponent(ext)+'/wlan-debug',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({minuten})});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok){ showErr(d.error||'Fehler'); return; }
+  showErr(minuten
+    ? ('Debugging über WLAN an '+ext+' bis '+new Date(d.wlan_debug_bis*1000).toLocaleTimeString('de-CH',{hour:'2-digit',minute:'2-digit'})
+       +(d.geweckt ? '. Das Telefon wird kurz angerufen (2098 Wartung) und schaltet es ein.' : '. Telefon nicht erreicht, es übernimmt den Stand beim nächsten Kontakt.')
+       +' Am Mac: adb mdns services, dann adb connect <IP>:<Port>.')
+    : ('Debugging über WLAN an '+ext+' wird ausgeschaltet.'));
 }
 async function saveTelGruppen(){
   const r = await api('/api/pbx/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({telefon_gruppen:$('tel_gruppen').value})});

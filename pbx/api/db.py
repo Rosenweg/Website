@@ -214,6 +214,16 @@ CREATE TABLE IF NOT EXISTS telefon_sip_privat (
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Wartung der geteilten Telefone (Stefan 25.11.2026): "Debugging ueber WLAN" zentral fuer
+-- eine Nebenstelle einschalten. Die Geraete-App liest wlan_debug_bis im Status und wird mit
+-- einem kurzen Anruf von 2098 "Wartung" geweckt.
+CREATE TABLE IF NOT EXISTS telefon_wartung (
+    ext            TEXT PRIMARY KEY,
+    wlan_debug_bis INTEGER NOT NULL DEFAULT 0,   -- epoch Sekunden, 0 = aus
+    durch          TEXT,
+    geaendert      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- 4000er: Hausverwaltung (heute Immosense), 4000 Hauptnummer, 4001 ... Mitarbeiter.
 -- Nur Festnetznummern (Entscheid 24.11.2026).
 CREATE TABLE IF NOT EXISTS verwaltung_nummern (

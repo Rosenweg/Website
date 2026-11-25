@@ -96,6 +96,7 @@ Wichtig für die geplante Einrichtung per QR ohne Kabel.
 | Akku-Optimierung ausnehmen | `adb shell dumpsys deviceidle whitelist +ch.rosenweg4303.telefon` | dito |
 | Akku-Optimierung für Rosenweg Messenger ausnehmen (MQTT bleibt im Ruhemodus offen, Notfälle kommen an) | `adb shell dumpsys deviceidle whitelist +ch.rosenweg4303.messages` | dito |
 | Rosenweg Telefon darf eingehende Anrufe als Vollbild über dem Sperrbildschirm zeigen (sonst nur ein Symbol, nicht annehmbar; Rosenweg Telefon warnt dauerhaft, solange es fehlt, und zeigt auf geteilten Telefonen Anrufe immer im Vollbild) | `adb shell appops set ch.rosenweg4303.phone USE_FULL_SCREEN_INTENT allow` | dito |
+| Rosenweg Gerät bestätigt „Debugging über WLAN zulassen“ selbst – nur im WLAN „Rosenweg“ und nur, wenn die Anlage das Debugging zentral eingeschaltet hat (in anderen WLANs bestätigt ein Mensch von Hand) | `adb shell settings put secure enabled_accessibility_services ch.rosenweg4303.telefon/org.sipdroid.sipua.rosenweg.WlanBestaetiger` und `adb shell settings put secure accessibility_enabled 1` | dito |
 | Messenger darf „Nicht stören“ für den Notfall-Alarm kurz ausschalten | `adb shell cmd notification allow_dnd ch.rosenweg4303.messages` | dito |
 | Rotes Notfall-Fenster über dem Sperrbildschirm (Android 14 erteilt es nicht von selbst) | `adb shell appops set ch.rosenweg4303.messages USE_FULL_SCREEN_INTENT allow` | dito |
 | Exakte Wecker: Notfall-Erinnerung alle 2 min bis gelesen, auch im Tiefschlaf | `adb shell appops set ch.rosenweg4303.messages SCHEDULE_EXACT_ALARM allow` | dito |

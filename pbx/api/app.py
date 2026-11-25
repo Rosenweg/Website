@@ -1342,9 +1342,12 @@ def telefon_status():
                 technik = any(g in gr for g in ("technik", "präsident", "praesident"))
             except ValueError:
                 pass
+        w = conn.execute("SELECT wlan_debug_bis FROM telefon_wartung WHERE ext = ?", (ext,)).fetchone()
+        bis = int(w["wlan_debug_bis"]) if w and int(w["wlan_debug_bis"] or 0) > time.time() else 0
         # technik: Geraete-App sperrt die gefaehrlichen Einstellungen nur fuer alle anderen
+        # wlan_debug_bis: zentral eingeschaltetes "Debugging ueber WLAN" (epoch s, 0 = aus)
         return jsonify({"ext": ext, "geraet": geraet["name"] if geraet else ext, "technik": technik,
-                        **_sitzung_json(row), **_apps_fuer(conn, row)})
+                        "wlan_debug_bis": bis, **_sitzung_json(row), **_apps_fuer(conn, row)})
     finally:
         conn.close()
 
@@ -2692,6 +2695,49 @@ def telefon_suchen(ext):
         return jsonify({"error": f"Anlage: {type(e).__name__}"}), 502
     app.logger.info("Telefon suchen: %s durch %s", ext, actor(user))
     return jsonify({"ok": True})
+
+
+@app.route("/api/telefon/<ext>/wlan-debug", methods=["GET", "POST"])
+def telefon_wlan_debug(ext):
+    """Technik/Praesident: "Debugging ueber WLAN" an einem geteilten Telefon zentral ein-
+    (Body {minuten: 1..240}) oder ausschalten ({minuten: 0}). Weckt das Telefon mit einem
+    kurzen Anruf von 2098 "Wartung" - die Geraete-App lehnt ihn lautlos ab und fragt den
+    Status ab. GET: aktueller Stand."""
+    user, deny = require_admin()
+    if deny:
+        return deny
+    if not re.fullmatch(r"[0-9]{2,8}", ext):
+        return jsonify({"error": "Nebenstelle ungueltig"}), 400
+    conn = db.connect()
+    try:
+        if not conn.execute("SELECT 1 FROM sip_extensions WHERE ext = ?", (ext,)).fetchone():
+            return jsonify({"error": "Unbekannte Nebenstelle"}), 404
+        if request.method == "GET":
+            w = conn.execute("SELECT wlan_debug_bis, durch FROM telefon_wartung WHERE ext = ?", (ext,)).fetchone()
+            bis = int(w["wlan_debug_bis"]) if w and int(w["wlan_debug_bis"] or 0) > time.time() else 0
+            return jsonify({"ext": ext, "wlan_debug_bis": bis, "durch": w["durch"] if (w and bis) else None})
+        b = request.get_json(silent=True) or {}
+        try:
+            minuten = max(0, min(int(b.get("minuten", 60)), 240))
+        except (TypeError, ValueError):
+            return jsonify({"error": "minuten: Zahl 0..240"}), 400
+        bis = int(time.time()) + minuten * 60 if minuten else 0
+        conn.execute("INSERT INTO telefon_wartung (ext, wlan_debug_bis, durch, geaendert) VALUES (?,?,?,datetime('now')) "
+                     "ON CONFLICT(ext) DO UPDATE SET wlan_debug_bis = excluded.wlan_debug_bis, "
+                     "durch = excluded.durch, geaendert = excluded.geaendert", (ext, bis, actor(user)))
+        conn.execute("INSERT INTO telefon_log (ext, ereignis, durch) VALUES (?,?,?)",
+                     (ext, f"wlan-debug {minuten} min" if minuten else "wlan-debug aus", actor(user)))
+        conn.commit()
+    finally:
+        conn.close()
+    geweckt = True
+    try:
+        ami.originate(f"PJSIP/{ext}", "suchen", "s", callerid='"Wartung" <2098>', timeout_ms=15000)
+    except Exception as e:  # noqa: BLE001
+        geweckt = False   # Telefon holt den Stand spaetestens beim naechsten Status
+        app.logger.warning("Wartung wecken %s: %s", ext, type(e).__name__)
+    app.logger.info("WLAN-Debugging %s: %s durch %s", ext, f"{minuten} min" if minuten else "aus", actor(user))
+    return jsonify({"ok": True, "wlan_debug_bis": bis, "geweckt": geweckt})
 
 
 @app.get("/api/pbx/telefon-sitzungen")
