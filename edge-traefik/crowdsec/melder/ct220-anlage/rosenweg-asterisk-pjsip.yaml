@@ -1,0 +1,21 @@
+# Rosenweg (25.11.2026): gescheiterte SIP-Anmeldungen aus /var/log/asterisk/messages
+# (Asterisk 22, res_pjsip). Pro Versuch schreibt Asterisk "No matching endpoint" und
+# "Failed to authenticate" - gezaehlt wird nur die zweite Zeile (ein Versuch = ein Ereignis).
+name: rosenweg/asterisk-pjsip-logs
+description: "Gescheiterte SIP-Anmeldungen (Asterisk PJSIP) aus dem messages-Log"
+filter: "evt.Parsed.program == 'asterisk'"
+onsuccess: next_stage
+grok:
+  pattern: '^\[%{TIMESTAMP_ISO8601:timestamp}\] NOTICE\[%{NUMBER}\] res_pjsip/pjsip_distributor\.c: Request ''%{WORD:sip_methode}'' from ''%{DATA:sip_von}'' failed for ''\[?%{IP:source_ip}\]?:%{NUMBER:source_port}'' \(callid: %{DATA}\) - Failed to authenticate'
+  apply_on: message
+statics:
+  - meta: service
+    value: asterisk
+  - meta: log_type
+    value: asterisk_failed_auth
+  - meta: source_ip
+    expression: evt.Parsed.source_ip
+  - meta: target_user
+    expression: evt.Parsed.sip_von
+  - target: evt.StrTime
+    expression: evt.Parsed.timestamp

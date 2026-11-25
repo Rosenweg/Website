@@ -1,0 +1,6 @@
+# Rosenweg (25.11.2026): Melder auf CT 220 - gescheiterte SIP-Anmeldungen (Asterisk).
+# SSH liest bereits setup.sshd.yaml (nicht doppelt erfassen, sonst zaehlt jeder Versuch zweimal).
+filenames:
+  - /var/log/asterisk/messages
+labels:
+  type: asterisk
