@@ -1381,12 +1381,17 @@ def _rosenweg_konto():
     try:
         r = requests.get(AUTHENTIK_USERINFO, headers={"Authorization": f"Bearer {token}"}, timeout=6)
         if not r.ok:
+            app.logger.warning("Rosenweg-Anmeldung: userinfo %s", r.status_code)
             return None
         u = r.json()
-    except (requests.RequestException, ValueError):
+    except (requests.RequestException, ValueError) as e:
+        app.logger.warning("Rosenweg-Anmeldung: userinfo %s", type(e).__name__)
         return None
+    # email_verified nicht verlangen: Authentik setzt es standardmaessig false, die
+    # Adresse stammt aber aus dem Rosenweg-Konto selbst (wie beim Website-Login).
     email = str(u.get("email") or "").strip().lower()
-    if not email or not u.get("email_verified", True):
+    if not email:
+        app.logger.warning("Rosenweg-Anmeldung: keine E-Mail im Konto")
         return None
     return {"email": email, "name": str(u.get("name") or u.get("preferred_username") or "")}
 
