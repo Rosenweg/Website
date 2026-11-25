@@ -30,6 +30,10 @@
 //     POST   /api/stations/admin/:id/update   Update anfordern
 //     POST   /api/stations/admin/:id/block    sperren
 //     POST   /api/stations/admin/:id/unblock  entsperren
+//     POST   /api/stations/admin/:id/ssh-wartung   SSH-Wartung freigeben (2 h)
+//     DELETE /api/stations/admin/:id/ssh-wartung   Freigabe vorzeitig beenden
+//     GET/POST/DELETE /api/stations/admin/wartungsschluessel[/:sid]
+//                                      Schlüssel, die eine Freigabe hereinlässt
 //     DELETE /api/stations/admin/:id          endgültig entfernen
 //
 // Ablauf und Begründung: os-stationen/docs/installer.md
@@ -46,6 +50,7 @@ const { wlanAufloesen, netznamen } = require('../lib/stationwlan');
 const { stationApps, gruppenJeApp } = require('../lib/stationapps');
 const { telefonbuch } = require('../lib/telefonbuch');
 const stationos = require('../lib/stationos');
+const { schluesselPruefen, alsZeile } = require('../lib/sshkeys');
 
 const router = express.Router();
 
@@ -208,6 +213,36 @@ async function ensureSchema() {
       erstellt   TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS station_logs_id_idx ON station_logs (station_id, erstellt DESC);
+    -- SSH-Wartung: Technik gibt eine Station fuer eine feste Zeit frei, und
+    -- in dieser Zeit kommt das Wartungskonto (admin.user, rwadmin) mit den
+    -- Schluesseln aus station_wartung_schluessel herein. Jede Freigabe bleibt
+    -- als Zeile stehen — wer, wann, bis wann, wer sie beendet hat. Das ist
+    -- das Protokoll; geloescht wird hier nichts.
+    CREATE TABLE IF NOT EXISTS station_ssh_wartung (
+      id          BIGSERIAL PRIMARY KEY,
+      station_id  TEXT NOT NULL,
+      erteilt_von TEXT NOT NULL,
+      erteilt_am  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      bis         TIMESTAMPTZ NOT NULL,
+      beendet_von TEXT,
+      beendet_am  TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS station_ssh_wartung_offen_idx
+      ON station_ssh_wartung (station_id, bis DESC) WHERE beendet_am IS NULL;
+    -- Die Schluessel selbst. Absichtlich eine eigene Liste und nicht die
+    -- Profilschluessel der Person, die freigibt: gewartet wird oft von einem
+    -- Dienstkonto oder einem Rechner aus, der niemandes Profil gehoert. Nur
+    -- oeffentliche Teile — ein Leck hier oeffnet nichts.
+    CREATE TABLE IF NOT EXISTS station_wartung_schluessel (
+      id          BIGSERIAL PRIMARY KEY,
+      typ         TEXT NOT NULL,
+      blob_b64    TEXT NOT NULL,
+      kommentar   TEXT,
+      fingerprint TEXT NOT NULL UNIQUE,
+      label       TEXT,
+      erstellt_von TEXT,
+      erstellt_am TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `).catch((e) => { schemaReady = null; throw e; });
   return schemaReady;
 }
@@ -480,8 +515,13 @@ router.get('/admin/list', authMiddleware, nurTechnik, a(async (req, res) => {
            gesperrt_am, hardware, registered_by, registered_at,
            last_seen_at, last_seen_ip, last_state, revoked_at,
            update_angefordert, update_angefordert_von, overrides,
-           programme, programme_gemeldet_am, haus
+           programme, programme_gemeldet_am, haus,
+           w.bis AS ssh_wartung_bis, w.erteilt_von AS ssh_wartung_von
       FROM stations
+      LEFT JOIN LATERAL (
+        SELECT bis, erteilt_von FROM station_ssh_wartung
+         WHERE station_id = stations.id AND beendet_am IS NULL AND bis > NOW()
+         ORDER BY bis DESC LIMIT 1) w ON true
      ORDER BY (revoked_at IS NOT NULL), registered_at DESC`);
 
   // In den overrides kann ein WLAN-Schlüssel stehen. Der Browser braucht ihn
@@ -503,6 +543,10 @@ router.get('/admin/list', authMiddleware, nurTechnik, a(async (req, res) => {
     // anbieten kann statt eines Textfelds, in das jemand einen Schlüssel
     // tippt, den es längst gibt.
     wlan_netze: await netznamen(),
+    // Ohne hinterlegten Schluessel liesse eine Freigabe niemanden herein —
+    // die Seite sagt es, bevor jemand vergeblich auf den Knopf drueckt.
+    wartungsschluessel: Number((await pool.query(
+      'SELECT COUNT(*)::int AS n FROM station_wartung_schluessel')).rows[0].n),
   });
 }));
 
@@ -857,6 +901,122 @@ router.delete('/admin/anzeigen/:id', authMiddleware, nurTechnik, a(async (req, r
   const r = await pool.query('DELETE FROM anzeigegeraete WHERE id = $1 RETURNING mqtt_benutzer', [req.params.id]);
   if (!r.rows.length) return res.status(404).json({ error: 'Nicht gefunden' });
   await pool.query('DELETE FROM mqtt_service_users WHERE username = $1', [r.rows[0].mqtt_benutzer]);
+  res.json({ ok: true });
+}));
+
+// ─── SSH-Wartung ─────────────────────────────────────────────────────
+// Nach dem Muster der adb-Freigabe auf /smartphones: ein Knopf, eine feste
+// Dauer, das Ende steht sichtbar daneben, und vorzeitig beenden geht auch.
+//
+// Der Weg zur Station ist das Lebenszeichen. Eine Station hat keinen offenen
+// Port, also kann man ihr nichts schicken; sie bekommt die Freigabe samt
+// Schluesseln in der Antwort auf /seen (station-agent, alle fuenf Minuten)
+// und oeffnet dann selbst — sshd, Firewall, Schluesseldatei unter /run.
+//
+// Warum nicht der AuthorizedKeysCommand aus routes/ssh-zugang.js: der fragt
+// mit dem gemeinsamen Host-Token, den Stationen bisher gar nicht bekommen,
+// und sein Zwischenspeicher haelt bei einem API-Ausfall den letzten Stand
+// sieben Tage lang — genau das, was eine befristete Freigabe nicht darf. Das
+// Stationstoken dagegen ist je Geraet und ohnehin da.
+//
+// Das Ende haengt NICHT an der API. Jede Schluesselzeile traegt auf der
+// Station ein expiry-time, die Firewall-Oeffnung ein Timeout, und ein Timer
+// raeumt zur Endzeit ab. Faellt die API aus, schliesst die Station trotzdem
+// puenktlich. Nur das VORZEITIGE Beenden braucht das naechste Lebenszeichen.
+const WARTUNG_STUNDEN = 2;
+
+async function wartungOffen(stationId) {
+  const r = await pool.query(
+    `SELECT id, bis, erteilt_von FROM station_ssh_wartung
+      WHERE station_id = $1 AND beendet_am IS NULL AND bis > NOW()
+      ORDER BY bis DESC LIMIT 1`, [stationId]);
+  return r.rows[0] || null;
+}
+
+const uhrzeit = (d) => new Date(d).toLocaleTimeString('de-CH',
+  { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Zurich' });
+
+// POST /api/stations/admin/:id/ssh-wartung — freigeben oder verlaengern.
+// Ein zweiter Druck auf den Knopf verlaengert auf zwei Stunden ab jetzt, statt
+// eine zweite Freigabe danebenzustellen.
+router.post('/admin/:id/ssh-wartung', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  const wer = req.user?.email || req.user?.name || 'unbekannt';
+  const st = await pool.query(
+    `SELECT id, status FROM stations WHERE id = $1 AND revoked_at IS NULL`, [req.params.id]);
+  if (!st.rows.length) return res.status(404).json({ error: 'Station nicht gefunden oder entfernt' });
+  // Eine gesperrte Station bekommt im Lebenszeichen nichts ausser der Sperre.
+  if (st.rows[0].status === 'gesperrt') {
+    return res.status(409).json({ error: 'Station ist gesperrt — erst entsperren' });
+  }
+  const n = Number((await pool.query('SELECT COUNT(*)::int AS n FROM station_wartung_schluessel')).rows[0].n);
+  if (!n) return res.status(409).json({ error: 'Keine Wartungsschlüssel hinterlegt — die Freigabe liesse niemanden herein' });
+
+  const offen = await wartungOffen(req.params.id);
+  let bis;
+  if (offen) {
+    bis = (await pool.query(
+      `UPDATE station_ssh_wartung SET bis = NOW() + ($2 || ' hours')::interval
+        WHERE id = $1 RETURNING bis`, [offen.id, String(WARTUNG_STUNDEN)])).rows[0].bis;
+    await ereignis(req.params.id, 'ssh-wartung-verlaengert', wer, `bis ${uhrzeit(bis)}`);
+  } else {
+    bis = (await pool.query(
+      `INSERT INTO station_ssh_wartung (station_id, erteilt_von, bis)
+       VALUES ($1, $2, NOW() + ($3 || ' hours')::interval) RETURNING bis`,
+      [req.params.id, wer, String(WARTUNG_STUNDEN)])).rows[0].bis;
+    await ereignis(req.params.id, 'ssh-wartung-an', wer, `bis ${uhrzeit(bis)}`);
+  }
+  console.log(`[stations] SSH-Wartung '${req.params.id}' von ${wer} bis ${new Date(bis).toISOString()}`);
+  res.json({ ok: true, bis });
+}));
+
+// DELETE /api/stations/admin/:id/ssh-wartung — vorzeitig beenden.
+router.delete('/admin/:id/ssh-wartung', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  const wer = req.user?.email || req.user?.name || 'unbekannt';
+  const r = await pool.query(
+    `UPDATE station_ssh_wartung SET beendet_am = NOW(), beendet_von = $2
+      WHERE station_id = $1 AND beendet_am IS NULL AND bis > NOW() RETURNING id`,
+    [req.params.id, wer]);
+  if (r.rows.length) await ereignis(req.params.id, 'ssh-wartung-aus', wer, 'vorzeitig beendet');
+  res.json({ ok: true, beendet: r.rows.length });
+}));
+
+// Die Wartungsschluessel. Nur oeffentliche Teile, geprueft wie im Profil
+// (lib/sshkeys.js: keine Optionen vor dem Typ, RSA ab 2048 Bit).
+router.get('/admin/wartungsschluessel', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  const r = await pool.query(
+    `SELECT id, typ, kommentar, fingerprint, label, erstellt_von, erstellt_am
+       FROM station_wartung_schluessel ORDER BY erstellt_am`);
+  res.json({ schluessel: r.rows });
+}));
+
+router.post('/admin/wartungsschluessel', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  const wer = req.user?.email || req.user?.name || 'unbekannt';
+  let k;
+  try { k = schluesselPruefen(req.body?.schluessel); }
+  catch (e) { return res.status(400).json({ error: e.message }); }
+  const label = String(req.body?.label || k.kommentar || '').trim().slice(0, 100) || null;
+  const r = await pool.query(
+    `INSERT INTO station_wartung_schluessel (typ, blob_b64, kommentar, fingerprint, label, erstellt_von)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (fingerprint) DO NOTHING RETURNING id`,
+    [k.typ, k.blobB64, k.kommentar || null, k.fingerprint, label, wer]);
+  if (!r.rows.length) return res.status(409).json({ error: 'Dieser Schlüssel ist schon hinterlegt' });
+  console.log(`[stations] Wartungsschlüssel ${k.fingerprint} hinzugefügt von ${wer}`);
+  res.json({ ok: true, id: r.rows[0].id, fingerprint: k.fingerprint });
+}));
+
+router.delete('/admin/wartungsschluessel/:sid', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  if (!/^\d+$/.test(req.params.sid)) return res.status(404).json({ error: 'Schlüssel nicht gefunden' });
+  const wer = req.user?.email || req.user?.name || 'unbekannt';
+  const r = await pool.query(
+    'DELETE FROM station_wartung_schluessel WHERE id = $1 RETURNING fingerprint', [req.params.sid]);
+  if (!r.rows.length) return res.status(404).json({ error: 'Schlüssel nicht gefunden' });
+  console.log(`[stations] Wartungsschlüssel ${r.rows[0].fingerprint} entfernt von ${wer}`);
   res.json({ ok: true });
 }));
 
@@ -1454,8 +1614,28 @@ router.post('/:id/seen', stationAuth, a(async (req, res) => {
   // Die Aufforderung bleibt stehen, bis die Station sich selbst abmeldet —
   // sonst waere sie nach dem ersten Lebenszeichen weg, und ein Neustart
   // mitten im Vorgang liesse die Station im alten Zustand zurueck.
+  // SSH-Wartung: die Station oeffnet, solange hier etwas steht, und schliesst
+  // beim ersten Lebenszeichen ohne. 'bis' als Epoch-Sekunden, die Station
+  // rechnet damit expiry-time und Firewall-Timeout aus.
+  let sshWartung = null;
+  if (req.station.status !== 'gesperrt') {
+    const offen = await wartungOffen(req.station.id);
+    if (offen) {
+      const k = await pool.query(
+        'SELECT typ, blob_b64, kommentar FROM station_wartung_schluessel ORDER BY id');
+      if (k.rows.length) {
+        sshWartung = {
+          bis: Math.floor(new Date(offen.bis).getTime() / 1000),
+          von: offen.erteilt_von,
+          schluessel: k.rows.map(alsZeile),
+        };
+      }
+    }
+  }
+
   res.json({
     ok: true,
+    ssh_wartung: sshWartung,
     gesperrt: req.station.status === 'gesperrt',
     sperr_grund: req.station.status === 'gesperrt' ? (req.station.sperr_grund || null) : null,
     zuruecksetzen: !!req.station.zuruecksetzen_angefordert,
