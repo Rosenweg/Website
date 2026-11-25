@@ -201,6 +201,19 @@ CREATE TABLE IF NOT EXISTS telefon_sip_person (
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Rosenweg Telefon auf dem eigenen Handy (Stefan 25.11.2026): Anmeldung in der App mit dem
+-- Rosenweg-Konto (Authentik, Anwendung "rosenweg-apps"), danach ein fester Zugang
+-- <nummer>-p<id> pro Handy. Bleibt, bis die App abmeldet, Technik ihn loescht oder die
+-- persoenliche Nummer inaktiv wird. Passwort nie loggen.
+CREATE TABLE IF NOT EXISTS telefon_sip_privat (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    nummer       TEXT NOT NULL,            -- persoenliche Nummer 3HHWWP
+    email        TEXT NOT NULL,
+    geraet       TEXT NOT NULL DEFAULT '', -- Anzeige, z.B. "Pixel 8" (von der App)
+    passwort     TEXT NOT NULL,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- 4000er: Hausverwaltung (heute Immosense), 4000 Hauptnummer, 4001 ... Mitarbeiter.
 -- Nur Festnetznummern (Entscheid 24.11.2026).
 CREATE TABLE IF NOT EXISTS verwaltung_nummern (
