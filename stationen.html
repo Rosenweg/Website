@@ -116,6 +116,31 @@
 
             <p id="status" class="hidden text-sm"></p>
 
+            <!-- SSH-Wartungsschlüssel -->
+            <details id="wartung-box" class="bg-white rounded-lg shadow mt-8">
+                <summary class="p-6 cursor-pointer">
+                    <span class="text-lg font-semibold text-gray-800">SSH-Wartung</span>
+                    <span id="wartung-zahl" class="text-sm text-gray-500 ml-2"></span>
+                </summary>
+                <div class="px-6 pb-6 space-y-3 text-sm">
+                    <p class="text-gray-600">„SSH-Wartung“ in der Zeile einer Station öffnet sie für zwei Stunden:
+                        mit einem der Schlüssel unten kommt man als <code>rwadmin</code> herein, aus dem Hausnetz.
+                        Die Station übernimmt das beim nächsten Lebenszeichen (bis zu fünf Minuten) und schliesst
+                        zur Endzeit von selbst, auch ohne Verbindung zur Verwaltung. Vorzeitig beenden wirkt
+                        ebenfalls beim nächsten Lebenszeichen.</p>
+                    <ul id="wartung-liste" class="divide-y"></ul>
+                    <div class="flex flex-wrap gap-2 items-end">
+                        <label class="flex-1 min-w-[16rem]">Öffentlicher Schlüssel
+                            <input id="wartung-neu" class="block w-full mt-1 px-3 py-2 border rounded-lg font-mono text-xs"
+                                   placeholder="ssh-ed25519 AAAA… wartung@rosenweg4303.ch"></label>
+                        <label class="w-48">Bezeichnung
+                            <input id="wartung-label" class="block w-full mt-1 px-3 py-2 border rounded-lg"
+                                   placeholder="z. B. Laptop Technik"></label>
+                        <button onclick="wartungSchluesselNeu()" class="px-3 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-lg">Hinzufügen</button>
+                    </div>
+                </div>
+            </details>
+
             <!-- Ankündigungen & Notfall -->
             <div class="bg-white rounded-xl shadow-sm border mt-8">
                 <div class="p-6 border-b">
@@ -344,6 +369,7 @@
 
     <script>
         let stationen = [];
+        let wartungsschluessel = 0;
         let hausWlan = null;
         let wlanNetze = [];
         let typen = [];
@@ -392,7 +418,9 @@
                 hausWlan = daten.haus_wlan || null;
                 wlanNetze = daten.wlan_netze || [];
                 typen = daten.types || [];
+                wartungsschluessel = daten.wartungsschluessel || 0;
                 zeichne();
+                ladeWartungsschluessel();
             } catch (err) {
                 document.getElementById('main-content').innerHTML =
                     `<div class="bg-red-50 border-l-4 border-red-500 p-4 rounded"><p class="text-red-800">Fehler: ${escape(err.message)}</p></div>`;
@@ -441,6 +469,20 @@
             return '<span class="px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">aktiv</span>';
         }
 
+        const uhr = (iso) => new Date(iso).toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
+
+        // Eine offene SSH-Wartung steht unter dem Zustand, samt ihren beiden
+        // Knöpfen — wie „an bis 14:30 [aus]“ auf /smartphones. Die
+        // Aktionsspalte zeigt „SSH-Wartung“ nur, solange nichts offen ist;
+        // sonst stünde dieselbe Sache an zwei Stellen.
+        function wartungZeile(s) {
+            if (!s.ssh_wartung_bis || s.revoked_at) return '';
+            const id = escape(s.id);
+            return `<div class="mt-1 text-xs text-orange-700 whitespace-nowrap" title="freigegeben von ${escape(s.ssh_wartung_von || '?')}">🛠 SSH offen bis ${escape(uhr(s.ssh_wartung_bis))}
+                <button onclick="wartungFreigeben('${id}', true)" class="ml-1 underline hover:text-orange-900">+2 h</button>
+                <button onclick="wartungBeenden('${id}')" class="ml-1 underline hover:text-orange-900">beenden</button></div>`;
+        }
+
         function zeichne() {
             const suche = document.getElementById('suche').value.trim().toLowerCase();
             const mitEntfernten = document.getElementById('zeige-entfernte').checked;
@@ -480,6 +522,9 @@
                             : `<button onclick="sperren('${escape(s.id)}')" class="text-red-600 hover:text-red-800 font-medium">Sperren</button>`
                     ) +
                     ` <span class="text-gray-300 mx-1">|</span>` + (
+                        (s.status === 'gesperrt' || s.ssh_wartung_bis) ? ''
+                            : `<button onclick="wartungFreigeben('${escape(s.id)}')" class="text-blue-600 hover:text-blue-800 font-medium">SSH-Wartung</button> <span class="text-gray-300 mx-1">|</span>`
+                    ) + (
                         s.zuruecksetzen_angefordert
                             ? `<button onclick="zuruecksetzenAbbrechen('${escape(s.id)}')" class="text-yellow-700 hover:text-yellow-900 font-medium">Zurücksetzen abbrechen</button>`
                             : `<button onclick="zuruecksetzen('${escape(s.id)}')" class="text-orange-600 hover:text-orange-800 font-medium">Zurücksetzen</button>`
@@ -494,7 +539,7 @@
                     <td class="py-3 px-3 text-gray-600">${escape(geraet(s))}</td>
                     <td class="py-3 px-3 text-gray-600">${escape(s.registered_by || '—')}</td>
                     <td class="py-3 px-3 ${gesehen.alt ? 'text-yellow-700' : 'text-gray-600'}">${escape(gesehen.text)}</td>
-                    <td class="py-3 px-3">${zustandBadge(s)}</td>
+                    <td class="py-3 px-3">${zustandBadge(s)}${wartungZeile(s)}</td>
                     <td class="py-3 px-6 whitespace-nowrap">${aktionen}</td>
                 </tr>`;
             }).join('');
@@ -1356,6 +1401,77 @@
         function zuruecksetzenAbbrechen(id) {
             tuUnd(`/api/stations/admin/${encodeURIComponent(id)}/zuruecksetzen`,
                 { method: 'DELETE' }, `Zurücksetzen von „${id}" abgebrochen.`);
+        }
+
+        // ─── SSH-Wartung ───────────────────────────────────────────────
+        // Wie die adb-Freigabe auf /smartphones: ein Druck, feste zwei
+        // Stunden, Ende sichtbar in der Zeile. „+2 h“ verlängert auf zwei
+        // Stunden ab jetzt, ohne Rückfrage — die Freigabe besteht ja schon.
+        function wartungFreigeben(id, verlaengern) {
+            if (verlaengern) {
+                tuUnd(`/api/stations/admin/${encodeURIComponent(id)}/ssh-wartung`,
+                    { method: 'POST' }, `SSH-Wartung für „${id}" auf zwei Stunden ab jetzt verlängert.`);
+                return;
+            }
+            if (!wartungsschluessel) {
+                zeigeStatus('Noch kein Wartungsschlüssel hinterlegt — unten unter „SSH-Wartung“ eintragen.', false);
+                document.getElementById('wartung-box').open = true;
+                return;
+            }
+            dialogOeffnen(
+                `SSH-Wartung für „${id}"`,
+                `Zwei Stunden lang kommt man mit den hinterlegten Wartungsschlüsseln als rwadmin auf die Station. `
+                + 'Sie übernimmt das beim nächsten Lebenszeichen (bis zu fünf Minuten) und schliesst danach von selbst. '
+                + 'Die Freigabe wird mit deinem Namen protokolliert.',
+                'Freigeben', 'bg-orange-600 hover:bg-orange-700',
+                async () => tuUnd(`/api/stations/admin/${encodeURIComponent(id)}/ssh-wartung`,
+                    { method: 'POST' }, `SSH-Wartung für „${id}" freigegeben — die Station öffnet innerhalb von fünf Minuten.`),
+                false);
+        }
+
+        function wartungBeenden(id) {
+            tuUnd(`/api/stations/admin/${encodeURIComponent(id)}/ssh-wartung`,
+                { method: 'DELETE' }, `SSH-Wartung für „${id}" beendet — die Station schliesst beim nächsten Lebenszeichen.`);
+        }
+
+        async function ladeWartungsschluessel() {
+            try {
+                const d = await api('/api/stations/admin/wartungsschluessel');
+                const liste = d.schluessel || [];
+                wartungsschluessel = liste.length;
+                document.getElementById('wartung-zahl').textContent =
+                    liste.length ? `${liste.length} Schlüssel hinterlegt` : 'kein Schlüssel hinterlegt';
+                document.getElementById('wartung-liste').innerHTML = liste.map(k => `<li class="py-2 flex items-center gap-3">
+                    <span class="flex-1"><span class="font-medium">${escape(k.label || k.kommentar || k.typ)}</span>
+                        <span class="block text-xs text-gray-500 font-mono">${escape(k.fingerprint)}</span></span>
+                    <span class="text-xs text-gray-500">${escape(k.erstellt_von || '')}</span>
+                    <button onclick="wartungSchluesselWeg(${Number(k.id)})" class="text-red-600 hover:text-red-800">Entfernen</button></li>`).join('')
+                    || '<li class="py-2 text-gray-500">Noch keiner — ohne Schlüssel lässt eine Freigabe niemanden herein.</li>';
+            } catch (err) {
+                document.getElementById('wartung-zahl').textContent = '';
+            }
+        }
+
+        async function wartungSchluesselNeu() {
+            const schluessel = document.getElementById('wartung-neu').value.trim();
+            const label = document.getElementById('wartung-label').value.trim();
+            if (!schluessel) return;
+            try {
+                await api('/api/stations/admin/wartungsschluessel', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { schluessel, label } });
+                document.getElementById('wartung-neu').value = '';
+                document.getElementById('wartung-label').value = '';
+                zeigeStatus('Wartungsschlüssel hinterlegt.', true);
+                ladeWartungsschluessel();
+            } catch (err) { zeigeStatus(err.message, false); }
+        }
+
+        async function wartungSchluesselWeg(sid) {
+            if (!confirm('Diesen Wartungsschlüssel entfernen? Laufende Freigaben lassen ihn ab dem nächsten Lebenszeichen nicht mehr herein.')) return;
+            try {
+                await api(`/api/stations/admin/wartungsschluessel/${sid}`, { method: 'DELETE' });
+                ladeWartungsschluessel();
+            } catch (err) { zeigeStatus(err.message, false); }
         }
 
         function entfernen(id) {
