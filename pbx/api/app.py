@@ -2409,26 +2409,71 @@ def telefon_abmelden_web(ext):
         conn.close()
 
 
-@app.post("/api/telefon/<ext>/suchen")
-def telefon_suchen(ext):
-    """Verlegtes Telefon klingeln lassen: die Anlage ruft es mit 2099 "Telefon suchen" an,
-    die Geraete-App dreht dafuer die Klingellautstaerke voll auf. Die eigene Sitzung,
-    oder jedes Telefon fuer Technik/Praesident (auch ohne Anmeldung)."""
+# Laufende Suchen (nur im Speicher): ext -> {start, durch, gefunden, gefunden_von}
+_SUCHEN = {}
+
+
+def _suche_darf(ext):
+    """(user, None) wenn die Person dieses Telefon suchen darf, sonst (None, Antwort)."""
     user = current_user()
     if not user:
-        return jsonify({"error": "Nicht angemeldet"}), 401
+        return None, (jsonify({"error": "Nicht angemeldet"}), 401)
     if not re.fullmatch(r"[0-9]{2,8}", ext or ""):
-        return jsonify({"error": "Nebenstelle ungueltig"}), 400
+        return None, (jsonify({"error": "Nebenstelle ungueltig"}), 400)
     conn = db.connect()
     try:
         if not conn.execute("SELECT 1 FROM sip_extensions WHERE ext = ? AND enabled = 1", (ext,)).fetchone():
-            return jsonify({"error": "Unbekanntes Telefon"}), 404
+            return None, (jsonify({"error": "Unbekanntes Telefon"}), 404)
         s = conn.execute("SELECT email FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
         eigene = bool(s and s["email"] and s["email"].lower() == (user.get("email") or "").lower())
         if not eigene and not is_admin(user):
-            return jsonify({"error": "Nur das eigene Telefon"}), 403
+            return None, (jsonify({"error": "Nur das eigene Telefon"}), 403)
     finally:
         conn.close()
+    return user, None
+
+
+@app.get("/api/telefon/<ext>/suchen")
+def telefon_suchen_stand(ext):
+    """Stand der letzten Suche: {laeuft, start, gefunden, gefunden_von} — fuer "Gefunden um …"."""
+    _, deny = _suche_darf(ext)
+    if deny:
+        return deny
+    s = _SUCHEN.get(ext) or {}
+    return jsonify({"start": s.get("start"), "gefunden": s.get("gefunden"), "gefunden_von": s.get("gefunden_von")})
+
+
+@app.post("/api/telefon/gefunden")
+def telefon_gefunden():
+    """Das gesuchte Telefon meldet "Gefunden" (Knopf im Suchfenster von Rosenweg Geraet)."""
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    jetzt = _jetzt_iso()
+    conn = db.connect()
+    try:
+        s = conn.execute("SELECT name, email FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+        wer = (s["name"] if s else "") or ""
+        conn.execute("INSERT INTO telefon_log (ext, ereignis, email, name, durch) VALUES (?,?,?,?,?)",
+                     (ext, "gefunden", s["email"] if s else None, wer, "Telefon suchen"))
+        conn.commit()
+    finally:
+        conn.close()
+    eintrag = _SUCHEN.setdefault(ext, {})
+    eintrag.update({"gefunden": jetzt, "gefunden_von": wer})
+    app.logger.info("Telefon gefunden: %s", ext)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/telefon/<ext>/suchen")
+def telefon_suchen(ext):
+    """Verlegtes Telefon klingeln lassen: die Anlage ruft es mit 2099 "Telefon suchen" an,
+    die Geraete-App klingelt laut und zeigt "Gefunden". Die eigene Sitzung,
+    oder jedes Telefon fuer Technik/Praesident (auch ohne Anmeldung)."""
+    user, deny = _suche_darf(ext)
+    if deny:
+        return deny
+    _SUCHEN[ext] = {"start": _jetzt_iso(), "durch": actor(user), "gefunden": None, "gefunden_von": None}
     try:
         ami.originate(f"PJSIP/{ext}", "suchen", "s", callerid='"Telefon suchen" <2099>', timeout_ms=45000)
     except Exception as e:
