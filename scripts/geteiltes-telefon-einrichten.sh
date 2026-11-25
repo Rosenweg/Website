@@ -54,6 +54,7 @@ if a shell pm path ch.rosenweg4303.phone >/dev/null 2>&1; then
     schritt "SIP-Anrufkonto persönlich (Rosenweg Telefon) aktiv" a shell telecom set-phone-account-enabled ch.rosenweg4303.phone/$SIPKONTO SipdroidCallProvider 0
     schritt "Akku-Optimierung aus (Rosenweg Telefon: SIP bleibt im Ruhemodus registriert)" a shell dumpsys deviceidle whitelist +ch.rosenweg4303.phone
     schritt "Mikrofon für Rosenweg Telefon" a shell pm grant ch.rosenweg4303.phone android.permission.RECORD_AUDIO
+    schritt "Anruf-Vollbild über dem Sperrbildschirm (Rosenweg Telefon; ohne: Anruf nur als Symbol, nicht annehmbar)" a shell appops set ch.rosenweg4303.phone USE_FULL_SCREEN_INTENT allow
   else
     echo "alt      Rosenweg Telefon ohne SIP-Kern (vor v27) — telefoniert über das Konto der Geräte-App"
   fi
