@@ -16399,10 +16399,12 @@ app.post('/api/mqtt/getuser', mqttBrokerGuard, async (req, res) => {
       await msgSitzungMerken(String(username), pwClaims);
       return res.status(200).end();
     }
-    // Messenger alt: JWT als Benutzername (Uebergang, bis alle Clients umgestellt sind).
+    // Messenger alt: JWT als Benutzername. Seit 25.11.2026 abgewiesen (Stefan: Umstellung ja; seit
+    // dem Start der neuen API keine solche Anmeldung mehr). So steht nie ein JWT im Mosquitto-
+    // Protokoll: abgewiesene Clients erscheinen dort nur als "not authorised", ohne Benutzernamen.
     if (messengerJwtClaims(username)) {
-      if (++msgAltAnmeldungen % 20 === 1) console.log(`[mqtt] Messenger meldet sich noch mit JWT als Benutzername an (${msgAltAnmeldungen} seit Start)`);
-      return res.status(200).end();
+      if (++msgAltAnmeldungen % 20 === 1) console.log(`[mqtt] Messenger mit JWT als Benutzername abgewiesen (${msgAltAnmeldungen} seit Start) - App/PWA zu alt`);
+      return res.status(403).end();
     }
     if (pwClaims) return res.status(403).end();   // JWT als Passwort, aber falscher Name
     if (!password) return res.status(403).end();
