@@ -97,11 +97,11 @@
   <!-- Ring-Group -->
   <div class="card">
     <h2>🔔 Ring-Group Mitglieder</h2>
-    <table><thead><tr><th>Name</th><th>Ziel</th><th>Typ</th><th>Intern</th><th>Prio</th><th>Zeitsperre</th><th>Aktiv</th><th></th></tr></thead>
+    <table><thead><tr><th>Name</th><th>Ziel</th><th>Typ</th><th>Prio</th><th>Zeitsperre</th><th>Aktiv</th><th></th></tr></thead>
       <tbody id="members"></tbody></table>
     <div class="row" style="margin-top:.8rem;border-top:1px solid #f1f5f9;padding-top:.8rem">
       <label class="f">Name<input id="m_name"></label>
-      <label class="f">Typ<select id="m_kind" onchange="kindHint()"><option value="mobile">Mobil (Trunk)</option><option value="sip">SIP-Telefon</option></select></label>
+      <label class="f">Typ<select id="m_kind" onchange="kindHint()"><option value="person">Person (3HHWWP)</option><option value="mobile">Mobil (Trunk)</option><option value="sip">SIP-Telefon</option></select></label>
       <label class="f"><span id="m_phone_lbl">Nummer (+41…)</span><input id="m_phone"></label>
       <label class="f">Prio<input id="m_prio" type="number" value="10" style="width:70px"></label>
       <label class="f">Klingelt immer<select id="m_bypass"><option value="0">nein (Zeitsperre)</option><option value="1">ja (immer)</option></select></label>
@@ -218,7 +218,7 @@ const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&l
 function showErr(m){ $('err').style.display='block'; $('err').textContent=m; setTimeout(()=>$('err').style.display='none',6000); }
 async function api(path, opts){ const r = await AuthentikAuth.apiFetch(path, opts); if(r.status===401||r.status===403){ gate(); throw new Error('auth'); } return r; }
 
-function kindHint(){ $('m_phone_lbl').textContent = $('m_kind').value==='sip' ? 'Extension (z.B. 11)' : 'Nummer (+41…)'; }
+function kindHint(){ const k=$('m_kind').value; $('m_phone_lbl').textContent = k==='sip' ? 'Extension (z.B. 11)' : k==='person' ? 'Persönliche Nummer (3HHWWP)' : 'Nummer (+41…)'; }
 
 async function loadTrunk(){
   try { const d = await (await api('/api/pbx/trunk-status')).json();
@@ -253,8 +253,7 @@ async function loadMembers(){
   $('members').innerHTML = ms.map(m=>`<tr>
     <td>${esc(m.name)}</td>
     <td class="mono">${esc(m.phone)}</td>
-    <td><span class="tag">${m.kind==='sip'?'SIP':'Mobil'}</span></td>
-    <td class="mono">${esc(m.internal_ext||'—')}</td>
+    <td><span class="tag">${m.kind==='sip'?'SIP':m.kind==='person'?'Person':'Mobil'}</span></td>
     <td>${esc(m.priority)}</td>
     <td><label style="display:inline-flex;align-items:center;gap:.4rem;cursor:pointer" title="angehakt = nur in Geschäftszeit (Zeitsperre); aus = klingelt immer">
       <input type="checkbox" ${m.bypass_hours?'':'checked'} onchange="toggleZeitsperre(${m.id},this.checked)">

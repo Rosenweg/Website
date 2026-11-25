@@ -222,25 +222,6 @@ def conference_members():
         conn.close()
 
 
-@app.get("/api/pbx/ring-members/by-ext/<int:ext>")
-def ring_member_by_ext(ext):
-    """AGI: interne Direktwahl (ab 1000) -> Ziel des Ring-Mitglieds."""
-    err = require_agi()
-    if err:
-        return err
-    conn = db.connect()
-    try:
-        row = conn.execute(
-            "SELECT name, phone, kind FROM ring_members WHERE internal_ext = ? AND enabled = 1",
-            (ext,),
-        ).fetchone()
-        if not row:
-            return jsonify({"found": False}), 404
-        return jsonify({"found": True, **dict(row)})
-    finally:
-        conn.close()
-
-
 @app.post("/api/pbx/call-event")
 def call_event():
     err = require_agi()
@@ -551,13 +532,24 @@ def _ring_member_pruefen(b, kind_bisher=None):
         out["name"] = name
     kind = kind_bisher or "mobile"
     if "kind" in b:
-        kind = "sip" if b.get("kind") == "sip" else "mobile"
+        # person (Stefan 25.11.2026): persoenliche Nummer 3HHWWP - klingelt auf allen Geraeten der
+        # Person (Telefon-App, geteilte Telefone), ihre Weiterleitung gilt, ihre Voicemail nicht
+        kind = b.get("kind") if b.get("kind") in ("sip", "person") else "mobile"
         out["kind"] = kind
     if "phone" in b or "kind" in b:
         phone = str(b.get("phone") if "phone" in b else (b.get("_phone_bisher") or "")).strip()
         if kind == "sip":
             if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", phone):
                 return None, "SIP-Extension ungueltig"
+        elif kind == "person":
+            if not re.fullmatch(r"3[0-9]{5}", phone):
+                return None, "Persoenliche Nummer: 6 Ziffern, beginnt mit 3 (3HHWWP)"
+            conn = db.connect()
+            try:
+                if not conn.execute("SELECT 1 FROM personen_nummern WHERE nummer = ?", (phone,)).fetchone():
+                    return None, "Persoenliche Nummer nicht vergeben"
+            finally:
+                conn.close()
         else:
             phone = "+" + phone[1:].replace(" ", "") if phone.startswith("+") else phone
             if not re.fullmatch(r"\+[0-9]{6,20}", phone):
