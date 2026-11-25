@@ -97,6 +97,7 @@ Wichtig für die geplante Einrichtung per QR ohne Kabel.
 | Akku-Optimierung für Rosenweg Messenger ausnehmen (MQTT bleibt im Ruhemodus offen, Notfälle kommen an) | `adb shell dumpsys deviceidle whitelist +ch.rosenweg4303.messages` | dito |
 | Rosenweg Telefon darf eingehende Anrufe als Vollbild über dem Sperrbildschirm zeigen (sonst nur ein Symbol, nicht annehmbar; Rosenweg Telefon warnt dauerhaft, solange es fehlt, und zeigt auf geteilten Telefonen Anrufe immer im Vollbild) | `adb shell appops set ch.rosenweg4303.phone USE_FULL_SCREEN_INTENT allow` | dito |
 | Rosenweg Gerät bestätigt „Debugging über WLAN zulassen“ selbst – nur im WLAN „Rosenweg“ und nur, wenn die Anlage das Debugging zentral eingeschaltet hat (in anderen WLANs bestätigt ein Mensch von Hand) | `adb shell settings put secure enabled_accessibility_services ch.rosenweg4303.telefon/org.sipdroid.sipua.rosenweg.WlanBestaetiger` und `adb shell settings put secure accessibility_enabled 1` | dito |
+| Samsung-Aufforderung „Beenden der Galaxy-Einrichtung“ verschwindet (kommt aus den Einstellungen, dort nicht abschaltbar; Samsung Account lässt sich nicht deaktivieren) – Rosenweg Gerät entfernt genau diese Meldungen | `adb shell cmd notification allow_listener ch.rosenweg4303.telefon/org.sipdroid.sipua.rosenweg.Benachrichtigungen` | dito |
 | Messenger darf „Nicht stören“ für den Notfall-Alarm kurz ausschalten | `adb shell cmd notification allow_dnd ch.rosenweg4303.messages` | dito |
 | Rotes Notfall-Fenster über dem Sperrbildschirm (Android 14 erteilt es nicht von selbst) | `adb shell appops set ch.rosenweg4303.messages USE_FULL_SCREEN_INTENT allow` | dito |
 | Exakte Wecker: Notfall-Erinnerung alle 2 min bis gelesen, auch im Tiefschlaf | `adb shell appops set ch.rosenweg4303.messages SCHEDULE_EXACT_ALARM allow` | dito |
@@ -343,3 +344,7 @@ Laufende Sitzungen von vor dem Update bekommen ihren Zugang beim ersten Abruf.
 **Rosenweg Telefon im Katalog auf „immer“:** sonst wird es beim Abmelden ausgeblendet und seine
 Daten gelöscht — die Akku-Ausnahme und die Freigabe des Anrufkontos gingen verloren.
 
+### Debugging über WLAN: Port und Nachprüfen (ab Rosenweg Gerät v215)
+
+- Gerät sucht den Port von „Debugging über WLAN“ per mDNS bei sich selbst (`_adb-tls-connect._tcp`) und meldet Adresse und Port an die Anlage (`POST /api/telefon/adb`). /smartphones zeigt dann `adb connect <adresse>:<port>`, solange das Debugging zentral an ist (Meldung höchstens 15 Min. alt).
+- Solange es zentral an ist, prüft Gerät alle 5 Minuten nach: hat Android es abgeschaltet (WLAN-Wechsel, Dialog nicht bestätigt), schaltet Gerät es bis zum Ablauf wieder ein (höchstens alle 5 Min., damit der Android-Dialog nicht dauernd aufgeht).
