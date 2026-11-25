@@ -224,6 +224,17 @@ CREATE TABLE IF NOT EXISTS telefon_wartung (
     geaendert      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- WLAN der geteilten Telefone (Stefan 25.11.2026): SSID "Rosenweg" mit PPSK, das Passwort
+-- bestimmt das VLAN. Die Schluessel stehen NUR hier in der Datenbank (nie im Repo, nie im Log);
+-- Rosenweg Geraet holt seinen mit dem Geraete-Token und richtet das WLAN als Device Owner ein.
+-- netz: Name wie im UniFi-PPSK (RK-Clients, RW9-Clients ...). Abgemeldet gilt 'RK-Clients'.
+CREATE TABLE IF NOT EXISTS telefon_wlan (
+    netz         TEXT PRIMARY KEY,
+    vlan         INTEGER,
+    passwort     TEXT NOT NULL,
+    geaendert    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- 4000er: Hausverwaltung (heute Immosense), 4000 Hauptnummer, 4001 ... Mitarbeiter.
 -- Nur Festnetznummern (Entscheid 24.11.2026).
 CREATE TABLE IF NOT EXISTS verwaltung_nummern (

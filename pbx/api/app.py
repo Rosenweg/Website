@@ -1352,6 +1352,47 @@ def telefon_status():
         conn.close()
 
 
+TELEFON_WLAN_SSID = "Rosenweg"
+TELEFON_WLAN_GRUNDNETZ = "RK-Clients"   # Variante 1 (Stefan 25.11.2026)
+
+
+def _telefon_wlan_netz(conn, ext):
+    """Welches PPSK-Netz das Telefon jetzt nutzen soll (Stefan 25.11.2026):
+    abgemeldet RK-Clients; angemeldet das Haus, in dem die Person wohnt - aus der persoenlichen
+    Nummer 3HHWWP (HH = Hausnummer) -> "RW<HH>-Clients". Auch Technik bekommt das Haus-Netz,
+    nie ein Technik-VLAN. Ohne hinterlegten Schluessel fuer das Haus: RK-Clients."""
+    s = conn.execute("SELECT email, name FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+    if not s:
+        return TELEFON_WLAN_GRUNDNETZ
+    nummer = str(_nummer_der_person(conn, s["email"], s["name"]) or "")
+    if not re.fullmatch(r"3[0-9]{5}", nummer):
+        return TELEFON_WLAN_GRUNDNETZ
+    netz = f"RW{int(nummer[1:3])}-Clients"
+    if conn.execute("SELECT 1 FROM telefon_wlan WHERE netz = ?", (netz,)).fetchone():
+        return netz
+    return TELEFON_WLAN_GRUNDNETZ
+
+
+@app.get("/api/telefon/wlan")
+def telefon_wlan():
+    """WLAN "Rosenweg" fuer das geteilte Telefon (Geraete-Token): SSID und PPSK des Netzes,
+    in dem es gerade sein soll. 404, solange kein Schluessel hinterlegt ist. Nie loggen."""
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        netz = _telefon_wlan_netz(conn, ext)
+        r = conn.execute("SELECT netz, vlan, passwort FROM telefon_wlan WHERE netz = ?", (netz,)).fetchone()
+    finally:
+        conn.close()
+    if not r:
+        return jsonify({"error": "Kein WLAN-Schluessel hinterlegt"}), 404
+    res = jsonify({"ssid": TELEFON_WLAN_SSID, "netz": r["netz"], "vlan": r["vlan"], "passwort": r["passwort"]})
+    res.headers["Cache-Control"] = "no-store"
+    return res
+
+
 @app.get("/api/telefon/sip-person")
 def telefon_sip_person():
     """Persoenlicher SIP-Zugang der angemeldeten Person fuer Rosenweg Telefon (ueber den
