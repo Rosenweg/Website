@@ -106,6 +106,128 @@ async function validateAuthentikToken(token) {
   }
 }
 
+// ─── Access-Tokens der Rosenweg-Apps (Authentik "rosenweg-apps") ────
+// Die Flutter-Apps melden sich als oeffentlicher Client mit PKCE an. Ihre
+// Tokens kennt die Introspektion oben nicht (sie fragt mit dem Website-Client
+// und bekommt fuer fremde Tokens active:false). Geprueft wird deshalb wie in
+// routes/app-tunnel.js: Authentik bestaetigt das Token ueber userinfo, danach
+// sagen aud/azp, fuer welchen Client es ausgestellt ist, und die users-Zeile
+// muss es schon geben (aktiv, gleiches authentik_sub). Angelegt wird hier
+// nichts — das bleibt dem Browser-Login vorbehalten.
+//
+// req.user sieht danach genauso aus wie bei einem Website-Token: dieselben
+// Felder, Gruppen aus Authentik (userinfo liefert dieselbe Gruppenliste wie
+// die Introspektion), Rolle aus den Gruppen.
+//
+// Zwischenspeicher nach sha256(Token), nie nach dem Token selbst: der Schluessel
+// taucht so in keinem Speicherabbild als brauchbarer Ausweis auf. Erfolg 60 s,
+// Fehlschlag 15 s. Fehlversuche je Absender-IP begrenzt, damit niemand ueber
+// uns Authentik mit Ratetokens zuschuettet.
+const APPS_CLIENT_ID = process.env.ROSENWEG_APPS_CLIENT_ID || 'rosenweg-apps';
+const appTokenCache = new Map(); // sha256(token) -> { user, time, ttl }
+const appTokenFehlversuche = new Map(); // ip -> { first, count }
+const APP_FEHL_FENSTER = 60 * 1000;
+const APP_FEHL_MAX = 30;
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of appTokenCache) { if (now - v.time > v.ttl) appTokenCache.delete(k); }
+  for (const [k, v] of appTokenFehlversuche) { if (now - v.first > APP_FEHL_FENSTER) appTokenFehlversuche.delete(k); }
+}, 5 * 60 * 1000).unref?.();
+
+// Claims eines JWT OHNE Signaturpruefung. Nur zum Vorsortieren und NACHDEM
+// userinfo dasselbe Token bestaetigt hat (siehe routes/app-tunnel.js).
+function jwtClaims(token) {
+  try {
+    const teil = String(token).split('.')[1];
+    if (!teil) return null;
+    return JSON.parse(Buffer.from(teil, 'base64url').toString('utf8'));
+  } catch { return null; }
+}
+
+/** Ist das (unbestaetigte) Token fuer die Rosenweg-Apps ausgestellt? */
+function istAppToken(token) {
+  const c = jwtClaims(token);
+  if (!c || typeof c !== 'object') return false;
+  return [].concat(c.aud || [], c.azp || []).includes(APPS_CLIENT_ID);
+}
+
+const istTechnikOderPraesident = (groups) => (groups || []).some(g => {
+  const gl = String(g).toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident';
+});
+
+/**
+ * Prueft ein Access-Token der Rosenweg-Apps. Rueckgabe: req.user-Objekt,
+ * null (ungueltig/fremd), oder { gebremst: true } bei zu vielen Fehlversuchen.
+ * Wirft bei Netzwerkfehlern nicht, sondern liefert null (nicht gecacht).
+ */
+async function validateAppToken(token, ip = '') {
+  if (!token || token.length > 4096) return null;
+  const schluessel = crypto.createHash('sha256').update(token).digest('hex');
+  const gemerkt = appTokenCache.get(schluessel);
+  if (gemerkt && Date.now() - gemerkt.time < gemerkt.ttl) return gemerkt.user;
+
+  const fehl = appTokenFehlversuche.get(ip);
+  if (fehl && Date.now() - fehl.first < APP_FEHL_FENSTER && fehl.count >= APP_FEHL_MAX) return { gebremst: true };
+
+  const merken = (user) => {
+    if (appTokenCache.size > 10000) appTokenCache.clear();
+    appTokenCache.set(schluessel, { user, time: Date.now(), ttl: user ? 60 * 1000 : 15 * 1000 });
+    if (!user) {
+      const f = appTokenFehlversuche.get(ip);
+      if (f && Date.now() - f.first < APP_FEHL_FENSTER) f.count++;
+      else appTokenFehlversuche.set(ip, { first: Date.now(), count: 1 });
+    }
+    return user;
+  };
+
+  try {
+    const r = await fetch(`${AUTHENTIK_URL}/application/o/userinfo/`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!r.ok) return merken(null);
+    const info = await r.json();
+    // Erst jetzt sind die Claims echt (userinfo hat genau dieses Token
+    // angenommen) — und userinfo nimmt Tokens JEDER Authentik-Anwendung an.
+    if (!istAppToken(token)) return merken(null);
+
+    const email = String(info.email || '').trim().toLowerCase();
+    if (!email) return merken(null);
+    const sub = String(info.sub || '');
+    const u = await pool.query(
+      `SELECT id, email, name, wohnung, stweg, role, active, authentik_sub, groups_json
+         FROM users WHERE LOWER(email) = $1 LIMIT 1`, [email]);
+    const zeile = u.rows[0];
+    if (!zeile || zeile.active === false) return merken(null);
+    if (zeile.authentik_sub && sub && zeile.authentik_sub !== sub) {
+      console.warn(`[auth] App-Token abgewiesen: users-Zeile ${email} gehoert zu anderem Authentik-Konto`);
+      return merken(null);
+    }
+    // Gruppen frisch aus Authentik; fehlen sie in userinfo (Scope 'profile'
+    // nicht angefragt), die zuletzt beim Browser-Login gespeicherten.
+    let groups = Array.isArray(info.groups) ? info.groups.map(String) : null;
+    if (!groups) { try { groups = JSON.parse(zeile.groups_json || '[]'); } catch { groups = []; } }
+    const role = istTechnikOderPraesident(groups) ? 'admin' : 'bewohner';
+    const user = {
+      id: zeile.id, email: zeile.email, name: zeile.name,
+      wohnung: zeile.wohnung, stweg: zeile.stweg, role,
+      isAdmin: role === 'admin', user_id: zeile.id,
+      auth_source: 'authentik', auth_client: APPS_CLIENT_ID,
+      groups,
+    };
+    return merken(user);
+  } catch (err) {
+    console.error('[auth] App-Token-Pruefung:', err.message);
+    return null;
+  }
+}
+
+/** Zwischengespeicherte App-Anmeldungen einer Person vergessen (Kontoloeschung). */
+function appTokensVergessen(email) {
+  const e = String(email || '').toLowerCase();
+  for (const [k, v] of appTokenCache) { if (String(v.user?.email || '').toLowerCase() === e) appTokenCache.delete(k); }
+}
+
 // ─── Nicht-interaktiver Login fuer MQTT-Clients ─────────────────────
 // Erlaubt Authentik-Usern, sich bei MQTT ohne Browser-Token-Flow anzumelden.
 // Authentik kennt kein ROPC mit echtem Login-Passwort: der Client sendet
@@ -278,5 +400,6 @@ async function getUserPermissions(groups) {
 
 module.exports = {
   authentikAPI, tokenCache, validateAuthentikToken, authentikPasswordLogin,
+  validateAppToken, istAppToken, appTokensVergessen, APPS_CLIENT_ID,
   MANAGED_PAGES, ACCESS_LEVELS, resolveAncestorGroups, getUserPermissions,
 };

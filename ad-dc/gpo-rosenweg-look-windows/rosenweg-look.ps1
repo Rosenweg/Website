@@ -121,6 +121,10 @@ Setze 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'UseDe
 Set-Content $Marke "$LogoNeu"
 
 # --- Taskleiste links, fuer jedes Profil ------------------------------------
+# Links wie auf den Stationen: Startmenue in der Ecke. Der Start-Knopf von
+# Open-Shell (startknopf.png) ist genau auf den linksbuendigen Windows-Knopf
+# zugeschnitten - zentriert saesse das Windows-Symbol 10 px anders und
+# schaute neben dem Wappen hervor.
 # TaskbarAl ist eine Benutzereinstellung. Beim Start ist niemand angemeldet,
 # also jedes Profil (und die Vorlage fuer neue) kurz laden und setzen.
 $profile = @(@{ Name = 'Default'; Datei = 'C:\Users\Default\NTUSER.DAT' })
@@ -583,9 +587,14 @@ if ($OpenShellAn -and $build -ge $OpenShellAbBuild) {
     OsRegel 'EnableStartButton' 1 'DWord'
     OsRegel 'StartButtonType'   2 'DWord'          # eigenes Bild
     OsRegel 'StartButtonPath'   (Join-Path $Ziel 'startknopf.png') 'String'
-    # Breite bei 100 %, so hoch wie die Taskleiste; Open-Shell skaliert mit der
-    # Anzeige hoch, das Bild hat dafuer 144 px je Zustand.
-    OsRegel 'StartButtonSize'   48 'DWord'
+    # Breite bei 100 %: so breit wie der linksbuendige Windows-Knopf (55 px),
+    # den Windows nicht ausblendet; das Wappen sitzt im Bild genau ueber dessen
+    # Symbol. Open-Shell skaliert mit der Anzeige hoch, das Bild hat dafuer
+    # dreifache Groesse. Masse in startknopf-erzeugen.py.
+    OsRegel 'StartButtonSize'   56 'DWord'
+    # Unten buendig mit der Taskleiste statt "mittig + 1 px" (Open-Shell
+    # schob den Knopf sonst 1 px unter den Bildschirmrand).
+    OsRegel 'StartButtonAlign'  1 'DWord'
     # "Immersive" folgt hell/dunkel und der Akzentfarbe (Mint-Blau, oben) -
     # sieht damit aus wie der Rest von Windows 11. Nur Vorgabe.
     OsRegel 'SkinW7'            'Immersive' 'String' 2

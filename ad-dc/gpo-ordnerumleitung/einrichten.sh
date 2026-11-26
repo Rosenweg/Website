@@ -176,7 +176,7 @@ open(sys.argv[1], 'wb').write(ndr_pack(f))
 EOF
 
 # Erweiterungen eintragen, nur die Benutzer-Version hochzaehlen (obere 16 Bit);
-# flags=1: der Computerteil ist leer und abgeschaltet, das spart den Rechnern
+# flags=2 (GPO_FLAG_MACHINE_DISABLE): der Computerteil ist leer und abgeschaltet, das spart den Rechnern
 # die Auswertung beim Start.
 alt="$(ldbsearch -H "$SAM" -b "$gpo_dn" -s base versionNumber | sed -n 's/^versionNumber: //p')"
 alt=${alt:-0}
@@ -188,7 +188,7 @@ replace: gPCUserExtensionNames
 gPCUserExtensionNames: [$FR_CSE][$REG_CSE]
 -
 replace: flags
-flags: 1
+flags: 2
 -
 replace: versionNumber
 versionNumber: $neu

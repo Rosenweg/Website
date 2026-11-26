@@ -167,9 +167,14 @@ printf '\r\n[Startup]\r\n0CmdLine=%s\r\n0Parameters=%s\r\n' \
 # Datei. Wirkt, weil rosenweg-look.ps1 Loopback (Zusammenfuehren) einschaltet:
 # die Konten liegen nicht in OU=Windows.
 mkdir -p "$gpo_dir/User/Scripts/Logoff"
-printf '\r\n[Logoff]\r\n0CmdLine=%s\r\n0Parameters=%s\r\n' \
+# Zweites Abmeldeskript: Hintergrund auf das neutrale Stationsbild zurueck,
+# damit das Profil kein Bild mit Rechner und Adressen dieses Rechners auf den
+# naechsten mitnimmt (bginfo.ps1 -Abmelden).
+printf '\r\n[Logoff]\r\n0CmdLine=%s\r\n0Parameters=%s\r\n1CmdLine=%s\r\n1Parameters=%s\r\n' \
     'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' \
     '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "C:\Program Files\Rosenweg\drucker.ps1" -Anlass Abmelden' \
+    'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' \
+    '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "C:\Program Files\Rosenweg\bginfo.ps1" -Abmelden' \
     | iconv -f UTF-8 -t UTF-16LE | { printf '\xff\xfe'; cat; } > "$gpo_dir/User/Scripts/scripts.ini"
 
 # Erweiterung "Skripts" fuer beide Teile eintragen und beide Versionen
