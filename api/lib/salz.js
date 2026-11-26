@@ -127,7 +127,78 @@ function meldungsText({ lager, ort, stand, bestandSaecke, bestandKg, kgProWoche,
   return zeilen.join('\n');
 }
 
+// ─── Nächster Sack (Wunsch Stefan 26.11.2026) ─────────────────────
+
+/** Kalendertag in Zürich als 'YYYY-MM-DD'. */
+function zuerichTag(d) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Zurich', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .format(new Date(d));
+}
+
+/** Stunde (0–23) in Zürich. */
+function zuerichStunde(d = new Date()) {
+  return Number(new Intl.DateTimeFormat('de-CH', { hour: 'numeric', hourCycle: 'h23', timeZone: 'Europe/Zurich' })
+    .formatToParts(new Date(d)).find(t => t.type === 'hour')?.value);
+}
+
+/** Ganze Tage von Tag a bis Tag b ('YYYY-MM-DD'). */
+function tageZwischen(a, b) {
+  return Math.round((Date.parse(b + 'T12:00:00Z') - Date.parse(a + 'T12:00:00Z')) / TAG_MS);
+}
+
+/**
+ * Wann müsste der nächste Sack eingefüllt werden?
+ * Letzte Einfüllung + (kg dieser Einfüllung ÷ kg pro Woche), auf den Tag
+ * (Zürich). null, wenn es keinen Verbrauch oder keine Einfüllung gibt.
+ * Wird früher eingefüllt, gilt einfach die neue letzte Einfüllung.
+ */
+function naechsterSack({ letzteAm, letzteKg, kgProWoche }) {
+  if (!letzteAm || !(Number(letzteKg) > 0) || !(Number(kgProWoche) > 0)) return null;
+  const t = new Date(letzteAm).getTime();
+  if (!Number.isFinite(t)) return null;
+  return zuerichTag(t + Number(letzteKg) / Number(kgProWoche) * WOCHE_MS);
+}
+
+// So lange nach der Fälligkeit wird noch erinnert (Server war am Tag selbst
+// weg). Ältere Fälligkeiten — etwa aus importierten alten Listen — nicht.
+const NACHHOLEN_TAGE = 2;
+const ERINNERUNG_STUNDE = 8;
+
+/**
+ * Soll heute an das Einfüllen erinnert werden? Einmal je Fälligkeit, ab 8 Uhr.
+ * @returns {boolean}
+ */
+function einfuellErinnern({ faellig, gemeldetFuer, eingeschaltet, inBetrieb, jetzt = new Date() }) {
+  if (!faellig || !eingeschaltet || !inBetrieb) return false;
+  if (gemeldetFuer && String(gemeldetFuer).slice(0, 10) === faellig) return false;
+  const heute = zuerichTag(jetzt);
+  const tage = tageZwischen(faellig, heute);
+  if (tage < 0 || tage > NACHHOLEN_TAGE) return false;
+  return tage > 0 || zuerichStunde(jetzt) >= ERINNERUNG_STUNDE;
+}
+
+/** "Donnerstag, 3. Dezember" */
+function tagText(tag) {
+  return new Intl.DateTimeFormat('de-CH', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
+    .format(new Date(tag + 'T12:00:00Z'));
+}
+
+function einfuellText({ lager, ort, faellig, bestandSaecke, kgProWoche, portalUrl }) {
+  const z = [];
+  z.push(`Im Salzlager ${lager} müsste heute (${tagText(faellig)}) der nächste Sack in die Enthärtungsanlage.`);
+  if (ort) z.push(`Ort: ${ort}`);
+  z.push('');
+  z.push(`Gerechnet aus dem bisherigen Verbrauch (etwa ${Math.round(kgProWoche * 10) / 10} kg pro Woche).`);
+  z.push(`Im Lager: ${bestandSaecke} ${bestandSaecke === 1 ? 'Sack' : 'Säcke'}.`);
+  z.push('');
+  z.push('Nach dem Einfüllen in der App „Rosenweg Salz“ auf „Sack eingefüllt“ tippen und den Sack scannen –');
+  z.push('dann rechnet Rosenweg den nächsten Termin neu.');
+  if (portalUrl) z.push(`Erinnerung abschalten: ${portalUrl}`);
+  return z.join('\n');
+}
+
 module.exports = {
-  FENSTER_TAGE, MIN_EINFUELLUNGEN, MIN_SPANNE_TAGE,
+  FENSTER_TAGE, MIN_EINFUELLUNGEN, MIN_SPANNE_TAGE, NACHHOLEN_TAGE,
   verbrauchProWoche, lagerStand, meldeEntscheid, meldungsText, wochenText, reichtText,
+  zuerichTag, naechsterSack, einfuellErinnern, einfuellText, tagText,
 };

@@ -41,6 +41,22 @@ Einfüllen unter null wird abgewiesen (409, „zuerst Anlieferung buchen“).
 
 Geprüft wird nach jeder Buchung und stündlich (Erinnerungen nur 7–20 Uhr).
 
+## Nächster Sack
+
+Je Lager: **letzte Einfüllung + (kg dieser Einfüllung ÷ kg pro Woche)**, auf
+den Tag (Zürich) — angezeigt als „Nächster Sack etwa am …“ in der App und auf
+`salz.html`. Ohne Verbrauch (zu wenig Daten) kein Termin. Wer früher
+einfüllt, verschiebt ihn; wer eine Einfüllung rückgängig macht, holt den
+alten zurück.
+
+Am fälligen Tag ab 8 Uhr (geprüft alle 15 Minuten) geht **einmal je
+Fälligkeit** eine Mail an die Hauswart-Adressen des Lagers, ohne Hauswart an
+`SALZ_MELDUNG_AN`. Dazu Web-Push (`lib/webpush.js`, dieselben Abos wie die
+Rosenweg-PWA) an die Hauswart-Konten. War der Server am Tag selbst weg, wird
+bis 2 Tage nachgeholt; ältere Fälligkeiten (z. B. aus importierten Listen)
+lösen nichts aus. Je Lager abschaltbar (`erinnerung_einfuellen`, Portal).
+Gemerkt wird in `einfuellen_gemeldet_fuer`.
+
 ## API (`/api/salz`)
 
 Anmeldung: `authMiddleware` — Token der Authentik-Anwendung `rosenweg-apps`
@@ -65,7 +81,7 @@ Grenzen je Konto: 600 Lese- und 120 Schreibanfragen pro Stunde (429 mit
 | `GET /ich` | `{name, darf_buchen, darf_einstellen, darf_sorten_erfassen, lager_ids}` |
 | `GET /lager` | die Lager, in denen man buchen darf, mit Ort, Bestand, Verbrauch, Reichweite, `knapp` (Hauswart/Gruppen nur für Technik) |
 | `GET /lager/:id/verlauf?anzahl=50` | Buchungen |
-| `PUT /lager/:id` | `{schwelle_wochen, mindest_saecke, wiederholung_tage, hauswart_emails, bewohner_gruppen}` |
+| `PUT /lager/:id` | `{schwelle_wochen, mindest_saecke, wiederholung_tage, hauswart_emails, bewohner_gruppen, erinnerung_einfuellen}` |
 | `POST /lager/:id/inventur` | `{saecke}` gezählter Bestand |
 | `GET /sorten`, `GET /sorten/:barcode` | 404 `{unbekannt:true}` für neue Barcodes |
 | `POST /sorten` | `{barcode, bezeichnung, gewicht_kg}` (nicht Bewohner) |
