@@ -23,6 +23,7 @@
 
     <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
     <script src="/js/nav.js?v=3"></script>
+    <script src="/js/meine-geraete.js?v=1"></script>
     <script src="/js/phone-helpers.js?v=1"></script>
 
     <div class="max-w-4xl mx-auto px-4 py-8 space-y-6">
@@ -320,9 +321,9 @@
         <!-- Karten-Anmeldungen in den Rosenweg-Apps auf eigenen Geraeten (api/routes/app-karte.js) -->
         <div id="app-sitzungen" class="bg-white rounded-lg shadow-md p-6">
             <h2 class="text-lg font-semibold text-gray-800 mb-2 flex items-center gap-2">
-                💳 Mit der Rosenweg-Karte angemeldete Apps
+                📱 Deine Handys mit Rosenweg-Apps
             </h2>
-            <p class="text-sm text-gray-500 mb-4">Jede Rosenweg-App auf deinem eigenen Handy, in der du dich mit der Karte angemeldet hast, steht hier einzeln. Kennst du ein Gerät nicht: abmelden und der Technik melden, damit sie die Karte sperrt.</p>
+            <p class="text-sm text-gray-500 mb-4">Jedes eigene Handy steht hier einmal, darunter die Rosenweg-Apps, die darauf angemeldet sind (Telefon, Messenger und die Apps, in denen du dich mit der Karte angemeldet hast). Kennst du ein Handy nicht: alle Apps darauf abmelden und der Technik melden, damit sie die Karte sperrt. Geteilte Telefone: unter <a href="/smartphones" class="text-blue-600 hover:underline">Smartphones</a>.</p>
             <div class="flex flex-wrap items-center gap-3 mb-3">
                 <label id="aks-alle-wahl" class="hidden text-sm text-gray-700 flex items-center gap-2">
                     <input type="checkbox" id="aks-alle" onchange="ladeAppSitzungen()"> Alle Personen (Technik)
@@ -1505,11 +1506,18 @@
             } catch (e) { alert('Fehler: ' + e.message); }
         }
 
-        // === Karten-Anmeldungen der Apps ===
+        // === Eigene Handys mit ihren Rosenweg-Apps (js/meine-geraete.js); Technik: alle Karten-Sitzungen einzeln ===
         async function ladeAppSitzungen() {
             const liste = document.getElementById('aks-liste');
             const leer = document.getElementById('aks-leer');
             const alle = document.getElementById('aks-alle').checked;
+            if (window.__aksTechnik) document.getElementById('aks-alle-wahl').classList.remove('hidden');
+            if (!alle) {
+                leer.classList.add('hidden');
+                try { await RosenwegGeraete.anzeigen(liste, { leer: 'Auf keinem eigenen Handy ist eine Rosenweg-App angemeldet.' }); }
+                catch (e) { liste.innerHTML = `<div class="text-red-600 text-sm p-2">Fehler: ${String(e.message).replace(/</g, '&lt;')}</div>`; }
+                return;
+            }
             try {
                 const r = await AuthentikAuth.apiFetch('/api/apps/sitzungen' + (alle ? '?alle=1' : ''));
                 if (!r.ok) { liste.innerHTML = `<div class="text-red-600 text-sm p-2">Fehler beim Laden: HTTP ${r.status}</div>`; return; }

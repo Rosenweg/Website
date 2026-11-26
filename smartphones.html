@@ -8,6 +8,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="/js/authentik-auth.js?v=5"></script>
     <script src="/js/nav.js?v=3"></script>
+    <script src="/js/meine-geraete.js?v=1"></script>
     <style>
         .qr { background:#fff; border-radius:14px; padding:12px; width:min(100%, 300px); aspect-ratio:1; margin:0 auto; }
         .qr svg { width:100%; height:100%; display:block; }
@@ -51,14 +52,15 @@
             </section>
             <section class="bg-white rounded-xl shadow p-5">
                 <h2 class="font-semibold mb-2">Hier bist du angemeldet</h2>
-                <ul id="meine" class="divide-y text-sm"><li class="py-2 text-slate-500">An keinem Telefon.</li></ul>
-                <h2 class="font-semibold mt-5 mb-1">Rosenweg Telefon auf dem eigenen Handy</h2>
-                <p class="text-sm text-slate-600">App von der <a href="/apps" class="text-red-700 underline">Apps-Seite</a> laden,
-                    im Menü „Mit Rosenweg anmelden“. Deine Nummer klingelt dann auch dort.</p>
-                <h2 class="font-semibold mt-5 mb-1">Rosenweg Messenger auf dem eigenen Handy</h2>
-                <p class="text-sm text-slate-600">App von der <a href="/apps" class="text-red-700 underline">Apps-Seite</a> laden
-                    und „Mit Rosenweg-Konto anmelden“ tippen. Hier abmelden, wenn das Handy weg ist: der Messenger löscht dort dann seine Chats.</p>
-                <ul id="meineMessenger" class="divide-y text-sm mt-1"></ul>
+                <!-- geteilte Telefone; eigene Handys je Handy einmal mit ihren Apps (js/meine-geraete.js) -->
+                <ul id="meine" class="divide-y text-sm"></ul>
+                <div id="meineHandys" class="space-y-3 mt-1"></div>
+                <div class="text-sm text-slate-600 mt-5 pt-3 border-t space-y-1">
+                    <p><b>Rosenweg-Apps auf dem eigenen Handy:</b> von der <a href="/apps" class="text-red-700 underline">Apps-Seite</a> laden.
+                        Rosenweg Telefon: im Menü „Mit Rosenweg anmelden“ – deine Nummer klingelt dann auch dort.
+                        Rosenweg Messenger: „Mit Rosenweg-Konto anmelden“ tippen.</p>
+                    <p>Handy weg? Hier „Alle Apps auf diesem Handy abmelden“ – der Messenger löscht dort dann seine Chats.</p>
+                </div>
             </section>
         </div>
 
@@ -174,13 +176,6 @@ async function web(pfad, opts) {
 }
 
 // ── Rosenweg Messenger auf eigenen Handys ──
-async function ladeMessenger() {
-    const d = await json(await web('/api/messenger/zugaenge'));
-    $('meineMessenger').innerHTML = (d.zugaenge || []).map(z => `<li class="py-2 flex items-center gap-2">
-        <div class="flex-1"><b>${esc(z.geraet || 'Eigenes Handy')}</b><div class="text-xs text-slate-500">Rosenweg Messenger · seit ${esc(zeit(z.seit))}${z.zuletzt ? ' · zuletzt ' + esc(zeit(z.zuletzt)) : ''}</div></div>
-        <button class="knopf" onclick="messengerAbmelden(${Number(z.id)}, '${esc(z.geraet || 'Eigenes Handy')}', false)">Abmelden</button></li>`).join('')
-        || '<li class="py-2 text-slate-500">Auf keinem eigenen Handy angemeldet.</li>';
-}
 async function ladeMessengerAlle() {
     const r = await web('/api/messenger/zugaenge?alle=1');
     if (!r.ok) return;
@@ -195,7 +190,7 @@ async function messengerAbmelden(id, name, technik) {
     if (!confirm(technik ? 'Messenger-Zugang ' + name + ' sperren?' : name + ' abmelden? Der Messenger löscht dort beim nächsten Kontakt seine Chats; neu anmelden geht jederzeit.')) return;
     const r = await web('/api/messenger/zugaenge/' + id, {method: 'DELETE'});
     melde(r.ok ? (technik ? 'Zugang ' + name + ' gesperrt.' : name + ' abgemeldet.') : ((await json(r)).error || 'Fehler'), !r.ok);
-    ladeMessenger().catch(() => {}); ladeMessengerAlle().catch(() => {});
+    ladeHandys().catch(() => {}); ladeMessengerAlle().catch(() => {});
 }
 
 // ── Anmelde-QR und eigene Sitzungen (frueher pbx.rosenweg4303.ch/telefon) ──
@@ -221,16 +216,19 @@ function tick() {
 async function ladeMeine() {
     const d = await json(await api('/api/telefon/meine'));
     if (d.darf === false) { $('qr').innerHTML = ''; $('frist').textContent = 'Dein Konto ist für geteilte Telefone nicht freigeschaltet.'; bisMs = 0; }
-    const xs = d.sitzungen || [], ps = d.privat || [];
-    const punkt = ok => `<span class="punkt" style="background:${ok ? '#16a34a' : '#cbd5e1'}"></span>`;
-    $('meine').innerHTML = (xs.map(s => `<li class="py-2 flex items-center gap-2">
+    const xs = d.sitzungen || [];
+    $('meine').innerHTML = xs.map(s => `<li class="py-2 flex items-center gap-2">
         <div class="flex-1"><b>${esc(s.geraet)}</b><div class="text-xs text-slate-500">Geteiltes Telefon · Nebenstelle ${esc(s.ext)} · seit ${esc(zeit(s.seit))}</div></div>
         <button class="knopf" onclick="klingeln('${esc(s.ext)}')">🔔 Klingeln</button>
-        <button class="knopf" onclick="abmelden('${esc(s.ext)}')">Abmelden</button></li>`).join('')
-      + ps.map(p => `<li class="py-2 flex items-center gap-2">
-        <div class="flex-1"><b>${esc(p.geraet || 'Eigenes Handy')}</b><div class="text-xs text-slate-500">${punkt(p.registriert)} Rosenweg Telefon · ${esc(p.kennung)} · seit ${esc(zeit(p.seit))}</div></div>
-        <button class="knopf" onclick="handyAbmelden(${Number(p.id)}, '${esc(p.geraet || p.kennung)}')">Abmelden</button></li>`).join(''))
-        || '<li class="py-2 text-slate-500">An keinem Telefon.</li>';
+        <button class="knopf" onclick="abmelden('${esc(s.ext)}')">Abmelden</button></li>`).join('');
+    // Eigene Handys: Telefon, Messenger und Karten-Apps je Handy einmal (js/meine-geraete.js)
+    await ladeHandys(d.privat || []);
+}
+async function ladeHandys(telefon) {
+    await RosenwegGeraete.anzeigen($('meineHandys'), {
+        pbx: api, web, telefon, melde, nachher: () => lade().catch(() => {}),
+        leer: $('meine').innerHTML ? 'Auf keinem eigenen Handy angemeldet.' : 'An keinem Telefon und auf keinem eigenen Handy angemeldet.',
+    });
 }
 
 // ── Aktionen ──
@@ -284,12 +282,6 @@ async function updater(ext, aktion) {
     melde(aktion === 'zulassen' ? 'Telefon ' + ext + ' wird zugelassen – Ergebnis in 1–3 Minuten hier.'
                                 : 'Updater für ' + ext + ' gestartet – Ergebnis in wenigen Minuten hier.');
     lade();
-}
-async function handyAbmelden(id, name) {
-    if (!confirm(name + ' abmelden? Deine Nummer klingelt dort dann nicht mehr; in der App wieder „Mit Rosenweg anmelden“.')) return;
-    const r = await api('/api/telefon/privat/' + id, {method: 'DELETE'});
-    melde(r.ok ? name + ' abgemeldet.' : ((await json(r)).error || 'Fehler'), !r.ok);
-    ladeMeine().catch(() => {}); lade().catch(() => {});
 }
 async function privatSperren(id, kennung) {
     if (!confirm('Zugang ' + kennung + ' sperren? Das Handy telefoniert danach nicht mehr über die Anlage.')) return;
@@ -402,7 +394,6 @@ function zeigeGate() { $('inhalt').classList.add('hidden'); $('gate').classList.
     if (!AuthentikAuth.isLoggedIn()) { zeigeGate(); return; }
     $('inhalt').classList.remove('hidden');
     try { await ladeMeine(); } catch (e) {}
-    ladeMessenger().catch(() => {});
     await holeQr();
     // Nach einem 401 (Login abgelaufen) nicht weiter abfragen: jede Abfrage waere ein
     // gescheiterter Versuch, und nach 8 sperrt CrowdSec 24 h (rosenweg/anmeldung-bf).
