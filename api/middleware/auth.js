@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const { pool, auditCtx } = require('../lib/db');
 const { AUTHENTIK_CLIENT_ID } = require('../lib/config');
 const { validateAuthentikToken, validateAppToken, istAppToken, resolveAncestorGroups, ACCESS_LEVELS } = require('../lib/auth');
+const { karteZugangPruefen } = require('../routes/app-karte');
 
 // Pfade, die einen Ausweis erzeugen oder ändern — für Zugangstoken tabu.
 // Relativ zu /api/, Präfix-Vergleich auf Segmentgrenze.
@@ -127,6 +128,23 @@ async function authMiddleware(req, res, next) {
       return auditCtx.run({ userEmail: req.user.email || 'pat:' + row.id }, next);
     }
 
+    // 0b. Karten-Sitzung einer Rosenweg-App auf einem privaten Geraet
+    //     (routes/app-karte.js): wie ein App-Token, aber die Karte ist ein
+    //     schwaecherer Ausweis als das Passwort — darum dieselbe Sperrliste
+    //     wie fuer PATs (kein Token, Passkey, Passwort, MQTT-Zugang).
+    if (token.startsWith('rw_app_')) {
+      const k = await karteZugangPruefen(pool, token, absenderIp(req));
+      if (!k) return res.status(401).json({ error: 'Anmeldung abgelaufen' });
+      const vollerPfad = ((req.baseUrl || '') + req.path).toLowerCase()
+        .replace(/\/{2,}/g, '/').replace(/^\/api\//, '').replace(/^\/+|\/+$/g, '');
+      if (PAT_GESPERRT.some(pfx => vollerPfad === pfx || vollerPfad.startsWith(pfx + '/'))) {
+        return res.status(403).json({ error: 'Mit der Karten-Anmeldung nicht erlaubt — bitte im Portal mit dem Rosenweg-Konto anmelden' });
+      }
+      req.user = k.user;
+      req.appKarte = k.sitzung;
+      return auditCtx.run({ userEmail: req.user.email || 'karte:' + k.sitzung.id }, next);
+    }
+
     // 1. Try local session token first
     const result = await pool.query(
       `SELECT s.user_id, s.expires_at, u.name, u.email, u.role, u.wohnung, u.stweg, u.groups_json
@@ -212,7 +230,9 @@ function requirePermission(page, level = 'read') {
 // widerrufen kann. Wir checken req.pat (gesetzt durch PAT-Auth) und lehnen ab.
 function requireUserLogin(req, res, next) {
   if (req.pat) return res.status(403).json({ error: 'Token-Verwaltung nur via Browser-Login (Authentik) möglich' });
+  // Karten-Sitzung (routes/app-karte.js): gleich wie ein PAT, nur Browser-Login
+  if (req.appKarte) return res.status(403).json({ error: 'Nur mit Browser-Login (Rosenweg-Konto) möglich, nicht mit der Karte' });
   next();
 }
 
-module.exports = { authMiddleware, adminOnly, requirePermission, requireUserLogin, scopeErlaubt };
+module.exports = { authMiddleware, adminOnly, requirePermission, requireUserLogin, scopeErlaubt, absenderIp };

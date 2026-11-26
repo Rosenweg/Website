@@ -1457,6 +1457,15 @@ def _rosenweg_konto():
     token = _bearer()
     if not token or len(token) > 4096:
         return None
+    if token.startswith("rw_app_"):
+        # Karten-Anmeldung einer App auf einem privaten Handy (Website api/routes/app-karte.js):
+        # kein Authentik-Token, die Haupt-API kennt es (/api/auth/me).
+        u = current_user()
+        email = str((u or {}).get("email") or "").strip().lower()
+        if not email:
+            return None
+        return {"email": email, "name": str(u.get("name") or ""),
+                "groups": [str(g) for g in (u.get("groups") or [])]}
     try:
         r = requests.get(AUTHENTIK_USERINFO, headers={"Authorization": f"Bearer {token}"}, timeout=6)
         if not r.ok:

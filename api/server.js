@@ -22897,6 +22897,14 @@ app.delete('/api/stations/:id/tunnel', stationsRouter.stationAuth, async (req, r
 // rosenweg-apps). Begruendung und Grenzen in routes/app-tunnel.js.
 require('./routes/app-tunnel').appTunnelRoutes(app, { pool, rateLimitGuard });
 
+// Karten-Anmeldung der Rosenweg-Apps auf privaten Geraeten (Entscheid Stefan 26.11.2026):
+// Rosenweg-Karte ans Handy -> eigene, widerrufbare Sitzung je App. Begruendung in routes/app-karte.js.
+require('./routes/app-karte').appKarteRoutes(app, {
+  pool, authMiddleware, requireUserLogin, absenderIp: require('./middleware/auth').absenderIp,
+  loggedSendMail, MAIL_FROM, accessKarteZurUid, accessKartenBesitzerId, kartenPerson, kartenProtokollieren,
+  unifiAccessRaw, accessOk,
+});
+
 app.post('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
   try {
     if (!WG_CONTROL_TOKEN) return res.status(503).json({ error: 'wg-control nicht konfiguriert (WG_CONTROL_TOKEN fehlt)' });
