@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-11-26
+
+### Offen
+- [ ] **logon.bat ablösen:** Ordnerumleitung als GPO «Rosenweg-Ordnerumleitung» ([ad-dc/gpo-ordnerumleitung](ad-dc/gpo-ordnerumleitung/README.md)), zuerst nur Gruppe `Ordnerumleitung` (stefan.mueller). Ausrollen: `einrichten.sh stefan.mueller` auf dc1, Test auf win11-1, dann `logon-bat-abschalten.sh --ausfuehren`. **Falle:** Cron `/etc/cron.d/sync-logon-script` auf dc1 setzt alle 5 min bei allen Konten wieder `scriptPath: logon.bat` (94 Konten am 26.11.) – das Skript schaltet ihn zuerst ab.
+
+---
+
 ## 2026-11-24
 
 ### Offen
