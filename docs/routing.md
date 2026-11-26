@@ -173,8 +173,8 @@ Aufgeräumt am 6.9.2026. Vorher standen vier Konventionen nebeneinander:
 | Platzhalter `owner_email = 'system'` (19) | `owner_group = 'technik'` |
 | `owner_email = 'technik@rosenweg4303.ch'` (1) | `owner_group = 'technik'` |
 | ohne Besitzer (9: `mcp.`, `meg.`, `stweg1–7`) | `owner_group = 'technik'` |
-| persönlich auf `stefan+rosenweg@juroct.ch` (2) | `whatsapp.` → technik, `test.` bleibt persönlich |
-| Mail-Relays auf `stefan.mueller.1694@gmail.com` (2) | alle drei `owner_group = 'technik'` |
+| persönlich auf Stefans Adresse (2) | `whatsapp.` → technik, `test.` bleibt persönlich |
+| Mail-Relays auf einer privaten Gmail-Adresse (2) | alle drei `owner_group = 'technik'` |
 
 Der letzte Punkt war der unangenehmste: Zwei Mail-Relays der Siedlung hingen
 an einer privaten Gmail-Adresse.
