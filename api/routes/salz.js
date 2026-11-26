@@ -21,27 +21,43 @@
 const express = require('express');
 const { pool } = require('../lib/db');
 const { authMiddleware } = require('../middleware/auth');
-const { isTechnik, isPraesident } = require('../lib/groups');
-const { HAEUSER } = require('../lib/haeuser');
+const { isTechnik, isPraesident, STWEG_GROUPS } = require('../lib/groups');
+const { resolveAncestorGroups } = require('../lib/auth');
+const { HAEUSER, stwegVonHaus } = require('../lib/haeuser');
 const { loggedSendMail, MAIL_FROM } = require('../lib/mail');
-const { FENSTER_TAGE, verbrauchProWoche, lagerStand, meldeEntscheid, meldungsText, wochenText } = require('../lib/salz');
+const { FENSTER_TAGE, verbrauchProWoche, lagerStand, meldeEntscheid, meldungsText, reichtText } = require('../lib/salz');
 
 const MELDUNG_AN = process.env.SALZ_MELDUNG_AN || 'technik@rosenweg4303.ch';
 const PORTAL_URL = process.env.SALZ_PORTAL_URL || 'https://rosenweg4303.ch/salz.html';
 const SALZ_GRUPPEN = (process.env.SALZ_GRUPPEN || '')
   .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 
-// Die Lager. „Kooperation“ ist kein Haus (haeuser.js kennt nur Hausnummern),
-// sondern ein eigener Standort der Kooperation — darum haus = null.
+// Die Lager. „Rosenweg Kooperation“ ist kein Haus (haeuser.js kennt nur
+// Hausnummern), sondern ein eigener Standort der Kooperation — darum
+// haus = null; das Lager steht im Rosenweg 10 (Entscheid Stefan 26.11.2026).
+//
+// bewohnerHaus: wessen Bewohnergruppe in diesem Lager buchen darf. Die Gruppe
+// kommt aus STWEG_GROUPS (lib/groups.js) über das STWEG des Hauses — es gibt
+// keine Bewohnergruppe je Haus, nur je STWEG. Folge: Rosenweg 2 und 4 sind
+// beide STWEG 7, ihre Bewohner dürfen in beiden Lagern buchen; die Kooperation
+// (Rosenweg 10) gehört zu STWEG 4. Die Technik kann die Gruppen je Lager im
+// Portal ändern (Spalte bewohner_gruppen); das hier ist nur der Anfang.
 const LAGER_START = [
-  { schluessel: 'haus2', name: 'Rosenweg 2', haus: 2, reihenfolge: 1 },
-  { schluessel: 'haus4', name: 'Rosenweg 4', haus: 4, reihenfolge: 2 },
-  { schluessel: 'haus9', name: 'Rosenweg 9', haus: 9, reihenfolge: 3 },
-  { schluessel: 'kooperation', name: 'Kooperation', haus: null, reihenfolge: 4 },
+  { schluessel: 'haus2', name: 'Rosenweg 2', haus: 2, ort: null, bewohnerHaus: 2, reihenfolge: 1 },
+  { schluessel: 'haus4', name: 'Rosenweg 4', haus: 4, ort: null, bewohnerHaus: 4, reihenfolge: 2 },
+  { schluessel: 'haus9', name: 'Rosenweg 9', haus: 9, ort: null, bewohnerHaus: 9, reihenfolge: 3 },
+  { schluessel: 'kooperation', name: 'Rosenweg Kooperation', haus: null, ort: 'Lager im Rosenweg 10', bewohnerHaus: 10, reihenfolge: 4 },
 ];
 for (const l of LAGER_START) {
-  if (l.haus != null && !HAEUSER.includes(l.haus)) throw new Error(`salz: Haus ${l.haus} fehlt in lib/haeuser.js`);
+  for (const h of [l.haus, l.bewohnerHaus]) {
+    if (h != null && !HAEUSER.includes(h)) throw new Error(`salz: Haus ${h} fehlt in lib/haeuser.js`);
+  }
+  const g = STWEG_GROUPS[stwegVonHaus(l.bewohnerHaus)]?.bewohner;
+  if (!g) throw new Error(`salz: keine Bewohnergruppe für Haus ${l.bewohnerHaus}`);
+  l.bewohnerGruppen = [g];
 }
+
+const EMAIL_RE = /^[^\s@<>,;"']+@[^\s@<>,;"']+\.[a-z]{2,}$/i;
 
 // EAN-13/EAN-8/UPC/Code 128 — lesbare Zeichen, keine Steuerzeichen.
 const BARCODE_RE = /^[\x21-\x7e]{4,64}$/;
@@ -52,10 +68,30 @@ function istVerwalter(user) {
   const g = user?.groups || [];
   return Boolean(user?.isAdmin || isTechnik(g) || isPraesident(g));
 }
-function darfBuchen(user) {
+
+/** Darf in allen Lagern buchen und neue Sorten erfassen (Technik, Präsident, SALZ_GRUPPEN). */
+function darfAlleLager(user) {
   if (istVerwalter(user)) return true;
   const g = (user?.groups || []).map(x => String(x).toLowerCase());
   return SALZ_GRUPPEN.some(s => g.includes(s));
+}
+
+/**
+ * Die Lager, in denen diese Person buchen darf: alle (Technik usw.) oder die
+ * Lager, deren bewohner_gruppen sie (auch über eine Obergruppe) angehört.
+ * lagerZeilen: [{id, bewohner_gruppen}].
+ */
+async function erlaubteLager(user, lagerZeilen) {
+  if (darfAlleLager(user)) return new Set(lagerZeilen.map(l => l.id));
+  const eigene = new Set(await resolveAncestorGroups((user?.groups || []).map(String)));
+  return new Set(lagerZeilen
+    .filter(l => (l.bewohner_gruppen || []).some(g => eigene.has(String(g).toLowerCase())))
+    .map(l => l.id));
+}
+
+async function lagerRechte(user) {
+  const r = await pool.query('SELECT id, bewohner_gruppen FROM salz_lager WHERE aktiv');
+  return erlaubteLager(user, r.rows);
 }
 
 let schemaVersprechen = null;
@@ -77,6 +113,12 @@ function ensureSchema() {
           aktiv BOOLEAN NOT NULL DEFAULT true,
           geaendert_am TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )`);
+      // Ort (Anzeige), Hauswart-Adressen (bekommen die Meldung mit) und die
+      // Bewohnergruppen, die in diesem Lager buchen dürfen.
+      await pool.query(`ALTER TABLE salz_lager
+          ADD COLUMN IF NOT EXISTS ort TEXT,
+          ADD COLUMN IF NOT EXISTS hauswart_emails TEXT[] NOT NULL DEFAULT '{}',
+          ADD COLUMN IF NOT EXISTS bewohner_gruppen TEXT[]`);
       await pool.query(`
         CREATE TABLE IF NOT EXISTS salz_sorten (
           barcode TEXT PRIMARY KEY,
@@ -103,9 +145,16 @@ function ensureSchema() {
       await pool.query('CREATE INDEX IF NOT EXISTS salz_buchungen_lager_am ON salz_buchungen (lager_id, gebucht_am)');
       for (const l of LAGER_START) {
         await pool.query(
-          `INSERT INTO salz_lager (schluessel, name, haus, reihenfolge) VALUES ($1,$2,$3,$4)
-           ON CONFLICT (schluessel) DO NOTHING`, [l.schluessel, l.name, l.haus, l.reihenfolge]);
+          `INSERT INTO salz_lager (schluessel, name, haus, ort, reihenfolge, bewohner_gruppen) VALUES ($1,$2,$3,$4,$5,$6)
+           ON CONFLICT (schluessel) DO NOTHING`, [l.schluessel, l.name, l.haus, l.ort, l.reihenfolge, l.bewohnerGruppen]);
+        // Bestehende Zeilen (erste Fassung): Bewohnergruppen nur setzen, wenn
+        // noch nie gesetzt — eine Änderung im Portal bleibt stehen.
+        await pool.query('UPDATE salz_lager SET bewohner_gruppen = $2 WHERE schluessel = $1 AND bewohner_gruppen IS NULL',
+          [l.schluessel, l.bewohnerGruppen]);
       }
+      // Umbenennung 26.11.2026: "Kooperation" -> "Rosenweg Kooperation", Ort Rosenweg 10.
+      await pool.query(`UPDATE salz_lager SET name = 'Rosenweg Kooperation', ort = COALESCE(ort, 'Lager im Rosenweg 10')
+                         WHERE schluessel = 'kooperation' AND name = 'Kooperation'`);
     })().catch(e => { schemaVersprechen = null; throw e; });
   }
   return schemaVersprechen;
@@ -143,7 +192,7 @@ async function lagerUebersicht(lagerId = null, db = pool) {
     // kein Alarm für „0 Säcke“, bevor jemand die erste Lieferung erfasst hat.
     const inBetrieb = l.buchungen > 0;
     return {
-      id: l.id, schluessel: l.schluessel, name: l.name, haus: l.haus, in_betrieb: inBetrieb,
+      id: l.id, schluessel: l.schluessel, name: l.name, haus: l.haus, ort: l.ort || null, in_betrieb: inBetrieb,
       bestand_saecke: l.bestand_saecke, bestand_kg: Math.round(l.bestand_kg * 10) / 10,
       verbrauch_kg_woche: v.kgProWoche == null ? null : Math.round(v.kgProWoche * 10) / 10,
       einfuellungen_im_fenster: v.einfuellungen,
@@ -151,6 +200,7 @@ async function lagerUebersicht(lagerId = null, db = pool) {
       schwelle_wochen: schwelle, mindest_saecke: l.mindest_saecke, wiederholung_tage: l.wiederholung_tage,
       meldung_seit: l.meldung_seit, meldung_zuletzt: l.meldung_zuletzt,
       letzte_anlieferung: l.letzte_anlieferung, letzte_einfuellung: l.letzte_einfuellung,
+      hauswart_emails: l.hauswart_emails || [], bewohner_gruppen: l.bewohner_gruppen || [],
     };
   });
 }
@@ -192,18 +242,20 @@ async function meldelauf({ lagerId = null, nurTagsueber = false } = {}) {
                               WHERE id = $1 AND date_trunc('milliseconds', meldung_zuletzt) IS NOT DISTINCT FROM $2::timestamptz RETURNING id`, [l.id, l.meldung_zuletzt]);
       if (gesetzt.rowCount === 0) continue;
       const erinnerung = was === 'erinnern';
-      const kurz = l.modus === 'reichweite' ? `noch etwa ${wochenText(l.reichweite_wochen)}` : `noch ${l.bestand_saecke} ${l.bestand_saecke === 1 ? 'Sack' : 'Säcke'}`;
+      const kurz = l.modus === 'reichweite' ? `reicht noch ${reichtText(l.reichweite_wochen)}` : `noch ${l.bestand_saecke} ${l.bestand_saecke === 1 ? 'Sack' : 'Säcke'}`;
+      // An die Technik und den Hauswart dieses Lagers (Entscheid 26.11.2026).
+      const an = [...new Set([MELDUNG_AN, ...(l.hauswart_emails || [])].map(e => String(e).trim().toLowerCase()).filter(Boolean))];
       try {
         await loggedSendMail({
-          from: MAIL_FROM, to: MELDUNG_AN,
+          from: MAIL_FROM, to: an.join(', '),
           subject: `${erinnerung ? 'Erinnerung: ' : ''}Salz nachbestellen – ${l.name} (${kurz})`,
           text: meldungsText({
-            lager: l.name, stand: { modus: l.modus, reichweiteWochen: l.reichweite_wochen },
+            lager: l.name, ort: l.ort, stand: { modus: l.modus, reichweiteWochen: l.reichweite_wochen },
             bestandSaecke: l.bestand_saecke, bestandKg: l.bestand_kg, kgProWoche: l.verbrauch_kg_woche,
             schwelleWochen: l.schwelle_wochen, mindestSaecke: l.mindest_saecke, erinnerung, portalUrl: PORTAL_URL,
           }),
         }, erinnerung ? 'salz-erinnerung' : 'salz-nachbestellen');
-        console.log(`[salz] ${l.name}: ${erinnerung ? 'Erinnerung' : 'Meldung'} an ${MELDUNG_AN} (${kurz})`);
+        console.log(`[salz] ${l.name}: ${erinnerung ? 'Erinnerung' : 'Meldung'} an ${an.length} Empfänger (${kurz})`);
       } catch (e) {
         console.error(`[salz] Mail ${l.name}:`, e.message);
         if (erinnerung) await pool.query('UPDATE salz_lager SET meldung_zuletzt = $2 WHERE id = $1', [l.id, l.meldung_zuletzt]);
@@ -240,10 +292,25 @@ function salzRouter({ rateLimitGuard }) {
     return res.status(429).json({ error: 'Zu viele Anfragen — bitte später erneut.' });
   };
   const lesen = grenze('lesen', 600);
+  const fehler = (res, e, wo) => {
+    console.error(`[salz] ${wo}:`, e.message);
+    res.status(500).json({ error: 'Interner Fehler' });
+  };
   const schreiben = grenze('schreiben', 120);
 
-  const nurBuchende = (req, res, next) => darfBuchen(req.user) ? next()
-    : res.status(403).json({ error: 'Für den Salzvorrat bist du nicht freigeschaltet. Bitte bei der Technik melden.' });
+  const KEIN_RECHT = 'Für den Salzvorrat bist du nicht freigeschaltet. Bitte bei der Technik melden.';
+  // Mindestens ein Lager; welche genau, steht danach in req.salzLager.
+  const nurBuchende = async (req, res, next) => {
+    try {
+      req.salzLager = await lagerRechte(req.user);
+      return req.salzLager.size ? next() : res.status(403).json({ error: KEIN_RECHT });
+    } catch (e) { return fehler(res, e, 'rechte'); }
+  };
+  const fuerLager = (id, req, res) => {
+    if (req.salzLager.has(id)) return true;
+    res.status(403).json({ error: 'In diesem Lager darfst du nicht buchen.' });
+    return false;
+  };
   const nurVerwalter = (req, res, next) => istVerwalter(req.user) ? next()
     : res.status(403).json({ error: 'Nur die Technik kann das ändern.' });
   const schema = (req, res, next) => ensureSchema().then(() => next(), e => {
@@ -253,23 +320,30 @@ function salzRouter({ rateLimitGuard }) {
 
   router.use(authMiddleware, schema);
 
-  const fehler = (res, e, wo) => {
-    console.error(`[salz] ${wo}:`, e.message);
-    res.status(500).json({ error: 'Interner Fehler' });
-  };
-
   // Wer bin ich, was darf ich? Die App zeigt danach Knöpfe oder einen Hinweis.
-  router.get('/ich', lesen, (req, res) => {
-    res.json({ name: req.user.name || null, email: req.user.email || null,
-      darf_buchen: darfBuchen(req.user), darf_einstellen: istVerwalter(req.user) });
+  router.get('/ich', lesen, async (req, res) => {
+    try {
+      const lager = await lagerRechte(req.user);
+      res.json({ name: req.user.name || null, email: req.user.email || null,
+        darf_buchen: lager.size > 0, darf_einstellen: istVerwalter(req.user),
+        darf_sorten_erfassen: darfAlleLager(req.user), lager_ids: [...lager] });
+    } catch (e) { fehler(res, e, 'ich'); }
   });
 
+  // Nur die Lager, in denen die Person buchen darf (Bewohner: ihr Haus).
+  // Hauswart-Adressen und Gruppen sieht nur, wer sie pflegt.
   router.get('/lager', lesen, nurBuchende, async (req, res) => {
-    try { res.json({ lager: await lagerUebersicht() }); } catch (e) { fehler(res, e, 'lager'); }
+    try {
+      const verwalter = istVerwalter(req.user);
+      const lager = (await lagerUebersicht()).filter(l => req.salzLager.has(l.id))
+        .map(l => verwalter ? l : { ...l, hauswart_emails: undefined, bewohner_gruppen: undefined });
+      res.json({ lager });
+    } catch (e) { fehler(res, e, 'lager'); }
   });
 
   router.get('/lager/:id/verlauf', lesen, nurBuchende, async (req, res) => {
     const id = parseInt(req.params.id, 10);
+    if (!fuerLager(id, req, res)) return;
     const anzahl = Math.min(Math.max(parseInt(req.query.anzahl, 10) || 50, 1), 500);
     try {
       const r = await pool.query(
@@ -285,8 +359,9 @@ function salzRouter({ rateLimitGuard }) {
         id: b.id, art: b.art, saecke: b.saecke, barcode: b.barcode, sorte: b.bezeichnung,
         kg_je_sack: b.kg_je_sack, notiz: b.notiz, gebucht_am: b.gebucht_am, storniert_am: b.storniert_am,
         eigene: String(b.gebucht_von || '').toLowerCase() === ich,
-        // Mailadressen sieht nur die Technik; sonst der Name (oder nichts).
-        von: verwalter ? (b.von_name || b.gebucht_von) : (b.von_name || null),
+        // Wer gebucht hat, sieht nur die Technik (Name, sonst Mail); die
+        // anderen nur ihre eigenen Buchungen als solche.
+        von: verwalter ? (b.von_name || b.gebucht_von) : (String(b.gebucht_von || '').toLowerCase() === ich ? (b.von_name || 'du') : null),
       })) });
     } catch (e) { fehler(res, e, 'verlauf'); }
   });
@@ -306,13 +381,27 @@ function salzRouter({ rateLimitGuard }) {
       mindest = zahl(b.mindest_saecke, 0, 500);
       wiederholung = zahl(b.wiederholung_tage, 0, 90);
     } catch { return res.status(400).json({ error: 'Schwelle 0–52 Wochen, Mindestbestand 0–500 Säcke, Wiederholung 0–90 Tage' }); }
+    // Listen: Array oder Text mit Komma/Zeilen; fehlt das Feld, bleibt es.
+    const liste = v => v == null ? null
+      : (Array.isArray(v) ? v : String(v).split(/[\s,;]+/)).map(x => String(x).trim()).filter(Boolean);
+    const hauswart = liste(b.hauswart_emails);
+    if (hauswart && (hauswart.length > 10 || hauswart.some(e => !EMAIL_RE.test(e) || e.length > 200))) {
+      return res.status(400).json({ error: 'Hauswart: gültige Mailadressen (höchstens 10)' });
+    }
+    const gruppen = liste(b.bewohner_gruppen);
+    if (gruppen && (gruppen.length > 10 || gruppen.some(g => !/^[\p{L}0-9._-]{2,80}$/u.test(g)))) {
+      return res.status(400).json({ error: 'Bewohnergruppen: Gruppennamen aus Authentik (höchstens 10)' });
+    }
     try {
       const r = await pool.query(
         `UPDATE salz_lager SET schwelle_wochen = COALESCE($2, schwelle_wochen),
                 mindest_saecke = COALESCE($3, mindest_saecke),
-                wiederholung_tage = COALESCE($4, wiederholung_tage), geaendert_am = NOW()
+                wiederholung_tage = COALESCE($4, wiederholung_tage),
+                hauswart_emails = COALESCE($5, hauswart_emails),
+                bewohner_gruppen = COALESCE($6, bewohner_gruppen), geaendert_am = NOW()
           WHERE id = $1 AND aktiv RETURNING id`,
-        [id, schwelle, mindest == null ? null : Math.round(mindest), wiederholung == null ? null : Math.round(wiederholung)]);
+        [id, schwelle, mindest == null ? null : Math.round(mindest), wiederholung == null ? null : Math.round(wiederholung),
+          hauswart && hauswart.map(e => e.toLowerCase()), gruppen && gruppen.map(g => g.toLowerCase())]);
       if (!r.rowCount) return res.status(404).json({ error: 'Lager nicht gefunden' });
       meldelaufBald(id);
       res.json({ lager: (await lagerUebersicht(id))[0] });
@@ -345,9 +434,12 @@ function salzRouter({ rateLimitGuard }) {
     return { bezeichnung, gewicht: Math.round(gewicht * 100) / 100 };
   }
 
-  // Neue Sorte — darf jede buchende Person, damit niemand mit einem neuen
-  // Sack im Keller steht und nicht weiterkommt. Ändern nur die Technik.
-  router.post('/sorten', schreiben, nurBuchende, async (req, res) => {
+  // Neue Sorte — Technik, Präsident und SALZ_GRUPPEN, nicht die Bewohner
+  // (Entscheid 26.11.2026: Sorten bleiben bei der Technik). Ändern nur die Technik.
+  router.post('/sorten', schreiben, async (req, res) => {
+    if (!darfAlleLager(req.user)) {
+      return res.status(403).json({ error: 'Diesen Sack kennt Rosenweg noch nicht. Bitte die Technik, ihn einmal zu erfassen.' });
+    }
     const code = String(req.body?.barcode || '').trim();
     if (!BARCODE_RE.test(code)) return res.status(400).json({ error: 'Ungültiger Barcode' });
     const s = sorteLesen(req.body || {});
@@ -450,6 +542,7 @@ function salzRouter({ rateLimitGuard }) {
       return res.status(400).json({ error: art === 'anlieferung' ? 'Anzahl Säcke: 1 bis 500' : 'Eingefüllt: 1 bis 10 Säcke' });
     }
     if (art === 'eingefuellt') saecke = -saecke;
+    if (!fuerLager(lagerId, req, res)) return;
     try {
       const r = await buchen(req.user, { lagerId, art, saecke, barcode, clientId });
       if (!r.wiederholt) meldelaufBald(lagerId);
@@ -495,7 +588,7 @@ function salzRouter({ rateLimitGuard }) {
       if (b.storniert_am) { await c.query('ROLLBACK'); return res.json({ ok: true, schon: true }); }
       const eigene = String(b.gebucht_von || '').toLowerCase() === String(req.user.email || '').toLowerCase();
       const frisch = Date.now() - new Date(b.gebucht_am).getTime() < STORNO_EIGENE_STUNDEN * 3600 * 1000;
-      if (!istVerwalter(req.user) && !(eigene && frisch)) {
+      if (!istVerwalter(req.user) && !(eigene && frisch && req.salzLager.has(b.lager_id))) {
         await c.query('ROLLBACK');
         return res.status(403).json({ error: 'Rückgängig machen geht nur bei eigenen Buchungen der letzten 24 Stunden.' });
       }
@@ -521,4 +614,4 @@ function salzRouter({ rateLimitGuard }) {
   return router;
 }
 
-module.exports = { salzRouter, ensureSchema, starteSalzCron, meldelauf, lagerUebersicht, darfBuchen, istVerwalter };
+module.exports = { salzRouter, ensureSchema, starteSalzCron, meldelauf, lagerUebersicht, erlaubteLager, darfAlleLager, istVerwalter, LAGER_START };

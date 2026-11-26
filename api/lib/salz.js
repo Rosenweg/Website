@@ -96,16 +96,22 @@ function wochenText(n) {
   return `${n} ${Number(n) === 1 ? 'Woche' : 'Wochen'}`;
 }
 
+/** Reichweite in Worten: unter einer Woche nicht "0 Wochen". */
+function reichtText(n) {
+  return Number(n) < 1 ? 'weniger als 1 Woche' : `etwa ${wochenText(n)}`;
+}
+
 /** Text der Mail an die Technik. Keine Personendaten. */
-function meldungsText({ lager, stand, bestandSaecke, bestandKg, kgProWoche, schwelleWochen, mindestSaecke, erinnerung, portalUrl }) {
+function meldungsText({ lager, ort, stand, bestandSaecke, bestandKg, kgProWoche, schwelleWochen, mindestSaecke, erinnerung, portalUrl }) {
   const zeilen = [];
   zeilen.push(erinnerung
     ? `Erinnerung: Im Salzlager ${lager} ist noch immer zu wenig Salz.`
     : `Im Salzlager ${lager} wird das Salz knapp. Bitte nachbestellen.`);
+  if (ort) zeilen.push(`Ort: ${ort}`);
   zeilen.push('');
   zeilen.push(`Bestand: ${bestandSaecke} ${bestandSaecke === 1 ? 'Sack' : 'Säcke'} (${Math.round(bestandKg)} kg)`);
   if (stand.modus === 'reichweite') {
-    zeilen.push(`Reicht noch etwa: ${wochenText(stand.reichweiteWochen)} (Meldung unter ${wochenText(schwelleWochen)})`);
+    zeilen.push(`Reicht noch: ${reichtText(stand.reichweiteWochen)} (Meldung unter ${wochenText(schwelleWochen)})`);
     zeilen.push(`Verbrauch bisher: etwa ${Math.round(kgProWoche * 10) / 10} kg pro Woche`);
   } else {
     zeilen.push(`Noch zu wenig Verbrauchsdaten für eine Reichweite — Meldung ab ${mindestSaecke} Säcken oder weniger.`);
@@ -118,5 +124,5 @@ function meldungsText({ lager, stand, bestandSaecke, bestandKg, kgProWoche, schw
 
 module.exports = {
   FENSTER_TAGE, MIN_EINFUELLUNGEN, MIN_SPANNE_TAGE,
-  verbrauchProWoche, lagerStand, meldeEntscheid, meldungsText, wochenText,
+  verbrauchProWoche, lagerStand, meldeEntscheid, meldungsText, wochenText, reichtText,
 };

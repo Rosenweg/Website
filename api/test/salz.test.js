@@ -70,5 +70,20 @@ test('Mailtext nennt Lager, Bestand, Reichweite', () => {
     bestandSaecke: 2, bestandKg: 50, kgProWoche: 20, schwelleWochen: 4, mindestSaecke: 4, erinnerung: false });
   assert.match(t, /Rosenweg 9/);
   assert.match(t, /2 Säcke \(50 kg\)/);
-  assert.match(t, /2\.5 Wochen/);
+  assert.match(t, /Reicht noch: etwa 2\.5 Wochen/);
+});
+
+test('Mailtext nennt den Ort, wenn es einen gibt', () => {
+  const t = meldungsText({ lager: 'Rosenweg Kooperation', ort: 'Lager im Rosenweg 10', stand: { modus: 'mindestbestand' },
+    bestandSaecke: 1, bestandKg: 25, kgProWoche: null, schwelleWochen: 4, mindestSaecke: 4, erinnerung: false });
+  assert.match(t, /Rosenweg Kooperation/);
+  assert.match(t, /Ort: Lager im Rosenweg 10/);
+  assert.match(t, /1 Säcke|1 Sack/);
+});
+
+test('Reichweite unter einer Woche heisst nicht "0 Wochen"', () => {
+  const { reichtText } = require('../lib/salz');
+  assert.equal(reichtText(0.3), 'weniger als 1 Woche');
+  assert.equal(reichtText(1), 'etwa 1 Woche');
+  assert.equal(reichtText(3.5), 'etwa 3.5 Wochen');
 });
