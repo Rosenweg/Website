@@ -25,7 +25,7 @@
 // geht über das Konto (Authentik/users.active) — der Gateway prüft das Token
 // bei jeder Anfrage.
 //
-// Grenzen (docs/sicherheit.md, Abschnitt 5): 10 Anfragen pro Stunde je Konto;
+// Grenzen (docs/sicherheit.md, Abschnitt 5): 30 Anfragen pro Stunde je Geraet, 60 je Konto;
 // höchstens 5 Geräte gleichzeitig je Person (prüft der Gateway).
 
 const crypto = require('crypto');
@@ -137,7 +137,12 @@ function appTunnelRoutes(app, { pool, rateLimitGuard }) {
       if (!/^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$/.test(schluessel)) {
         return res.status(400).json({ error: 'Öffentlicher Schlüssel fehlt oder ist ungültig' });
       }
-      if (!rateLimitGuard('app-tunnel', email, 10, 60 * 60 * 1000).ok) {
+      // Je Geraet statt je Konto (26.11.2026): die App baut bei jedem Start
+      // einen frischen Tunnel auf; mit 10/h je Konto war Stefans erster
+      // Testnachmittag nach ein paar Neustarts gesperrt. Die Zahl der Geraete
+      // je Person begrenzt ohnehin der Gateway (GW_MAX_JE_PERSON).
+      if (!rateLimitGuard('app-tunnel-geraet', `${email}:${geraet}`, 30, 60 * 60 * 1000).ok
+          || !rateLimitGuard('app-tunnel', email, 60, 60 * 60 * 1000).ok) {
         return res.status(429).json({ error: 'Zu viele Verbindungsanfragen — bitte später erneut.' });
       }
       const { status, daten } = await gatewayRuf('POST', '/peers', req.personToken, { geraet, schluessel });
