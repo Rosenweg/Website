@@ -20,7 +20,7 @@ Gilt für alle Rechner in `OU=Windows`. Seit dem 22.11.2026 liegt dort `WIN11-1`
 |---|---|
 | `einrichten.sh` | auf dc1 als root: OU, Rechner verschieben, Richtlinie anlegen und verlinken, Inhalt ins sysvol, Version hochzählen |
 | `rosenweg-look.ps1` | Startskript, läuft beim Start als SYSTEM und setzt alles; Protokoll in `C:\ProgramData\Rosenweg\look.log` |
-| `bilder/` | `hintergrund.png` und `sperrbild.png` aus os-stationen, `logo.png` von der Website, `startknopf.png` (aus dem Logo, `startknopf-erzeugen.py`) |
+| `bilder/` | `hintergrund.png` (aus dem Stationsbild von os-stationen, Logo und Schriftzug für Windows vertikal mittig gesetzt, damit die Stationsinfo oben rechts nichts verdeckt), `sperrbild.png` aus os-stationen, `logo.png` von der Website, `startknopf.png` (aus dem Logo, `startknopf-erzeugen.py`) |
 | `drucker.ps1` | räumt die Drucker im Profil auf und setzt den Standarddrucker, bei jeder An- und Abmeldung |
 | `startknopf-erzeugen.py` | erzeugt `bilder/startknopf.png` neu, falls sich das Logo ändert (braucht Pillow) |
 | `programme/` | nicht im Git: der Open-Shell-Installer, den `einrichten.sh` mit Prüfsumme holt |
