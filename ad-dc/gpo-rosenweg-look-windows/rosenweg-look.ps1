@@ -280,6 +280,74 @@ if (-not $bgAufgabe -or $bgAufgabe.Actions[0].Arguments -ne $bgArg) {
     Log "Aufgabe 'Rosenweg BGInfo' eingerichtet"
 }
 
+# --- Nextcloud als Laufwerk N: (WebDAV) ---------------------------------------
+# Die Anmeldung und das Verbinden macht nextcloud-laufwerk.ps1 im Namen der
+# Person (Begruendung dort und im README). Hier nur das Rechnerweite: das
+# Skript unter Programme (Programm-Whitelist), die Aufgabe bei der Anmeldung,
+# ein Eintrag im Startmenue, der WebDAV-Dienst und die Intranet-Zone.
+# Zuruecknehmen: $NextcloudAn = $false, dann raeumt der naechste Start auf.
+$NextcloudAn = $true
+$ncQuelle = Join-Path $Quelle 'nextcloud-laufwerk.ps1'
+$ncZiel = Join-Path $prog 'nextcloud-laufwerk.ps1'
+$ncMenue = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Rosenweg\Nextcloud als Laufwerk N.lnk'
+$ncZonen = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Internet Settings\ZoneMapKey'
+$ncArg = "--headless $env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$ncZiel`" -Anlass Anmelden"
+if ($NextcloudAn) {
+    if ((Test-Path $ncQuelle) -and (-not (Test-Path $ncZiel) -or (Get-FileHash $ncQuelle).Hash -ne (Get-FileHash $ncZiel).Hash)) {
+        Copy-Item $ncQuelle $ncZiel -Force
+        Log "nextcloud-laufwerk.ps1 aktualisiert"
+    }
+    $ncAufgabe = Get-ScheduledTask -TaskName 'Rosenweg Nextcloud' -ErrorAction SilentlyContinue
+    if (-not $ncAufgabe -or $ncAufgabe.Actions[0].Arguments -ne $ncArg) {
+        $a = New-ScheduledTaskAction -Execute "$env:WINDIR\System32\conhost.exe" -Argument $ncArg
+        $t = New-ScheduledTaskTrigger -AtLogOn
+        $p = New-ScheduledTaskPrincipal -GroupId 'S-1-5-32-545' -RunLevel Limited
+        # 20 Minuten: beim ersten Mal wartet das Skript auf die Freigabe im Browser
+        $o = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 20)
+        Register-ScheduledTask -TaskName 'Rosenweg Nextcloud' -Action $a -Trigger $t -Principal $p -Settings $o -Force | Out-Null
+        Log "Aufgabe 'Rosenweg Nextcloud' eingerichtet"
+    }
+    # Eintrag im Startmenue (Rosenweg > Nextcloud als Laufwerk N), fuer wer
+    # bei der Anmeldung "Nein" gesagt hat oder neu verbinden will
+    if (-not (Test-Path $ncMenue)) {
+        New-Item -ItemType Directory -Force -Path (Split-Path $ncMenue) | Out-Null
+        $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut($ncMenue)
+        $lnk.TargetPath = "$env:WINDIR\System32\conhost.exe"
+        $lnk.Arguments = $ncArg -replace '-Anlass Anmelden$', '-Anlass Einrichten'
+        $lnk.IconLocation = "$env:WINDIR\System32\shell32.dll,9"
+        $lnk.Description = 'Die Nextcloud als Laufwerk N: einbinden (einmal im Browser freigeben)'
+        $lnk.Save()
+        Log "Startmenue: Nextcloud als Laufwerk N angelegt"
+    }
+    # WebDAV-Client: ab Werk "Manuell (Trigger)". Automatisch, damit N: schon
+    # bei der Anmeldung verbinden kann (ohne laufenden Dienst: Fehler 67).
+    $wc = Get-Service WebClient -ErrorAction SilentlyContinue
+    if ($wc) {
+        $wcPar = 'HKLM:\SYSTEM\CurrentControlSet\Services\WebClient\Parameters'
+        # Basic nur ueber HTTPS (das ist die Vorgabe, hier festgehalten)
+        Setze $wcPar 'BasicAuthLevel' 1 'DWord'
+        # Groesste Datei: ab Werk 50 MB; so 4 GB (0xFFFFFFFF, das Maximum).
+        # Der Dienst liest das nur beim Start - darum vor dem Starten setzen.
+        Setze $wcPar 'FileSizeLimitInBytes' ([int32]-1) 'DWord'
+        if ($wc.StartType -ne 'Automatic') { Set-Service WebClient -StartupType Automatic; Log "WebClient: Start automatisch" }
+        if ($wc.Status -ne 'Running') { Start-Service WebClient -ErrorAction SilentlyContinue }
+    } else { Log "WebClient-Dienst fehlt - N: geht auf diesem Rechner nicht" }
+    # Intranet-Zone (1): Dateien von N: bekommen keine Internet-Markierung
+    # (sonst Warnungen beim Oeffnen, Office in der geschuetzten Ansicht), und
+    # Edge/Chrome melden sich bei Authentik per Kerberos an, solange keine
+    # AuthServerAllowlist gesetzt ist - so braucht die einmalige Freigabe im
+    # Haus kein Passwort. Nur einzelne Werte, andere Eintraege bleiben.
+    Setze $ncZonen 'https://nextcloud.rosenweg4303.ch' '1'
+    Setze $ncZonen 'https://authentik.rosenweg4303.ch' '1'
+} else {
+    if (Get-ScheduledTask -TaskName 'Rosenweg Nextcloud' -ErrorAction SilentlyContinue) {
+        Unregister-ScheduledTask -TaskName 'Rosenweg Nextcloud' -Confirm:$false
+        Log "Aufgabe 'Rosenweg Nextcloud' entfernt"
+    }
+    Remove-Item $ncMenue, $ncZiel -Force -ErrorAction SilentlyContinue
+    Remove-ItemProperty $ncZonen -Name 'https://nextcloud.rosenweg4303.ch', 'https://authentik.rosenweg4303.ch' -ErrorAction SilentlyContinue
+}
+
 # --- Drucker im Profil ------------------------------------------------------
 # Servergespeicherte Profile wandern mit. Darin standen Druckerverbindungen von
 # frueheren PCs (\\100.64.2.32\DruckerR9 per SMB, Brother, AnyDesk, PDF24 ...)
