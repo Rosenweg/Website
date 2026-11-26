@@ -38,14 +38,14 @@
         <p class="mb-3">Bitte zuerst mit dem Rosenweg-Konto anmelden.</p>
         <div id="login-container"></div>
     </div>
-    <div id="keinRecht" class="hidden bg-white rounded-xl shadow p-5 text-sm">Diese Seite ist für die Technik.</div>
+    <div id="keinRecht" class="hidden bg-white rounded-xl shadow p-5 text-sm">Für den Salzvorrat bist du nicht freigeschaltet.</div>
 
     <div id="inhalt" class="hidden space-y-5">
         <section id="karten" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4"></section>
 
         <section id="detail" class="hidden bg-white rounded-xl shadow p-5 space-y-4">
             <div class="flex items-center gap-3 flex-wrap">
-                <h2 class="font-semibold text-lg flex-1" id="dName"></h2>
+                <h2 class="font-semibold text-lg flex-1"><span id="dName"></span> <span id="dOrt" class="text-sm font-normal text-slate-500"></span></h2>
             </div>
             <div class="grid sm:grid-cols-3 gap-4 text-sm" id="einstellungen">
                 <label>Melden unter (Wochen Reichweite)
@@ -54,6 +54,12 @@
                     <input id="eMindest" type="number" min="0" max="500" step="1" class="feld"></label>
                 <label>Erinnerung nach (Tagen, 0 = nie)
                     <input id="eWiederholung" type="number" min="0" max="90" step="1" class="feld"></label>
+            </div>
+            <div class="grid sm:grid-cols-2 gap-4 text-sm" id="zuordnung">
+                <label>Hauswart – bekommt die Meldung „nachbestellen“ zusätzlich zur Technik (Mailadressen, eine pro Zeile)
+                    <textarea id="eHauswart" rows="2" class="feld font-mono"></textarea></label>
+                <label>Bewohnergruppen (Authentik), die hier buchen dürfen – eine pro Zeile
+                    <textarea id="eGruppen" rows="2" class="feld font-mono"></textarea></label>
             </div>
             <div class="flex gap-2 flex-wrap items-end text-sm" id="verwalten">
                 <button class="knopf blau" onclick="speichern()">Einstellungen speichern</button>
@@ -117,7 +123,7 @@ function zeichneKarten() {
     $('karten').innerHTML = lager.map(l => `
         <button class="karte ${!l.in_betrieb ? 'leer' : l.knapp ? 'knapp' : 'gut'} ${gewaehlt === l.id ? 'gewaehlt' : ''} bg-white rounded-xl shadow p-4 text-left"
                 onclick="waehle(${Number(l.id)})">
-            <div class="text-sm text-slate-500">${esc(l.name)}</div>
+            <div class="text-sm text-slate-500">${esc(l.name)}${l.ort ? ' · ' + esc(l.ort) : ''}</div>
             <div class="text-3xl font-bold">${Number(l.bestand_saecke)} <span class="text-base font-normal">${l.bestand_saecke === 1 ? 'Sack' : 'Säcke'}</span></div>
             <div class="text-sm">${esc(reichweiteText(l))}</div>
             <div class="text-xs text-slate-500 mt-1">${l.verbrauch_kg_woche != null ? esc(l.verbrauch_kg_woche) + ' kg/Woche · ' : ''}${Math.round(l.bestand_kg)} kg</div>
@@ -139,6 +145,10 @@ async function zeigeDetail() {
     if (!l) return;
     $('detail').classList.remove('hidden');
     $('dName').textContent = l.name;
+    $('dOrt').textContent = l.ort || '';
+    $('eHauswart').value = (l.hauswart_emails || []).join('\n');
+    $('eGruppen').value = (l.bewohner_gruppen || []).join('\n');
+    $('zuordnung').classList.toggle('hidden', !darfEinstellen);
     $('eSchwelle').value = l.schwelle_wochen;
     $('eMindest').value = l.mindest_saecke;
     $('eWiederholung').value = l.wiederholung_tage;
@@ -167,7 +177,8 @@ async function zeigeDetail() {
 async function speichern() {
     try {
         await api('/lager/' + gewaehlt, { method: 'PUT', body: {
-            schwelle_wochen: $('eSchwelle').value, mindest_saecke: $('eMindest').value, wiederholung_tage: $('eWiederholung').value } });
+            schwelle_wochen: $('eSchwelle').value, mindest_saecke: $('eMindest').value, wiederholung_tage: $('eWiederholung').value,
+            hauswart_emails: $('eHauswart').value, bewohner_gruppen: $('eGruppen').value } });
         melde('Gespeichert.');
         await lade();
     } catch (e) { melde(e.message, true); }
