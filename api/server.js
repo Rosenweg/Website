@@ -11246,6 +11246,10 @@ app.use('/api/grundbuch', require('./routes/grundbuch'));
 // RAUM-QR: Tuerschilder/Aushaenge mit Token-QR -> routes/raum-qr.js
 app.use('/api/raum-qr', require('./routes/raum-qr'));
 
+// SALZVORRAT der Enthärtungsanlagen -> routes/salz.js (App „Rosenweg Salz“ + salz.html)
+const salz = require('./routes/salz');
+app.use('/api/salz', salz.salzRouter({ rateLimitGuard }));
+
 // STATIONEN (Rosenweg/os-stationen) -> routes/stations.js
 // Bewusst ohne authMiddleware: der Installer läuft auf einem Gerät ohne
 // Browser und ohne Identität und meldet sich mit Benutzer + Passwort gegen
@@ -30391,6 +30395,9 @@ initDB()
       startConnectionPolling();
       // SSH: GitHub-Schluessel periodisch abgleichen
       startSshGithubAbgleich();
+      // Salzvorrat: stündlich prüfen, ob ein Lager nachbestellt werden muss
+      salz.ensureSchema().then(() => salz.starteSalzCron(activeIntervals))
+        .catch(e => console.error('[salz] Schema:', e.message));
       // Mitgelieferte Dokumente (Beispielmappe) in die Ablage, siehe lib/ablage.js
       setTimeout(() => require('./lib/ablage').ablageAbgleichen(), 20 * 1000);
       // Cleanup expired sessions every hour

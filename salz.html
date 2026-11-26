@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Salzvorrat - Rosenweg</title>
+    <link rel="icon" href="/logo-rosenweg.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=5"></script>
+    <script src="/js/nav.js?v=3"></script>
+    <style>
+        .knopf { padding:.35rem .7rem; border-radius:.5rem; font-size:.85rem; background:#e2e8f0; white-space:nowrap; }
+        .knopf:hover { background:#cbd5e1; }
+        .knopf.blau { background:#1e3a8a; color:#fff; }
+        .feld { display:block; width:100%; margin-top:.2rem; padding:.4rem .5rem; border:1px solid #cbd5e1; border-radius:.5rem; background:#fff; }
+        .karte.knapp { border-left:6px solid #dc2626; }
+        .karte.gut { border-left:6px solid #16a34a; }
+        .karte.leer { border-left:6px solid #cbd5e1; }
+        .karte.gewaehlt { outline:2px solid #1e3a8a; }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800">
+<nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+<script>RosenwegNav.init({ active: 'salz' });</script>
+
+<main class="max-w-5xl mx-auto px-4 py-6 space-y-5">
+    <div class="flex items-center gap-3">
+        <img src="/logo-rosenweg.png" alt="" class="w-12 h-12">
+        <div>
+            <h1 class="text-2xl font-bold">Salzvorrat</h1>
+            <div class="text-sm text-slate-500">Regeneriersalz der Enthärtungsanlagen – gebucht wird mit der App „Rosenweg Salz“</div>
+        </div>
+    </div>
+
+    <div id="meldung" class="hidden rounded-lg px-4 py-3 text-sm"></div>
+    <div id="laden" class="text-slate-500 text-sm">Lade …</div>
+    <div id="gate" class="hidden bg-white rounded-xl shadow p-5">
+        <p class="mb-3">Bitte zuerst mit dem Rosenweg-Konto anmelden.</p>
+        <div id="login-container"></div>
+    </div>
+    <div id="keinRecht" class="hidden bg-white rounded-xl shadow p-5 text-sm">Diese Seite ist für die Technik.</div>
+
+    <div id="inhalt" class="hidden space-y-5">
+        <section id="karten" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4"></section>
+
+        <section id="detail" class="hidden bg-white rounded-xl shadow p-5 space-y-4">
+            <div class="flex items-center gap-3 flex-wrap">
+                <h2 class="font-semibold text-lg flex-1" id="dName"></h2>
+            </div>
+            <div class="grid sm:grid-cols-3 gap-4 text-sm" id="einstellungen">
+                <label>Melden unter (Wochen Reichweite)
+                    <input id="eSchwelle" type="number" min="0" max="52" step="0.5" class="feld"></label>
+                <label>Mindestbestand (Säcke) – solange Verbrauchsdaten fehlen
+                    <input id="eMindest" type="number" min="0" max="500" step="1" class="feld"></label>
+                <label>Erinnerung nach (Tagen, 0 = nie)
+                    <input id="eWiederholung" type="number" min="0" max="90" step="1" class="feld"></label>
+            </div>
+            <div class="flex gap-2 flex-wrap items-end text-sm" id="verwalten">
+                <button class="knopf blau" onclick="speichern()">Einstellungen speichern</button>
+                <span class="flex-1"></span>
+                <label>Gezählt (Säcke)
+                    <input id="iSaecke" type="number" min="0" step="1" class="feld w-32"></label>
+                <button class="knopf" onclick="inventur()">Bestand setzen</button>
+            </div>
+            <p class="text-xs text-slate-500" id="dErklaerung"></p>
+            <div>
+                <h3 class="font-medium mb-2">Verlauf</h3>
+                <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="text-left text-slate-500"><tr>
+                        <th class="py-1 pr-3">Wann</th><th class="pr-3">Was</th><th class="pr-3 text-right">Säcke</th>
+                        <th class="pr-3">Sorte</th><th class="pr-3">Wer</th><th></th></tr></thead>
+                    <tbody id="verlauf" class="divide-y"></tbody>
+                </table>
+                </div>
+            </div>
+        </section>
+
+        <section class="bg-white rounded-xl shadow p-5">
+            <h2 class="font-semibold mb-2">Sorten (Barcodes)</h2>
+            <p class="text-xs text-slate-500 mb-2">Neue Sorten erfasst die App beim ersten Scan. Ein geändertes Gewicht gilt für künftige Buchungen.</p>
+            <table class="w-full text-sm">
+                <thead class="text-left text-slate-500"><tr><th class="py-1 pr-3">Barcode</th><th class="pr-3">Bezeichnung</th><th class="pr-3">kg je Sack</th><th></th></tr></thead>
+                <tbody id="sorten" class="divide-y"></tbody>
+            </table>
+        </section>
+    </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const datum = t => t ? new Date(t).toLocaleString('de-CH', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' }) : '–';
+const ART = { anlieferung: 'Anlieferung', eingefuellt: 'Sack eingefüllt', korrektur: 'Bestand gezählt' };
+let lager = [], gewaehlt = null, darfEinstellen = false;
+
+function melde(text, fehler) {
+    const m = $('meldung');
+    m.textContent = text;
+    m.className = 'rounded-lg px-4 py-3 text-sm ' + (fehler ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800');
+    if (!fehler) setTimeout(() => m.classList.add('hidden'), 4000);
+}
+async function api(pfad, opts) {
+    const r = await AuthentikAuth.apiFetch('/api/salz' + pfad, opts);
+    const d = await r.json().catch(() => ({ error: 'Server gerade nicht erreichbar' }));
+    if (!r.ok) throw new Error(d.error || ('Fehler ' + r.status));
+    return d;
+}
+
+function reichweiteText(l) {
+    if (!l.in_betrieb) return 'Noch keine Buchung';
+    if (l.modus === 'reichweite') return `reicht etwa ${l.reichweite_wochen} ${l.reichweite_wochen === 1 ? 'Woche' : 'Wochen'}`;
+    return 'Reichweite: noch zu wenig Daten';
+}
+
+function zeichneKarten() {
+    $('karten').innerHTML = lager.map(l => `
+        <button class="karte ${!l.in_betrieb ? 'leer' : l.knapp ? 'knapp' : 'gut'} ${gewaehlt === l.id ? 'gewaehlt' : ''} bg-white rounded-xl shadow p-4 text-left"
+                onclick="waehle(${Number(l.id)})">
+            <div class="text-sm text-slate-500">${esc(l.name)}</div>
+            <div class="text-3xl font-bold">${Number(l.bestand_saecke)} <span class="text-base font-normal">${l.bestand_saecke === 1 ? 'Sack' : 'Säcke'}</span></div>
+            <div class="text-sm">${esc(reichweiteText(l))}</div>
+            <div class="text-xs text-slate-500 mt-1">${l.verbrauch_kg_woche != null ? esc(l.verbrauch_kg_woche) + ' kg/Woche · ' : ''}${Math.round(l.bestand_kg)} kg</div>
+            ${l.meldung_seit ? `<div class="text-xs text-red-700 mt-1">Nachbestellen gemeldet am ${esc(datum(l.meldung_seit))}</div>` : ''}
+        </button>`).join('');
+}
+
+async function lade() {
+    const d = await api('/lager');
+    lager = d.lager || [];
+    zeichneKarten();
+    if (gewaehlt != null) zeigeDetail();
+}
+
+function waehle(id) { gewaehlt = id; zeichneKarten(); zeigeDetail(); }
+
+async function zeigeDetail() {
+    const l = lager.find(x => x.id === gewaehlt);
+    if (!l) return;
+    $('detail').classList.remove('hidden');
+    $('dName').textContent = l.name;
+    $('eSchwelle').value = l.schwelle_wochen;
+    $('eMindest').value = l.mindest_saecke;
+    $('eWiederholung').value = l.wiederholung_tage;
+    $('iSaecke').value = '';
+    for (const id of ['eSchwelle', 'eMindest', 'eWiederholung']) $(id).disabled = !darfEinstellen;
+    $('verwalten').classList.toggle('hidden', !darfEinstellen);
+    $('dErklaerung').textContent = l.modus === 'reichweite'
+        ? `Verbrauch aus ${l.einfuellungen_im_fenster} Einfüllungen der letzten 26 Wochen: ${l.verbrauch_kg_woche} kg pro Woche. `
+          + `Die Technik bekommt eine Mail, sobald der Vorrat weniger als ${l.schwelle_wochen} Wochen reicht.`
+        : `Für eine Reichweite braucht es mindestens 3 Einfüllungen über 2 Wochen (bisher ${l.einfuellungen_im_fenster}). `
+          + `Bis dahin kommt die Mail bei ${l.mindest_saecke} Säcken oder weniger.`;
+    try {
+        const v = await api(`/lager/${l.id}/verlauf?anzahl=100`);
+        $('verlauf').innerHTML = (v.buchungen || []).map(b => `
+            <tr class="${b.storniert_am ? 'line-through text-slate-400' : ''}">
+                <td class="py-1 pr-3 whitespace-nowrap">${esc(datum(b.gebucht_am))}</td>
+                <td class="pr-3">${esc(ART[b.art] || b.art)}${b.notiz ? ' <span class="text-slate-500">· ' + esc(b.notiz) + '</span>' : ''}</td>
+                <td class="pr-3 text-right font-mono">${b.saecke > 0 ? '+' : ''}${Number(b.saecke)}</td>
+                <td class="pr-3">${esc(b.sorte || '')}</td>
+                <td class="pr-3">${esc(b.von || '')}</td>
+                <td class="text-right">${!b.storniert_am && (darfEinstellen || b.eigene) ? `<button class="knopf" onclick="storno(${Number(b.id)})">Rückgängig</button>` : ''}</td>
+            </tr>`).join('') || '<tr><td colspan="6" class="py-2 text-slate-500">Noch keine Buchungen.</td></tr>';
+    } catch (e) { melde(e.message, true); }
+}
+
+async function speichern() {
+    try {
+        await api('/lager/' + gewaehlt, { method: 'PUT', body: {
+            schwelle_wochen: $('eSchwelle').value, mindest_saecke: $('eMindest').value, wiederholung_tage: $('eWiederholung').value } });
+        melde('Gespeichert.');
+        await lade();
+    } catch (e) { melde(e.message, true); }
+}
+
+async function inventur() {
+    const n = $('iSaecke').value;
+    if (n === '') return melde('Bitte die gezählten Säcke eintragen.', true);
+    const l = lager.find(x => x.id === gewaehlt);
+    if (!confirm(`Bestand ${l.name} von ${l.bestand_saecke} auf ${n} Säcke setzen?`)) return;
+    try {
+        await api(`/lager/${gewaehlt}/inventur`, { method: 'POST', body: { saecke: Number(n) } });
+        melde('Bestand gesetzt.');
+        await lade();
+    } catch (e) { melde(e.message, true); }
+}
+
+async function storno(id) {
+    if (!confirm('Diese Buchung rückgängig machen?')) return;
+    try { await api('/buchungen/' + id, { method: 'DELETE' }); melde('Rückgängig gemacht.'); await lade(); }
+    catch (e) { melde(e.message, true); }
+}
+
+async function ladeSorten() {
+    const d = await api('/sorten');
+    $('sorten').innerHTML = (d.sorten || []).map(s => `
+        <tr><td class="py-1 pr-3 font-mono">${esc(s.barcode)}</td>
+            <td class="pr-3">${esc(s.bezeichnung)}</td><td class="pr-3">${esc(s.gewicht_kg)}</td>
+            <td class="text-right">${darfEinstellen ? `<button class="knopf" data-code="${esc(s.barcode)}" data-name="${esc(s.bezeichnung)}" data-kg="${esc(s.gewicht_kg)}" onclick="sorteAendern(this)">Ändern</button>` : ''}</td></tr>`).join('')
+        || '<tr><td colspan="4" class="py-2 text-slate-500">Noch keine Sorte erfasst.</td></tr>';
+}
+
+async function sorteAendern(knopf) {
+    const name = prompt('Bezeichnung', knopf.dataset.name);
+    if (name == null) return;
+    const kg = prompt('Gewicht je Sack (kg)', knopf.dataset.kg);
+    if (kg == null) return;
+    try {
+        await api('/sorten/' + encodeURIComponent(knopf.dataset.code), { method: 'PUT', body: { bezeichnung: name, gewicht_kg: kg } });
+        melde('Sorte gespeichert.');
+        await ladeSorten();
+    } catch (e) { melde(e.message, true); }
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
+    const user = await AuthentikAuth.init({ requireAuth: false });
+    $('laden').classList.add('hidden');
+    if (!user) { $('gate').classList.remove('hidden'); AuthentikAuth.createLoginButton('login-container'); return; }
+    try {
+        const ich = await api('/ich');
+        if (!ich.darf_buchen) { $('keinRecht').classList.remove('hidden'); return; }
+        darfEinstellen = ich.darf_einstellen;
+        $('inhalt').classList.remove('hidden');
+        await lade();
+        if (lager.length) waehle(lager[0].id);
+        await ladeSorten();
+    } catch (e) { melde(e.message, true); }
+});
+</script>
+</body>
+</html>
