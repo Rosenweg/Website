@@ -328,7 +328,7 @@ haben keine eigene JSON-Sperre (dort liegen keine Datendateien). `/.well-known/`
 | Mailbox-Antrag | 10 / Std., höchstens 3 automatisch angelegte Postfächer |
 | VPN-Konto anlegen | 10 / Std., höchstens 10 Konten |
 | Stations-Tunnel | 10 / Std., höchstens 20 je Konto |
-| App-Tunnel zum vm-gateway (`POST /api/apps/tunnel`, Rosenweg-Konto) | 10 / Std. je Konto; höchstens 5 Geräte gleichzeitig je Person (prüft der Gateway) |
+| App-Tunnel zum vm-gateway (`POST /api/apps/tunnel`, Rosenweg-Konto) | 30 / Std. je Gerät, 60 / Std. je Konto; höchstens 5 Geräte gleichzeitig je Person (prüft der Gateway) |
 | DNS-Prüfung (ISP) | 30 / 10 Min |
 | Push-Test | 5 / 10 Min |
 | Voicemail-Reklamation | 3 / Tag je Nummer, 20 / Tag gesamt |
