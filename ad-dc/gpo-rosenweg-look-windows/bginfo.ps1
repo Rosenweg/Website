@@ -6,7 +6,7 @@
 # dort darf die Programm-Whitelist es starten, und niemand ausser Admins kann
 # es veraendern.
 #
-# Es nimmt das Stations-Hintergrundbild und schreibt unten rechts in eine
+# Es nimmt das Stations-Hintergrundbild und schreibt oben rechts in eine
 # halbtransparente Box: Rechner, Adressen, angemeldete Person, Windows-Stand,
 # letztes Update. Das Ergebnis liegt pro Person in %LOCALAPPDATA%\Rosenweg.
 #
@@ -82,9 +82,11 @@ foreach ($z in $zeilen) {
 $rand = 14 * $skala; $abstand = 12 * $skala
 $boxB = $labelBreite + $abstand + $wertBreite + 2 * $rand
 $boxH = $hoehe + 2 * $rand
-# Unten rechts, ueber der Taskleiste (WorkingArea), mit etwas Luft
+# Oben rechts (Stefan, 26.11.2026: wie auf den Linux-Stationen), innerhalb
+# der Arbeitsflaeche (WorkingArea) - eine oben angedockte Taskleiste wird
+# also ausgespart -, mit etwas Luft
 $x = $arbeit.Right * ($w / $schirm.Width) - $boxB - 24 * $skala
-$y = $arbeit.Bottom * ($h / $schirm.Height) - $boxH - 24 * $skala
+$y = $arbeit.Top * ($h / $schirm.Height) + 24 * $skala
 
 $pfad = New-Object System.Drawing.Drawing2D.GraphicsPath
 $r = 10 * $skala
