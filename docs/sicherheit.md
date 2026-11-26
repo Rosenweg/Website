@@ -416,7 +416,7 @@ ins Repo:
   Unterschriftenlisten-Rückläufe, Zähler-Daten) waren schon vor dem 17.11. nie
   erreichbar (Express vergleicht den kodierten Pfad) – Behebung in PR #24.
 
-- Zertifikat `contacts.rosenweg4303.ch` ist abgelaufen.
+- ~~Zertifikat `contacts.rosenweg4303.ch` abgelaufen~~ — seit 18.11.2026 endet TLS am Edge, das Zertifikat erneuert sich dort automatisch (`zpush/README.md`).
 - `PRINT_AR_AUTHSERV_ID` an einer echten Mail prüfen (oberster
   `Authentication-Results`-Kopf).
 - CrowdSec laeuft auf dem Edge (CT 245) seit spaetestens Nov. 2026 (Traefik- und Firewall-Bouncer); Details und Rosenweg-Regeln in `edge-traefik/README.md`. Offen: MQTT und Nextcloud melden gescheiterte Anmeldungen noch nicht an CrowdSec.
