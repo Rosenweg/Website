@@ -378,10 +378,17 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--ausfuehren", action="store_true", help="AUTO-Konten wirklich umbenennen")
     ap.add_argument("--nur", default="", help="nur diese alten Benutzernamen (Komma-Liste)")
+    ap.add_argument("--verwaist-umbenennen", action="store_true",
+                    help="mit --nur: Konten, die nur wegen 'verwaist' MANUELL sind, trotzdem umbenennen")
     a = ap.parse_args()
     nur = {x.strip() for x in a.nur.split(",") if x.strip()}
 
     plaene = planen(nur)
+    if a.verwaist_umbenennen and nur:
+        for p in plaene:
+            if p["alt"] in nur and p["gruende"] and all(g.startswith("Mail in keinem aktiven Kontakt") for g in p["gruende"]):
+                p["plan"] = "AUTO"
+                p["gruende"].append("auf Wunsch trotzdem umbenannt (--verwaist-umbenennen)")
     for p in plaene:
         zeigen(p)
     auto = [p for p in plaene if p["plan"] == "AUTO"]
