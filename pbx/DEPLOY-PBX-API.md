@@ -27,7 +27,7 @@ lässt `manager.conf` **nur** diese zwei Adressen zu (`permit 127.0.0.1` und
 
 | Datei | Ziel im LXC | Zweck |
 |---|---|---|
-| `api/app.py`, `db.py`, `ami.py` | `/opt/pbx-api/` | Flask-Service (waitress) |
+| `api/app.py`, `db.py`, `ami.py`, `apk.py`, `adb_updater.py` | `/opt/pbx-api/` | Flask-Service (waitress); `adb_updater.py` auch als Timer (3b) |
 | `api/requirements.txt` | (venv) | Flask + requests + waitress |
 | `api/pbx-api.service` | `/etc/systemd/system/` | systemd-Unit |
 | `api/pbx-api.env.example` | `/etc/default/pbx-api` | Config (Pfade, MAIN_API_BASE) |
@@ -56,7 +56,7 @@ ssh root@100.64.2.22 'pct exec 220 -- chmod +x /var/lib/asterisk/agi-bin/*.py'
 ### 2. PBX-API installieren
 ```bash
 ssh root@100.64.2.22 'pct exec 220 -- mkdir -p /opt/pbx-api/web /var/lib/pbx-api'
-tar -C pbx/api -cf - app.py db.py ami.py voicemail.py migrate_from_postgres.py requirements.txt \
+tar -C pbx/api -cf - app.py db.py ami.py apk.py adb_updater.py voicemail.py nummernvergabe.py migrate_from_postgres.py requirements.txt \
   | ssh root@100.64.2.22 'pct exec 220 -- tar -C /opt/pbx-api -xf -'
 tar -C pbx/web -cf - pbx-admin.html \
   | ssh root@100.64.2.22 'pct exec 220 -- tar -C /opt/pbx-api/web -xf -'
@@ -84,6 +84,27 @@ ssh root@100.64.2.22 'pct push 220 /tmp/pbx-api.service /etc/systemd/system/pbx-
 ssh root@100.64.2.22 'pct exec 220 -- systemctl daemon-reload && systemctl enable --now pbx-api'
 ssh root@100.64.2.22 'pct exec 220 -- curl -s localhost:8095/health'   # {"ok":true,...}
 ```
+
+### 3b. adb-Updater der geteilten Telefone  *(Entwurf, noch nicht ausgerollt)*
+Siehe `pbx/GETEILTE-TELEFONE.md`, „Apps per adb aktualisieren“. Der Schlüssel entsteht auf CT 220
+und verlässt ihn nie (nicht ins Repo, nicht in den Passwortmanager nötig – bei Verlust neu erzeugen
+und pro Telefon neu zulassen).
+```bash
+ssh root@100.64.2.22 'pct exec 220 -- bash -lc "
+  apt-get install -y adb apksigner
+  install -d -m 0700 -o asterisk -g asterisk /var/lib/pbx-adb /var/lib/pbx-adb/.android
+  sudo -u asterisk HOME=/var/lib/pbx-adb ANDROID_ADB_SERVER_PORT=5039 adb keygen /var/lib/pbx-adb/.android/adbkey
+  chmod 600 /var/lib/pbx-adb/.android/adbkey
+"'
+# Units (adb_updater.py, apk.py liegen mit der API in /opt/pbx-api):
+for f in pbx-adb-updater.service pbx-adb-updater.timer pbx-adb-updater.path; do
+  scp pbx/api/$f root@100.64.2.22:/tmp/ && ssh root@100.64.2.22 "pct push 220 /tmp/$f /etc/systemd/system/$f"; done
+ssh root@100.64.2.22 'pct exec 220 -- bash -lc "systemctl daemon-reload && systemctl enable --now pbx-adb-updater.timer pbx-adb-updater.path"'
+# Probelauf ohne Schalten/Installieren:
+ssh root@100.64.2.22 'pct exec 220 -- sudo -u asterisk /opt/pbx-api/venv/bin/python3 /opt/pbx-api/adb_updater.py --trocken'
+```
+Optional `/etc/default/pbx-adb-updater` (Vorlage `api/pbx-adb-updater.env.example`).
+Reihenfolge: zuerst Rosenweg Gerät v237 auf die Telefone (über den Katalog), dann API + Updater.
 
 ### 4. Datenmigration (Bestand → SQLite)  *(einmalig)*
 ```bash

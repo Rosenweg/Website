@@ -1,0 +1,10 @@
+[Unit]
+Description=Rosenweg PBX: adb-Updater der geteilten Telefone alle 15 Minuten
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

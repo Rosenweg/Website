@@ -37,7 +37,9 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from flask import Flask, Response, jsonify, request, send_file, send_from_directory
 
+import adb_updater
 import ami
+import apk
 import db
 import nummernvergabe
 import voicemail
@@ -1349,8 +1351,16 @@ def telefon_status():
         bis = int(w["wlan_debug_bis"]) if w and int(w["wlan_debug_bis"] or 0) > time.time() else 0
         # technik: Geraete-App sperrt die gefaehrlichen Einstellungen nur fuer alle anderen
         # wlan_debug_bis: zentral eingeschaltetes "Debugging ueber WLAN" (epoch s, 0 = aus)
+        # adb_dienst: Updater-Schluessel jetzt zulassen (ab Geraet v237 bestaetigt die
+        # Bedienungshilfe "USB-Debugging zulassen?" nur fuer genau diesen Fingerabdruck)
+        extra = {}
+        u = conn.execute("SELECT freigabe_bis, zugelassen FROM telefon_updater WHERE ext = ?", (ext,)).fetchone()
+        if u and not u["zugelassen"] and int(u["freigabe_bis"] or 0) > time.time() and bis:
+            fp = adb_updater.fingerabdruck()
+            if fp:
+                extra["adb_dienst"] = {"fingerabdruck": fp, "bis": int(u["freigabe_bis"])}
         return jsonify({"ext": ext, "geraet": geraet["name"] if geraet else ext, "technik": technik,
-                        "wlan_debug_bis": bis, **_sitzung_json(row), **_apps_fuer(conn, row)})
+                        "wlan_debug_bis": bis, **extra, **_sitzung_json(row), **_apps_fuer(conn, row)})
     finally:
         conn.close()
 
@@ -2039,7 +2049,7 @@ APPS_OEFFENTLICH_OHNE = {"ch.rosenweg4303.telefon"}
 APPS_HERKUNFT = {"https://www.rosenweg4303.ch", "https://rosenweg4303.ch"}
 
 
-APPS_SIGNATUR_SHA256 = "7b3bac26e82b6103546b96861dcf1bb89b3239424ff11fdf684975cf78c5a5ae"
+APPS_SIGNATUR_SHA256 = apk.SIGNATUR_SHA256
 
 # ─── Weitere Rosenweg-Apps auf /apps (Stefan 26.11.2026: "jede App gehoert auf /apps") ───
 # Apps mit eigenem Repo (Flutter), die es fuer mehrere Plattformen gibt. Ihre Dateien kommen
@@ -2173,108 +2183,8 @@ def _github_oidc(token):
     return claims
 
 
-def _apk_zertifikat_sha256(pfad):
-    """SHA-256 des ersten Signer-Zertifikats aus dem APK-Signaturblock (v2/v3), sonst None.
-    Nur die Herkunftspruefung beim Hochladen; die kryptografische Pruefung machen Android und
-    der Updater beim Installieren."""
-    import struct
-    with open(pfad, "rb") as f:
-        f.seek(0, 2)
-        laenge = f.tell()
-        f.seek(max(0, laenge - 65557))
-        ende = f.read()
-        eocd = ende.rfind(b"PK\x05\x06")
-        if eocd < 0:
-            return None
-        cd = struct.unpack_from("<I", ende, eocd + 16)[0]
-        if cd < 32:
-            return None
-        f.seek(cd - 24)
-        groesse, magie = struct.unpack("<Q16s", f.read(24))
-        if magie != b"APK Sig Block 42" or groesse > cd or groesse < 24:
-            return None
-        f.seek(cd - groesse - 8)
-        block = f.read(groesse - 16)   # Laengenfeld + Paare, ohne Laenge+Magie am Ende
-    paare, i = {}, 8   # Paare beginnen nach dem fuehrenden Laengenfeld
-    while i + 12 <= len(block):
-        plen, pid = struct.unpack_from("<QI", block, i)
-        paare[pid] = block[i + 12:i + 8 + plen]
-        i += 8 + plen
-    wert = paare.get(0x7109871A) or paare.get(0xF05368C0)   # v2, sonst v3
-    if not wert:
-        return None
-    try:
-        def lp(b, o):   # laengenpraefigiertes Stueck
-            n = struct.unpack_from("<I", b, o)[0]
-            return b[o + 4:o + 4 + n], o + 4 + n
-        signers, _ = lp(wert, 0)
-        signer, _ = lp(signers, 0)
-        signed, _ = lp(signer, 0)
-        _digests, o = lp(signed, 0)
-        zerts, _ = lp(signed, o)
-        zert, _ = lp(zerts, 0)
-    except struct.error:
-        return None
-    return hashlib.sha256(zert).hexdigest() if zert else None
-
-
-def _apk_manifest(pfad):
-    """(paket, versionCode, versionName) aus dem binaeren AndroidManifest.xml, sonst (None, None, None)."""
-    import struct
-    import zipfile
-    try:
-        with zipfile.ZipFile(pfad) as z:
-            x = z.read("AndroidManifest.xml")
-        if struct.unpack_from("<H", x, 0)[0] != 0x0003:
-            return None, None, None
-        o = struct.unpack_from("<H", x, 2)[0]
-        texte, resids = [], []
-        while o + 8 <= len(x):
-            typ, hgr, gr = struct.unpack_from("<HHI", x, o)
-            if typ == 0x0001:   # String-Pool
-                anzahl, _stile, flags, start = struct.unpack_from("<IIII", x, o + 8)
-                utf8 = bool(flags & 0x100)
-                for k in range(anzahl):
-                    p = o + start + struct.unpack_from("<I", x, o + hgr + 4 * k)[0]
-                    if utf8:
-                        p += 2 if x[p] & 0x80 else 1
-                        n = x[p] & 0x7F
-                        if x[p] & 0x80:
-                            n = (n << 8) | x[p + 1]
-                            p += 1
-                        texte.append(x[p + 1:p + 1 + n].decode("utf-8", "replace"))
-                    else:
-                        n = struct.unpack_from("<H", x, p)[0]
-                        if n & 0x8000:
-                            n = ((n & 0x7FFF) << 16) | struct.unpack_from("<H", x, p + 2)[0]
-                            p += 2
-                        texte.append(x[p + 2:p + 2 + 2 * n].decode("utf-16-le", "replace"))
-            elif typ == 0x0180:   # Ressourcen-IDs der Attributnamen
-                resids = list(struct.unpack_from(f"<{(gr - hgr) // 4}I", x, o + hgr))
-            elif typ == 0x0102:   # Start-Element
-                name = struct.unpack_from("<I", x, o + 20)[0]
-                if texte[name] == "manifest":
-                    a_start, a_gr, a_anz = struct.unpack_from("<HHH", x, o + 24)
-                    paket = vcode = vname = None
-                    for k in range(a_anz):
-                        a = o + 16 + a_start + k * a_gr
-                        _ns, an, roh, _g, _r, dtyp, daten = struct.unpack_from("<IIIHBBI", x, a)
-                        rid = resids[an] if an < len(resids) else 0
-                        aname = texte[an] if an < len(texte) else ""
-                        wert = texte[roh] if roh != 0xFFFFFFFF else (texte[daten] if dtyp == 0x03 else None)
-                        if aname == "package":
-                            paket = wert
-                        elif rid == 0x0101021B or aname == "versionCode":
-                            vcode = daten if dtyp in (0x10, 0x11) else (int(wert) if wert and wert.isdigit() else None)
-                        elif rid == 0x0101021C or aname == "versionName":
-                            vname = wert
-                    return paket, vcode, vname
-            if gr <= 0:
-                break
-            o += gr
-    except (KeyError, zipfile.BadZipFile, struct.error, IndexError, ValueError, OSError):
-        pass
-    return None, None, None
+_apk_zertifikat_sha256 = apk.zertifikat_sha256
+_apk_manifest = apk.manifest
 
 
 def _oeffentlich(res):
@@ -2508,6 +2418,8 @@ def _apps_einspielen(schluessel, plattform, quelle, version_soll=None):
                 os.remove(pfad)
             except OSError:
                 pass
+        if katalog:
+            adb_updater.anstossen()   # geteilte Telefone bekommen die Fassung per adb (adb_updater.py)
         app.logger.info("apps: %s %s %s (%s) von %s", schluessel, plattform, version, sha[:12], quelle)
         return jsonify({"ok": True, "schluessel": schluessel, "plattform": plattform, "version": version,
                         "version_code": version_code, "sha256": sha, "groesse": n, "katalog": bool(katalog)})
@@ -2679,8 +2591,11 @@ def telefon_app_apk_hochladen(paket):
         with open(tmp, "wb") as out:
             out.write(daten)
         os.replace(tmp, os.path.join(TELEFON_APPS_DIR, datei))
-        conn.execute("UPDATE telefon_apps SET apk_datei=?, sha256=?, groesse=?, updated_at=datetime('now') "
-                     "WHERE paket=?", (datei, sha, len(daten), paket))
+        # versionCode/-Name aus dem Manifest: der adb-Updater vergleicht danach
+        _p, vcode, vname = apk.manifest(os.path.join(TELEFON_APPS_DIR, datei))
+        conn.execute("UPDATE telefon_apps SET apk_datei=?, sha256=?, groesse=?, version_code=?, version_name=?, "
+                     "updated_at=datetime('now') WHERE paket=?",
+                     (datei, sha, len(daten), vcode if _p == paket else None, vname if _p == paket else None, paket))
         conn.commit()
         alt = r["apk_datei"]
         if alt and alt != datei:
@@ -2688,6 +2603,7 @@ def telefon_app_apk_hochladen(paket):
                 os.remove(os.path.join(TELEFON_APPS_DIR, alt))
             except OSError:
                 pass
+        adb_updater.anstossen()   # geteilte Telefone bekommen die Fassung per adb
         return jsonify({"ok": True, "paket": paket, "sha256": sha, "groesse": len(daten)})
     finally:
         conn.close()
@@ -3565,12 +3481,9 @@ def telefon_wlan_debug(ext):
             minuten = max(0, min(int(b.get("minuten", 60)), 240))
         except (TypeError, ValueError):
             return jsonify({"error": "minuten: Zahl 0..240"}), 400
-        bis = int(time.time()) + minuten * 60 if minuten else 0
-        conn.execute("INSERT INTO telefon_wartung (ext, wlan_debug_bis, durch, geaendert) VALUES (?,?,?,datetime('now')) "
-                     "ON CONFLICT(ext) DO UPDATE SET wlan_debug_bis = excluded.wlan_debug_bis, "
-                     "durch = excluded.durch, geaendert = excluded.geaendert", (ext, bis, actor(user)))
-        conn.execute("INSERT INTO telefon_log (ext, ereignis, durch) VALUES (?,?,?)",
-                     (ext, f"wlan-debug {minuten} min" if minuten else "wlan-debug aus", actor(user)))
+        bis = db.wartung_setzen(conn, ext, minuten, actor(user))
+        # von Hand geschaltet: der Updater schaltet diese Wartung nicht mehr selbst aus
+        conn.execute("UPDATE telefon_updater SET wartung_von_uns = 0 WHERE ext = ?", (ext,))
         conn.commit()
     finally:
         conn.close()
@@ -3611,6 +3524,70 @@ def telefon_adb_melden():
         conn.close()
     return jsonify({"ok": True})
 
+def _updater_json(conn, ext, u, jetzt):
+    """Stand des adb-Updaters fuer eine Nebenstelle (fuer /smartphones)."""
+    if not u:
+        return {"zugelassen": False, "zulassen_bis": 0, "ergebnis": "", "geprueft": 0, "sofort": False,
+                "ausstehend": []}
+    return {"zugelassen": bool(u["zugelassen"]),
+            "zulassen_bis": int(u["freigabe_bis"]) if int(u["freigabe_bis"] or 0) > jetzt else 0,
+            "ergebnis": u["ergebnis"], "geprueft": int(u["geprueft"] or 0), "sofort": bool(u["sofort"]),
+            "ausstehend": [{"paket": a["paket"], "name": a["name"], "ist": a["ist"], "soll": a["soll"],
+                            "version": a["version_name"]} for a in adb_updater.ausstehend(conn, ext)]}
+
+
+@app.post("/api/telefon/<ext>/updater")
+def telefon_updater(ext):
+    """Technik/Praesident: adb-Updater fuer ein geteiltes Telefon.
+    {aktion: 'zulassen'}  Updater-Schluessel einmal zulassen (Wartung 15 Min. an, Geraet bestaetigt
+                          die Rueckfrage nur fuer den Fingerabdruck des Updaters, 5 Min. lang)
+    {aktion: 'jetzt'}     sofort pruefen und - wenn die Regeln es erlauben - einspielen
+    {aktion: 'vergessen'} Zulassung/Seriennummer vergessen (Telefon ersetzt oder zurueckgesetzt)"""
+    user, deny = require_admin()
+    if deny:
+        return deny
+    if not re.fullmatch(r"[0-9]{2,8}", ext):
+        return jsonify({"error": "Nebenstelle ungueltig"}), 400
+    aktion = str((request.get_json(silent=True) or {}).get("aktion") or "")
+    if aktion not in ("zulassen", "jetzt", "vergessen"):
+        return jsonify({"error": "aktion: zulassen | jetzt | vergessen"}), 400
+    if aktion == "zulassen" and not adb_updater.fingerabdruck():
+        return jsonify({"error": "Der Updater hat noch keinen adb-Schluessel (pbx/DEPLOY-PBX-API.md)"}), 409
+    conn = db.connect()
+    weck = False
+    try:
+        if not conn.execute("SELECT 1 FROM sip_extensions WHERE ext = ? AND context = 'geteilt'", (ext,)).fetchone():
+            return jsonify({"error": "Kein geteiltes Telefon"}), 404
+        adb_updater.zeile(conn, ext)
+        if aktion == "zulassen":
+            bis = int(time.time()) + adb_updater.FREIGABE_S
+            conn.execute("UPDATE telefon_updater SET zugelassen = 0, freigabe_bis = ? WHERE ext = ?", (bis, ext))
+            w = conn.execute("SELECT wlan_debug_bis FROM telefon_wartung WHERE ext = ?", (ext,)).fetchone()
+            if not w or int(w["wlan_debug_bis"] or 0) < bis:
+                db.wartung_setzen(conn, ext, adb_updater.WARTUNG_MIN, actor(user))
+                conn.execute("UPDATE telefon_updater SET wartung_von_uns = 1 WHERE ext = ?", (ext,))
+                weck = True
+        elif aktion == "jetzt":
+            conn.execute("UPDATE telefon_updater SET sofort = 1 WHERE ext = ?", (ext,))
+        else:
+            conn.execute("UPDATE telefon_updater SET zugelassen = 0, freigabe_bis = 0, seriennummer = '' "
+                         "WHERE ext = ?", (ext,))
+            conn.execute("DELETE FROM telefon_apps_ist WHERE ext = ?", (ext,))
+        conn.execute("INSERT INTO telefon_log (ext, ereignis, durch) VALUES (?,?,?)",
+                     (ext, f"updater {aktion}", actor(user)))
+        conn.commit()
+    finally:
+        conn.close()
+    if weck:
+        try:
+            ami.originate(f"PJSIP/{ext}", "suchen", "s", callerid='"Wartung" <2098>', timeout_ms=15000)
+        except Exception as e:  # noqa: BLE001
+            app.logger.warning("Wartung wecken %s: %s", ext, type(e).__name__)
+    gestartet = aktion != "vergessen" and adb_updater.anstossen()
+    app.logger.info("Updater %s: %s durch %s", ext, aktion, actor(user))
+    return jsonify({"ok": True, "gestartet": gestartet})
+
+
 @app.get("/api/pbx/smartphones")
 def smartphones_uebersicht():
     """Technik/Praesident: alles fuer rosenweg4303.ch/smartphones in einer Antwort, ohne
@@ -3629,6 +3606,7 @@ def smartphones_uebersicht():
         sitz = {r["ext"]: r for r in conn.execute("SELECT ext, name, seit FROM telefon_sitzungen")}
         wart = {r["ext"]: r for r in conn.execute("SELECT ext, wlan_debug_bis, durch FROM telefon_wartung")}
         adb = {r["ext"]: r for r in conn.execute("SELECT ext, adresse, port, gemeldet FROM telefon_adb")}
+        upd = {r["ext"]: r for r in conn.execute("SELECT * FROM telefon_updater")}
         telefone = []
         for e in conn.execute("SELECT ext, name, client, enabled FROM sip_extensions "
                               "WHERE context = 'geteilt' ORDER BY ext"):
@@ -3643,6 +3621,7 @@ def smartphones_uebersicht():
                 "adb": (f"{adb[e['ext']]['adresse']}:{adb[e['ext']]['port']}"
                         if e["ext"] in adb and adb[e["ext"]]["port"] and bis > jetzt
                         and jetzt - int(adb[e["ext"]]["gemeldet"] or 0) < 900 else None),
+                "updater": _updater_json(conn, e["ext"], upd.get(e["ext"]), jetzt),
             })
         privat = [{"id": r["id"], "kennung": f"{r['nummer']}-p{r['id']}", "nummer": r["nummer"],
                    "geraet": r["geraet"], "seit": r["created_at"],
@@ -3651,7 +3630,8 @@ def smartphones_uebersicht():
         log = db.rows_to_dicts(conn.execute("SELECT ext, ereignis, name, durch, zeit FROM telefon_log "
                                             "ORDER BY id DESC LIMIT 40").fetchall())
         return jsonify({"telefone": telefone, "privat": privat, "log": log,
-                        "gruppen": sorted(_telefon_gruppen(conn))})
+                        "gruppen": sorted(_telefon_gruppen(conn)),
+                        "updater_fingerabdruck": adb_updater.fingerabdruck()})
     finally:
         conn.close()
 
