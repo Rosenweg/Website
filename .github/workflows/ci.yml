@@ -42,6 +42,9 @@ jobs:
           done < <(find . -type f -name '*.json' -not -path '*/node_modules/*' -print0)
           echo "✓ Alle JSON-Dateien gueltig"
 
+      - name: API-Tests ohne Datenbank (node --test api/test/)
+        run: node --test api/test/
+
   edge-plugin:
     # Eigenes Traefik-Plugin (edge-traefik/plugins/echteip): Format, vet, Tests
     runs-on: ubuntu-latest

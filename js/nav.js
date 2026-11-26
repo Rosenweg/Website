@@ -63,6 +63,7 @@ const SERVICES_GROUPS = [
       { label: 'Auslagen / Vorschüsse', href: 'auslagen.html', activeKey: 'auslagen', perm: 'auslagen' },
       { label: 'Stundensatz (Auslagen)', href: 'auslagen-stundensatz.html', activeKey: 'auslagen-stundensatz', perm: 'auslagen-stundensatz' },
       { label: 'Handwerker & Lieferanten', href: 'handwerker.html', activeKey: 'handwerker', perm: 'handwerker' },
+      { label: 'Salzvorrat', href: 'salz.html', activeKey: 'salz', permAny: 'technik,praesident' },
       { label: 'Proxmox', href: 'proxmox-verwaltung.html', activeKey: 'proxmox', perm: 'proxmox-verwaltung' },
       { label: 'Stationen', href: 'stationen.html', activeKey: 'stationen', permAny: 'technik,praesident' },
       { label: 'SSH-Zugang', href: 'ssh-zugriffsmatrix.html', activeKey: 'ssh-zugang', permAny: 'technik,praesident' },
