@@ -23,6 +23,8 @@
 //     app_karten_versuche, überlebt Neustarts und mehrere Instanzen).
 //  3. Mail an die Person bei der ersten Karten-Anmeldung auf einem neuen Gerät.
 //  4. Karte bei jedem Erneuern live in UniFi Access: entzogen = Sitzung weg.
+//     Die Kartenpruefung ist dieselbe wie fuer die geteilten Telefone
+//     (karteNachschlagen in server.js, auch hinter GET /api/pbx/karte/:nfcId).
 //  5. Höchstens APP_KARTE_MAX_SITZUNGEN (20) aktive Sitzungen je Person; eine
 //     neue löst die am längsten unbenutzte ab (statt die Person auszusperren,
 //     die eine App neu installiert hat und deren alte Sitzung noch zählt).
@@ -45,8 +47,7 @@ const PORTAL_URL = process.env.SITE_URL || 'https://www.rosenweg4303.ch';
 function appKarteRoutes(app, deps) {
   const {
     pool, authMiddleware, requireUserLogin, absenderIp, loggedSendMail, MAIL_FROM,
-    accessKarteZurUid, accessKartenBesitzerId, kartenPerson, kartenProtokollieren,
-    unifiAccessRaw, accessOk,
+    karteNachschlagen, accessKarteLive, accessKartenBesitzerId, kartenPerson, kartenProtokollieren,
   } = deps;
 
   let bereit = null;
@@ -157,15 +158,16 @@ function appKarteRoutes(app, deps) {
         await versuch(uidHash, ip, w.kennung, false, `gebremst:${bremse}`);
         return res.status(429).json({ error: 'Zu viele Versuche – bitte in einer Viertelstunde nochmals.', grund: 'gebremst' });
       }
-      let k;
-      try { k = await accessKarteZurUid(w.uid); } catch (e) {
+      // Dieselbe Pruefung wie fuer die geteilten Telefone (GET /api/pbx/karte/:nfcId)
+      let n;
+      try { n = await karteNachschlagen(w.uid); } catch (e) {
         return res.status(502).json({ error: 'Die Kartenprüfung ist gerade nicht erreichbar.', grund: 'verbindung' });
       }
+      const k = n.karte || null;
       const besitzer = accessKartenBesitzerId(k);
-      const zugewiesen = !!k && !!besitzer && String(k.status || '').toLowerCase() === 'assigned';
-      const person = zugewiesen ? await kartenPerson(besitzer) : null;
-      const anzeige = k?.display_id || w.uid.slice(-6);
-      let grund = !k ? 'unbekannt' : !zugewiesen ? 'gesperrt' : !person?.email ? 'ohne-person' : null;
+      const person = n.assigned ? n.person : null;
+      const anzeige = n.display_id || w.uid.slice(-6);
+      let grund = !n.found ? 'unbekannt' : !n.assigned ? 'gesperrt' : !person?.email ? 'ohne-person' : null;
       let zeile = null;
       if (!grund) {
         zeile = (await pool.query('SELECT id, email, name, active FROM users WHERE LOWER(email) = $1 ORDER BY id LIMIT 1',
@@ -255,9 +257,9 @@ function appKarteRoutes(app, deps) {
       // Karte live in UniFi Access: noch zugewiesen, derselben Person?
       let geprueft = false;
       if (s.access_karten_token) {
-        const r = await unifiAccessRaw('GET', `/credentials/nfc_cards/tokens/${encodeURIComponent(s.access_karten_token)}`);
-        if (r.status === 404 || (accessOk(r) && r.body?.data)) {
-          const d = r.body?.data;
+        let d, erreicht = true;
+        try { d = await accessKarteLive(s.access_karten_token); } catch (e) { erreicht = false; }
+        if (erreicht) {
           const ok = d && String(d.status || '').toLowerCase() === 'assigned' && String(accessKartenBesitzerId(d)) === String(s.access_user_id);
           if (!ok) {
             await widerrufen('id = $1', [id], 'system', 'karte entzogen');
