@@ -1440,7 +1440,7 @@ def telefon_sip_person():
 # PKCE) und holt hier einen festen Zugang <nummer>-p<id>. Ohne Sitzung an einem geteilten
 # Telefon; er bleibt, bis die App abmeldet, Technik ihn loescht oder die Nummer inaktiv wird.
 SIP_PRIVAT_RE = re.compile(r"3[0-9]{5}-p[0-9]{1,6}")
-SIP_PRIVAT_MAX = 5   # Handys pro Person
+SIP_PRIVAT_MAX = int(os.environ.get("SIP_PRIVAT_MAX", "20"))   # Handys pro Person (Stefan 26.11.2026: 20, jede App meldet sich einzeln an)
 
 
 def _sip_privat_abschnitte(conn):
