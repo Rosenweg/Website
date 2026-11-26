@@ -41,3 +41,18 @@ jobs:
               || { echo "Ungueltiges JSON: $f"; exit 1; }
           done < <(find . -type f -name '*.json' -not -path '*/node_modules/*' -print0)
           echo "✓ Alle JSON-Dateien gueltig"
+
+  edge-plugin:
+    # Eigenes Traefik-Plugin (edge-traefik/plugins/echteip): Format, vet, Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: edge-traefik/plugins/echteip
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test -count=1 ./...

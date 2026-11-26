@@ -347,6 +347,28 @@ http:
           - url: http://100.64.90.50:8082
 tcp:
   routers:
+    # IMAPS mit PROXY-Protokoll (18.11.2026): Dovecot sieht so die echte
+    # Client-IP (Sperre/CrowdSec je Angreifer statt fuer den Edge). Ueberdeckt
+    # per Prioritaet die gleichnamigen Datenbank-Routen (routes.yml), die weiter
+    # auf 993 zeigen - Router loeschen = alter Weg. Mailcow-Port 10993 ist
+    # Mailcows eingebauter haproxy-Listener; PROXY-Koepfe nur von 100.64.2.40
+    # (data/conf/dovecot/extra.conf).
+    # SMTPS zu PMG mit PROXY-Protokoll (18.11.2026): PMG-Port 10465 sieht die
+    # echte Client-IP (nur der Edge darf dorthin, nft auf PMG). Ueberdeckt die
+    # Datenbank-Routen auf 465. Auch mail.rosenweg4303.ch: PMG ist Eingang fuer
+    # alles SMTP (PMG-Zertifikat enthaelt den Namen seit 18.11.2026).
+    smtps-pmg-proxy:
+      entryPoints: [smtps]
+      rule: HostSNI(`smtp.rosenweg4303.ch`) || HostSNI(`smtp.rosenweg9.ch`) || HostSNI(`smtp.personen.rosenweg4303.ch`) || HostSNI(`mail.rosenweg4303.ch`)
+      priority: 10000
+      service: smtps-pmg-proxy-svc
+      tls: { passthrough: true }
+    imaps-mailcow-proxy:
+      entryPoints: [imaps]
+      rule: HostSNI(`imap.rosenweg4303.ch`) || HostSNI(`mail.rosenweg4303.ch`) || HostSNI(`imap.rosenweg9.ch`) || HostSNI(`imap.personen.rosenweg4303.ch`)
+      priority: 10000
+      service: imaps-mailcow-proxy-svc
+      tls: { passthrough: true }
     personen-rw4303-passthrough:
       entryPoints: [websecure]
       rule: HostSNI(`personen.rosenweg4303.ch`)
@@ -364,7 +386,23 @@ tcp:
         certResolver: cf
         domains:
           - main: mqtt.rosenweg4303.ch
+  # PROXY-Protokoll v2 zum Ziel (Traefik >= 3.5: ueber serversTransport,
+  # nicht mehr direkt am loadBalancer).
+  serversTransports:
+    proxy-v2:
+      proxyProtocol:
+        version: 2
   services:
+    smtps-pmg-proxy-svc:
+      loadBalancer:
+        serversTransport: proxy-v2
+        servers:
+          - address: 100.64.2.31:10465
+    imaps-mailcow-proxy-svc:
+      loadBalancer:
+        serversTransport: proxy-v2
+        servers:
+          - address: 100.64.2.33:10993
     personen-rw4303-svc:
       loadBalancer:
         servers:

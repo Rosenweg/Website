@@ -1,0 +1,20 @@
+# Passwort-Raten gegen Authentik (Portal-Anmeldung, auth./authentik.).
+# Authentik selbst bremst nicht je IP; ab dem 8. Fehlversuch (1 pro Minute
+# abgebaut) wird gesperrt, 24 h laut profil-rosenweg-anmeldung-24h.yaml (Stefan 25.11.2026).
+type: leaky
+name: rosenweg/authentik-bf
+description: "Passwort-Raten gegen Authentik"
+filter: "evt.Meta.log_type == 'authentik_login_failed'"
+groupby: evt.Meta.source_ip
+capacity: 7
+leakspeed: 1m
+blackhole: 10m
+labels:
+  service: authentik
+  remediation: true
+  confidence: 3
+  spoofable: 0
+  classification:
+    - attack.T1110
+  behavior: "http:bruteforce"
+  label: "Authentik Passwort-Raten"

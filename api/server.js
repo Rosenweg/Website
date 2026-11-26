@@ -21762,10 +21762,15 @@ async function buildTraefikDynamicConfig() {
   for (const m of mrs.rows) {
     // Namen/Adressen landen woertlich in HostSNI-Regeln — Ungueltiges auslassen.
     if (!mailRelayEintragGueltig(m)) { console.warn('[traefik] Mail-Relay übersprungen, ungültiger Host/Port:', m.id); continue; }
-    // Aliasname (z. B. mail.<domain>): IMAPS und Submission beide auf Mailcow,
-    // dessen Zertifikat den Namen abdeckt. Siehe Kommentar bei sni_alias.
+    // Aliasname (z. B. mail.<domain>): IMAPS auf Mailcow, SMTPS auf den
+    // SMTPS-Host (PMG ist Eingang fuer alles SMTP; dessen Zertifikat enthaelt
+    // den Aliasnamen seit 18.11.2026). Ohne SMTPS-Host wie frueher auf Mailcow.
     if (m.sni_alias && m.imap_host) {
-      for (const [ep, port] of [['imaps', m.imap_port || 993], ['smtps', 465]]) {
+      const ziele = [
+        ['imaps', m.imap_host, m.imap_port || 993],
+        ['smtps', m.smtps_host || m.imap_host, m.smtps_host ? (m.smtps_port || 465) : 465],
+      ];
+      for (const [ep, host, port] of ziele) {
         const id = safeId(`${ep}-alias-${m.id}-${m.sni_alias}`);
         const svc = id + '-svc';
         cfg.tcp.routers[id] = {
@@ -21774,7 +21779,7 @@ async function buildTraefikDynamicConfig() {
           service: svc,
           tls: { passthrough: true },
         };
-        cfg.tcp.services[svc] = { loadBalancer: { servers: [{ address: mailRelayAdresse(m.imap_host, port) }] } };
+        cfg.tcp.services[svc] = { loadBalancer: { servers: [{ address: mailRelayAdresse(host, port) }] } };
       }
     }
     if (m.imap_sni_hostname && m.imap_host) {

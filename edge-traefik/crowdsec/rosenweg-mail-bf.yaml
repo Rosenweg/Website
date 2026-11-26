@@ -1,0 +1,21 @@
+# Passwort-Raten gegen Mailcow (IMAP/POP, SASL, SOGo-Webmail). Gesperrt wird am
+# Edge (nftables), weil proxierte Verbindungen auf Mailcow vom Edge kommen.
+# Mailprogramme mit altem Passwort versuchen es alle paar Minuten - erst ein
+# schnelleres Muster (10 Fehler, je 1 pro Minute abgebaut) gilt als Raten.
+type: leaky
+name: rosenweg/mail-bf
+description: "Passwort-Raten gegen Mailcow"
+filter: "evt.Meta.log_type == 'mail_auth_failed'"
+groupby: evt.Meta.source_ip
+capacity: 10
+leakspeed: 1m
+blackhole: 10m
+labels:
+  service: mail
+  remediation: true
+  confidence: 3
+  spoofable: 0
+  classification:
+    - attack.T1110
+  behavior: "pop3/imap:bruteforce"
+  label: "Mail Passwort-Raten"

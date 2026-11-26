@@ -1,0 +1,13 @@
+[Unit]
+Description=nft: CrowdSec-API nur fuer lokale Bouncer, PMG und Melder
+Before=crowdsec.service
+After=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/rosenweg/rw-crowdsec-lapi.nft
+ExecStop=/usr/sbin/nft delete table inet rw_crowdsec_lapi
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+# Zeilen vom Exporter auf dem Authentik-CT (scripts/authentik-crowdsec-melder):
+#   programm "authentik-melder", Nachricht "login_failed ip=<adresse>"
+name: rosenweg/authentik-melder
+description: "Authentik-Fehlanmeldungen (vom Melder per Syslog)"
+filter: "evt.Parsed.program == 'authentik-melder'"
+onsuccess: next_stage
+grok:
+  pattern: '^login_failed ip=%{IP:client_ip}$'
+  apply_on: message
+statics:
+  - meta: log_type
+    value: authentik_login_failed
+  - meta: service
+    value: authentik
+  - meta: source_ip
+    expression: evt.Parsed.client_ip

@@ -1,0 +1,12 @@
+[Unit]
+Description=nft: CrowdSec-Sperren auf PMG fuer 25, 465, 587
+Before=crowdsec-firewall-bouncer.service
+After=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/rosenweg/pmg-crowdsec-sperre.nft
+
+[Install]
+WantedBy=multi-user.target

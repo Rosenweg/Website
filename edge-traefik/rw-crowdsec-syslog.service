@@ -1,0 +1,13 @@
+[Unit]
+Description=nft: CrowdSec-Syslog-Eingang nur fuer freigegebene Hosts
+Before=crowdsec.service
+After=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/rosenweg/rw-crowdsec-syslog.nft
+ExecStop=/usr/sbin/nft delete table inet rw_crowdsec_syslog
+
+[Install]
+WantedBy=multi-user.target
