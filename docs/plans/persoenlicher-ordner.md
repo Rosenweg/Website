@@ -8,7 +8,7 @@ Die Nextcloud zeigt ihn an, statt einen eigenen zu führen.
 | | AD-Home | Nextcloud persönlich |
 |---|---|---|
 | Ort | CephFS `/userdata/home/<name>` | Platte von CT 104, `data/<name>/files` |
-| Zugang heute | Windows (H:, Ordnerumleitung per `logon.bat`, Testphase nur stefan.mueller), Linux-Stationen | Browser, Rosenweg Files, Dateiauswahl am Telefon |
+| Zugang heute | Windows (H:, Ordnerumleitung per `logon.bat`, Testphase nur stefan.mueller; Ablösung durch GPO siehe [ad-dc/gpo-ordnerumleitung](../../ad-dc/gpo-ordnerumleitung/README.md)), Linux-Stationen | Browser, Rosenweg Files, Dateiauswahl am Telefon |
 | Inhalt | nur `stefan.mueller` hat einen (42 GB) | praktisch leer (nur Testdateien) |
 | Rechte | `700`, Besitzer = Person (idmap-rid-uid, bei Stefan 11184), keine ACL | Nextcloud |
 | Sicherung | CT 134 liest `/userdata` (read-only, als root) | mit CT 104 |
@@ -106,7 +106,10 @@ Die Nextcloud-Einbindung ist leer, solange es keinen Home gibt. Heute legt Windo
   Die Nextcloud greift lokal aufs CephFS zu und ist davon nicht betroffen.
 - ~~GPO „Grant the user exclusive rights“~~ **geprüft:** Die GPO „Rosenweg-Folder Redirect“ ist leer
   (Version 0, kein fdeploy.ini). Die Umleitung macht `logon.bat` (md, robocopy, `reg add` für
-  User Shell Folders, nur stefan.mueller). Dabei setzt Windows keine eigenen Rechte. Die leere GPO kann weg.
+  User Shell Folders, nur stefan.mueller). Dabei setzt Windows keine eigenen Rechte.
+  **26.11.:** Die leere GPO wird zur Richtlinie «Rosenweg-Ordnerumleitung» (Windows-Ordnerumleitung,
+  ohne exklusive Rechte und ohne Besitzprüfung, Gruppe `Ordnerumleitung`), danach fällt `logon.bat` weg:
+  [ad-dc/gpo-ordnerumleitung](../../ad-dc/gpo-ordnerumleitung/README.md).
 - **Samba `inherit acls`** bläht neue ACLs auf (siehe Probelauf Ordnerrechte). Das ist kosmetisch,
   die wirksamen Rechte stimmen.
 - **Zugriff:** Wer root auf CT 104 hat, kann alle Homes lesen. Das gilt heute für die
