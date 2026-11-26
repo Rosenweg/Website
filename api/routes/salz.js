@@ -178,8 +178,7 @@ async function lagerUebersicht(lagerId = null, db = pool) {
     `SELECT lager_id, gebucht_am AS am, (-saecke * kg_je_sack)::float AS kg
        FROM salz_buchungen
       WHERE art = 'eingefuellt' AND storniert_am IS NULL
-        AND gebucht_am > NOW() - ($1::int * INTERVAL '1 day')
-        AND ($2::int IS NULL OR lager_id = $2)`, [FENSTER_TAGE, lagerId]);
+        AND ($1::int IS NULL OR lager_id = $1)`, [lagerId]);
   const jetzt = new Date();
   return lager.rows.map(l => {
     const v = verbrauchProWoche(ein.rows.filter(e => e.lager_id === l.id), jetzt);
