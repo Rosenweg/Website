@@ -7,7 +7,7 @@ Windows-Rechner der Domäne sehen damit aus wie die Stationen:
 - Taskleiste links
 - Rosenweg als Hersteller mit Logo
 - das Logo als Standard-Kontobild
-- BGInfo: Rechner, Adressen, angemeldete Person, Windows-Stand und letztes Update unten rechts auf dem Hintergrund (`bginfo.ps1`, bei jeder Anmeldung)
+- BGInfo: Rechner, Adressen, angemeldete Person, Windows-Stand und letztes Update oben rechts auf dem Hintergrund (`bginfo.ps1`, bei jeder Anmeldung)
 - eine Programm-Whitelist (AppLocker, erzwungen): Siehe unten
 - die Laufwerke H: (Home) und D: (Dokumente) bei jeder Anmeldung
 - die Drucker DruckerR9 und DruckerR13 über den CUPS-Server (IPP, ohne Herstellertreiber, A4)
