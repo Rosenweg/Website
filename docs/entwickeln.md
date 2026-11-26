@@ -76,4 +76,4 @@ Containern. Regeln, Grenzwerte und offene Punkte nach der Prüfung vom
 ## Kontakt
 
 **Technischer Dienst Rosenweg**
-- Stefan Müller - stefan+rosenweg@juroct.ch
+- Technik, über das Kontaktformular auf [www.rosenweg4303.ch](https://www.rosenweg4303.ch)
