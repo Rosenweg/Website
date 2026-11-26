@@ -103,11 +103,16 @@
                             title="Nur nötig, wenn ein Rechner nicht im AD steht — sonst kommt er von selbst">
                         Windows-Rechner eintragen
                     </button>
+                    <button onclick="ccOeffnen()" class="px-3 py-2 text-sm border rounded-lg hover:bg-gray-50"
+                            title="Ein Chromecast als Anzeige — zeigt dieselbe Seite wie eine Anzeige-Station, der Cast-Wächter hält ihn dort">
+                        Chromecast eintragen
+                    </button>
                     <!-- Windows-Rechner kommen von selbst aus dem AD (26.11.2026): hier
                          steht, wann zuletzt und mit welchem Ergebnis, damit niemand
                          rätselt, warum ein neuer PC (noch) fehlt. -->
                     <p id="ad-stand" class="w-full text-xs text-gray-500"></p>
                     <p id="anschluss-stand" class="w-full text-xs text-gray-500 -mt-2"></p>
+                    <p id="cast-stand" class="w-full text-xs text-gray-500 -mt-2 hidden"></p>
                 </div>
 
                 <!-- Was die Wächter gerade melden, damit es niemand in der Tabelle suchen muss -->
@@ -361,6 +366,42 @@
         </div>
     </div>
 
+    <!-- Chromecast eintragen -->
+    <div id="cc-dialog" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-xl max-w-lg w-full">
+            <div class="p-6 border-b">
+                <h3 class="text-lg font-semibold text-gray-800">Chromecast eintragen</h3>
+                <p class="text-sm text-gray-500">Er wird zur Anzeige wie eine Anzeige-Station: dieselbe Seite fürs gewählte Haus, Ankündigungen und Notfall inklusive. Der Cast-Wächter prüft ihn alle paar Sekunden und holt die Anzeige zurück, wenn er neu startet oder jemand anderes castet.</p>
+            </div>
+            <div class="p-6 space-y-4">
+                <label class="block"><span class="text-sm font-medium text-gray-700">Name</span>
+                    <input id="cc-name" type="text" maxlength="63" class="mt-1 w-full border rounded-lg px-3 py-2" placeholder="z. B. Anzeige Eingang R9">
+                    <span class="text-xs text-gray-500">Daraus wird die Kennung (anzeige-eingang-r9).</span></label>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <label class="block"><span class="text-sm font-medium text-gray-700">IP-Adresse</span>
+                        <input id="cc-adresse" type="text" class="mt-1 w-full border rounded-lg px-3 py-2 font-mono" placeholder="192.0.2.10">
+                        <span class="text-xs text-gray-500">Fest (DHCP-Reservierung) — der Wächter spricht ihn direkt an.</span></label>
+                    <label class="block"><span class="text-sm font-medium text-gray-700">MAC (freiwillig)</span>
+                        <input id="cc-mac" type="text" class="mt-1 w-full border rounded-lg px-3 py-2 font-mono" placeholder="aa:bb:cc:dd:ee:ff"></label>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <label class="block"><span class="text-sm font-medium text-gray-700">Haus</span>
+                        <select id="cc-haus" class="mt-1 w-full border rounded-lg px-3 py-2"></select>
+                        <span class="text-xs text-gray-500">Bestimmt, welche Ankündigungen er zeigt.</span></label>
+                    <label class="block"><span class="text-sm font-medium text-gray-700">Standort</span>
+                        <input id="cc-standort" type="text" class="mt-1 w-full border rounded-lg px-3 py-2" placeholder="z. B. Treppenhaus EG"></label>
+                </div>
+                <label class="block"><span class="text-sm font-medium text-gray-700">Notiz</span>
+                    <input id="cc-notiz" type="text" class="mt-1 w-full border rounded-lg px-3 py-2"></label>
+                <p id="cc-meldung" class="text-sm"></p>
+            </div>
+            <div class="p-6 border-t flex justify-end gap-3">
+                <button onclick="ccSchliessen()" class="px-4 py-2 text-sm border rounded-lg hover:bg-gray-50">Abbrechen</button>
+                <button onclick="ccSpeichern()" class="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Eintragen</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Einstellungen je Station -->
     <div id="cfg-dialog" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[85vh] flex flex-col">
@@ -384,6 +425,12 @@
                 </div>
                 <label class="block"><span class="text-sm font-medium text-gray-700">Notiz</span>
                     <input id="cfg-notiz" type="text" class="mt-1 w-full border rounded-lg px-3 py-2"></label>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 hidden" id="cfg-cast-block">
+                    <label class="block"><span class="text-sm font-medium text-gray-700">IP-Adresse des Chromecast</span>
+                        <input id="cfg-cast-adresse" type="text" class="mt-1 w-full border rounded-lg px-3 py-2 font-mono"></label>
+                    <label class="block"><span class="text-sm font-medium text-gray-700">MAC (freiwillig)</span>
+                        <input id="cfg-cast-mac" type="text" class="mt-1 w-full border rounded-lg px-3 py-2 font-mono"></label>
+                </div>
 
                 <div class="border-t pt-4" id="cfg-druck-block">
                     <h4 class="font-medium text-gray-800">Drucken</h4>
@@ -548,6 +595,8 @@
                 adStandZeichnen();
                 anschlussStand = daten.anschluss_abgleich || null;
                 anschlussStandZeichnen();
+                castWaechter = daten.cast_waechter || null;
+                castStandZeichnen();
                 winProg = daten.windows_programme || null;
                 winProgZeichnen();
                 wartungsschluessel = daten.wartungsschluessel || 0;
@@ -591,6 +640,26 @@
         // die echte.
         const ohneAgent = (s) => s.role === 'windows';
 
+        // Ein Chromecast meldet sich auch nicht selbst — aber der Cast-Wächter
+        // fragt ihn ab und trägt „zuletzt gesehen" ein. Er zählt deshalb wie
+        // eine Station zu „länger still", hat aber nur die Knöpfe, die bei
+        // ihm etwas bewirken.
+        const istCast = (s) => s.role === 'chromecast';
+        let castWaechter = null;
+
+        // Was der Wächter beim letzten Lauf gesehen und getan hat.
+        function castZeile(s) {
+            const c = s.last_state?.cast;
+            if (!c) return '<div class="text-xs text-gray-400">noch nicht geprüft</div>';
+            const teile = [];
+            if (c.erreichbar === false) teile.push(`<span class="text-red-600">nicht erreichbar${c.unerreichbar_seit ? ' seit ' + escape(new Date(c.unerreichbar_seit).toLocaleString('de-CH')) : ''}</span>`);
+            else if (c.app) teile.push(`läuft: ${escape(c.app.name)}`);
+            else if (c.erreichbar) teile.push('Leerlauf');
+            if (c.wiederhergestellt_am) teile.push(`zuletzt zurückgeholt ${escape(vorZeit(c.wiederhergestellt_am).text)}${c.wiederherstellungen ? ` (${c.wiederherstellungen}×)` : ''}`);
+            if (c.fehler && c.erreichbar !== false) teile.push(`<span class="text-red-600">${escape(c.fehler)}</span>`);
+            return `<div class="text-xs text-gray-400" title="${escape(c.grund || '')}">📺 ${teile.join(' · ')}</div>`;
+        }
+
         // Was als Standarddrucker gewählt ist — derselbe Pfad, den Linux in
         // seiner Config liest (roles.<Art>.printing.default).
         const standardDrucker = (s) => s.overrides?.roles?.[s.role]?.printing?.default || '';
@@ -621,6 +690,15 @@
                 if (s.ad_zustand === 'deaktiviert') return '<span title="Das Computerkonto ist im AD deaktiviert — an diesem Rechner meldet sich niemand an." class="px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">im AD deaktiviert</span>';
                 if (s.aus_ad) return `<span title="${escape(s.ad_dn || '')}" class="px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700">aus dem AD</span>`;
                 return '<span title="Von Hand eingetragen, ohne Agent, nicht im AD gefunden" class="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">eingetragen</span>';
+            }
+            if (istCast(s) && s.last_state?.cast) {
+                const c = s.last_state.cast;
+                const badge = (text, farbe, titel) => `<span title="${escape(titel || c.grund || '')}" class="px-2 py-0.5 rounded text-xs font-medium ${farbe}">${text}</span>`;
+                if (c.erreichbar === false) return badge('nicht erreichbar', 'bg-red-100 text-red-700', c.fehler);
+                if (c.aktion === 'gut' || c.aktion === 'starten' || c.aktion === 'laden') return badge('zeigt die Anzeige', 'bg-green-100 text-green-700');
+                if (c.aktion === 'warten' && c.fremd_app) return badge(`${escape(c.fremd_app)} läuft`, 'bg-yellow-100 text-yellow-800');
+                if (c.aktion === 'gescheitert' || c.aktion === 'warten') return badge('Start gescheitert', 'bg-yellow-100 text-yellow-800', c.fehler);
+                if (c.aktion === 'aus') return badge('Wächter aus', 'bg-gray-100 text-gray-700');
             }
             if (!s.last_seen_at) {
                 return '<span class="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">neu</span>';
@@ -833,7 +911,7 @@
                     <td class="py-3 px-6 font-mono font-medium">${escape(s.id)}${version}</td>
                     <td class="py-3 px-3">${escape(typLabel(s.role))}${druckerZeile}${progZ}</td>
                     <td class="py-3 px-3">${standortZelle(s)}</td>
-                    <td class="py-3 px-3 text-gray-600">${ohneAgent(s) ? `AD-Name <span class="font-mono">${escape(s.hostname || s.id)}</span>${s.ad_betriebssystem ? `<div class="text-xs text-gray-400">${escape(s.ad_betriebssystem)}</div>` : ''}` : escape(geraet(s)) + anschlussZ}</td>
+                    <td class="py-3 px-3 text-gray-600">${istCast(s) ? `Chromecast <span class="font-mono">${escape(s.hardware?.adresse || '?')}</span>${castZeile(s)}` : ohneAgent(s) ? `AD-Name <span class="font-mono">${escape(s.hostname || s.id)}</span>${s.ad_betriebssystem ? `<div class="text-xs text-gray-400">${escape(s.ad_betriebssystem)}</div>` : ''}` : escape(geraet(s)) + anschlussZ}</td>
                     <td class="py-3 px-3 text-gray-600">${escape(s.registered_by || '—')}</td>
                     <td class="py-3 px-3 ${gesehen.alt ? 'text-yellow-700' : 'text-gray-600'}">${escape(gesehen.text)}</td>
                     <td class="py-3 px-3">${zustandBadge(s)}${wartungZeile(s)}${waechterZeilen(s)}</td>
@@ -900,13 +978,20 @@
             // einer Anzeige. WLAN und Kanal gibt es bei Windows nicht: dort
             // läuft kein Agent, der sie läse — die Felder wären Attrappen.
             const win = s.role === 'windows';
-            document.getElementById('cfg-druck-block').classList.toggle('hidden', s.role === 'display');
+            const cast = istCast(s);
+            document.getElementById('cfg-druck-block').classList.toggle('hidden', s.role === 'display' || cast);
+            document.getElementById('cfg-cast-block').classList.toggle('hidden', !cast);
+            document.getElementById('cfg-cast-adresse').value = s.hardware?.adresse || '';
+            document.getElementById('cfg-cast-mac').value = s.hardware?.mac || '';
             document.getElementById('cfg-drucker').innerHTML = druckerOptionen(standardDrucker(s));
             // Die A4-Regel gilt nur auf Linux (os-stationen, 50-apps.sh); Windows
             // stellt das Papier selbst auf A4 (GPO rosenweg-look).
             document.getElementById('cfg-drucker-linux').classList.toggle('hidden', win);
-            document.getElementById('cfg-wlan-block').classList.toggle('hidden', win);
-            document.getElementById('cfg-kanal-block').classList.toggle('hidden', win);
+            // Beim Chromecast: kein WLAN, kein Kanal — auf ihm läuft nichts von uns.
+            // Die Anzeigeadresse lässt sich wie bei einer Anzeige-Station im JSON
+            // unter roles.display.url überschreiben.
+            document.getElementById('cfg-wlan-block').classList.toggle('hidden', win || cast);
+            document.getElementById('cfg-kanal-block').classList.toggle('hidden', win || cast);
 
             document.getElementById('cfg-dialog').classList.remove('hidden');
         }
@@ -1489,14 +1574,16 @@
             const netzWahl = document.getElementById('cfg-wlan-netz').value;
 
             const station = (stationen || []).find(x => x.id === cfgStation) || {};
-            const win = station.role === 'windows';
+            const cast = istCast(station);
+            // Ohne eigenes OS (Windows, Chromecast): kein Kanal, kein WLAN von hier.
+            const win = station.role === 'windows' || cast;
 
             // Standarddrucker. Leer heisst „keiner" und geht als null hinaus:
             // die API führt zusammen, ein bloss weggelassener Wert bliebe stehen.
             // Nur anfassen, wenn es etwas zu sagen gibt — sonst stünde nach
             // jedem Speichern ein leeres printing-Objekt in den overrides.
             const wahl = document.getElementById('cfg-drucker').value || null;
-            if (station.role && station.role !== 'display' && (wahl || standardDrucker(station))) {
+            if (station.role && station.role !== 'display' && !cast && (wahl || standardDrucker(station))) {
                 overrides.roles = { ...(overrides.roles || {}) };
                 overrides.roles[station.role] = { ...(overrides.roles[station.role] || {}) };
                 overrides.roles[station.role].printing = {
@@ -1530,7 +1617,7 @@
 
             // Windows-Programme. Leere Felder gehen als null hinaus: die API
             // führt zusammen, ein weggelassener Schlüssel bliebe stehen.
-            if (win && winProg) {
+            if (station.role === 'windows' && winProg) {
                 const zusatz = [...document.querySelectorAll('#cfg-winprog-liste input[data-zusatz]:checked')].map(el => el.value);
                 const freigaben = document.getElementById('cfg-winprog-freigaben').value.trim();
                 const modus = document.getElementById('cfg-winprog-modus').value || null;
@@ -1582,9 +1669,14 @@
                         notiz: document.getElementById('cfg-notiz').value,
                         haus: document.getElementById('cfg-haus').value || null,
                         overrides,
+                        ...(cast ? {
+                            adresse: document.getElementById('cfg-cast-adresse').value,
+                            mac: document.getElementById('cfg-cast-mac').value,
+                        } : {}),
                     },
                 });
-                melden(win ? 'Gespeichert. Der Rechner übernimmt es bei der nächsten Anmeldung.'
+                melden(cast ? 'Gespeichert. Der Cast-Wächter übernimmt es beim nächsten Lauf.'
+                     : win ? 'Gespeichert. Der Rechner übernimmt es bei der nächsten Anmeldung.'
                            : 'Gespeichert. Die Station übernimmt es beim nächsten Update.', true);
                 await ladeDaten();
                 setTimeout(cfgSchliessen, 1200);
@@ -1837,6 +1929,69 @@
                 el.className = 'text-sm text-red-600';
                 el.textContent = err.message;
             }
+        }
+
+        // ─── Chromecast eintragen ──────────────────────────────────────
+        function ccOeffnen() {
+            for (const f of ['cc-name', 'cc-adresse', 'cc-mac', 'cc-standort', 'cc-notiz']) document.getElementById(f).value = '';
+            document.getElementById('cc-meldung').textContent = '';
+            document.getElementById('cc-haus').innerHTML = '<option value="">— kein bestimmtes Haus —</option>'
+                + HAEUSER.map(n => `<option value="${n}">Rosenweg ${n}</option>`).join('');
+            document.getElementById('cc-dialog').classList.remove('hidden');
+            document.getElementById('cc-name').focus();
+        }
+
+        function ccSchliessen() {
+            document.getElementById('cc-dialog').classList.add('hidden');
+        }
+
+        async function ccSpeichern() {
+            const el = document.getElementById('cc-meldung');
+            const name = document.getElementById('cc-name').value.trim();
+            try {
+                await api('/api/stations/admin/chromecast', {
+                    method: 'POST',
+                    body: {
+                        name,
+                        adresse: document.getElementById('cc-adresse').value.trim(),
+                        mac: document.getElementById('cc-mac').value.trim() || null,
+                        haus: document.getElementById('cc-haus').value || null,
+                        standort: document.getElementById('cc-standort').value,
+                        notiz: document.getElementById('cc-notiz').value,
+                    },
+                });
+                ccSchliessen();
+                zeigeStatus(`„${name}" eingetragen — der Cast-Wächter holt die Anzeige gleich drauf.`, true);
+                await ladeDaten();
+            } catch (err) {
+                el.className = 'text-sm text-red-600';
+                el.textContent = err.message;
+            }
+        }
+
+        async function castJetzt(id) {
+            zeigeStatus('Frage den Chromecast …', true);
+            try {
+                const e = await api(`/api/stations/admin/${encodeURIComponent(id)}/cast-jetzt`, { method: 'POST' });
+                zeigeStatus(`${id}: ${e.grund || e.aktion || 'erledigt'}`, e.aktion !== 'unerreichbar' && e.aktion !== 'gescheitert');
+                await ladeDaten();
+            } catch (err) {
+                zeigeStatus(err.message, false);
+            }
+        }
+
+        // Was der Cast-Wächter gerade tut, über der Tabelle — nur wenn es Chromecasts gibt.
+        function castStandZeichnen() {
+            const el = document.getElementById('cast-stand');
+            const da = stationen.some(s => istCast(s) && !s.revoked_at);
+            el.classList.toggle('hidden', !da || !castWaechter);
+            if (!da || !castWaechter) return;
+            const w = castWaechter;
+            const empf = w.empfaenger === 'eigen' ? `eigener Empfänger (App ${escape(w.app_id)})` : 'Übergang über DashCast (noch keine eigene App-ID)';
+            const lauf = !w.sekunden ? 'aus (CAST_WAECHTER_SEKUNDEN=0)' : `alle ${w.sekunden} s`;
+            const zuletzt = w.zuletzt ? `, zuletzt ${escape(vorZeit(w.zuletzt).text)}` : '';
+            el.innerHTML = `📺 Cast-Wächter ${lauf}${zuletzt} · ${empf} · castet jemand anderes, bleibt das bis zu ${escape(w.pause_minuten)} min stehen (bei Notfall nicht)`
+                + (w.fehler ? ` · <span class="text-red-600">${escape(w.fehler)}</span>` : '');
         }
 
         // ─── Logs ──────────────────────────────────────────────────────
@@ -2118,6 +2273,21 @@
             // tatsächlich etwas bewirkt.
             if (ohneAgent(s)) {
                 m.innerHTML = e('Einstellen …', 'cfgOeffnen') + linie + e('Entfernen …', 'entfernen', 'text-gray-500');
+                m.classList.remove('hidden');
+                const r = ev.currentTarget.getBoundingClientRect();
+                m.style.left = Math.max(8, Math.min(r.right - m.offsetWidth, window.innerWidth - m.offsetWidth - 8)) + 'px';
+                m.style.top = (r.bottom + 4) + 'px';
+                return;
+            }
+            // Ein Chromecast: zurückholen, einstellen, Wächter anhalten (sperren), entfernen.
+            if (istCast(s)) {
+                let h = '';
+                if (s.status !== 'gesperrt') h += e('Jetzt auf die Anzeige holen', 'castJetzt', 'text-blue-700');
+                h += e('Einstellen …', 'cfgOeffnen') + linie;
+                h += s.status === 'gesperrt' ? e('Entsperren (Wächter wieder an)', 'entsperren', 'text-green-700')
+                                             : e('Sperren (Wächter anhalten) …', 'sperren', 'text-red-600');
+                h += linie + e('Entfernen …', 'entfernen', 'text-gray-500');
+                m.innerHTML = h;
                 m.classList.remove('hidden');
                 const r = ev.currentTarget.getBoundingClientRect();
                 m.style.left = Math.max(8, Math.min(r.right - m.offsetWidth, window.innerWidth - m.offsetWidth - 8)) + 'px';

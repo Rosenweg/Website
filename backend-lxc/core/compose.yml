@@ -55,6 +55,12 @@ services:
       PBS_PC_REPO: "sicherung@pbs!pc@100.64.2.23:storage"
       PBS_PC_NS: Rosenweg9/pc
       PBS_ERWARTUNG: "Rosenweg9/pc=0,*=36"
+      # Chromecasts als Anzeige (docs/cast.md). CAST_APP_ID: App-ID des eigenen
+      # Empfängers aus der Google Cast Developer Console, kein Geheimnis; leer =
+      # Übergang über den öffentlichen DashCast-Empfänger.
+      # CAST_APP_ID: "XXXXXXXX"   (hier oder in .env — hier gesetzt schlüge es .env)
+      CAST_WAECHTER_SEKUNDEN: "45"
+      CAST_FREMD_MINUTEN: "20"
     ports: ["3000:3000"]
     volumes:
       - /mnt/documents:/documents

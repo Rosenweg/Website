@@ -50,6 +50,16 @@ const VERWALTUNGS_TYPEN = [
     description: 'Von Hand eingetragen, ohne Agent — nur für Einstellungen wie den Standarddrucker.',
     ohne_agent: true,
   },
+  // Ein Chromecast ist eine Anzeige wie eine Station mit der Rolle display —
+  // dieselbe Seite, dasselbe Haus, dieselben MQTT-Meldungen —, nur ohne
+  // Betriebssystem von uns. Statt eines Agenten hält ihn der Cast-Wächter der
+  // API auf der Anzeige (lib/castwaechter.js, docs/cast.md).
+  {
+    id: 'chromecast',
+    label: 'Anzeige (Chromecast)',
+    description: 'Chromecast ohne eigenes OS — der Cast-Wächter hält ihn auf display.rosenweg4303.ch.',
+    ohne_agent: true,
+  },
 ];
 
 // Die Drucker, die als Standard je Station wählbar sind.

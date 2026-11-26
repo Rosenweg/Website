@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Rosenweg Anzeige (Cast-Empfänger)</title>
+  <!--
+    Eigener Cast-Empfänger für die Chromecasts im Haus.
+    Ausgeliefert unter https://cast.rosenweg4303.ch/empfaenger/ (Traefik schreibt
+    den Pfad auf diese Datei um, docs/cast.md). In der Google Cast Developer
+    Console ist genau diese Adresse als Receiver-URL eingetragen.
+
+    Er tut, was die Rolle display einer Station tut (os-stationen/roles/display):
+    display.rosenweg4303.ch?haus=N zeigen und in Intervallen neu laden. Die Seite
+    holt sich Ankündigungen und Notfall selbst per MQTT; dafür muss hier nichts
+    passieren. Welche Adresse er zeigt, schickt ihm der Cast-Wächter der API
+    (api/lib/castverbindung.js) auf dem Namensraum urn:x-cast:ch.rosenweg4303.anzeige:
+      {type:'LADEN', url, reload_minuten}   zeigen
+      {type:'STATUS'}                        -> {type:'STATUS', url, geladen_am}
+
+    Warum ein iframe auf derselben Herkunft: display.rosenweg4303.ch verbietet das
+    Einbetten durch fremde Seiten (X-Frame-Options SAMEORIGIN). cast.rosenweg4303.ch
+    liefert dasselbe Frontend aus — dort ist /display.html dieselbe Herkunft, und
+    der Empfänger bleibt die oberste Seite. So kann er weiter antworten und neu
+    laden; navigierte er weg (wie DashCast mit force), wäre er stumm.
+
+    Bewusst ES5 ohne Pfeilfunktionen, Template-Strings oder fetch: Chromecast 1
+    hat ein altes Chrome. Keine eigenen Schriften, keine Bilder ausser dem Logo.
+  -->
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #0f172a; }
+    #anzeige { position: fixed; top: 0; left: 0; width: 100%; height: 100%; border: 0; display: none; background: #0f172a; }
+    #warten { position: fixed; top: 0; left: 0; width: 100%; height: 100%; color: #e2e8f0;
+      font-family: sans-serif; text-align: center; }
+    #warten img { height: 90px; margin-top: 30vh; }
+    #warten p { font-size: 28px; margin: 24px 0 0; opacity: .8; }
+  </style>
+</head>
+<body>
+  <div id="warten">
+    <img src="/logo-rosenweg.png" alt="">
+    <p>Rosenweg Anzeige — warte auf Inhalt …</p>
+  </div>
+  <iframe id="anzeige" title="Anzeige"></iframe>
+
+  <script>
+  (function () {
+    var NS = 'urn:x-cast:ch.rosenweg4303.anzeige';
+    // Wie roles.display.allowed_domains (api/lib/stationconfig.js). Ein anderes
+    // Gerät im WLAN könnte uns Nachrichten schicken — gezeigt wird nur die Anzeige.
+    var ERLAUBT = ['display.rosenweg4303.ch'];
+
+    var rahmen = document.getElementById('anzeige');
+    var warten = document.getElementById('warten');
+    var jetzt = { url: null, geladen_am: null };
+    var takt = null;
+
+    function host(url) {
+      var m = /^https:\/\/([^\/?#:]+)/i.exec(url || '');
+      return m ? m[1].toLowerCase() : null;
+    }
+
+    // https://display.rosenweg4303.ch/?haus=9 -> /display.html?haus=9 auf dieser Herkunft.
+    function aufDieseHerkunft(url) {
+      var rest = url.replace(/^https:\/\/[^\/?#]+/i, '');
+      var pfad = rest.replace(/[?#].*$/, '');
+      var suche = rest.substring(pfad.length);
+      if (pfad === '' || pfad === '/') pfad = '/display.html';
+      return pfad + suche;
+    }
+
+    function laden(url, minuten) {
+      if (ERLAUBT.indexOf(host(url)) < 0) return false;
+      jetzt.url = url;
+      jetzt.geladen_am = new Date().toISOString();
+      rahmen.src = aufDieseHerkunft(url);
+      rahmen.style.display = 'block';
+      warten.style.display = 'none';
+      // Wie station-display-reload: eine Seite, die wochenlang läuft, verliert
+      // irgendwann ihren WebSocket oder frisst Speicher.
+      if (takt) clearInterval(takt);
+      takt = null;
+      if (minuten > 0) {
+        takt = setInterval(function () {
+          try { rahmen.contentWindow.location.reload(); } catch (e) { rahmen.src = rahmen.src; }
+        }, minuten * 60 * 1000);
+      }
+      return true;
+    }
+
+    function verarbeiten(daten, antworten) {
+      if (typeof daten === 'string') { try { daten = JSON.parse(daten); } catch (e) { return; } }
+      if (!daten) return;
+      if (daten.type === 'LADEN') laden(String(daten.url || ''), Number(daten.reload_minuten) || 0);
+      if (daten.type === 'LADEN' || daten.type === 'STATUS') {
+        antworten({ type: 'STATUS', url: jetzt.url, geladen_am: jetzt.geladen_am });
+      }
+    }
+
+    // Web Receiver SDK v3 (CAF). Fehlt es (alte Firmware), das ältere v2.
+    function caf() {
+      var ctx = cast.framework.CastReceiverContext.getInstance();
+      var opt = new cast.framework.CastReceiverOptions();
+      opt.disableIdleTimeout = true;   // keine Medien — sonst schliesst er sich nach ein paar Minuten
+      opt.statusText = 'Rosenweg Anzeige';
+      opt.customNamespaces = {};
+      opt.customNamespaces[NS] = cast.framework.system.MessageType.JSON;
+      ctx.addCustomMessageListener(NS, function (ev) {
+        verarbeiten(ev.data, function (a) { ctx.sendCustomMessage(NS, ev.senderId, a); });
+      });
+      ctx.start(opt);
+    }
+
+    function v2() {
+      var mgr = cast.receiver.CastReceiverManager.getInstance();
+      var bus = mgr.getCastMessageBus(NS, cast.receiver.CastMessageBus.MessageType.JSON);
+      bus.onMessage = function (ev) {
+        verarbeiten(ev.data, function (a) { bus.send(ev.senderId, a); });
+      };
+      // Ohne Absender nicht schliessen: der Wächter verbindet sich neu.
+      mgr.onSenderDisconnected = function () {};
+      mgr.start({ statusText: 'Rosenweg Anzeige', maxInactivity: 3600 });
+    }
+
+    function sdk(src, fertig, sonst) {
+      var s = document.createElement('script');
+      s.src = src;
+      s.onload = fertig;
+      s.onerror = sonst;
+      document.head.appendChild(s);
+    }
+
+    sdk('https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js',
+      function () { try { caf(); } catch (e) { sdk('https://www.gstatic.com/cast/sdk/libs/receiver/2.0.0/cast_receiver.js', v2, function () {}); } },
+      function () { sdk('https://www.gstatic.com/cast/sdk/libs/receiver/2.0.0/cast_receiver.js', v2, function () {}); });
+
+    // Im Browser (ohne Chromecast) zum Ausprobieren: ?zeige=https://display.rosenweg4303.ch?haus=9
+    var probe = /[?&]zeige=([^&]+)/.exec(location.search);
+    if (probe) laden(decodeURIComponent(probe[1]), 0);
+  })();
+  </script>
+</body>
+</html>
