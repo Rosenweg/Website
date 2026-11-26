@@ -18,6 +18,7 @@ Obsidian Vault mit der technischen Dokumentation der Rosenweg-Kooperation.
 - [Cloudflare](cloudflare.md) — Zone, API-Token und wo er gebraucht wird (Tunnel/Email Routing veraltet)
 
 ### Applikationen
+- [Entwickeln](entwickeln.md) — Einstieg: Funktionen, Architektur, Struktur, Ausrollen (früher im Repo-README)
 - [Website](website.md) — Seiten, JS, Deployment, Nginx
 - [API](api.md) — Endpunkte, Auth, Umgebungsvariablen
 - [Email](email.md) — Mailcow/PMG, IMAP-Abruf, Druck per Mail, SMTP2GO, DMARC
