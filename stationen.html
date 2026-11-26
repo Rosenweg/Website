@@ -155,6 +155,8 @@
 
                     <div id="winprog-liste" class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3"></div>
 
+                    <div id="winprog-sperren"></div>
+
                     <label class="block"><span class="font-medium text-gray-700">Weitere Freigaben für alle</span>
                         <textarea id="winprog-freigaben" rows="3" class="mt-1 w-full border rounded-lg px-3 py-2 font-mono text-xs"
                                   placeholder="C:\Program Files\Hersteller\Programm\*&#10;Microsoft.BingWeather"></textarea>
@@ -392,6 +394,7 @@
                         <textarea id="cfg-winprog-freigaben" rows="3" class="mt-1 w-full border rounded-lg px-3 py-2 font-mono text-xs"
                                   placeholder="C:\Program Files\Hersteller\Programm\*&#10;Microsoft.BingWeather"></textarea>
                         <span class="text-xs text-gray-500">Ordner oder Datei unter C:\Program Files, oder Paketname einer Store-App — eine je Zeile.</span></label>
+                    <div id="cfg-winprog-sperren" class="mt-3"></div>
                     <div id="cfg-winprog-probe" class="mt-3"></div>
                 </div>
 
@@ -1521,6 +1524,20 @@
 
         // Zu einer Meldung: das Programm im Katalog, das sie abdeckt — oder
         // die Zeile, die man als Freigabe eintragen könnte.
+        // Gesperrt? Erkannt am Produkt aus der Signatur, wie die Regel selbst.
+        function winSperre(e) {
+            const produkt = String(e.produkt || '').toUpperCase();
+            if (!produkt) return null;
+            return (winProg?.sperren || []).find(sp => sp.regeln.some(r => r.produkt === produkt)) || null;
+        }
+        function winSperrenText(modus) {
+            const sp = winProg?.sperren || [];
+            if (!sp.length) return '';
+            return `<p class="text-sm"><span class="font-medium text-gray-700">Gesperrt auf allen Windows-Rechnern</span>
+                <span class="text-xs text-gray-500">— auch für Technik; ${modus === 'durchsetzen' ? 'durchgesetzt' : 'wird wie die Liste erst überwacht'}</span></p>
+                <ul class="text-sm list-disc ml-5">${sp.map(x => `<li>${escape(x.name)}${x.hinweis ? ` <span class="text-xs text-gray-500">${escape(x.hinweis)}</span>` : ''}</li>`).join('')}</ul>`;
+        }
+
         function winTreffer(e) {
             const ziel = String(e.ziel || '').toLowerCase();
             for (const p of winProg?.katalog || []) {
@@ -1548,20 +1565,24 @@
             const kopf = `<p class="text-sm font-medium text-gray-700">${durch ? 'Blockiert' : 'Wäre blockiert'} — letzte 30 Tage
                 <span class="text-xs font-normal text-gray-400">gemeldet ${escape(vorZeit(s.programme_probe_am).text)}</span></p>`;
             if (!probe.eintraege?.length) return kopf + `<p class="text-xs text-green-700">Nichts — ${durch ? 'die Liste hat nichts blockiert' : 'mit der Liste wäre alles gelaufen, was hier lief'}.</p>`;
-            return kopf + `<table class="w-full text-xs mt-1"><tbody>${probe.eintraege.map((e, i) => {
-                const p = winTreffer(e);
-                const v = winVorschlag(e);
+            return kopf + `<ul class="text-xs mt-1 divide-y border-t border-b">${probe.eintraege.map((e, i) => {
+                const sp = winSperre(e);
+                const p = sp ? null : winTreffer(e);
+                const v = sp ? null : winVorschlag(e);
                 let knopf = '';
-                if (mitKnoepfen && p) knopf = `<button type="button" class="text-blue-600 hover:text-blue-800" onclick="winAnhaken('${escape(p.id)}')">„${escape(p.name)}" anhaken</button>`;
+                if (sp) knopf = `<span class="text-red-600" title="Gesperrt auf allen Windows-Rechnern (api/lib/windowsprogramme.js)">gesperrt: ${escape(sp.name)}</span>`;
+                else if (mitKnoepfen && p) knopf = `<button type="button" class="text-blue-600 hover:text-blue-800" onclick="winAnhaken('${escape(p.id)}')">„${escape(p.name)}" anhaken</button>`;
                 else if (mitKnoepfen && v) knopf = `<button type="button" class="text-blue-600 hover:text-blue-800" onclick="winFreigeben(${i})">hier erlauben</button>`;
                 else if (mitKnoepfen) knopf = '<span class="text-gray-400" title="Liegt nicht unter Programme. Nur über programme-freigaben.txt (Git) — und nur, wenn normale Benutzer dort nicht schreiben können.">ausserhalb Programme</span>';
-                return `<tr class="border-t align-top">
-                    <td class="py-1 pr-2 text-gray-500">${e.art === 'appx' ? 'App' : 'Programm'}</td>
-                    <td class="py-1 pr-2 font-mono break-all">${escape(e.ziel)}</td>
-                    <td class="py-1 pr-2 whitespace-nowrap">${escape(e.person || '')}</td>
-                    <td class="py-1 pr-2 whitespace-nowrap text-gray-500">${e.anzahl}× · ${escape(e.zuletzt ? new Date(e.zuletzt).toLocaleString('de-CH', { dateStyle: 'short', timeStyle: 'short' }) : '')}</td>
-                    <td class="py-1 whitespace-nowrap">${knopf}</td></tr>`;
-            }).join('')}</tbody></table>`;
+                return `<li class="py-1.5">
+                    <div class="font-mono break-all">${escape(e.ziel)}</div>
+                    <div class="flex flex-wrap gap-x-3 text-gray-500">
+                        <span>${e.art === 'appx' ? 'App' : 'Programm'}</span>
+                        <span>${escape(e.person || '')}</span>
+                        <span>${e.anzahl}× · zuletzt ${escape(e.zuletzt ? new Date(e.zuletzt).toLocaleString('de-CH', { dateStyle: 'short', timeStyle: 'short' }) : '')}</span>
+                        <span class="ml-auto">${knopf}</span>
+                    </div></li>`;
+            }).join('')}</ul>`;
         }
 
         function progZeile(s) {
@@ -1583,6 +1604,7 @@
             document.getElementById('winprog-liste').innerHTML =
                 winKaestchen({ fuerAlle: new Set(), eigen: new Set(v.programme), attr: 'data-alle' });
             document.getElementById('winprog-freigaben').value = v.freigaben || '';
+            document.getElementById('winprog-sperren').innerHTML = winSperrenText(v.modus);
             document.getElementById('winprog-stand').textContent = winProg.geaendert_am
                 ? `Zuletzt geändert ${new Date(winProg.geaendert_am).toLocaleString('de-CH')} von ${winProg.geaendert_von || '?'}`
                 : 'Noch nie geändert — es gilt die Vorgabe aus dem Katalog.';
@@ -1640,6 +1662,7 @@
             document.getElementById('cfg-winprog-liste').innerHTML = winKaestchen({
                 fuerAlle: new Set(v.programme), eigen: new Set(eigen.zusatz || []), attr: 'data-zusatz' });
             document.getElementById('cfg-winprog-freigaben').value = eigen.freigaben || '';
+            document.getElementById('cfg-winprog-sperren').innerHTML = winSperrenText(eigen.modus || v.modus);
             document.getElementById('cfg-winprog-probe').innerHTML = winProbeTabelle(s, true);
         }
 

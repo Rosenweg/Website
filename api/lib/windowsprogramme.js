@@ -27,6 +27,9 @@
 // Ein Rechner ohne Eintrag bekommt immer 'probe' — durchgesetzt wird nur,
 // was jemand ausdrücklich so eingestellt hat.
 //
+// Gesperrt (SPERREN unten, Edge und OneDrive): Verbotsregeln, die auch die
+// Ausnahmen schlagen — ein Verbot geht bei AppLocker jeder Erlaubnis vor.
+//
 // Nie von hier aus beeinflussbar (steht fest in programme.ps1): alles unter
 // C:\Windows, die Gruppe Windows-Programme-frei und Administratoren mit
 // Admin-Token, Dienste. Die API kann also nur ERLAUBEN, nie den Grundschutz
@@ -116,19 +119,12 @@ const KATALOG = [
   },
 
   // ── Programme ──────────────────────────────────────────────────────────
-  { id: 'edge', name: 'Microsoft Edge', gruppe: 'Internet', standard: true,
-    regeln: [pfad('%PROGRAMFILES%\\Microsoft\\Edge\\Application\\*')] },
   { id: 'firefox', name: 'Firefox', gruppe: 'Internet', standard: true,
     regeln: [pfad('%PROGRAMFILES%\\Mozilla Firefox\\*'), pfad('%PROGRAMFILES%\\Mozilla Maintenance Service\\*')] },
-  { id: 'chrome', name: 'Google Chrome', gruppe: 'Internet',
+  // Der Browser der Windows-Rechner (26.11.2026, statt Edge). Installiert
+  // und eingestellt von rosenweg-look.ps1; der Google-Updater aktualisiert.
+  { id: 'chrome', name: 'Google Chrome', gruppe: 'Internet', standard: true,
     regeln: [pfad('%PROGRAMFILES%\\Google\\Chrome\\Application\\*'), pfad('%PROGRAMFILES%\\Google\\Update\\*')] },
-  { id: 'onedrive', name: 'OneDrive', gruppe: 'Internet', standard: true,
-    hinweis: 'auch die Installation im Benutzerprofil (an der Signatur erkannt)',
-    regeln: [
-      pfad('%PROGRAMFILES%\\Microsoft OneDrive\\*'),
-      pfad('%PROGRAMFILES%\\Microsoft\\OneDrive\\*'),
-      herausgeber(MS_CORP_EXE, 'MICROSOFT ONEDRIVE'),
-    ] },
 
   { id: 'office', name: 'Microsoft Office / 365', gruppe: 'Büro', standard: true,
     regeln: [pfad('%PROGRAMFILES%\\Microsoft Office\\*'), pfad('%PROGRAMFILES%\\Microsoft Office 15\\*')] },
@@ -170,6 +166,30 @@ const KATALOG = [
   { id: 'xbox', name: 'Xbox / Spiele', gruppe: 'Store-Apps',
     regeln: [paket('MICROSOFT.GAMINGAPP'), paket('MICROSOFT.XBOXGAMINGOVERLAY')] },
   { id: 'hilfe', name: 'Hilfe anfordern', gruppe: 'Store-Apps', regeln: [paket('MICROSOFT.GETHELP')] },
+];
+
+// ── Gesperrt ───────────────────────────────────────────────────────────────
+// Auf allen Windows-Rechnern, auch für Technik (Stefan, 26.11.2026): Edge
+// und OneDrive. AppLocker-Verbotsregeln an der Signatur, damit es auch eine
+// Kopie an anderem Ort trifft. Sie gehören zur Positivliste, wirken also im
+// gleichen Modus: beim Überwachen meldet der Rechner nur, wo Edge oder
+// OneDrive gestartet wurde; durchgesetzt erst mit „Durchsetzen".
+//
+// WebView2 (msedgewebview2.exe) trägt das Produkt „MICROSOFT EDGE WEBVIEW2"
+// und bleibt damit erlaubt — Widgets, Outlook, Teams und manches Programm
+// zeigen ihre Oberfläche darin. Auf win11-1 nachgesehen: msedge.exe,
+// msedge_proxy.exe, msedge_pwa_launcher.exe sind „MICROSOFT EDGE", der
+// Installer „MICROSOFT EDGE INSTALLER", der Updater „MICROSOFT EDGE UPDATE"
+// (der aktualisiert als SYSTEM auch WebView2 — SYSTEM prüft AppLocker nicht).
+const SPERREN = [
+  { id: 'edge', name: 'Microsoft Edge', hinweis: 'Browser, Installer und Updater im Namen der Person — WebView2 bleibt erlaubt',
+    regeln: [
+      herausgeber(MS_CORP_EXE, 'MICROSOFT EDGE'),
+      herausgeber(MS_CORP_EXE, 'MICROSOFT EDGE INSTALLER'),
+      herausgeber(MS_CORP_EXE, 'MICROSOFT EDGE UPDATE'),
+    ] },
+  { id: 'onedrive', name: 'OneDrive', hinweis: 'Programm und Einrichtung (OneDriveSetup.exe)',
+    regeln: [herausgeber(MS_CORP_EXE, 'MICROSOFT ONEDRIVE')] },
 ];
 
 const MODI = ['probe', 'durchsetzen'];
@@ -292,10 +312,11 @@ function fuerRechner(vorgabe, rechner) {
     ...freigabenLesen(r.freigaben).regeln,
   ];
   const modus = MODI.includes(r.modus) ? r.modus : v.modus;
-  return { modus, programme, freigaben };
+  const sperren = SPERREN.map(({ id, name, regeln }) => ({ id, name, regeln }));
+  return { modus, programme, freigaben, sperren };
 }
 
 module.exports = {
-  KATALOG, MODI, STANDARD,
+  KATALOG, SPERREN, MODI, STANDARD,
   freigabeLesen, freigabenLesen, vorgabeNormal, vorgabePruefen, rechnerPruefen, fuerRechner,
 };

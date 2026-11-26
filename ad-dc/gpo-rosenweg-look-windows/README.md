@@ -12,6 +12,7 @@ Windows-Rechner der Domäne sehen damit aus wie die Stationen:
 - die Laufwerke H: (Home) und D: (Dokumente) bei jeder Anmeldung
 - die Drucker DruckerR9 und DruckerR13 über den CUPS-Server (IPP, ohne Herstellertreiber, A4)
 - aufgeräumte Drucker im Benutzerprofil und der Standarddrucker der Station (gepflegt auf /stationen): Siehe unten
+- Google Chrome als Browser und Standard für Webseiten und PDF; Edge und OneDrive gesperrt: Siehe unten
 - Windows 11: das klassische Startmenü Open-Shell mit dem Rosenweg-Wappen als Start-Knopf: Siehe unten
 
 Gilt für alle Rechner in `OU=Windows`. Seit dem 22.11.2026 liegt dort `WIN11-1` (VM 107 auf pve3, Windows 11 Enterprise).
@@ -22,9 +23,10 @@ Gilt für alle Rechner in `OU=Windows`. Seit dem 22.11.2026 liegt dort `WIN11-1`
 | `rosenweg-look.ps1` | Startskript, läuft beim Start als SYSTEM und setzt alles; Protokoll in `C:\ProgramData\Rosenweg\look.log` |
 | `bilder/` | `hintergrund.png` und `sperrbild.png` aus os-stationen, `logo.png` von der Website, `startknopf.png` (aus dem Logo, `startknopf-erzeugen.py`) |
 | `programme.ps1` | baut die AppLocker-Regeln aus der Liste auf /stationen und wertet aus, was sie blockiert (hätte); beim Start und alle 30 min |
+| `aufraeumen.ps1` | bei jeder Anmeldung im Namen der Person: Autostarts von Edge/OneDrive und Edge-Verknüpfungen aus dem (servergespeicherten) Profil |
 | `drucker.ps1` | räumt die Drucker im Profil auf und setzt den Standarddrucker, bei jeder An- und Abmeldung |
 | `startknopf-erzeugen.py` | erzeugt `bilder/startknopf.png` neu, falls sich das Logo ändert (braucht Pillow) |
-| `programme/` | nicht im Git: der Open-Shell-Installer, den `einrichten.sh` mit Prüfsumme holt |
+| `programme/` | nicht im Git: der Open-Shell-Installer (mit Prüfsumme) und das Chrome-Enterprise-MSI (Signatur wird auf Windows geprüft), beide holt `einrichten.sh` einmal |
 
 ## Ändern
 
@@ -67,6 +69,43 @@ Die Auswertung (letzte 30 Tage) zeigt /stationen beim Rechner, mit Knöpfen «�
 **Von Hand prüfen** (als Admin, ändert nichts): `& 'C:\Program Files\Rosenweg\programme.ps1' -NurPruefen -AlsPerson Jeder` wertet das ganze Protokoll aus, als hätte eine normale Person alles gestartet. Ablage und Protokoll: `C:\Program Files\Rosenweg\programme\` (`programme.log`, `positivliste.xml`, `aktiv.xml`, `probe.json`). Nicht unter ProgramData: dort dürfen normale Benutzer Dateien anlegen, und eine untergeschobene Liste wäre eine Freigabe.
 
 **Nicht Teil der Positivliste:** Skripte und MSI bleiben wie im Grundschutz (Skripte aus Windows, Programme, SYSVOL/NETLOGON; MSI nur aus `C:\Windows\Installer`). DLL-Regeln sind aus.
+
+## Browser: Chrome statt Edge, kein OneDrive
+
+Seit dem 26.11.2026 auf allen Rechnern in OU=Windows.
+
+**Wirkt sofort** (rosenweg-look.ps1 beim Start, aufraeumen.ps1 bei der Anmeldung). Nichts davon löscht Daten:
+
+- **Chrome** (Enterprise-MSI, 64 bit) wird installiert, wenn es fehlt. Vorher prüft das Skript die Signatur (gültig, von Google LLC). Eine feste Prüfsumme gibt es nicht, weil Google das MSI nur unter einer Adresse für die jeweils neueste Version anbietet. Danach aktualisiert der Google-Updater (läuft als SYSTEM). Das ist bewusst so: Der Browser braucht die meisten Sicherheitsupdates.
+- **Richtlinien für Chrome**, wie auf den Linux-Stationen (`65-browser.sh`): keine Übersetzung, Kerberos-Anmeldung nur an `authentik.rosenweg4303.ch`. Zusätzlich für geteilte Rechner:
+  - keine Anmeldung bei Google, kein Sync
+  - keine Werbe-Tabs, kein Chrome im Hintergrund
+  - Startseite `www.rosenweg4303.ch` (beim Start nur empfohlen) mit Home-Knopf
+  - Der Passwortmanager bleibt an, wie auf den Stationen.
+- **Chrome als Standard** für http, https, .htm, .html und .pdf. Dafür sorgt die Richtlinie «Standardzuordnungen» (`standardprogramme.xml`), die Windows bei jeder Anmeldung anwendet.
+- **Taskleiste** (nur Windows 11): Explorer und Chrome statt Edge und Store, über die Richtlinie «Startlayout» (`taskleiste.xml`). Selbst Angeheftetes bleibt. Unter Windows 10 sperrte dieselbe Richtlinie die Kacheln, darum dort nicht.
+- **Edge**:
+  - keine Erstausführung, kein Import, nicht im Hintergrund, keine Frage nach dem Standardbrowser
+  - Beim Aktualisieren legt der Updater keine Desktop-Verknüpfung mehr an.
+  - Die Verknüpfungen auf dem öffentlichen Desktop und im Startmenü entfernt das Startskript. Die auf dem eigenen Desktop, in der Taskleiste und den Autostart `MicrosoftEdgeAutoLaunch_*` entfernt aufraeumen.ps1.
+- **OneDrive**:
+  - Die Richtlinie `DisableFileSyncNGSC=1` hält es vom Starten und Synchronisieren ab.
+  - Das Programm wird rechnerweit deinstalliert (`OneDriveSetup.exe /uninstall /allusers`).
+  - Die Autostarts `OneDrive` und `OneDriveSetup` werden entfernt, auch in der Vorlage für neue Profile.
+  - Der Ordner `%USERPROFILE%\OneDrive` und die Daten in der Cloud bleiben.
+
+**Wirkt erst mit «Durchsetzen»:** Das eigentliche Startverbot gehört zur Positivliste (oben). Es besteht aus AppLocker-Verbotsregeln an der Signatur, die auch für Technik gelten:
+
+- Edge: die Produkte «Microsoft Edge», «… Installer» und «… Update»
+- OneDrive: das Produkt «Microsoft OneDrive»
+
+WebView2 (`msedgewebview2.exe`, Produkt «Microsoft Edge WebView2») bleibt erlaubt.
+
+Bis zum Durchsetzen zeigt /stationen unter «Wäre blockiert», wo Edge oder OneDrive noch gestartet wurden. Geprüft auf win11-1 mit `Test-AppLockerPolicy`:
+
+- `msedge.exe` (auch unter `EdgeCore`), `MicrosoftEdgeUpdate.exe`, `OneDrive.exe` und `OneDriveSetup.exe` werden abgelehnt.
+- `msedgewebview2.exe` (unter `EdgeWebView` und `EdgeCore`) ist erlaubt.
+- Auch der Copilot-Installer fällt unter «Microsoft Edge Installer».
 
 ## Drucker im Profil und Standarddrucker
 

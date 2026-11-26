@@ -37,6 +37,8 @@
 #   - die AD-Gruppe Windows-Programme-frei und Administratoren mit
 #     Admin-Token: alles (Begruendung in rosenweg-look.ps1 / README)
 #   - programme-freigaben.txt aus der Richtlinie (Git, einrichten.sh)
+# Gesperrt (Liste "sperren", heute Edge und OneDrive) sind Verbote in der
+# Positivliste - sie wirken also im selben Modus wie sie.
 # Freigaben aus der Verwaltung nur unter den Programme-Ordnern (hier noch
 # einmal geprueft) - dort schreiben nur Admins.
 #
@@ -123,13 +125,12 @@ function Pfad([string]$sid, [string]$pfad, [string]$name, [string]$typ = 'Exe') 
     $id = Id "pfad|$typ|$sid|$pfad|$name"
     "<FilePathRule Id=""$id"" Name=""$(X $name)"" Description="""" UserOrGroupSid=""$sid"" Action=""Allow""><Conditions><FilePathCondition Path=""$(X $pfad)"" /></Conditions></FilePathRule>"
 }
-function Signatur([string]$sid, [string]$herausgeber, [string]$produkt, [string]$name, [string]$ab = '*') {
-    $id = Id "sig|$ab|$sid|$herausgeber|$produkt|$name"
-    "<FilePublisherRule Id=""$id"" Name=""$(X $name)"" Description="""" UserOrGroupSid=""$sid"" Action=""Allow""><Conditions><FilePublisherCondition PublisherName=""$(X $herausgeber)"" ProductName=""$(X $produkt)"" BinaryName=""*""><BinaryVersionRange LowSection=""$ab"" HighSection=""*"" /></FilePublisherCondition></Conditions></FilePublisherRule>"
+function Signatur([string]$sid, [string]$herausgeber, [string]$produkt, [string]$name, [string]$ab = '*', [string]$tun = 'Allow') {
+    $id = Id "sig|$tun|$ab|$sid|$herausgeber|$produkt|$name"
+    "<FilePublisherRule Id=""$id"" Name=""$(X $name)"" Description="""" UserOrGroupSid=""$sid"" Action=""$tun""><Conditions><FilePublisherCondition PublisherName=""$(X $herausgeber)"" ProductName=""$(X $produkt)"" BinaryName=""*""><BinaryVersionRange LowSection=""$ab"" HighSection=""*"" /></FilePublisherCondition></Conditions></FilePublisherRule>"
 }
 
 $defender = '%OSDRIVE%\PROGRAMDATA\MICROSOFT\WINDOWS DEFENDER\PLATFORM\*'
-$onedrive = 'O=MICROSOFT CORPORATION, L=REDMOND, S=WASHINGTON, C=US'
 
 # Zusatzfreigaben aus der Richtlinie (Git). rosenweg-look.ps1 legt die Datei
 # neben dieses Skript.
@@ -161,10 +162,12 @@ $msi = @(
     (Pfad $admins '*.*' 'Administratoren: alles' 'Msi')
 )
 
-# Grundschutz: wie seit dem 22.11.2026, plus Defender-Plattform
+# Grundschutz: wie seit dem 22.11.2026, plus Defender-Plattform. Die
+# Freigabe fuer OneDrive im Benutzerprofil (AppData) ist seit 26.11. weg:
+# OneDrive ist abgeschaltet (rosenweg-look.ps1). Das OneDrive unter
+# Programme bleibt bis zum Durchsetzen erlaubt - es startet ohnehin nicht mehr.
 $gsExe = $exeFest + @(
-    (Pfad $jeder '%PROGRAMFILES%\*' 'Programme'),
-    (Signatur $jeder $onedrive 'MICROSOFT ONEDRIVE' 'OneDrive')
+    (Pfad $jeder '%PROGRAMFILES%\*' 'Programme')
 )
 $gsAppx = @(Signatur $jeder '*' '*' 'Signierte Store-Apps' '0.0.0.0')
 
@@ -206,6 +209,15 @@ function RegelAusListe($r, [string]$name) {
 if ($liste) {
     foreach ($p in @($liste.programme)) { foreach ($r in @($p.regeln)) { RegelAusListe $r $p.name } }
     foreach ($r in @($liste.freigaben)) { RegelAusListe $r 'Freigabe (Verwaltung)' }
+    # Gesperrt (Edge, OneDrive): Verbote an der Signatur, fuer Jeder - ein
+    # Verbot schlaegt bei AppLocker jede Erlaubnis, auch die fuer Technik.
+    foreach ($p in @($liste.sperren)) {
+        foreach ($r in @($p.regeln)) {
+            if ($r.art -eq 'herausgeber' -and $r.herausgeber -and $r.herausgeber -ne '*' -and $r.produkt -and $r.produkt -ne '*') {
+                $plExe.Add((Signatur $jeder $r.herausgeber $r.produkt "Gesperrt: $($p.name)" '*' 'Deny'))
+            } else { Log "Sperre verworfen: $($p.name)" }
+        }
+    }
 }
 
 function Richtlinie($exe, $appx) {
@@ -329,11 +341,12 @@ if (-not $liste -and $modus -eq 'probe') {
                 $ziel = [string]$d.FullFilePath
                 # Windows ist in beiden Regelwerken erlaubt - die grosse Masse.
                 if ($modus -eq 'probe' -and [string]$d.FilePath -match '^%(WINDIR|SYSTEM32)%\\') { continue }
-                $h = ([string]$d.Fqbn -split '\\')[0]
             } else {
                 $ziel = [string]$d.Package
-                $h = ([string]$d.Fqbn -split '\\')[0]
             }
+            # Fqbn: Herausgeber\Produkt\Datei\Version
+            $fq = [string]$d.Fqbn -split '\\'
+            $h = $fq[0]; $produkt = if ($fq.Count -gt 1) { $fq[1] } else { '' }
             if (-not $ziel) { continue }
             $schluessel = "$art|$ziel|$sid"
             if ($modus -eq 'probe' -and -not $eintraege.ContainsKey($schluessel)) {
@@ -347,7 +360,7 @@ if (-not $liste -and $modus -eq 'probe') {
                 if ($wann -gt $alt.zuletzt) { $alt.zuletzt = $wann }
             } else {
                 $eintraege[$schluessel] = [pscustomobject]@{
-                    art = $art; ziel = $ziel; herausgeber = $h; sid = $sid; person = (Person $sid)
+                    art = $art; ziel = $ziel; herausgeber = $h; produkt = $produkt; sid = $sid; person = (Person $sid)
                     anzahl = 1; zuletzt = $wann
                 }
             }
@@ -377,7 +390,7 @@ if (-not $liste -and $modus -eq 'probe') {
     } else {
         $melden = [ordered]@{
             format = 1; modus = $modus; stand = $stand; seit = $seit
-            eintraege = @($liste_ | Select-Object -First 300 art, ziel, herausgeber, person, anzahl, zuletzt)
+            eintraege = @($liste_ | Select-Object -First 300 art, ziel, herausgeber, produkt, person, anzahl, zuletzt)
         }
         try {
             $koerper = [System.Text.Encoding]::UTF8.GetBytes(($melden | ConvertTo-Json -Depth 5))

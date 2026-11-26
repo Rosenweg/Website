@@ -596,6 +596,7 @@ router.get('/drucker/:rechner', a(async (req, res) => {
 //   {"format":1,"rechner":"WIN11-1","bekannt":true,"modus":"probe",
 //    "programme":[{"id":"edge","name":"Microsoft Edge","regeln":[{"art":"pfad","pfad":"%PROGRAMFILES%\\…\\*"}]}],
 //    "freigaben":[{"art":"paket","herausgeber":"*","paket":"…"}],
+//    "sperren":[{"id":"edge","name":"Microsoft Edge","regeln":[{"art":"herausgeber","herausgeber":"O=…","produkt":"MICROSOFT EDGE"}]}],
 //    "stand":"<sha256 der Regeln>"}
 async function windowsVorgabe() {
   const r = await pool.query("SELECT wert, geaendert_von, geaendert_am FROM station_vorgaben WHERE schluessel = 'windows_programme'");
@@ -629,7 +630,7 @@ router.get('/programme/:rechner', a(async (req, res) => {
   const eigen = station ? station.overrides?.roles?.[station.role]?.programme : null;
   const liste = winprog.fuerRechner(vorgabe, eigen);
   if (!station) liste.modus = 'probe';
-  const stand = sha256(JSON.stringify([liste.modus, liste.programme, liste.freigaben]));
+  const stand = sha256(JSON.stringify([liste.modus, liste.programme, liste.freigaben, liste.sperren]));
   res.json({ format: 1, rechner, bekannt: !!station, ...liste, stand });
 }));
 
@@ -657,6 +658,7 @@ router.post('/programme/:rechner/probe', a(async (req, res) => {
     art: ['exe', 'appx', 'skript', 'msi'].includes(e?.art) ? e.art : 'exe',
     ziel: text(e?.ziel, 400) || '?',
     herausgeber: text(e?.herausgeber, 300),
+    produkt: text(e?.produkt, 200),
     person: text(e?.person, 120),
     anzahl: Math.max(1, Math.min(1e6, Number.parseInt(e?.anzahl, 10) || 1)),
     zuletzt: text(e?.zuletzt, 40),
@@ -762,7 +764,7 @@ router.get('/admin/list', authMiddleware, nurTechnik, a(async (req, res) => {
     drucker: DRUCKER,
     // Erlaubte Programme der Windows-Rechner: Katalog und Vorgabe für alle,
     // damit „Einstellen …" eines Rechners zeigt, was ohnehin gilt.
-    windows_programme: { katalog: winprog.KATALOG, ...(await windowsVorgabe()) },
+    windows_programme: { katalog: winprog.KATALOG, sperren: winprog.SPERREN, ...(await windowsVorgabe()) },
     // Die Hausvorgabe zum WLAN. Ohne sie sähe die Verwaltung nur die
     // stationseigene Ebene — also ein leeres Feld — und jemand trüge das Netz
     // ein zweites Mal ein, obwohl es längst für alle gilt.
@@ -1047,7 +1049,7 @@ async function adAbgleichSchreiben(imAd, wer) {
 // dazu, was nur dort gilt (overrides.roles.windows.programme).
 router.get('/admin/windows-programme', authMiddleware, nurTechnik, a(async (req, res) => {
   await ensureSchema();
-  res.json({ katalog: winprog.KATALOG, ...(await windowsVorgabe()) });
+  res.json({ katalog: winprog.KATALOG, sperren: winprog.SPERREN, ...(await windowsVorgabe()) });
 }));
 
 router.put('/admin/windows-programme', authMiddleware, nurTechnik, a(async (req, res) => {
@@ -1067,7 +1069,7 @@ router.put('/admin/windows-programme', authMiddleware, nurTechnik, a(async (req,
   const weg = vorher.programme.filter((id) => !wert.programme.includes(id));
   console.log(`[stations] Windows-Programme für alle geändert von ${wer}: Modus ${wert.modus}`
     + `${dazu.length ? `, dazu ${dazu.join(' ')}` : ''}${weg.length ? `, weg ${weg.join(' ')}` : ''}`);
-  res.json({ katalog: winprog.KATALOG, ...(await windowsVorgabe()) });
+  res.json({ katalog: winprog.KATALOG, sperren: winprog.SPERREN, ...(await windowsVorgabe()) });
 }));
 
 router.post('/admin/ad-abgleich', authMiddleware, nurTechnik, a(async (req, res) => {
