@@ -104,6 +104,16 @@ CREATE TABLE IF NOT EXISTS telefon_sitzungen (
     seit         TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Zuletzt gemeldeter Boot eines geteilten Telefons (Header X-Rosenweg-Boot =
+-- Settings.Global.BOOT_COUNT). Meldet das Geraet einen neuen Boot, beendet die
+-- Anlage dessen Sitzung selbst (Stefan 27.11.2026: "Jede Sitzung endet direkt
+-- beim Neustart"), auch wenn die App das Abmelden nicht schafft.
+CREATE TABLE IF NOT EXISTS telefon_boot (
+    ext          TEXT PRIMARY KEY,
+    boot         TEXT NOT NULL,
+    gesehen      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- App-Katalog der geteilten Telefone. art='apk': das Geraet installiert die
 -- APK still (Device Owner) und blendet sie nur fuer erlaubte Gruppen ein.
 -- art='web': Kachel in der Rosenweg-App (WebView). gruppen leer = alle, die
@@ -147,7 +157,7 @@ CREATE INDEX IF NOT EXISTS apps_versionen_ziel ON apps_versionen (schluessel, pl
 CREATE TABLE IF NOT EXISTS telefon_log (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     ext          TEXT NOT NULL,
-    ereignis     TEXT NOT NULL,            -- 'an' | 'ab' | 'karte-abgelehnt' | 'karte-info' | 'karte-zu' | 'karte-weg' | 'karte-geloescht' | 'gefunden'
+    ereignis     TEXT NOT NULL,            -- 'an' | 'ab' | 'karte-abgelehnt' | 'karte-info' | 'karte-zu' | 'karte-weg' | 'karte-geloescht' | 'gefunden'; 'ab' mit durch='neustart': Sitzung beim Neustart beendet
     email        TEXT,
     name         TEXT,
     durch        TEXT,                     -- wer es ausgeloest hat (Geraet, Person, Admin)

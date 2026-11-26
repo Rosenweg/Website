@@ -1265,7 +1265,37 @@ def _geraet():
         conn.close()
     if not row or not hmac.compare_digest(str(row["secret"]).encode(), a.password.encode()):
         return None, nein
+    _geraet_boot(row["ext"])
     return row["ext"], None
+
+
+def _geraet_boot(ext):
+    """Neustart des geteilten Telefons erkennen (Header X-Rosenweg-Boot = Boot-Zaehler des
+    Geraets) und dann dessen Sitzung beenden - Stefan 27.11.2026: "Jede Sitzung endet direkt
+    beim Neustart", auch fuer Technik. Die App meldet nach dem Neustart selbst ab; das hier
+    sichert ab, falls sie es nicht schafft. Laeuft vor der eigentlichen Anfrage: kommt nach
+    dem Neustart zuerst eine Anmeldung (Karte/QR), ist die alte Sitzung schon weg.
+    Ohne Header (aeltere App) aendert sich nichts."""
+    boot = (request.headers.get("X-Rosenweg-Boot") or "").strip()
+    if not boot or len(boot) > 40:
+        return
+    conn = db.connect()
+    try:
+        alt = conn.execute("SELECT boot FROM telefon_boot WHERE ext = ?", (ext,)).fetchone()
+        if alt and alt["boot"] == boot:
+            return
+        weg = bool(alt) and _telefon_abmelden(conn, ext, "neustart")
+        conn.execute("INSERT INTO telefon_boot (ext, boot, gesehen) VALUES (?,?,datetime('now')) "
+                     "ON CONFLICT(ext) DO UPDATE SET boot = excluded.boot, gesehen = excluded.gesehen",
+                     (ext, boot))
+        conn.commit()
+        if weg:
+            app.logger.info("Geteiltes Telefon %s neu gestartet: Sitzung beendet", ext)
+            _sip_person_neu_laden()
+    except Exception as e:  # noqa: BLE001 - die Anfrage selbst soll nicht daran scheitern
+        app.logger.warning("Boot von %s: %s", ext, type(e).__name__)
+    finally:
+        conn.close()
 
 
 def _telefon_abmelden(conn, ext, durch):
