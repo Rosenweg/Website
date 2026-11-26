@@ -329,7 +329,7 @@ Kurzfassung (Details [`energie-api.md`](energie-api.md)):
 | MQTT, Anzeigen | `/api/mqtt/meters…`, `service-users`, `topic-rules`, `publish`, `user-*`; `/api/display/state`, `pdf`, `ankuendigungen`, `announce` | T/P (`requireMqttTechnik`) |
 | MQTT eigen | `POST /api/mqtt/token`, `GET /api/mqtt/my-access`, `/api/mqtt/my-app-passwords` | angemeldet (App-Passwörter nur Browser) |
 | SSH | `/api/ssh/me*` (Browser), `/api/ssh/sitzungen`, `hosts`, `matrix`, `dienste` (GET) | eigene Schlüssel angemeldet; Verwaltung T/P |
-| Stationen | `/api/stations/admin/*` (darin `POST admin/windows`: Windows-Rechner von Hand eintragen; `POST admin/ad-abgleich`: Windows-Rechner jetzt aus dem AD lesen) | T/P |
+| Stationen | `/api/stations/admin/*` (darin `POST admin/windows`: Windows-Rechner von Hand eintragen; `POST admin/ad-abgleich`: Windows-Rechner jetzt aus dem AD lesen; `POST admin/:id/anschluss-uebernehmen`: Anschluss-Wächter — neuen Switch-Port/AP übernehmen und, falls der Wächter gesperrt hat, freigeben; `POST admin/:id/anschluss-vergessen`: nächsten Anschluss ohne Sperre lernen; `DELETE admin/:id/doppelt`: Meldung „doppelte Station“ erledigt) | T/P |
 | TV | `/api/tv/channels`, `stream-url`, `extern/token*` | angemeldet |
 | Push | `/api/push/subscribe`, `unsubscribe`, `test` (5 / 10 Min.) | angemeldet |
 | Alarmpanel | `/api/alarmpanel/sensors`, `events` | lesen angemeldet; Sensoren anlegen, ändern, testen, Webhook ansehen T/P |
