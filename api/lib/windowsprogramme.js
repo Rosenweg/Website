@@ -135,8 +135,6 @@ const KATALOG = [
   { id: 'acrobat', name: 'Adobe Acrobat Reader', gruppe: 'Büro',
     regeln: [pfad('%PROGRAMFILES%\\Adobe\\Acrobat DC\\*'), pfad('%PROGRAMFILES%\\Adobe\\Acrobat Reader DC\\*'),
       pfad('%PROGRAMFILES%\\Adobe\\Acrobat Reader\\*')] },
-  { id: 'linphone', name: 'Linphone (Telefonie)', gruppe: 'Büro', standard: true,
-    regeln: [pfad('%PROGRAMFILES%\\Linphone\\*')] },
 
   { id: '7zip', name: '7-Zip', gruppe: 'Werkzeuge', regeln: [pfad('%PROGRAMFILES%\\7-Zip\\*')] },
   { id: 'vlc', name: 'VLC', gruppe: 'Werkzeuge', regeln: [pfad('%PROGRAMFILES%\\VideoLAN\\*')] },
