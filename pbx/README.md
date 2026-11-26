@@ -404,6 +404,8 @@ LXC-Snapshot taeglich via Proxmox (PVE GUI → CT 220 → Backup). Voicemail-Rec
 - **1000 = Ring-Group Technik:** klingelt bei allen Mitgliedern, ohne Geschäftszeiten, ohne Voicemail.
 - **2000 = Dienst Technik:** wie die Amtsnummer – Geschäftszeiten, Ring-Group, sonst gemeinsame Voicemail (Abschrift, WhatsApp an Technik, Auto-Reklamation).
 
+**Anrufer bei internen Anrufen (26.11.2026):** Auf Rosenweg-Geräten (Nebenstellen, App-Zugänge, geteilte Telefone) erscheint bei internen Anrufen nie eine externe Nummer. Rosenweg-Endpunkte rufen mit ihrer Caller-ID aus `pjsip_phones.conf` an (nach Anmeldung „Name 3HHWWP“). Ohne interne Nummer (Local/-Kanäle, Originate ohne CallerID, Testanrufe) setzt `[intern-absender]` „Rosenweg Telefonanlage 2000“. Die eigene Amtsnummer von innen gewählt geht direkt auf 2000, nicht über den Trunk hinaus und wieder herein. Bei der Weiterleitung auf ein externes Handy kommt dagegen die Amtsnummer an, so ist es gewollt. Den Namen schickt der Trunk heute nicht mit (`from_user` leert den Anzeigenamen, `send_pai` ist aus).
+
 ## Phase 2 (Roadmap)
 
 - Asterisk-AudioSocket-Modul → bidirektionaler PCM-Stream zur API
