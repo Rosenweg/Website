@@ -2,7 +2,9 @@ FROM node:22-alpine
 
 # poppler-utils -> pdftotext, fuer ZEV-Rechnungs-Parsing (Textlayer auslesen)
 # openssl -> Client-Zertifikate fuers Stationsjournal signieren (routes/stations.js)
-RUN apk add --no-cache poppler-utils openssl
+# openssh-client -> Sicherungen: Vormerkung auf CT 135 und `sichern` im
+#   Sicherungs-System (routes/sicherungen.js); Schluessel liegen nur auf CT 128
+RUN apk add --no-cache poppler-utils openssl openssh-client
 
 WORKDIR /app
 

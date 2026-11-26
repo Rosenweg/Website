@@ -11275,6 +11275,10 @@ app.use('/api/raum-qr', require('./routes/raum-qr'));
 const salz = require('./routes/salz');
 app.use('/api/salz', salz.salzRouter({ rateLimitGuard }));
 
+// SICHERUNGEN: PBS-Übersicht und PC-Sicherungen per Netzstart -> routes/sicherungen.js (sicherungen.html)
+const sicherungen = require('./routes/sicherungen');
+app.use('/api/sicherungen', sicherungen.sicherungenRouter({ pveAPI }));
+
 // Rosenweg Messenger auf dem eigenen Handy: Zugang je Geraet -> routes/messenger-zugang.js
 const messengerZugang = require('./routes/messenger-zugang');
 const { brokerBenutzername: msgBrokerBenutzername } = require('./lib/messenger-zugang');
@@ -30455,6 +30459,9 @@ initDB()
       // Salzvorrat: stündlich prüfen, ob ein Lager nachbestellt werden muss
       salz.ensureSchema().then(() => salz.starteSalzCron(activeIntervals))
         .catch(e => console.error('[salz] Schema:', e.message));
+      // Sicherungen: laufende PC-Sicherungen alle 20 s nachführen (auch ohne offene Seite)
+      sicherungen.ensureSchema().then(() => sicherungen.starteNachfuehren(activeIntervals))
+        .catch(e => console.error('[sicherungen] Schema:', e.message));
       // Mitgelieferte Dokumente (Beispielmappe) in die Ablage, siehe lib/ablage.js
       setTimeout(() => require('./lib/ablage').ablageAbgleichen(), 20 * 1000);
       // Cleanup expired sessions every hour

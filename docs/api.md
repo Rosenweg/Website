@@ -330,6 +330,7 @@ Kurzfassung (Details [`energie-api.md`](energie-api.md)):
 | MQTT eigen | `POST /api/mqtt/token`, `GET /api/mqtt/my-access`, `/api/mqtt/my-app-passwords` | angemeldet (App-Passwörter nur Browser) |
 | SSH | `/api/ssh/me*` (Browser), `/api/ssh/sitzungen`, `hosts`, `matrix`, `dienste` (GET) | eigene Schlüssel angemeldet; Verwaltung T/P |
 | Stationen | `/api/stations/admin/*` (darin `POST admin/windows`: Windows-Rechner von Hand eintragen; `POST admin/ad-abgleich`: Windows-Rechner jetzt aus dem AD lesen) | T/P |
+| Sicherungen | `GET /api/sicherungen/pbs` (PBS-Übersicht, nur lesend), `GET /api/sicherungen/pcs`, `PUT /api/sicherungen/pcs/:id` (MAC, Adresse), `POST/DELETE /api/sicherungen/pcs/:id/vormerkung` (CT 135), `POST /api/sicherungen/pcs/:id/start` (`sichern` im Sicherungs-System); Seite `sicherungen.html` | T/P |
 | TV | `/api/tv/channels`, `stream-url`, `extern/token*` | angemeldet |
 | Push | `/api/push/subscribe`, `unsubscribe`, `test` (5 / 10 Min.) | angemeldet |
 | Alarmpanel | `/api/alarmpanel/sensors`, `events` | lesen angemeldet; Sensoren anlegen, ändern, testen, Webhook ansehen T/P |
@@ -395,10 +396,12 @@ Weitere Einstellungen aus `.env` (Auswahl, ohne Geheimnisse): `DOCS_PATH`
 (Dokumentenablage, Standard `/documents`), `IMAP_HOST` (Standard `imap.gmail.com`),
 `IMAP_POLL_INTERVAL` (Sekunden, Standard 60), `IMAP_MAILBOXES` (Standard
 `INBOX,Junk`), `GOTENBERG_URL`, `GOTENBERG_MAX_CONCURRENT` (Standard 3), `PVE_API_URL`,
-`WG_CONTROL_URL`, `PRINT_API_URL`, `AD_PASSWORD_API_URL`, `MCP_HOST` (Standard
+`WG_CONTROL_URL`, `PRINT_API_URL`, `PBS_FINGERPRINT`, `PXE_VORMERK_ZIEL` (Sicherungen;
+Schlüssel unter `/opt/rosenweg-core/sicherung/`, siehe `api/routes/sicherungen.js`), `AD_PASSWORD_API_URL`, `MCP_HOST` (Standard
 `mcp.rosenweg4303.ch`), `VERTEILER_DOMAIN`. Geheimnisse wie `AUTHENTIK_CLIENT_SECRET`,
 `AUTHENTIK_API_TOKEN`, `SMTP_PASS`, `IMAP_PASS`, `MAILCOW_API_KEY`, `UNIFI_API_KEY`,
-`CLOUDFLARE_API_TOKEN`, `OPENROUTER_API_KEY` stehen nur in `.env`
+`CLOUDFLARE_API_TOKEN`, `OPENROUTER_API_KEY`, `PBS_AUDIT_TOKEN` (PBS, nur DatastoreAudit),
+`PBS_PC_TOKEN` (Geheimnis von `sicherung@pbs!pc`) stehen nur in `.env`
 (`<im Passwortmanager>`).
 
 ---
