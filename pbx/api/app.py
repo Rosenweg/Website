@@ -2873,28 +2873,85 @@ def _person_der_nebenstelle(conn, ext):
     return (r["email"], r["name"]) if r and r["email"] else (None, None)
 
 
-@app.get("/api/telefon/anrufliste")
-def telefon_anrufliste():
-    """Anrufe der Person, die an dieser Nebenstelle angemeldet ist — ueber alle Geraete."""
-    ext, deny = _nebenstelle()
-    if deny:
-        return deny
-    limit = min(int(request.args.get("limit", 200) or 200), 500)
+def _privat_zugang():
+    """HTTP-Basic <nummer>-p<id>:passwort eines eigenen Handys (telefon_sip_privat).
+    -> (email, name) | None. Nur fuer Anrufliste/Voicemail der Person (nicht PIN,
+    Nextcloud, Messenger: die gehoeren zur Sitzung auf geteilten Telefonen)."""
+    a = request.authorization
+    if not a or not a.username or not a.password or not SIP_PRIVAT_RE.fullmatch(a.username):
+        return None
+    zid = int(a.username.split("-p", 1)[1])
     conn = db.connect()
     try:
-        email, name = _person_der_nebenstelle(conn, ext)
+        r = conn.execute("SELECT email, nummer, passwort FROM telefon_sip_privat WHERE id = ?", (zid,)).fetchone()
+        if not r or a.username != f"{r['nummer']}-p{zid}" or \
+                not hmac.compare_digest(str(r["passwort"]).encode(), a.password.encode()):
+            return None
+        n = conn.execute("SELECT name FROM personen_nummern WHERE nummer = ? AND lower(email) = lower(?)",
+                         (r["nummer"], r["email"])).fetchone()
+        return r["email"], (n["name"] if n else "")
+    finally:
+        conn.close()
+
+
+def _person_fuer_verlauf():
+    """Person fuer Anrufliste/Voicemail: Nebenstelle mit Sitzung (geteiltes Telefon, wie
+    bisher) oder eigener Handy-Zugang. -> ((email, name), None) | (None, response)"""
+    a = request.authorization
+    if a and a.username and SIP_PRIVAT_RE.fullmatch(a.username):
+        p = _privat_zugang()
+        if not p:
+            return None, (jsonify({"error": "Unbekannter Zugang"}), 401)
+        return p, None
+    ext, deny = _nebenstelle()
+    if deny:
+        return None, deny
+    conn = db.connect()
+    try:
+        return _person_der_nebenstelle(conn, ext), None
+    finally:
+        conn.close()
+
+
+@app.get("/api/telefon/anrufliste")
+def telefon_anrufliste():
+    """Anrufe der Person, die an dieser Nebenstelle angemeldet ist (bzw. der das eigene Handy
+    gehoert) — ueber alle Geraete und die persoenliche Nummer.
+    ?limit= (max 500), optional ?tage= (nur die letzten N Tage, max 366) und ?vor=<beginn>
+    (aeltere Seite: nur Anrufe vor diesem Zeitpunkt). gegenueber_name = interner Name."""
+    person, deny = _person_fuer_verlauf()
+    if deny:
+        return deny
+    email, name = person
+    limit = min(int(request.args.get("limit", 200) or 200), 500)
+    bedingung, werte = "", []
+    tage = request.args.get("tage")
+    if tage and tage.isdigit() and 0 < int(tage) <= 366:
+        bedingung += " AND started_at >= datetime('now', ?)"
+        werte.append(f"-{int(tage)} days")
+    vor = request.args.get("vor") or ""
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", vor):
+        bedingung += " AND started_at < ?"
+        werte.append(vor)
+    conn = db.connect()
+    try:
         if not email:
             return jsonify({"angemeldet": False, "anrufe": []})
         rows = conn.execute(
             "SELECT id, direction, caller_id, dialed, ext, person, ziel_ext, ziel_person, started_at, "
             "answered_at, duration_seconds, hangup_cause, voicemail_summary, voicemail_path "
-            "FROM calls WHERE lower(person) = lower(?) OR lower(ziel_person) = lower(?) "
-            "ORDER BY started_at DESC LIMIT ?", (email, email, limit)).fetchall()
+            "FROM calls WHERE (lower(person) = lower(?) OR lower(ziel_person) = lower(?))" + bedingung +
+            " ORDER BY started_at DESC LIMIT ?", (email, email, *werte, limit)).fetchall()
+        namen = {}
+        for r in conn.execute("SELECT lower(email) e, name FROM personen_nummern WHERE aktiv = 1"):
+            namen.setdefault(r["e"], r["name"])
         anrufe = []
         for r in rows:
             ich_rufe = (r["person"] or "").lower() == email.lower() and r["direction"] in ("internal", "outbound")
             angenommen = bool(r["answered_at"]) or (r["hangup_cause"] or "").upper() == "ANSWERED"
+            gegenueber = (r["ziel_person"] if ich_rufe else r["person"]) or ""
             anrufe.append({
+                "gegenueber_name": namen.get(gegenueber.lower(), ""),
                 "id": r["id"],
                 # aus Sicht der Person
                 "richtung": "ausgehend" if ich_rufe else ("eingehend" if angenommen else "verpasst"),
@@ -2913,12 +2970,12 @@ def telefon_anrufliste():
 @app.get("/api/telefon/voicemail/<int:call_id>")
 def telefon_voicemail(call_id):
     """Persoenliche Voicemail anhoeren — nur die Person, der sie gehoert."""
-    ext, deny = _nebenstelle()
+    person, deny = _person_fuer_verlauf()
     if deny:
         return deny
+    email = person[0]
     conn = db.connect()
     try:
-        email, _ = _person_der_nebenstelle(conn, ext)
         r = conn.execute("SELECT voicemail_path, ziel_person FROM calls WHERE id = ?", (call_id,)).fetchone()
         if not email or not r or not r["voicemail_path"] or (r["ziel_person"] or "").lower() != email.lower():
             return jsonify({"error": "Nicht gefunden"}), 404
