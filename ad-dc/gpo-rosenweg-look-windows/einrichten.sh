@@ -37,6 +37,7 @@ HIER="$(cd "$(dirname "$0")" && pwd)"
 for b in hintergrund.png sperrbild.png logo.png startknopf.png; do
     [ -f "$HIER/bilder/$b" ] || { echo "bilder/$b fehlt" >&2; exit 1; }
 done
+[ -f "$HIER/nextcloud-laufwerk.ps1" ] || { echo "nextcloud-laufwerk.ps1 fehlt neben $0" >&2; exit 1; }
 
 # Open-Shell (klassisches Startmenue, rosenweg-look.ps1): feste Version, nicht
 # im Git (10 MB Fremd-Binary), sondern hier geholt und gegen die Pruefsumme
@@ -123,6 +124,7 @@ mkdir -p "$start_dir"
 install -m 0644 "$HIER/rosenweg-look.ps1" "$start_dir/rosenweg-look.ps1"
 install -m 0644 "$HIER"/bilder/*.png "$start_dir/"
 install -m 0644 "$HIER/programme-freigaben.txt" "$start_dir/programme-freigaben.txt"
+install -m 0644 "$HIER/nextcloud-laufwerk.ps1" "$start_dir/nextcloud-laufwerk.ps1"
 install -m 0644 "$HIER/bginfo.ps1" "$start_dir/bginfo.ps1"
 install -m 0644 "$HIER/drucker.ps1" "$start_dir/drucker.ps1"
 install -m 0644 "$HIER/programme/$OPENSHELL_DATEI" "$start_dir/$OPENSHELL_DATEI"

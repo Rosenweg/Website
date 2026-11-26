@@ -145,3 +145,52 @@ Als die angemeldete Person selbst genügt `drucker.ps1 -Anlass Probe`.
 Der Installer macht das Upgrade selbst.
 
 **Zurücknehmen:** In `rosenweg-look.ps1` `$OpenShellAn = $false` setzen und `./einrichten.sh` ausführen. Beim nächsten Start entfernt das Skript Open-Shell still (`msiexec /x`) und löscht die Richtlinien. Ab der nächsten Anmeldung ist wieder das Startmenü von Windows 11 da.
+
+## Nextcloud als Laufwerk N: (WebDAV)
+
+**Was:** Bei jeder Anmeldung verbindet `nextcloud-laufwerk.ps1` die eigene Nextcloud (`https://nextcloud.rosenweg4303.ch/remote.php/dav/files/<name>`) als Laufwerk **N:** mit dem Namen «Nextcloud». Die Person muss das einmal freigeben, danach gibt es keine Abfrage mehr, auch nicht an einem anderen Rosenweg-PC.
+
+**Was N: gegenüber H:/D: bringt:** Inhaltlich fast nichts. Die Nextcloud bindet dieselben CephFS-Ordner ein: `/docs` als `stwegN`, `meg`, `allgemein` usw. (wie D:) und den AD-Home als `Persönlich` (wie H:). Neu sind nur:
+
+- was andere in der Nextcloud mit der Person teilen
+- der eigene Nextcloud-Ordner (heute praktisch leer)
+- die Ansicht so, wie sie in der Nextcloud und in Rosenweg Files aussieht
+
+Die Rechte kommen dabei aus den Einbindungen der Nextcloud (pro Nextcloud-Gruppe, Eigentümer nur lesend) und nicht aus den Samba-ACLs. Für die Arbeit an Dateien bleiben H: und D: der bessere Weg: Sie sind schneller, haben Sperren und kennen keine Grössengrenze.
+
+**Anmeldung, und warum so:**
+
+- Die Konten der Nextcloud kommen aus Authentik (`user_oidc`). Es gibt kein LDAP-Backend und kein Nextcloud-Passwort. WebDAV mit Benutzername und AD-Passwort geht deshalb nicht, nur mit einem **App-Passwort**.
+- Kerberos direkt an der Nextcloud bräuchte ein GSSAPI-Modul im Apache und ein zweites Benutzer-Backend neben `user_oidc`. Das ist zu viel Umbau für ein Laufwerk.
+- Das App-Passwort holt das Skript über den **Login-Flow v2** der Nextcloud. Der Browser öffnet sich, die Person meldet sich bei Authentik an und klickt «Zugriff gewähren».
+  - Im Haus genügt bei Authentik «SSO Login», das läuft über Kerberos ohne Passwort. Dafür stehen `authentik.rosenweg4303.ch` und `nextcloud.rosenweg4303.ch` in der Intranet-Zone. Edge und Chrome melden sich dann per Kerberos an, solange keine `AuthServerAllowlist` gesetzt ist. Kommt eine dazu, muss `authentik.rosenweg4303.ch` darin stehen.
+- Gespeichert wird das App-Passwort mit DPAPI verschlüsselt in `%APPDATA%\Rosenweg\nextcloud.anmeldung`.
+  - Lesen kann es nur die Person selbst. Es reist mit dem servergespeicherten Profil auf jeden Rechner.
+  - Es steht nie im SYSVOL, in der Aufgabe oder in einer Befehlszeile: Verbunden wird mit `WNetAddConnection2`, nicht mit `net use … passwort`.
+- Das App-Passwort läuft nicht ab und hängt nicht am AD-Passwort. Ungültig wird es nur, wenn es in der Nextcloud unter *Einstellungen > Sicherheit* widerrufen wird (Name «Windows-Laufwerk N: (eingerichtet auf RECHNER)») oder wenn das Konto gesperrt ist.
+  - Dann bemerkt die nächste Anmeldung die 401, löscht das gespeicherte Passwort und fragt, ob neu verbunden werden soll.
+  - Ist die Nextcloud nur nicht erreichbar, passiert nichts. N: fehlt dann bis zur nächsten Anmeldung.
+- Wer bei der ersten Frage «Nein» sagt, wird nicht mehr gefragt (`HKCU\Software\Rosenweg\Nextcloud\NichtFragen`). Einrichten geht später über *Startmenü > Rosenweg > Nextcloud als Laufwerk N*.
+
+**Rechnerweit setzt `rosenweg-look.ps1` beim Start:**
+
+- `nextcloud-laufwerk.ps1` nach `C:\Program Files\Rosenweg` (Programm-Whitelist), die Aufgabe «Rosenweg Nextcloud» bei der Anmeldung (Gruppe Benutzer, 20 Minuten Laufzeit wegen der ersten Freigabe) und den Startmenü-Eintrag
+- den Dienst **WebClient** auf «Automatisch». Ab Werk steht er auf «Manuell (Trigger)», und ohne laufenden Dienst scheitert das Verbinden mit Fehler 67.
+- `HKLM\SYSTEM\CurrentControlSet\Services\WebClient\Parameters`:
+  - `BasicAuthLevel=1`: Basic nur über HTTPS. Das ist die Vorgabe, hier festgehalten. Nie 2.
+  - `FileSizeLimitInBytes=0xFFFFFFFF`: 4 GB statt 50 MB. Mehr kann der WebDAV-Client von Windows nicht. Nextcloud und Traefik haben keine tiefere Grenze (PHP 16 GB, keine Zeitlimits).
+- die Intranet-Zone (`ZoneMapKey`, Wert 1) für `https://nextcloud.rosenweg4303.ch` und `https://authentik.rosenweg4303.ch`. Ohne das bekämen Dateien von N: die Internet-Markierung: Warnungen beim Öffnen, Office in der geschützten Ansicht.
+
+**Grenzen des WebDAV-Clients:** Er hat keine echten Sperren und keinen Offline-Zugriff. Grosse Ordner öffnen sich langsamer als über SMB. Microsoft führt den WebClient seit Ende 2023 als «veraltet». Er ist in Windows 10 und 11 noch enthalten, wird aber nicht mehr weiterentwickelt. Die Alternative mit eigener Anmeldung ist der Nextcloud-Desktop-Client mit virtuellen Dateien (Platzhalter, Dateien werden erst beim Öffnen geladen). Dafür braucht es eine Installation und eine Freigabe in der Programm-Whitelist.
+
+**Prüfen** als die angemeldete Person (ändert nichts):
+
+```powershell
+& 'C:\Program Files\Rosenweg\nextcloud-laufwerk.ps1' -Anlass Probe
+```
+
+Das zeigt, ob eine Anmeldung gespeichert ist, ob die Nextcloud sie annimmt, ob N: verbunden ist und ob der WebClient läuft. Das Protokoll steht in `%LOCALAPPDATA%\Rosenweg\nextcloud.log`.
+
+**Für eine Person entfernen:** `nextcloud-laufwerk.ps1 -Anlass Entfernen` trennt N: und löscht die gespeicherte Anmeldung. Danach in der Nextcloud unter *Einstellungen > Sicherheit* das App-Passwort widerrufen.
+
+**Zurücknehmen für alle:** In `rosenweg-look.ps1` `$NextcloudAn = $false` setzen und `./einrichten.sh` ausführen. Der nächste Start entfernt die Aufgabe, den Startmenü-Eintrag, das Skript und die beiden Zonen-Einträge. Der WebClient bleibt auf «Automatisch», das schadet nicht.
