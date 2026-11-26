@@ -304,6 +304,33 @@ haben keine eigene JSON-Sperre (dort liegen keine Datendateien). `/.well-known/`
 - Stationen von Nicht-Technik werden gesperrt registriert und erhalten Geheimnisse
   erst nach Freigabe.
 
+### 4.10 Karten-Anmeldung der Apps auf privaten Geräten (`api/routes/app-karte.js`)
+
+Entscheid Stefan 26.11.2026: Rosenweg-Apps zeigen auf privaten Geräten (ohne
+Rosenweg Gerät) denselben Anmeldeschirm wie der Sperrbildschirm der geteilten
+Telefone. Die Karte allein meldet an, **ohne PIN** (die PIN gibt es nur auf
+geteilten Telefonen). Jede App hat ihre eigene Sitzung.
+
+Die UID ist kopierbar und das Gerät steht nicht im Haus. Darum:
+
+- **Bindung ans Gerät:** Schlüsselpaar EC P-256 im Android-Keystore der App
+  (nicht exportierbar); der Server kennt nur den öffentlichen Schlüssel.
+  Zugangs-Token `rw_app_…` gilt 15 Minuten; erneuern nur mit Unterschrift über
+  eine einmalige Herausforderung des Servers (`POST /api/apps/sitzung/erneuern`).
+- **Kartenprüfung bei jedem Erneuern** live in UniFi Access (entzogen = Sitzung
+  weg, Gruppen frisch). Access nicht erreichbar: höchstens 24 Std. ohne Prüfung.
+- **Benachrichtigung:** Mail an die Person bei der ersten Karten-Anmeldung auf
+  einem neuen Gerät (Kennung = sha256 der ANDROID_ID, gleich für alle
+  Rosenweg-Apps eines Geräts).
+- **Übersicht/Widerruf:** Profil → „Mit der Rosenweg-Karte angemeldete Apps“;
+  Technik/Präsident sehen alle (`GET /api/apps/sitzungen?alle=1`,
+  `DELETE /api/apps/sitzungen/:id`, `POST /api/apps/sitzungen/alle-abmelden`).
+- **Schwächerer Ausweis:** gleiche Sperrliste wie PATs (kein Passwort, keine
+  Token/Passkeys/MQTT-Zugänge) und `requireUserLogin` lehnt ab.
+- **Kein Orakel:** „nicht bekannt oder gesperrt“ für Fremde gleich.
+- **Laufzeit** 30 Tage (`APP_KARTE_TAGE`), höchstens 20 aktive Sitzungen je
+  Person (`APP_KARTE_MAX_SITZUNGEN`); eine neue löst die am längsten unbenutzte ab.
+
 ---
 
 ## 5. Grenzwerte (Rate-Limits) auf einen Blick
@@ -333,6 +360,7 @@ haben keine eigene JSON-Sperre (dort liegen keine Datendateien). `/.well-known/`
 | Push-Test | 5 / 10 Min |
 | Voicemail-Reklamation | 3 / Tag je Nummer, 20 / Tag gesamt |
 | Doodle-Einladungen | 50 je Umfrage, 100 / Tag je Konto |
+| Karten-Anmeldung der Apps (`POST /api/apps/karte-anmelden`) | je 15 Min: 10 Fehlversuche und 40 Versuche je IP, 5 Fehlversuche je Karte, 10 je Gerät, 200 Fehlversuche gesamt; höchstens 20 Sitzungen je Person |
 | Z-Push (ActiveSync) | 5 Fehlversuche / 15 Min je Benutzer; nginx 10 / s gesamt |
 
 ---

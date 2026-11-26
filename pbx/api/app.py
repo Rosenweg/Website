@@ -1482,6 +1482,15 @@ def _rosenweg_konto():
     token = _bearer()
     if not token or len(token) > 4096:
         return None
+    if token.startswith("rw_app_"):
+        # Karten-Anmeldung einer App auf einem privaten Handy (Website api/routes/app-karte.js):
+        # kein Authentik-Token, die Haupt-API kennt es (/api/auth/me).
+        u = current_user()
+        email = str((u or {}).get("email") or "").strip().lower()
+        if not email:
+            return None
+        return {"email": email, "name": str(u.get("name") or ""),
+                "groups": [str(g) for g in (u.get("groups") or [])]}
     try:
         r = requests.get(AUTHENTIK_USERINFO, headers={"Authorization": f"Bearer {token}"}, timeout=6)
         if not r.ok:
@@ -1543,6 +1552,50 @@ def telefon_privat_anmelden():
         conn.close()
     _sip_person_neu_laden()
     return _privat_antwort(r, name)
+
+
+# Nextcloud-Zugang fuer Rosenweg-Apps auf dem eigenen Handy (Stefan 26.11.2026): wer in der App
+# angemeldet ist (Anmeldeschirm aus commons-rosenweg: Rosenweg-Karte oder Rosenweg-Konto), bekommt
+# das App-Passwort ueber denselben Token-Dienst wie die geteilten Telefone (/api/telefon/nextcloud).
+# Ein App-Passwort je App und Handy; die App widerruft es beim Abmelden selbst (Nextcloud OCS).
+NC_PRIVAT_MAX_STUNDE = 10
+_NC_PRIVAT = {}   # email -> [Zeitpunkte]
+
+
+@app.post("/api/telefon/privat/nextcloud")
+def telefon_privat_nextcloud():
+    """Bearer = Zugang der App (Authentik rosenweg-apps oder Karten-Sitzung rw_app_).
+    Body {app, app_name, geraet}. -> {server, benutzer, app_passwort}"""
+    konto = _rosenweg_konto()
+    if not konto:
+        return jsonify({"error": "Rosenweg-Anmeldung ungueltig"}), 401
+    if not NC_TOKEN_URL:
+        return jsonify({"error": "Nextcloud-Zugang nicht eingerichtet"}), 503
+    jetzt = time.time()
+    liste = [t for t in _NC_PRIVAT.get(konto["email"], []) if jetzt - t < 3600]
+    if len(liste) >= NC_PRIVAT_MAX_STUNDE:
+        return jsonify({"error": "Zu viele Anfragen - bitte spaeter nochmals"}), 429
+    _NC_PRIVAT[konto["email"]] = liste + [jetzt]
+    b = request.get_json(silent=True) or {}
+    sauber = lambda v, n: re.sub(r"[\x00-\x1f\x7f<>]", " ", str(v or ""))[:n].strip()
+    app_name = sauber(b.get("app_name") or b.get("app"), 60) or "Rosenweg-App"
+    geraet = sauber(b.get("geraet"), 60) or "Handy"
+    # eindeutig je Anmeldung: der Token-Dienst widerruft nach Name
+    name = f"{app_name} auf {geraet} ({pysecrets.token_hex(3)})"
+    try:
+        a = requests.post(f"{NC_TOKEN_URL}/ausstellen", json={"email": konto["email"], "name": name},
+                          headers={"X-NC-Token-Secret": NC_TOKEN_SECRET}, timeout=60)
+    except requests.RequestException:
+        return jsonify({"error": "Nextcloud nicht erreichbar"}), 502
+    if a.status_code == 404:
+        return jsonify({"error": "Kein Nextcloud-Konto mit dieser E-Mail"}), 404
+    if a.status_code != 200:
+        return jsonify({"error": "Nextcloud-Zugang fehlgeschlagen"}), 502
+    d = a.json()
+    app.logger.info("Nextcloud-Zugang fuer eine App auf dem eigenen Handy ausgestellt")
+    res = jsonify({"server": NEXTCLOUD_SERVER, "benutzer": d["benutzer"], "app_passwort": d["app_passwort"]})
+    res.headers["Cache-Control"] = "no-store"
+    return res
 
 
 @app.post("/api/telefon/privat/stand")

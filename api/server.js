@@ -18536,12 +18536,31 @@ async function accessKarteZurUid(nfcId, frisch = false) {
   // Nicht im Zwischenspeicher: vielleicht gerade erst angelegt -> einmal frisch nachsehen
   if (!k && !frisch) k = finde(await accessKartenListe(true));
   if (!k) return null;
-  // Live-Stand der einen Karte (Status/Besitzer koennen sich seit dem Listenabruf geaendert haben)
-  const r = await unifiAccessRaw('GET', `/credentials/nfc_cards/tokens/${encodeURIComponent(k.token)}`);
+  return accessKarteLive(k.token);
+}
+
+// Live-Stand einer Karte ueber ihr Access-Token (Status/Besitzer koennen sich seit dem
+// Listenabruf geaendert haben). null = geloescht. Auch fuer die Karten-Sitzungen der Apps
+// (routes/app-karte.js), die die UID nicht speichern.
+async function accessKarteLive(token) {
+  const r = await unifiAccessRaw('GET', `/credentials/nfc_cards/tokens/${encodeURIComponent(token)}`);
   if (r.status === 0) throw Object.assign(new Error('UniFi Access nicht erreichbar'), { http: 502 });
   if (r.status === 404) { accessKartenCacheLeeren(); return null; }   // inzwischen geloescht
   if (!accessOk(r) || !r.body?.data) throw Object.assign(new Error(`UniFi Access: HTTP ${r.status}`), { http: 502 });
   return r.body.data;
+}
+
+// Wem gehoert diese Karte? Eine Pruefung fuer alle: geteilte Telefone (pbx-api ueber
+// GET /api/pbx/karte/:nfcId) und Rosenweg-Apps auf privaten Handys (routes/app-karte.js).
+// -> {found, assigned, status, display_id, access_name, person, karte}; karte = Access-Datensatz
+async function karteNachschlagen(nfcId) {
+  const k = await accessKarteZurUid(nfcId);
+  if (!k) return { found: false };
+  const besitzer = accessKartenBesitzerId(k);
+  const assigned = !!besitzer && String(k.status || '').toLowerCase() === 'assigned';
+  const person = besitzer ? await kartenPerson(besitzer) : null;
+  return { found: true, assigned, status: k.status || null, display_id: k.display_id || null,
+    access_name: accessKartenBesitzerName(k), person, karte: k };
 }
 
 function accessKartenBesitzerId(k) {
@@ -18650,13 +18669,8 @@ app.get('/api/pbx/karte/:nfcId', requirePbxSecret, async (req, res) => {
   const nfcId = normNfcId(req.params.nfcId);
   if (!nfcIdGueltig(nfcId)) return res.status(400).json({ error: 'Ungueltige Karten-UID' });
   try {
-    const k = await accessKarteZurUid(nfcId);
-    if (!k) return res.json({ found: false });
-    const besitzer = accessKartenBesitzerId(k);
-    const assigned = !!besitzer && String(k.status || '').toLowerCase() === 'assigned';
-    const person = besitzer ? await kartenPerson(besitzer) : null;
-    res.json({ found: true, assigned, status: k.status || null, display_id: k.display_id || null,
-      access_name: accessKartenBesitzerName(k), person });
+    const { karte, ...antwort } = await karteNachschlagen(nfcId);
+    res.json(antwort);
   } catch (e) { kartenFehler(res, e); }
 });
 
@@ -22906,6 +22920,14 @@ app.delete('/api/stations/:id/tunnel', stationsRouter.stationAuth, async (req, r
 // nicht wg-control), angemeldet mit dem Rosenweg-Konto (Authentik
 // rosenweg-apps). Begruendung und Grenzen in routes/app-tunnel.js.
 require('./routes/app-tunnel').appTunnelRoutes(app, { pool, rateLimitGuard });
+
+// Karten-Anmeldung der Rosenweg-Apps auf privaten Geraeten (Entscheid Stefan 26.11.2026):
+// Rosenweg-Karte ans Handy -> eigene, widerrufbare Sitzung je App. Begruendung in routes/app-karte.js.
+require('./routes/app-karte').appKarteRoutes(app, {
+  pool, authMiddleware, requireUserLogin, absenderIp: require('./middleware/auth').absenderIp,
+  loggedSendMail, MAIL_FROM, karteNachschlagen, accessKarteLive, accessKartenBesitzerId, kartenPerson,
+  kartenProtokollieren,
+});
 
 app.post('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
   try {
