@@ -125,6 +125,25 @@ CREATE TABLE IF NOT EXISTS telefon_apps (
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Freigegebene Fassungen fuer die Seite /apps (POST /api/apps/release, CI der App-Repos
+-- per GitHub OIDC; oder Technik von Hand). schluessel = App aus APPS_REGISTER (z.B. 'vm')
+-- oder Paketname einer Katalog-App (z.B. 'ch.rosenweg4303.phone'). Je schluessel und
+-- plattform gilt die neueste Zeile; aeltere bleiben begrenzt (APPS_BEHALTEN) zum Zurueckgehen.
+CREATE TABLE IF NOT EXISTS apps_versionen (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    schluessel    TEXT NOT NULL,
+    plattform     TEXT NOT NULL,           -- 'android' | 'linux-deb' | 'macos' | 'windows'
+    version       TEXT NOT NULL,           -- z.B. '1.0.0'
+    version_code  INTEGER,                 -- nur Android (aus dem Manifest)
+    datei         TEXT NOT NULL,           -- Dateiname unter <PBX_TELEFON_APPS_DIR>/dateien/
+    sha256        TEXT NOT NULL,
+    groesse       INTEGER NOT NULL,
+    notiz         TEXT NOT NULL DEFAULT '',
+    quelle        TEXT NOT NULL,           -- 'Rosenweg/rosenweg-salz@v1.0.0' oder E-Mail
+    zeit          TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS apps_versionen_ziel ON apps_versionen (schluessel, plattform, id);
+
 CREATE TABLE IF NOT EXISTS telefon_log (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     ext          TEXT NOT NULL,

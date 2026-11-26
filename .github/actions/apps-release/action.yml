@@ -1,0 +1,91 @@
+# Rosenweg-App-Release an /apps schicken (www.rosenweg4303.ch/apps, Updater der Apps,
+# Katalog der geteilten Telefone). Ziel: POST https://pbx.rosenweg4303.ch/api/apps/release
+# (pbx/api/app.py, "Weitere Rosenweg-Apps auf /apps").
+#
+# Anmeldung ohne Geheimnis: das OIDC-Token von GitHub Actions. Der Aufrufer braucht
+#   permissions: { id-token: write }
+# und muss fuer einen Tag laufen (Release-Tag v1.2.3 oder 1.2.3: push eines Tags, release
+# published oder workflow_dispatch mit --ref <tag>). Die Anlage laesst nur die Repos zu, die
+# dort eingetragen sind (APPS_REGISTER / APPS_KATALOG_REPOS), prueft Pruefsumme, Dateityp,
+# bei APKs Rosenweg-Signatur und Paketname, und dass die Version zum Tag passt.
+#
+# Beispiel (nach dem Bau im eigenen Workflow):
+#   - uses: Rosenweg/Website/.github/actions/apps-release@main
+#     with:
+#       dateien: ausgabe/*.apk
+#       notiz: ${{ github.event.release.body }}
+name: Rosenweg-App an /apps
+description: Schickt Release-Dateien (APK, .deb, .dmg, .exe/.msi) an die Seite /apps der Rosenweg-Anlage.
+inputs:
+  dateien:
+    description: Dateien oder Muster, eines pro Zeile. Plattform nach Endung (.apk android, .deb linux-deb, .dmg macos, .exe/.msi windows).
+    required: true
+  version:
+    description: Version (Standard - der Tag ohne fuehrendes v)
+    required: false
+    default: ''
+  paket:
+    description: Android-Paketname zur Kontrolle (optional; die Anlage liest ihn ohnehin aus dem APK)
+    required: false
+    default: ''
+  notiz:
+    description: Aenderungsnotiz (z.B. der Text des GitHub-Release)
+    required: false
+    default: ''
+  anlage:
+    description: Adresse der PBX-API
+    required: false
+    default: https://pbx.rosenweg4303.ch
+runs:
+  using: composite
+  steps:
+    - name: An /apps schicken
+      shell: bash
+      env:
+        DATEIEN: ${{ inputs.dateien }}
+        VERSION: ${{ inputs.version }}
+        PAKET: ${{ inputs.paket }}
+        NOTIZ: ${{ inputs.notiz }}
+        ANLAGE: ${{ inputs.anlage }}
+      run: |
+        set -euo pipefail
+        if [ "${GITHUB_REF_TYPE:-}" != tag ]; then
+          echo "::error::Nur fuer einen Release-Tag (dieser Lauf: ${GITHUB_REF:-?})"; exit 1
+        fi
+        if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+          echo "::error::Kein OIDC-Token: im Workflow 'permissions: id-token: write' setzen"; exit 1
+        fi
+        version="${VERSION:-${GITHUB_REF_NAME#v}}"
+        antwort=$(curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+          "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://pbx.rosenweg4303.ch/api/apps")
+        token=$(printf '%s' "$antwort" | sed -n 's/.*"value"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+        [ -n "$token" ] || { echo "::error::OIDC-Token nicht erhalten"; exit 1; }
+        echo "::add-mask::$token"
+        summe() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
+        anzahl=0
+        while IFS= read -r muster; do
+          [ -n "${muster// /}" ] || continue
+          for f in $muster; do
+            [ -f "$f" ] || { echo "::error::Datei fehlt: $f"; exit 1; }
+            case "$(printf %s "$f" | tr "[:upper:]" "[:lower:]")" in
+              *.apk) plattform=android ;;
+              *.deb) plattform=linux-deb ;;
+              *.dmg) plattform=macos ;;
+              *.exe|*.msi) plattform=windows ;;
+              *) echo "Uebersprungen (keine App-Datei): $f"; continue ;;
+            esac
+            echo "== $f -> /apps ($plattform, $version)"
+            curl -sS --fail-with-body --retry 2 --max-time 1800 \
+              -H "Authorization: Bearer $token" \
+              --form-string "plattform=$plattform" \
+              --form-string "version=$version" \
+              --form-string "sha256=$(summe "$f")" \
+              --form-string "paket=$PAKET" \
+              --form-string "notiz=$NOTIZ" \
+              -F "datei=@\"$f\"" \
+              "$ANLAGE/api/apps/release"
+            echo
+            anzahl=$((anzahl + 1))
+          done
+        done <<< "$DATEIEN"
+        [ "$anzahl" -gt 0 ] || { echo "::error::Keine App-Datei gefunden ($DATEIEN)"; exit 1; }

@@ -15,6 +15,8 @@ Abhaengigkeit zur Haupt-API fuer den Betrieb. Zwei Auth-Welten:
 SIP-Telefone (LAN/VPN): aus der sip_extensions-Tabelle generiert die API
 /etc/asterisk/pjsip_phones.conf und triggert 'pjsip reload' via AMI.
 """
+import base64
+import binascii
 import hashlib
 import hmac
 import ipaddress
@@ -23,12 +25,16 @@ import time
 import os
 import re
 import secrets as pysecrets
+import shutil
 from datetime import datetime, timedelta, timezone
 from xml.sax.saxutils import escape as xesc
 from zoneinfo import ZoneInfo
 
 import requests
 import segno
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from flask import Flask, Response, jsonify, request, send_file, send_from_directory
 
 import ami
@@ -2033,6 +2039,244 @@ APPS_OEFFENTLICH_OHNE = {"ch.rosenweg4303.telefon"}
 APPS_HERKUNFT = {"https://www.rosenweg4303.ch", "https://rosenweg4303.ch"}
 
 
+APPS_SIGNATUR_SHA256 = "7b3bac26e82b6103546b96861dcf1bb89b3239424ff11fdf684975cf78c5a5ae"
+
+# ─── Weitere Rosenweg-Apps auf /apps (Stefan 26.11.2026: "jede App gehoert auf /apps") ───
+# Apps mit eigenem Repo (Flutter), die es fuer mehrere Plattformen gibt. Ihre Dateien kommen
+# nicht aus dem Katalog der geteilten Telefone, sondern
+#   - von der CI der App bei einem Release-Tag (POST /api/apps/release): sie meldet sich mit dem OIDC-Token
+#     von GitHub Actions an (kein gespeichertes Geheimnis; geprueft werden Signatur, Repo, Tag),
+#   - oder von der Technik von Hand (POST /api/pbx/apps-versionen/..., z.B. ein DMG ohne CI).
+# Android-APKs muessen mit dem Rosenweg-Schluessel signiert sein und den Paketnamen aus dem
+# Register tragen. Steht die App auch im Katalog der geteilten Telefone, wird dort dieselbe
+# APK eingespielt (die Freigabe fuer die Telefone und ihre Gruppen bleibt Sache der Technik).
+#
+# Neue App: Eintrag hier, Logo nach www img/apps/<app>.png, Schritt "Auf /apps" in der CI
+# (Action Rosenweg/Website/.github/actions/apps-release). Erst mit einer Datei erscheint sie.
+APPS_REGISTER = {
+    "vm": {
+        "name": "Rosenweg Virtuelle Computer", "repo": "Rosenweg/rosenweg-vm", "paket": "ch.rosenweg4303.vm",
+        "logo": "/img/apps/rosenweg-vm.png", "reihenfolge": 10,
+        "text": "Die eigenen virtuellen Computer der Anlage öffnen – im Haus und unterwegs, "
+                "mit Ton, USB-Geräten und freigegebenen Ordnern.",
+        "fuer": "Für alle, denen die Technik einen virtuellen Computer eingerichtet hat.",
+    },
+    "salz": {
+        "name": "Rosenweg Salz", "repo": "Rosenweg/rosenweg-salz", "paket": "ch.rosenweg4303.salz",
+        "logo": "/img/apps/rosenweg-salz.png", "reihenfolge": 20,
+        "text": "Salzvorrat der Enthärtungsanlagen: Anlieferung und eingefüllte Säcke mit dem "
+                "Barcode buchen, Bestand und Reichweite je Lager.",
+        "fuer": "Buchen dürfen die Bewohner von Rosenweg 2, 4 und 9, die Kooperation (Lager im "
+                "Rosenweg 10) und die Technik. Alle anderen sehen nur einen Hinweis.",
+    },
+    # Noch kein Repo/Release (26.11.2026): steht bereit, erscheint mit der ersten Datei.
+    "profil": {
+        "name": "Rosenweg Profil", "repo": "Rosenweg/rosenweg-profil", "paket": "ch.rosenweg4303.profil",
+        "logo": "/img/apps/rosenweg-profil.png", "reihenfolge": 30,
+        "text": "Die eigenen Angaben im Rosenweg-Portal ansehen und ändern.",
+        "fuer": "",
+    },
+}
+APPS_PLATTFORMEN = {
+    # endung -> Kennbytes am Anfang (DMG: Kennung "koly" im letzten 512-Byte-Block)
+    "android":   {"titel": "Android", "endungen": {".apk": b"PK\x03\x04"},
+                  "mime": "application/vnd.android.package-archive"},
+    "linux-deb": {"titel": "Linux (Debian 13)", "endungen": {".deb": b"!<arch>\ndebian-binary"},
+                  "mime": "application/vnd.debian.binary-package"},
+    "macos":     {"titel": "macOS", "endungen": {".dmg": None}, "mime": "application/x-apple-diskimage"},
+    "windows":   {"titel": "Windows", "endungen": {".exe": b"MZ", ".msi": b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"},
+                  "mime": "application/octet-stream"},
+}
+# Katalog-Apps (geteilte Telefone + Tabelle auf /apps): Repo -> Paketname. Ihre Releases ersetzen
+# die APK im Katalog; anlegen, Gruppen und "aktiv" bleiben Sache der Technik (/smartphones).
+APPS_KATALOG_REPOS = {
+    "Rosenweg/calculator-rosenweg": "ch.rosenweg4303.math",
+    "Rosenweg/calendar-rosenweg": "ch.rosenweg4303.calendar",
+    "Rosenweg/camera-rosenweg": "ch.rosenweg4303.camera",
+    "Rosenweg/clock-rosenweg": "ch.rosenweg4303.clock",
+    "Rosenweg/contacts-rosenweg": "ch.rosenweg4303.contacts",
+    "Rosenweg/documents-rosenweg": "ch.rosenweg4303.documents",
+    "Rosenweg/file-manager-rosenweg": "ch.rosenweg4303.filemanager",
+    "Rosenweg/gallery-rosenweg": "ch.rosenweg4303.gallery",
+    "Rosenweg/launcher-rosenweg": "ch.rosenweg4303.home",
+    "Rosenweg/messages-rosenweg": "ch.rosenweg4303.messages",
+    "Rosenweg/notes-rosenweg": "ch.rosenweg4303.notes",
+    "Rosenweg/paint-rosenweg": "ch.rosenweg4303.paint",
+    "Rosenweg/phone-rosenweg": "ch.rosenweg4303.phone",
+    "Rosenweg/voice-recorder-rosenweg": "ch.rosenweg4303.voicerecorder",
+    "Rosenweg/keyboard-rosenweg": "ch.rosenweg4303.keyboard",
+    "Rosenweg/rosenweg-karten": "ch.rosenweg4303.karten",
+    "Rosenweg/android-sip-rosenweg": "ch.rosenweg4303.telefon",   # Rosenweg Geraet: nur Katalog, nicht oeffentlich
+}
+APPS_BEHALTEN = 3          # Fassungen je App und Plattform (die aktuelle eingeschlossen)
+APPS_DATEIEN_DIR = os.path.join(TELEFON_APPS_DIR, "dateien")
+APPS_DATEI_MAX = 600 * 1024 * 1024
+_VERSION = re.compile(r"[0-9]+(\.[0-9]+){1,3}([-+.][0-9A-Za-z.]{1,20})?")
+
+# GitHub Actions OIDC: https://docs.github.com/actions/security-for-github-actions/security-hardening-your-deployments/about-security-hardening-with-openid-connect
+GITHUB_OIDC_ISS = "https://token.actions.githubusercontent.com"
+APPS_OIDC_AUD = os.environ.get("PBX_APPS_OIDC_AUD", "https://pbx.rosenweg4303.ch/api/apps")
+_GITHUB_JWKS = {"zeit": 0.0, "keys": {}}
+
+
+def _b64_lesen(s):
+    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+
+
+def _jwt_teile(token):
+    """(kopf, claims, teile) ohne Pruefung oder None."""
+    try:
+        teile = token.split(".")
+        if len(teile) != 3:
+            return None
+        return json.loads(_b64_lesen(teile[0])), json.loads(_b64_lesen(teile[1])), teile
+    except (ValueError, binascii.Error, UnicodeDecodeError):
+        return None
+
+
+def _github_schluessel(kid):
+    jetzt = time.time()
+    if (kid not in _GITHUB_JWKS["keys"] or jetzt - _GITHUB_JWKS["zeit"] > 3600) and jetzt - _GITHUB_JWKS["zeit"] > 60:
+        try:
+            r = requests.get(GITHUB_OIDC_ISS + "/.well-known/jwks", timeout=10)
+            r.raise_for_status()
+            _GITHUB_JWKS["keys"] = {k["kid"]: k for k in r.json().get("keys", []) if k.get("kty") == "RSA" and k.get("kid")}
+            _GITHUB_JWKS["zeit"] = jetzt
+        except (requests.RequestException, ValueError, KeyError):
+            app.logger.warning("GitHub-JWKS nicht ladbar")
+    return _GITHUB_JWKS["keys"].get(kid)
+
+
+def _github_oidc(token):
+    """Claims eines gueltigen GitHub-Actions-OIDC-Tokens fuer APPS_OIDC_AUD, sonst None."""
+    t = _jwt_teile(token)
+    if not t:
+        return None
+    kopf, claims, teile = t
+    if kopf.get("alg") != "RS256" or claims.get("iss") != GITHUB_OIDC_ISS:
+        return None
+    jwk = _github_schluessel(str(kopf.get("kid", "")))
+    if not jwk:
+        return None
+    try:
+        schluessel = rsa.RSAPublicNumbers(int.from_bytes(_b64_lesen(jwk["e"]), "big"),
+                                          int.from_bytes(_b64_lesen(jwk["n"]), "big")).public_key()
+        schluessel.verify(_b64_lesen(teile[2]), f"{teile[0]}.{teile[1]}".encode(), padding.PKCS1v15(), hashes.SHA256())
+    except (InvalidSignature, ValueError, KeyError, binascii.Error):
+        return None
+    jetzt = time.time()
+    if not (float(claims.get("exp", 0)) > jetzt and float(claims.get("nbf", claims.get("iat", 0))) < jetzt + 60):
+        return None
+    aud = claims.get("aud")
+    if APPS_OIDC_AUD not in (aud if isinstance(aud, list) else [aud]):
+        return None
+    return claims
+
+
+def _apk_zertifikat_sha256(pfad):
+    """SHA-256 des ersten Signer-Zertifikats aus dem APK-Signaturblock (v2/v3), sonst None.
+    Nur die Herkunftspruefung beim Hochladen; die kryptografische Pruefung machen Android und
+    der Updater beim Installieren."""
+    import struct
+    with open(pfad, "rb") as f:
+        f.seek(0, 2)
+        laenge = f.tell()
+        f.seek(max(0, laenge - 65557))
+        ende = f.read()
+        eocd = ende.rfind(b"PK\x05\x06")
+        if eocd < 0:
+            return None
+        cd = struct.unpack_from("<I", ende, eocd + 16)[0]
+        if cd < 32:
+            return None
+        f.seek(cd - 24)
+        groesse, magie = struct.unpack("<Q16s", f.read(24))
+        if magie != b"APK Sig Block 42" or groesse > cd or groesse < 24:
+            return None
+        f.seek(cd - groesse - 8)
+        block = f.read(groesse - 16)   # Laengenfeld + Paare, ohne Laenge+Magie am Ende
+    paare, i = {}, 8   # Paare beginnen nach dem fuehrenden Laengenfeld
+    while i + 12 <= len(block):
+        plen, pid = struct.unpack_from("<QI", block, i)
+        paare[pid] = block[i + 12:i + 8 + plen]
+        i += 8 + plen
+    wert = paare.get(0x7109871A) or paare.get(0xF05368C0)   # v2, sonst v3
+    if not wert:
+        return None
+    try:
+        def lp(b, o):   # laengenpraefigiertes Stueck
+            n = struct.unpack_from("<I", b, o)[0]
+            return b[o + 4:o + 4 + n], o + 4 + n
+        signers, _ = lp(wert, 0)
+        signer, _ = lp(signers, 0)
+        signed, _ = lp(signer, 0)
+        _digests, o = lp(signed, 0)
+        zerts, _ = lp(signed, o)
+        zert, _ = lp(zerts, 0)
+    except struct.error:
+        return None
+    return hashlib.sha256(zert).hexdigest() if zert else None
+
+
+def _apk_manifest(pfad):
+    """(paket, versionCode, versionName) aus dem binaeren AndroidManifest.xml, sonst (None, None, None)."""
+    import struct
+    import zipfile
+    try:
+        with zipfile.ZipFile(pfad) as z:
+            x = z.read("AndroidManifest.xml")
+        if struct.unpack_from("<H", x, 0)[0] != 0x0003:
+            return None, None, None
+        o = struct.unpack_from("<H", x, 2)[0]
+        texte, resids = [], []
+        while o + 8 <= len(x):
+            typ, hgr, gr = struct.unpack_from("<HHI", x, o)
+            if typ == 0x0001:   # String-Pool
+                anzahl, _stile, flags, start = struct.unpack_from("<IIII", x, o + 8)
+                utf8 = bool(flags & 0x100)
+                for k in range(anzahl):
+                    p = o + start + struct.unpack_from("<I", x, o + hgr + 4 * k)[0]
+                    if utf8:
+                        p += 2 if x[p] & 0x80 else 1
+                        n = x[p] & 0x7F
+                        if x[p] & 0x80:
+                            n = (n << 8) | x[p + 1]
+                            p += 1
+                        texte.append(x[p + 1:p + 1 + n].decode("utf-8", "replace"))
+                    else:
+                        n = struct.unpack_from("<H", x, p)[0]
+                        if n & 0x8000:
+                            n = ((n & 0x7FFF) << 16) | struct.unpack_from("<H", x, p + 2)[0]
+                            p += 2
+                        texte.append(x[p + 2:p + 2 + 2 * n].decode("utf-16-le", "replace"))
+            elif typ == 0x0180:   # Ressourcen-IDs der Attributnamen
+                resids = list(struct.unpack_from(f"<{(gr - hgr) // 4}I", x, o + hgr))
+            elif typ == 0x0102:   # Start-Element
+                name = struct.unpack_from("<I", x, o + 20)[0]
+                if texte[name] == "manifest":
+                    a_start, a_gr, a_anz = struct.unpack_from("<HHH", x, o + 24)
+                    paket = vcode = vname = None
+                    for k in range(a_anz):
+                        a = o + 16 + a_start + k * a_gr
+                        _ns, an, roh, _g, _r, dtyp, daten = struct.unpack_from("<IIIHBBI", x, a)
+                        rid = resids[an] if an < len(resids) else 0
+                        aname = texte[an] if an < len(texte) else ""
+                        wert = texte[roh] if roh != 0xFFFFFFFF else (texte[daten] if dtyp == 0x03 else None)
+                        if aname == "package":
+                            paket = wert
+                        elif rid == 0x0101021B or aname == "versionCode":
+                            vcode = daten if dtyp in (0x10, 0x11) else (int(wert) if wert and wert.isdigit() else None)
+                        elif rid == 0x0101021C or aname == "versionName":
+                            vname = wert
+                    return paket, vcode, vname
+            if gr <= 0:
+                break
+            o += gr
+    except (KeyError, zipfile.BadZipFile, struct.error, IndexError, ValueError, OSError):
+        pass
+    return None, None, None
+
+
 def _oeffentlich(res):
     herkunft = request.headers.get("Origin", "")
     if herkunft in APPS_HERKUNFT:
@@ -2042,20 +2286,70 @@ def _oeffentlich(res):
     return res
 
 
+
+
+def _apps_aktuell(conn, schluessel=None):
+    """Neueste Fassung je (schluessel, plattform) als Liste von Zeilen."""
+    sql = ("SELECT v.* FROM apps_versionen v JOIN (SELECT schluessel, plattform, MAX(id) AS id FROM apps_versionen "
+           "GROUP BY schluessel, plattform) m ON m.id = v.id")
+    if schluessel:
+        return conn.execute(sql + " WHERE v.schluessel = ?", (schluessel,)).fetchall()
+    return conn.execute(sql).fetchall()
+
+
+def _register_nach_paket(paket):
+    return next((k for k, e in APPS_REGISTER.items() if e["paket"] == paket), None)
+
+
 @app.get("/api/apps/index.json")
 def apps_index():
+    """apps: alle Android-APKs (Updater der Apps, Tabelle auf /apps) — Form wie bisher, dazu notiz.
+    karten: Apps aus APPS_REGISTER mit mindestens einer Datei, je Plattform ein Download."""
     conn = db.connect()
     try:
         rows = conn.execute("SELECT paket, name, sha256, groesse, version_code, version_name, updated_at "
                             "FROM telefon_apps WHERE art = 'apk' AND aktiv = 1 AND apk_datei IS NOT NULL "
                             "ORDER BY reihenfolge, name").fetchall()
+        aktuell = _apps_aktuell(conn)
     finally:
         conn.close()
-    apps = [{"paket": r["paket"], "name": r["name"], "sha256": r["sha256"], "groesse": r["groesse"],
-             "version_code": r["version_code"], "version_name": r["version_name"], "stand": r["updated_at"],
-             "url": f"/api/apps/{r['paket']}.apk"}
-            for r in rows if r["paket"] not in APPS_OEFFENTLICH_OHNE]
-    return _oeffentlich(jsonify({"apps": apps, "signatur_sha256": "7b3bac26e82b6103546b96861dcf1bb89b3239424ff11fdf684975cf78c5a5ae"}))
+    neu = {(v["schluessel"], v["plattform"]): v for v in aktuell}
+    apps = []
+    for r in rows:
+        if r["paket"] in APPS_OEFFENTLICH_OHNE:
+            continue
+        v = neu.get((_register_nach_paket(r["paket"]) or r["paket"], "android"))
+        apps.append({"paket": r["paket"], "name": r["name"], "sha256": r["sha256"], "groesse": r["groesse"],
+                     "version_code": r["version_code"], "version_name": r["version_name"], "stand": r["updated_at"],
+                     "url": f"/api/apps/{r['paket']}.apk",
+                     "notiz": v["notiz"] if v and v["sha256"] == r["sha256"] else ""})
+    im_katalog = {a["paket"]: a for a in apps}
+    karten = []
+    for app_id, e in APPS_REGISTER.items():
+        downloads = []
+        a = im_katalog.get(e["paket"])
+        v = neu.get((app_id, "android"))
+        if not a and v:
+            # nicht im Katalog der Telefone: trotzdem in 'apps', damit der Updater sie kennt
+            a = {"paket": e["paket"], "name": e["name"], "sha256": v["sha256"], "groesse": v["groesse"],
+                 "version_code": v["version_code"], "version_name": v["version"], "stand": v["zeit"],
+                 "url": f"/api/apps/{e['paket']}.apk", "notiz": v["notiz"]}
+            apps.append(a)
+        if a:
+            downloads.append({"plattform": "android", "titel": "Android", "version": a["version_name"],
+                              "groesse": a["groesse"], "sha256": a["sha256"], "stand": a["stand"],
+                              "url": a["url"], "notiz": a["notiz"]})
+        for pf_id, pf in APPS_PLATTFORMEN.items():
+            v = neu.get((app_id, pf_id))
+            if pf_id == "android" or not v:
+                continue
+            downloads.append({"plattform": pf_id, "titel": pf["titel"], "version": v["version"],
+                              "groesse": v["groesse"], "sha256": v["sha256"], "stand": v["zeit"],
+                              "url": f"/api/apps/datei/{app_id}/{pf_id}", "notiz": v["notiz"]})
+        if downloads:
+            karten.append({"app": app_id, "name": e["name"], "text": e["text"], "fuer": e["fuer"],
+                           "logo": e["logo"], "paket": e["paket"], "downloads": downloads})
+    return _oeffentlich(jsonify({"apps": apps, "karten": karten, "signatur_sha256": APPS_SIGNATUR_SHA256}))
 
 
 @app.get("/api/apps/<paket>.apk")
@@ -2066,14 +2360,240 @@ def apps_download(paket):
     try:
         r = conn.execute("SELECT name, apk_datei, version_name FROM telefon_apps "
                          "WHERE paket = ? AND art = 'apk' AND aktiv = 1", (paket,)).fetchone()
+        v = None
+        app_id = _register_nach_paket(paket)
+        if (not r or not r["apk_datei"]) and app_id:
+            v = next((x for x in _apps_aktuell(conn, app_id) if x["plattform"] == "android"), None)
     finally:
         conn.close()
+    if v:
+        name = re.sub(r"[^A-Za-z0-9]+", "-", f"{APPS_REGISTER[app_id]['name']}-{v['version']}").strip("-").lower()
+        return _oeffentlich(send_from_directory(APPS_DATEIEN_DIR, v["datei"], as_attachment=True,
+                                                download_name=f"{name}.apk",
+                                                mimetype=APPS_PLATTFORMEN["android"]["mime"]))
     if not r or not r["apk_datei"]:
         return jsonify({"error": "unbekannt"}), 404
     name = re.sub(r"[^A-Za-z0-9]+", "-", f"{r['name']}-{r['version_name'] or ''}").strip("-").lower()
     return _oeffentlich(send_from_directory(TELEFON_APPS_DIR, r["apk_datei"], as_attachment=True,
                                             download_name=f"{name}.apk",
                                             mimetype="application/vnd.android.package-archive"))
+
+
+@app.get("/api/apps/datei/<app_id>/<plattform>")
+def apps_datei(app_id, plattform):
+    if app_id not in APPS_REGISTER or plattform not in APPS_PLATTFORMEN or plattform == "android":
+        return jsonify({"error": "unbekannt"}), 404
+    conn = db.connect()
+    try:
+        v = next((x for x in _apps_aktuell(conn, app_id) if x["plattform"] == plattform), None)
+    finally:
+        conn.close()
+    if not v:
+        return jsonify({"error": "unbekannt"}), 404
+    endung = os.path.splitext(v["datei"])[1]
+    name = re.sub(r"[^A-Za-z0-9]+", "-", f"{APPS_REGISTER[app_id]['name']}-{v['version']}").strip("-").lower()
+    return _oeffentlich(send_from_directory(APPS_DATEIEN_DIR, v["datei"], as_attachment=True,
+                                            download_name=f"{name}{endung}",
+                                            mimetype=APPS_PLATTFORMEN[plattform]["mime"]))
+
+
+def _apps_einspielen(schluessel, plattform, quelle, version_soll=None):
+    """Datei aus dem Multipart-Feld 'datei' pruefen, ablegen und freigeben.
+    schluessel: App aus APPS_REGISTER oder Paketname einer Katalog-App.
+    Felder: datei, version, sha256 (Pflicht fuer die CI), paket (Android, optional), notiz."""
+    register = APPS_REGISTER.get(schluessel)
+    paket_soll = register["paket"] if register else schluessel
+    pf = APPS_PLATTFORMEN[plattform]
+    if not register and plattform != "android":
+        return jsonify({"error": "Katalog-Apps gibt es nur fuer Android"}), 400
+    f = request.files.get("datei")
+    if not f or not f.filename:
+        return jsonify({"error": "Feld 'datei' fehlt"}), 400
+    endung = os.path.splitext(f.filename)[1].lower()
+    if endung not in pf["endungen"]:
+        return jsonify({"error": f"{pf['titel']}: erlaubt sind {', '.join(pf['endungen'])}"}), 400
+    version = str(request.form.get("version") or "").strip()
+    version = version[1:] if version[:1] == "v" else version
+    sha_soll = str(request.form.get("sha256") or "").strip().lower()
+    if version_soll is not None and not re.fullmatch(r"[0-9a-f]{64}", sha_soll):
+        return jsonify({"error": "sha256 der Datei fehlt"}), 400
+    paket_angabe = str(request.form.get("paket") or "").strip()
+    if paket_angabe and paket_angabe != paket_soll:
+        return jsonify({"error": f"paket {paket_angabe} gehoert nicht zu diesem Repo ({paket_soll})"}), 400
+    notiz = str(request.form.get("notiz") or "").strip()[:4000]
+    notiz = _STEUERZEICHEN.sub(lambda m: m.group(0) if m.group(0) in "\n\t" else "", notiz)
+    os.makedirs(APPS_DATEIEN_DIR, exist_ok=True)
+    tmp = os.path.join(APPS_DATEIEN_DIR, f".hoch-{pysecrets.token_hex(8)}{endung}")
+    try:
+        h, n = hashlib.sha256(), 0
+        with open(tmp, "wb") as out:
+            while True:
+                stueck = f.stream.read(1024 * 1024)
+                if not stueck:
+                    break
+                n += len(stueck)
+                if n > APPS_DATEI_MAX:
+                    return jsonify({"error": "Datei zu gross"}), 413
+                h.update(stueck)
+                out.write(stueck)
+        sha = h.hexdigest()
+        if sha_soll and not hmac.compare_digest(sha, sha_soll):
+            return jsonify({"error": "Pruefsumme stimmt nicht (Datei unvollstaendig?)"}), 400
+        with open(tmp, "rb") as chk:
+            kopf = chk.read(32)
+            chk.seek(max(0, n - 512))
+            schluss = chk.read(4)
+        kenn = pf["endungen"][endung]
+        if (kenn is None and schluss != b"koly") or (kenn is not None and not kopf.startswith(kenn)):
+            return jsonify({"error": f"keine gueltige {endung}-Datei"}), 400
+        version_code = None
+        if plattform == "android":
+            if _apk_zertifikat_sha256(tmp) != APPS_SIGNATUR_SHA256:
+                return jsonify({"error": "APK ist nicht mit dem Rosenweg-Schluessel signiert"}), 400
+            paket, version_code, vname = _apk_manifest(tmp)
+            if paket != paket_soll:
+                return jsonify({"error": f"APK hat Paket {paket}, erwartet {paket_soll}"}), 400
+            if not version_code:
+                return jsonify({"error": "versionCode im APK nicht lesbar"}), 400
+            version = version or (vname or "")
+        if not _VERSION.fullmatch(version):
+            return jsonify({"error": "version fehlt oder ungueltig (z.B. 1.0.0)"}), 400
+        if version_soll is not None and version.split("+")[0] != version_soll:
+            return jsonify({"error": f"Version {version} passt nicht zum Tag {version_soll}"}), 400
+        if plattform == "android" and not register:
+            conn = db.connect()
+            try:
+                da = conn.execute("SELECT 1 FROM telefon_apps WHERE paket = ? AND art = 'apk'", (paket_soll,)).fetchone()
+            finally:
+                conn.close()
+            if not da:
+                return jsonify({"error": f"{paket_soll} steht nicht im App-Katalog – zuerst auf "
+                                         "/smartphones anlegen"}), 409
+        name_teil = re.sub(r"[^a-z0-9]+", "-", schluessel.lower())
+        datei = f"{name_teil}-{plattform}-{sha[:12]}{endung}"
+        os.replace(tmp, os.path.join(APPS_DATEIEN_DIR, datei))
+        tmp = None
+        conn = db.connect()
+        weg = []
+        try:
+            katalog = None
+            if plattform == "android":
+                katalog = conn.execute("SELECT apk_datei FROM telefon_apps WHERE paket = ? AND art = 'apk'",
+                                       (paket_soll,)).fetchone()
+                if katalog:
+                    # dieselbe Fassung in den Katalog der geteilten Telefone (Freigabe bleibt, wie sie ist)
+                    kdatei = f"{paket_soll}-{sha[:12]}.apk"
+                    shutil.copyfile(os.path.join(APPS_DATEIEN_DIR, datei), os.path.join(TELEFON_APPS_DIR, kdatei))
+                    conn.execute("UPDATE telefon_apps SET apk_datei=?, sha256=?, groesse=?, version_code=?, "
+                                 "version_name=?, updated_at=datetime('now') WHERE paket=?",
+                                 (kdatei, sha, n, version_code, version, paket_soll))
+                    if katalog["apk_datei"] and katalog["apk_datei"] != kdatei:
+                        weg.append(os.path.join(TELEFON_APPS_DIR, katalog["apk_datei"]))
+            conn.execute("INSERT INTO apps_versionen (schluessel, plattform, version, version_code, datei, sha256, "
+                         "groesse, notiz, quelle) VALUES (?,?,?,?,?,?,?,?,?)",
+                         (schluessel, plattform, version, version_code, datei, sha, n, notiz, quelle))
+            # aeltere Fassungen begrenzen (dieselbe Datei kann mehrfach vorkommen: nur loeschen, wenn ungenutzt)
+            alte = conn.execute("SELECT id, datei FROM apps_versionen WHERE schluessel = ? AND plattform = ? "
+                                "ORDER BY id DESC LIMIT -1 OFFSET ?", (schluessel, plattform, APPS_BEHALTEN)).fetchall()
+            for a in alte:
+                conn.execute("DELETE FROM apps_versionen WHERE id = ?", (a["id"],))
+            conn.commit()
+            for a in alte:
+                if not conn.execute("SELECT 1 FROM apps_versionen WHERE datei = ?", (a["datei"],)).fetchone():
+                    weg.append(os.path.join(APPS_DATEIEN_DIR, a["datei"]))
+        finally:
+            conn.close()
+        for pfad in weg:
+            try:
+                os.remove(pfad)
+            except OSError:
+                pass
+        app.logger.info("apps: %s %s %s (%s) von %s", schluessel, plattform, version, sha[:12], quelle)
+        return jsonify({"ok": True, "schluessel": schluessel, "plattform": plattform, "version": version,
+                        "version_code": version_code, "sha256": sha, "groesse": n, "katalog": bool(katalog)})
+    finally:
+        if tmp:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
+@app.post("/api/apps/release")
+def apps_release():
+    """Fuer die CI der App-Repos (Action Rosenweg/Website/.github/actions/apps-release).
+    Authorization: Bearer <GitHub-Actions-OIDC-Token, audience APPS_OIDC_AUD> — kein Geheimnis.
+    Zugelassen: Repos aus APPS_REGISTER/APPS_KATALOG_REPOS, nur fuer einen Tag (v)<version>.
+    Multipart: datei, plattform, version, sha256, paket (Android), notiz."""
+    claims = _github_oidc(_bearer() or "")
+    if not claims:
+        return jsonify({"error": "kein gueltiges GitHub-OIDC-Token"}), 401
+    repo = str(claims.get("repository", ""))
+    ref = str(claims.get("ref", ""))
+    schluessel = next((k for k, e in APPS_REGISTER.items() if e["repo"] == repo), None) or APPS_KATALOG_REPOS.get(repo)
+    tag = ref[len("refs/tags/"):] if ref.startswith("refs/tags/") else ""
+    tag_version = tag[1:] if tag[:1] == "v" else tag
+    if (not schluessel or claims.get("repository_owner") != "Rosenweg" or claims.get("ref_type") != "tag"
+            or not _VERSION.fullmatch(tag_version)
+            or claims.get("event_name") not in ("push", "release", "workflow_dispatch")):
+        app.logger.warning("apps: Release abgewiesen: %s %s %s", repo, ref, claims.get("event_name"))
+        return jsonify({"error": "nur eingetragene Rosenweg-App-Repos, nur fuer einen Release-Tag"}), 403
+    plattform = str(request.form.get("plattform") or "android")
+    if plattform not in APPS_PLATTFORMEN:
+        return jsonify({"error": "plattform: " + ", ".join(APPS_PLATTFORMEN)}), 400
+    return _apps_einspielen(schluessel, plattform, f"{repo}@{tag}", version_soll=tag_version)
+
+
+@app.get("/api/pbx/apps-versionen")
+def apps_versionen_liste():
+    _, deny = require_admin()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        rows = conn.execute("SELECT id, schluessel, plattform, version, version_code, sha256, groesse, notiz, quelle, zeit "
+                            "FROM apps_versionen ORDER BY schluessel, plattform, id DESC").fetchall()
+    finally:
+        conn.close()
+    return jsonify({"register": [{"app": k, "name": e["name"], "repo": e["repo"], "paket": e["paket"]}
+                                 for k, e in APPS_REGISTER.items()],
+                    "katalog_repos": APPS_KATALOG_REPOS, "behalten": APPS_BEHALTEN,
+                    "versionen": [dict(r) for r in rows]})
+
+
+@app.post("/api/pbx/apps-versionen/<schluessel>/<plattform>")
+def apps_versionen_hochladen(schluessel, plattform):
+    """Technik von Hand (z.B. macOS-DMG vom eigenen Mac). Multipart: datei, version, sha256?, notiz?"""
+    user, deny = require_admin()
+    if deny:
+        return deny
+    if plattform not in APPS_PLATTFORMEN or (schluessel not in APPS_REGISTER
+                                             and schluessel not in APPS_KATALOG_REPOS.values()):
+        return jsonify({"error": "unbekannt"}), 404
+    return _apps_einspielen(schluessel, plattform, actor(user))
+
+
+@app.delete("/api/pbx/apps-versionen/<int:vid>")
+def apps_versionen_loeschen(vid):
+    """Eine Fassung zurueckziehen; ist es die neueste, gilt wieder die vorherige (nur /apps-Dateien;
+    den Katalog der Telefone setzt das nicht zurueck)."""
+    _, deny = require_admin()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        r = conn.execute("SELECT datei FROM apps_versionen WHERE id = ?", (vid,)).fetchone()
+        conn.execute("DELETE FROM apps_versionen WHERE id = ?", (vid,))
+        conn.commit()
+        noch = r and conn.execute("SELECT 1 FROM apps_versionen WHERE datei = ?", (r["datei"],)).fetchone()
+    finally:
+        conn.close()
+    if r and not noch:
+        try:
+            os.remove(os.path.join(APPS_DATEIEN_DIR, r["datei"]))
+        except OSError:
+            pass
+    return jsonify({"ok": bool(r)})
 
 
 @app.get("/api/pbx/telefon-apps")
