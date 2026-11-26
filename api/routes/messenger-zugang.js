@@ -4,7 +4,9 @@
 // Ablauf und Sicherheitsgedanken: lib/messenger-zugang.js.
 //
 //   POST   /api/messenger/zugang            Bearer (App-Token rosenweg-apps oder Portal) -> neuer Zugang
-//   POST   /api/messenger/zugang/token      { zugang, geheimnis } -> Messenger-Token (1 h)
+//                                            { geraet, geraet_kennung? }: gleiche Kennung = gleiches Handy,
+//                                            der neue Zugang ersetzt den alten (App neu installiert)
+//   POST   /api/messenger/zugang/token      { zugang, geheimnis, geraet_kennung? } -> Messenger-Token (1 h)
 //   POST   /api/messenger/zugang/abmelden   { zugang, geheimnis } -> Zugang loeschen (App)
 //   GET    /api/messenger/zugaenge          eigene Handys; Technik/Praesident mit ?alle=1 alle
 //   DELETE /api/messenger/zugaenge/:id      eigenes Handy abmelden, Technik/Praesident jedes
@@ -18,6 +20,7 @@ const { pool } = require('../lib/db');
 const { authMiddleware, absenderIp } = require('../middleware/auth');
 const { isTechnik, isPraesident } = require('../lib/groups');
 const mz = require('../lib/messenger-zugang');
+const gg = require('../lib/geraet-gruppe');
 
 const MESSENGER_URL = (process.env.MESSENGER_URL || 'https://chat.rosenweg4303.ch').replace(/\/+$/, '');
 
@@ -35,6 +38,8 @@ function ensureSchema() {
         zuletzt_ip TEXT
       );
       CREATE INDEX IF NOT EXISTS messenger_privat_user ON messenger_privat (user_id);
+      -- sha256("rosenweg:"+ANDROID_ID) wie bei Telefon und Karten-Sitzungen (lib/geraet-gruppe.js)
+      ALTER TABLE messenger_privat ADD COLUMN IF NOT EXISTS geraet_kennung TEXT;
     `).catch((e) => { schemaVersprechen = null; throw e; });
   }
   return schemaVersprechen;
@@ -116,6 +121,7 @@ function messengerZugangRouter({ rateLimitGuard }) {
       const uid = Number(req.user.user_id || req.user.id);
       if (!Number.isInteger(uid) || uid <= 0) return res.status(403).json({ error: 'Kein Rosenweg-Konto' });
       const geraet = mz.geraeteName(req.body && req.body.geraet);
+      const kennung = gg.kennung(req.body && req.body.geraet_kennung);
       try {
         await ensureSchema();
         const client = await pool.connect();
@@ -124,6 +130,13 @@ function messengerZugangRouter({ rateLimitGuard }) {
           await client.query('BEGIN');
           // gleichzeitige Anmeldungen derselben Person nacheinander zaehlen
           await client.query('SELECT pg_advisory_xact_lock(43030, $1)', [uid]);
+          // Dasselbe Handy (gleiche Kennung): alten Zugang ersetzen, sonst stuende das Handy doppelt da
+          if (kennung) {
+            const alt = await client.query(
+              'DELETE FROM messenger_privat WHERE user_id = $1 AND geraet_kennung = $2 RETURNING id', [uid, kennung]);
+            alt.rows.forEach((x) => vergiss(x.id));
+            if (alt.rowCount) console.log(`[messenger-zugang] ${alt.rows.map((x) => 'z' + x.id).join(', ')} ersetzt (gleiches Handy)`);
+          }
           const n = await client.query('SELECT COUNT(*)::int AS n FROM messenger_privat WHERE user_id = $1', [uid]);
           const max = mz.maxJePerson();
           if (n.rows[0].n >= max) {
@@ -135,8 +148,8 @@ function messengerZugangRouter({ rateLimitGuard }) {
           const g = mz.neuesGeheimnis();
           geheimnis = g.geheimnis;
           const ins = await client.query(
-            `INSERT INTO messenger_privat (user_id, geraet, geheimnis_hash, zuletzt_at, zuletzt_ip)
-             VALUES ($1, $2, $3, NOW(), $4) RETURNING id`, [uid, geraet, g.hash, absenderIp(req)]);
+            `INSERT INTO messenger_privat (user_id, geraet, geraet_kennung, geheimnis_hash, zuletzt_at, zuletzt_ip)
+             VALUES ($1, $2, $3, $4, NOW(), $5) RETURNING id`, [uid, geraet, kennung, g.hash, absenderIp(req)]);
           const u = await client.query('SELECT id AS user_id, email, name, groups_json FROM users WHERE id = $1', [uid]);
           await client.query('COMMIT');
           zeile = { ...u.rows[0], id: ins.rows[0].id };
@@ -160,7 +173,10 @@ function messengerZugangRouter({ rateLimitGuard }) {
     try {
       const z = await zugangAusBody(req);
       if (!z) return res.status(401).json({ error: 'Unbekannter Zugang' });
-      pool.query('UPDATE messenger_privat SET zuletzt_at = NOW(), zuletzt_ip = $2 WHERE id = $1', [z.id, absenderIp(req)]).catch(() => {});
+      // geraet_kennung: Zugaenge aelterer App-Versionen bekommen sie so nachgetragen
+      pool.query(`UPDATE messenger_privat SET zuletzt_at = NOW(), zuletzt_ip = $2,
+                    geraet_kennung = COALESCE($3, geraet_kennung) WHERE id = $1`,
+        [z.id, absenderIp(req), gg.kennung(req.body && req.body.geraet_kennung)]).catch(() => {});
       return res.json({ zugang: String(z.id), name: z.name || '', user_id: String(z.user_id), ...(await tokenFuer(z)) });
     } catch (e) { return fehler(res, e, 'token'); }
   });
@@ -186,7 +202,7 @@ function messengerZugangRouter({ rateLimitGuard }) {
       if (req.query.alle === '1' && !alle) return res.status(403).json({ error: 'Nur Technik' });
       const uid = Number(req.user.user_id || req.user.id);
       const r = await pool.query(
-        `SELECT p.id, p.user_id, p.geraet, p.created_at, p.zuletzt_at, u.name, u.email
+        `SELECT p.id, p.user_id, p.geraet, p.geraet_kennung, p.created_at, p.zuletzt_at, u.name, u.email
            FROM messenger_privat p JOIN users u ON u.id = p.user_id
           ${alle ? '' : 'WHERE p.user_id = $1'}
           ORDER BY u.name, p.id`, alle ? [] : [uid]);
@@ -194,6 +210,8 @@ function messengerZugangRouter({ rateLimitGuard }) {
         max: mz.maxJePerson(),
         zugaenge: r.rows.map((z) => ({
           id: z.id, kennung: `z${z.id}`, geraet: z.geraet, seit: z.created_at, zuletzt: z.zuletzt_at,
+          // dasselbe Handy wie Telefon/Karten-Apps (lib/geraet-gruppe.js); nie die Kennung selbst
+          geraet_gruppe: gg.gruppe(z.email, z.geraet_kennung),
           ...(alle ? { user_id: z.user_id, name: z.name, email: z.email } : {}),
         })),
       });

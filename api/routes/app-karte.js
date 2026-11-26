@@ -35,6 +35,7 @@
 //  8. Fehlermeldungen unterscheiden "unbekannt" und "gesperrt" nicht (kein
 //     Orakel, welche UIDs es gibt); das Protokoll schon.
 const ak = require('../lib/appkarte');
+const gg = require('../lib/geraet-gruppe');
 
 const MAX_SITZUNGEN = Math.max(1, parseInt(process.env.APP_KARTE_MAX_SITZUNGEN || '20', 10) || 20);
 const LAUFZEIT_TAGE = Math.max(1, parseInt(process.env.APP_KARTE_TAGE || '30', 10) || 30);
@@ -307,7 +308,7 @@ function appKarteRoutes(app, deps) {
   // ── Übersicht im Portal: eigene; Technik/Präsident mit ?alle=1 alle ──
   // Nur mit Browser-Anmeldung (requireUserLogin sperrt PATs und Karten-Sitzungen):
   // wer nur eine Karte hat, soll nicht die anderen Sitzungen der Person abräumen.
-  const spalten = `id, email, name, app, app_name, geraet_name, plattform, LEFT(geraet_kennung, 8) AS geraet,
+  const spalten = `id, email, name, app, app_name, geraet_name, plattform, LEFT(geraet_kennung, 8) AS geraet, geraet_kennung,
                    karte_anzeige, created_at, created_ip, last_used_at, last_used_ip, expires_at,
                    revoked_at, revoked_by, revoked_reason`;
   app.get('/api/apps/sitzungen', authMiddleware, requireUserLogin, async (req, res) => {
@@ -321,7 +322,10 @@ function appKarteRoutes(app, deps) {
             AND ($3::boolean OR (revoked_at IS NULL AND expires_at > NOW()))
           ORDER BY COALESCE(last_used_at, created_at) DESC LIMIT 500`,
         [alle, req.user.email || '', auchAlte]);
-      res.json({ sitzungen: r.rows, alle, max_je_person: MAX_SITZUNGEN, laufzeit_tage: LAUFZEIT_TAGE });
+      // Gruppenschluessel je Person statt Kennung (lib/geraet-gruppe.js): legt im Browser die Apps
+      // desselben Handys zusammen (mit Telefon und Messenger); die volle Kennung geht nicht hinaus.
+      const sitzungen = r.rows.map(({ geraet_kennung: k, ...s }) => ({ ...s, geraet_gruppe: gg.gruppe(s.email, k) }));
+      res.json({ sitzungen, alle, max_je_person: MAX_SITZUNGEN, laufzeit_tage: LAUFZEIT_TAGE });
     } catch (e) {
       console.error('[app-karte] liste:', e.message);
       res.status(500).json({ error: 'Abfrage fehlgeschlagen' });

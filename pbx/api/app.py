@@ -1521,15 +1521,38 @@ def _privat_antwort(r, name):
     return res
 
 
+# Gemeinsame Geraetekennung der Rosenweg-Apps (Stefan 26.11.2026: im Portal jedes Handy genau einmal,
+# darunter seine Apps). Die App schickt sha256("rosenweg:" + ANDROID_ID) als Hex - derselbe Wert wie
+# bei den Karten-Sitzungen (Website api/routes/app-karte.js) und im Messenger (messenger_privat).
+# Nach aussen nie die Kennung selbst, nur der Gruppenschluessel je Person: dieselbe Formel wie
+# api/lib/geraet-gruppe.js der Website, damit der Browser Telefon, Messenger und Karten-Apps
+# zusammenlegen kann. Zwei Personen auf demselben Handy bekommen verschiedene Schluessel.
+GERAET_KENNUNG_RE = re.compile(r"[0-9a-f]{64}")
+
+
+def _geraet_kennung(v):
+    k = str(v or "").strip().lower()
+    return k if GERAET_KENNUNG_RE.fullmatch(k) else ""
+
+
+def _geraet_gruppe(email, kennung):
+    if not kennung:
+        return None
+    return hashlib.sha256(f"{str(email or '').strip().lower()}|{kennung}".encode()).hexdigest()[:16]
+
+
 @app.post("/api/telefon/privat/anmelden")
 def telefon_privat_anmelden():
     """Rosenweg Telefon auf dem eigenen Handy: Bearer = Authentik-Access-Token der App.
-    Body {geraet}: Anzeigename des Handys. Antwort wie /api/telefon/sip-person."""
+    Body {geraet, geraet_kennung?}: Anzeigename und Kennung des Handys. Antwort wie /api/telefon/sip-person.
+    Gibt es fuer diese Person auf demselben Handy (gleiche Kennung) schon einen Zugang - App neu
+    installiert oder Daten geloescht -, ersetzt der neue ihn (sonst stuende das Handy doppelt da)."""
     konto = _rosenweg_konto()
     if not konto:
         return jsonify({"error": "Rosenweg-Anmeldung ungueltig"}), 401
     b = request.get_json(silent=True) or {}
     geraet = re.sub(r"[\x00-\x1f\x7f]", " ", str(b.get("geraet") or ""))[:60].strip()
+    kennung = _geraet_kennung(b.get("geraet_kennung"))
     conn = db.connect()
     try:
         p = conn.execute("SELECT nummer, name FROM personen_nummern WHERE lower(email) = ? AND aktiv = 1 "
@@ -1538,13 +1561,19 @@ def telefon_privat_anmelden():
         if not p or not re.fullmatch(r"3[0-9]{5}", nummer):
             return jsonify({"error": "Keine persoenliche Telefonnummer fuer dieses Rosenweg-Konto"}), 404
         name = next((x["name"] for x in p if x["nummer"] == nummer), konto["name"])
+        if kennung:
+            alt = [r["id"] for r in conn.execute("SELECT id FROM telefon_sip_privat WHERE lower(email) = ? "
+                                                 "AND geraet_kennung = ?", (konto["email"], kennung))]
+            if alt:
+                conn.execute(f"DELETE FROM telefon_sip_privat WHERE id IN ({','.join('?' * len(alt))})", alt)
+                app.logger.info("Handy-Zugang %s ersetzt (gleiches Handy)", ", ".join(f"p{i}" for i in alt))
         n = conn.execute("SELECT COUNT(*) FROM telefon_sip_privat WHERE lower(email) = ?",
                          (konto["email"],)).fetchone()[0]
         if n >= SIP_PRIVAT_MAX:
             return jsonify({"error": f"Schon {SIP_PRIVAT_MAX} Handys angemeldet - eines in der "
                                      "Telefon-Verwaltung abmelden"}), 409
-        cur = conn.execute("INSERT INTO telefon_sip_privat (nummer, email, geraet, passwort) VALUES (?,?,?,?)",
-                           (nummer, konto["email"], geraet, pysecrets.token_urlsafe(24)))
+        cur = conn.execute("INSERT INTO telefon_sip_privat (nummer, email, geraet, geraet_kennung, passwort) "
+                           "VALUES (?,?,?,?,?)", (nummer, konto["email"], geraet, kennung, pysecrets.token_urlsafe(24)))
         conn.commit()
         r = conn.execute("SELECT * FROM telefon_sip_privat WHERE id = ?", (cur.lastrowid,)).fetchone()
         app.logger.info("Handy-Zugang %s-p%d angelegt", nummer, r["id"])
@@ -1603,15 +1632,21 @@ def telefon_privat_stand():
     """Rosenweg Telefon fragt regelmaessig nach ({user, password} des eigenen Zugangs): 200 mit
     den aktuellen Zugangsdaten (z.B. Wechsel auf TLS), 401 wenn es den Zugang nicht mehr gibt -
     dann wurde das Handy im Web (/smartphones) abgemeldet, und die App meldet sich auch ab.
-    Die App fragt nach einem 401 nicht weiter (CrowdSec zaehlt 401)."""
+    Die App fragt nach einem 401 nicht weiter (CrowdSec zaehlt 401).
+    Optional {geraet_kennung}: so bekommen Zugaenge aelterer App-Versionen die Kennung nachgetragen."""
     b = request.get_json(silent=True) or {}
     kennung, pw = str(b.get("user") or ""), str(b.get("password") or "")
     if not SIP_PRIVAT_RE.fullmatch(kennung):
         return jsonify({"error": "Unbekannter Zugang"}), 401
     zid = int(kennung.split("-p", 1)[1])
+    geraet_k = _geraet_kennung(b.get("geraet_kennung"))
     conn = db.connect()
     try:
-        r = conn.execute("SELECT id, nummer, passwort FROM telefon_sip_privat WHERE id = ?", (zid,)).fetchone()
+        r = conn.execute("SELECT id, nummer, passwort, geraet_kennung FROM telefon_sip_privat WHERE id = ?",
+                         (zid,)).fetchone()
+        if r and hmac.compare_digest(str(r["passwort"]), pw) and geraet_k and r["geraet_kennung"] != geraet_k:
+            conn.execute("UPDATE telefon_sip_privat SET geraet_kennung = ? WHERE id = ?", (geraet_k, zid))
+            conn.commit()
     finally:
         conn.close()
     if not r or not hmac.compare_digest(str(r["passwort"]), pw):
@@ -1650,13 +1685,15 @@ def sip_privat_liste():
         return deny
     conn = db.connect()
     try:
-        rows = conn.execute("SELECT id, nummer, email, geraet, created_at FROM telefon_sip_privat "
+        rows = conn.execute("SELECT id, nummer, email, geraet, geraet_kennung, created_at FROM telefon_sip_privat "
                             "ORDER BY nummer, id").fetchall()
         try:
             regs = ami.registered_aors()
         except Exception:  # noqa: BLE001
             regs = set()
-        return jsonify([{**dict(r), "kennung": f"{r['nummer']}-p{r['id']}",
+        return jsonify([{**{k: r[k] for k in ("id", "nummer", "email", "geraet", "created_at")},
+                         "kennung": f"{r['nummer']}-p{r['id']}",
+                         "geraet_gruppe": _geraet_gruppe(r["email"], r["geraet_kennung"]),
                          "registriert": f"{r['nummer']}-p{r['id']}" in regs} for r in rows])
     finally:
         conn.close()
@@ -3450,9 +3487,11 @@ def telefon_meine():
             regs = ami.registered_aors()
         except Exception:  # noqa: BLE001
             regs = set()
+        # geraet_gruppe: dasselbe Handy wie Messenger/Karten-Apps (Gruppenschluessel je Person, s. _geraet_gruppe)
         privat = [{"id": r["id"], "kennung": f"{r['nummer']}-p{r['id']}", "geraet": r["geraet"], "seit": r["created_at"],
+                   "geraet_gruppe": _geraet_gruppe(email, r["geraet_kennung"]),
                    "registriert": f"{r['nummer']}-p{r['id']}" in regs}
-                  for r in conn.execute("SELECT id, nummer, geraet, created_at FROM telefon_sip_privat "
+                  for r in conn.execute("SELECT id, nummer, geraet, geraet_kennung, created_at FROM telefon_sip_privat "
                                         "WHERE lower(email) = ? OR (? <> '' AND nummer = ?) ORDER BY id",
                                         (email, nummer, nummer))]
         return jsonify({"name": user.get("name"), "darf": _telefon_darf(conn, user),

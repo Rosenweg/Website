@@ -8,6 +8,7 @@
 ## 2026-11-26
 
 ### Offen
+- [ ] **Smartphones: jedes Handy einmal (Stefan 26.11.: „ist nur 1 Telefon – sieht aus wie 4 Geräte“):** /smartphones und Profil zeigen eigene Handys jetzt je Handy mit ihren Apps (js/meine-geraete.js). Gemeinsame Gerätekennung sha256("rosenweg:"+ANDROID_ID) wie die Karten-Sitzungen; Telefon und Messenger schicken sie erst ab der nächsten App-Version (phone-rosenweg/messages-rosenweg PR `geraet-kennung`, Versionsnummer beim Mergen hochzählen). Bis dahin Rückfall nach Modellname als „vermutlich dasselbe Handy“.
 - [ ] **logon.bat ablösen:** Ordnerumleitung als GPO «Rosenweg-Ordnerumleitung» ([ad-dc/gpo-ordnerumleitung](ad-dc/gpo-ordnerumleitung/README.md)), zuerst nur Gruppe `Ordnerumleitung` (stefan.mueller). Ausrollen: `einrichten.sh stefan.mueller` auf dc1, Test auf win11-1, dann `logon-bat-abschalten.sh --ausfuehren`. **Falle:** Cron `/etc/cron.d/sync-logon-script` auf dc1 setzt alle 5 min bei allen Konten wieder `scriptPath: logon.bat` (94 Konten am 26.11.) – das Skript schaltet ihn zuerst ab.
 
 ---
