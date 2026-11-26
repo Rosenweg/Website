@@ -166,9 +166,28 @@ gesperrt (als '…')“).
 |---|---|
 | Sperren | mit optionalem Grund; die Station bekommt keine Konfiguration mehr, nur ihr Lebenszeichen geht noch durch |
 | Aktualisieren | Station holt beim nächsten Lebenszeichen die neueste Version |
-| Einstellen | Überschreibungen der Konfiguration |
+| Einstellen | Überschreibungen der Konfiguration: Haus, Standort, Kanal, WLAN, Programme, **Standarddrucker** |
 | Zurücksetzen | Station löscht ihre Identität und startet im Einrichtungszustand; zum Bestätigen den Namen eintippen. Neu-Zuordnung nur vor Ort. „Zurücksetzen abbrechen“ solange die Station es noch nicht abgeholt hat. |
 | Entfernen | Eintrag entwertet; das Gerät läuft weiter, bis es beim nächsten Lauf abgewiesen wird |
+
+### 4.4 Standarddrucker und Windows-Rechner
+
+Der Standarddrucker je Rechner wird hier gepflegt: **Aktionen ▾ → Einstellen … →
+Drucken → Standarddrucker**. Zur Wahl stehen die Drucker aus
+`api/lib/stationconfig.js` (`DRUCKER`, heute DruckerR9 und DruckerR13) und
+„Keiner — der Rechner wählt selbst“. Gespeichert wird unter
+`overrides.roles.<Art>.printing.default` — genau das Feld, das os-stationen
+schon liest. Linux-Stationen nehmen nur einen Drucker mit A4-Vorgabe als
+Standard; DruckerR13 (A3) wird dort übergangen.
+
+Windows-Rechner richten sich nicht selbst ein. Damit ihr Drucker trotzdem hier
+steht: **„Windows-Rechner eintragen“** über der Liste, Rechnername genau wie im
+AD (z. B. `WIN11-1`), Haus, Drucker. Ein so eingetragener Rechner hat keinen
+Agenten und kein Token: er zeigt „eingetragen“ statt „neu“, zählt nie als
+„länger still“, und im Menü gibt es nur **Einstellen …** und **Entfernen …**.
+
+Abgefragt wird der Wert ohne Anmeldung, nur aus dem internen Netz, über
+`GET /api/stations/drucker/<rechner>` (siehe [api.md](api.md), 4.1).
 
 Nach der Sicherheitsprüfung gelten Geheimnisse, die früher über die alte
 Registrierung an Nicht-Technik gingen, als offengelegt (Rotation:

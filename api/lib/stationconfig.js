@@ -31,6 +31,45 @@ const STATION_TYPES = [
   },
 ];
 
+// Arten, die NUR die Verwaltung kennt — von Hand angelegt, ohne Installer,
+// ohne Agent, ohne Token.
+//
+// Absichtlich nicht in STATION_TYPES: diese Liste geht über GET /types an den
+// Installer. Stünde 'windows' dort, böte der Einrichtungsdialog einer
+// Linux-Station plötzlich „Windows-Rechner" an — und es entstünde eine
+// Station, die sich für etwas hält, das sie nicht ist.
+//
+// Wozu dann überhaupt? Damit Einstellungen, die je Rechner gelten (heute:
+// der Standarddrucker), für Windows-Rechner an derselben Stelle gepflegt
+// werden wie für die Stationen — und nicht in einer zweiten Liste, die
+// auseinanderläuft. Der Rechner liest sie über GET /api/stations/drucker/:rechner.
+const VERWALTUNGS_TYPEN = [
+  {
+    id: 'windows',
+    label: 'Windows-Rechner',
+    description: 'Von Hand eingetragen, ohne Agent — nur für Einstellungen wie den Standarddrucker.',
+    ohne_agent: true,
+  },
+];
+
+// Die Drucker, die als Standard je Station wählbar sind.
+//
+// Die Warteschlangen selbst kommen vom Druckserver (CT 111, printing.server
+// unten) — die Stationen kennen dadurch JEDEN Drucker dort. Diese Liste
+// bestimmt nur, was die Verwaltung als Standard anbietet, und zwar mit
+// Klartextnamen: „DruckerR13" allein sagt nicht, dass er im Haus 13 steht und
+// A3 kann.
+//
+// Bewusst NICHT als printing.printers in der Config: das Feld heisst in
+// os-stationen „lege diese Warteschlangen an" (mit uri) und wird bei
+// gesetztem printing.server übergangen — samt Warnung im Einrichtungslauf.
+// Kommt auf CT 111 ein Drucker dazu, gehört er hier ergänzt; `name` muss genau
+// der Name der Warteschlange sein (CUPS und Samba-Freigabe heissen gleich).
+const DRUCKER = [
+  { name: 'DruckerR9', label: 'DruckerR9 (Rosenweg 9, A4)', haus: 9 },
+  { name: 'DruckerR13', label: 'DruckerR13 (Rosenweg 13, A3/A4)', haus: 13 },
+];
+
 const DEFAULTS = {
   system: {
     timezone: 'Europe/Zurich',
@@ -534,4 +573,6 @@ function hausWlan() {
   };
 }
 
-module.exports = { STATION_TYPES, buildConfig, missingSecrets, merge, hausWlan };
+module.exports = {
+  STATION_TYPES, VERWALTUNGS_TYPEN, DRUCKER, buildConfig, missingSecrets, merge, hausWlan,
+};

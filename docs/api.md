@@ -215,6 +215,7 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `GET /api/meg/einstellplaetze/verfuegbar` | freie Einstellplätze (ohne Personendaten) |
 | `GET /api/tv/playlist.m3u`, `/api/tv/epg.xml` | TV-Senderliste |
 | `GET /api/wetter/:station/history`, `GET /api/push/vapid-public-key`, `GET /api/nav/audience-map` | Wetter, Push-Schlüssel, Menü-Zuordnung |
+| `GET /api/stations/drucker/:rechner` | Standarddrucker eines Rechners (`{"rechner","bekannt","standard"}`), **nur aus dem internen Netz** (jede Adresse in `X-Forwarded-For` muss innen liegen, sonst 403), `Cache-Control: no-store`; gesperrte/entfernte Stationen gelten als unbekannt |
 
 ### 4.2 Konto und Profil (`me`, `auth`)
 
@@ -328,7 +329,7 @@ Kurzfassung (Details [`energie-api.md`](energie-api.md)):
 | MQTT, Anzeigen | `/api/mqtt/meters…`, `service-users`, `topic-rules`, `publish`, `user-*`; `/api/display/state`, `pdf`, `ankuendigungen`, `announce` | T/P (`requireMqttTechnik`) |
 | MQTT eigen | `POST /api/mqtt/token`, `GET /api/mqtt/my-access`, `/api/mqtt/my-app-passwords` | angemeldet (App-Passwörter nur Browser) |
 | SSH | `/api/ssh/me*` (Browser), `/api/ssh/sitzungen`, `hosts`, `matrix`, `dienste` (GET) | eigene Schlüssel angemeldet; Verwaltung T/P |
-| Stationen | `/api/stations/admin/*` | T/P |
+| Stationen | `/api/stations/admin/*` (darin `POST admin/windows`: Windows-Rechner von Hand eintragen) | T/P |
 | TV | `/api/tv/channels`, `stream-url`, `extern/token*` | angemeldet |
 | Push | `/api/push/subscribe`, `unsubscribe`, `test` (5 / 10 Min.) | angemeldet |
 | Alarmpanel | `/api/alarmpanel/sensors`, `events` | lesen angemeldet; Sensoren anlegen, ändern, testen, Webhook ansehen T/P |
