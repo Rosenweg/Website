@@ -39,6 +39,9 @@
 //     POST   /api/stations/admin/:id/update   Update anfordern
 //     POST   /api/stations/admin/:id/block    sperren
 //     POST   /api/stations/admin/:id/unblock  entsperren
+//     POST   /api/stations/admin/:id/anschluss-uebernehmen  neuen Anschluss lernen (+ freigeben)
+//     POST   /api/stations/admin/:id/anschluss-vergessen    nächsten Anschluss ohne Sperre lernen
+//     DELETE /api/stations/admin/:id/doppelt  Meldung "doppelte Station" erledigt
 //     POST   /api/stations/admin/:id/ssh-wartung   SSH-Wartung freigeben (2 h)
 //     DELETE /api/stations/admin/:id/ssh-wartung   Freigabe vorzeitig beenden
 //     GET/POST/DELETE /api/stations/admin/wartungsschluessel[/:sid]
@@ -58,7 +61,9 @@ const {
   STATION_TYPES, VERWALTUNGS_TYPEN, DRUCKER, buildConfig, missingSecrets, hausWlan,
 } = require('../lib/stationconfig');
 const { HAEUSER } = require('../lib/haeuser');
-const { wlanAufloesen, netznamen } = require('../lib/stationwlan');
+const { wlanAufloesen, netznamen, unifiHolen, unifiBereit } = require('../lib/stationwlan');
+const waechter = require('../lib/stationwaechter');
+const { queueWhatsappMessage, resolveTechnikWhatsappGroupId } = require('../lib/whatsapp');
 const { stationApps, gruppenJeApp } = require('../lib/stationapps');
 const { telefonbuch } = require('../lib/telefonbuch');
 const winprog = require('../lib/windowsprogramme');
@@ -283,6 +288,35 @@ async function ensureSchema() {
     -- blockiert haette (programme.ps1, POST /programme/:rechner/probe).
     ALTER TABLE stations ADD COLUMN IF NOT EXISTS programme_probe JSONB;
     ALTER TABLE stations ADD COLUMN IF NOT EXISTS programme_probe_am TIMESTAMPTZ;
+    -- Anschluss-Wächter (lib/stationwaechter.js): wo die MAC der Station in
+    -- UniFi hängt. 'anschluss' ist die gelernte Liste (Kabel: ein Port;
+    -- WLAN: die freigegebenen APs), 'anschluss_jetzt' der letzte Stand aus
+    -- UniFi, 'anschluss_kandidat' ein fremder Anschluss, der noch einmal
+    -- bestätigt werden muss, 'anschluss_abweichung' der fremde Anschluss,
+    -- für den gesperrt wurde — ihn übernimmt "Anschluss übernehmen und
+    -- freigeben".
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS anschluss JSONB;
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS anschluss_gelernt_am TIMESTAMPTZ;
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS anschluss_jetzt JSONB;
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS anschluss_jetzt_am TIMESTAMPTZ;
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS anschluss_kandidat JSONB;
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS anschluss_abweichung JSONB;
+    -- Doppelte Station: zwei Geräte melden sich mit demselben Token.
+    -- {seit, zuletzt, quellen:[…]}; bleibt stehen, bis Technik "Erledigt"
+    -- drückt. Gemeldet (WhatsApp Technik) höchstens alle paar Stunden.
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS doppelt JSONB;
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS doppelt_gemeldet_am TIMESTAMPTZ;
+    -- Die letzten Lebenszeichen je Station, nur so lange, wie die Erkennung
+    -- sie braucht (zwei Stunden). Adresse, lokale Adresse, Startzeit.
+    CREATE TABLE IF NOT EXISTS station_lebenszeichen (
+      id         BIGSERIAL PRIMARY KEY,
+      station_id TEXT NOT NULL,
+      erstellt   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      quelle_ip  TEXT,
+      lokal_ip   TEXT,
+      boot       TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS station_lebenszeichen_id_idx ON station_lebenszeichen (station_id, erstellt DESC);
   `).catch((e) => { schemaReady = null; throw e; });
   return schemaReady;
 }
@@ -739,6 +773,8 @@ router.get('/admin/list', authMiddleware, nurTechnik, a(async (req, res) => {
            programme, programme_gemeldet_am, haus, programme_probe, programme_probe_am,
            ad_guid IS NOT NULL AS aus_ad, ad_dn, ad_zustand, ad_betriebssystem,
            ad_gesehen_am, ad_aufgenommen_am, ad_standort_regel,
+           anschluss, anschluss_gelernt_am, anschluss_jetzt, anschluss_jetzt_am,
+           anschluss_abweichung, doppelt,
            w.bis AS ssh_wartung_bis, w.erteilt_von AS ssh_wartung_von
       FROM stations
       LEFT JOIN LATERAL (
@@ -781,6 +817,8 @@ router.get('/admin/list', authMiddleware, nurTechnik, a(async (req, res) => {
     // zeigen kann — und warum er nicht läuft, falls er nicht läuft.
     ad_abgleich: { ...adStand, lesbar: adLesbar(), minuten: AD_ABGLEICH_MINUTEN,
       regeln: STANDORT_REGELN.map((r) => r.text) },
+    // Stand des Anschluss-Wächters, wie beim AD-Abgleich.
+    anschluss_abgleich: { ...anschlussStand, bereit: unifiBereit(), minuten: ANSCHLUSS_MINUTEN, ohne: ANSCHLUSS_OHNE },
   });
 }));
 
@@ -1095,6 +1133,243 @@ if (AD_ABGLEICH_MINUTEN > 0) {
   };
   setTimeout(lauf, 60 * 1000).unref();
   setInterval(lauf, AD_ABGLEICH_MINUTEN * 60 * 1000).unref();
+}
+
+// ─── Wächter: Anschluss und doppelte Station ────────────────────────
+// Entscheidungen in lib/stationwaechter.js; hier Datenbank, Sperre, Meldung.
+//
+// Meldungen gehen an die WhatsApp-Gruppe Technik — derselbe Weg wie die
+// anderen Technik-Meldungen (notifyTechnik in server.js). Wirft nie: eine
+// ausgefallene Meldung darf weder Abgleich noch Lebenszeichen aufhalten.
+const STATIONEN_URL = 'www.rosenweg4303.ch/stationen.html';
+async function technikMelden(text, sourceType) {
+  try {
+    const gid = await resolveTechnikWhatsappGroupId();
+    if (!gid) { console.warn(`[stations] ${sourceType}: keine Technik-Gruppe gefunden`); return; }
+    await queueWhatsappMessage({ chatId: gid, body: text.slice(0, 3500), sourceType });
+  } catch (e) { console.warn(`[stations] ${sourceType}:`, e.message); }
+}
+
+// 1. Anschluss. Periodisch aus UniFi (stat/sta + stat/device), nicht im
+// Lebenszeichen: UniFi weiss, wo eine MAC hängt, auch wenn die Station
+// selbst nichts sagt — und eine Station, die lügt, soll es nicht selbst
+// melden können. Alle paar Minuten genügt; gesperrt wird erst, wenn der
+// fremde Anschluss zweimal in Folge gesehen wurde.
+const ANSCHLUSS_MINUTEN = Number(process.env.STATION_ANSCHLUSS_MINUTEN ?? 3);
+const ANSCHLUSS_WER = 'Anschluss-Wächter';
+const ANSCHLUSS_OHNE = ['windows', 'laptop'];   // Rollen ohne festen Anschluss
+let anschlussStand = { zuletzt: null, ergebnis: null, fehler: null };
+let anschlussLaeuft = null;
+
+async function anschlussAbgleichen() {
+  if (anschlussLaeuft) return anschlussLaeuft;
+  anschlussLaeuft = (async () => {
+    try {
+      const ergebnis = await anschlussAbgleichDurchfuehren();
+      anschlussStand = { zuletzt: new Date().toISOString(), ergebnis, fehler: null };
+      return ergebnis;
+    } catch (e) {
+      anschlussStand = { ...anschlussStand, zuletzt: new Date().toISOString(), fehler: e.message };
+      throw e;
+    } finally {
+      anschlussLaeuft = null;
+    }
+  })();
+  return anschlussLaeuft;
+}
+
+async function anschlussAbgleichDurchfuehren() {
+  await ensureSchema();
+  const [clients, devices] = await Promise.all([
+    unifiHolen('stat/sta', 15000),
+    unifiHolen('stat/device', 15000),
+  ]);
+  // Wie beim AD-Abgleich: bei mehreren API-Instanzen gleicht nur eine ab,
+  // sonst zählte jede den Kandidaten einmal hoch und es würde zu früh gesperrt.
+  const sperre = await pool.connect();
+  try {
+    const { rows: [l] } = await sperre.query("SELECT pg_try_advisory_lock(hashtext('stations-anschluss')) AS ok");
+    if (!l.ok) return { uebersprungen: 'läuft schon anderswo' };
+    try {
+      return await anschlussAbgleichSchreiben(clients, devices);
+    } finally {
+      await sperre.query("SELECT pg_advisory_unlock(hashtext('stations-anschluss'))").catch(() => {});
+    }
+  } finally {
+    sperre.release();
+  }
+}
+
+async function anschlussAbgleichSchreiben(clients, devices) {
+  const ergebnis = { geprueft: 0, im_netz: 0, gelernt: [], gesperrt: [] };
+  // Nur, was fest steht. Windows-Rechner haben kein Inventar mit MACs (sie
+  // kommen aus dem AD); ein Laptop wandert von Raum zu Raum und nach Hause —
+  // an einen Anschluss binden hiesse, ihn bei jedem neuen AP zu sperren.
+  const { rows } = await pool.query(
+    `SELECT id, status, hardware, anschluss, anschluss_kandidat, anschluss_abweichung, gesperrt_von
+       FROM stations WHERE revoked_at IS NULL AND role NOT IN (${ANSCHLUSS_OHNE.map((r) => `'${r}'`).join(',')})`);
+  for (const st of rows) {
+    const macs = waechter.stationsMacs(st.hardware);
+    if (!macs.length) continue;
+    ergebnis.geprueft += 1;
+    const aktuell = waechter.anschlussAus(waechter.clientFinden(clients, macs), devices);
+    if (!aktuell) continue;          // nicht im Netz: nichts zu sagen
+    ergebnis.im_netz += 1;
+    const e = waechter.anschlussPruefen({
+      gelernt: st.anschluss, kandidat: st.anschluss_kandidat, abweichung: st.anschluss_abweichung, aktuell,
+    });
+    const jetzt = JSON.stringify(aktuell);
+    if (e.aktion === 'lernen') {
+      await pool.query(
+        `UPDATE stations SET anschluss = $2, anschluss_gelernt_am = NOW(), anschluss_kandidat = NULL,
+                anschluss_jetzt = $3, anschluss_jetzt_am = NOW() WHERE id = $1`,
+        [st.id, JSON.stringify([aktuell]), jetzt]);
+      await ereignis(st.id, 'anschluss-gelernt', ANSCHLUSS_WER, waechter.anschlussText(aktuell));
+      ergebnis.gelernt.push(st.id);
+    } else if (e.aktion === 'gleich') {
+      // Zurück am gelernten Anschluss: die offene Abweichung fällt weg, eine
+      // Sperre bleibt — aufheben entscheidet Technik ("Entsperren").
+      await pool.query(
+        `UPDATE stations SET anschluss_kandidat = NULL, anschluss_abweichung = NULL,
+                anschluss_jetzt = $2, anschluss_jetzt_am = NOW() WHERE id = $1`, [st.id, jetzt]);
+      if (st.anschluss_abweichung) {
+        await ereignis(st.id, 'anschluss-zurueck', ANSCHLUSS_WER,
+          `wieder am gelernten Anschluss ${waechter.anschlussText(aktuell)}`);
+      }
+    } else if (e.aktion === 'vormerken') {
+      await pool.query(
+        `UPDATE stations SET anschluss_kandidat = $2, anschluss_jetzt = $3, anschluss_jetzt_am = NOW() WHERE id = $1`,
+        [st.id, JSON.stringify(e.kandidat), jetzt]);
+    } else if (e.aktion === 'bleibt') {
+      await pool.query(
+        'UPDATE stations SET anschluss_jetzt = $2, anschluss_jetzt_am = NOW() WHERE id = $1', [st.id, jetzt]);
+    } else if (e.aktion === 'sperren') {
+      await pool.query(
+        `UPDATE stations SET anschluss_abweichung = $2, anschluss_kandidat = NULL,
+                anschluss_jetzt = $2, anschluss_jetzt_am = NOW() WHERE id = $1`, [st.id, jetzt]);
+      if (st.status !== 'gesperrt' || st.gesperrt_von === ANSCHLUSS_WER) {
+        // Auch eine schon vom Wächter gesperrte Station, die erneut umzieht,
+        // bekommt den neuen Grund — sonst stünde dort der alte Port.
+        await stationSperren(st.id, e.grund, ANSCHLUSS_WER);
+        ergebnis.gesperrt.push(st.id);
+        technikMelden(`🔒 Station *${st.id}* gesperrt: ${e.grund}.\n`
+          + `Ist das ein Umzug, auf ${STATIONEN_URL} „Anschluss übernehmen und freigeben“.`, 'station-anschluss');
+      } else {
+        // Schon von Hand gesperrt: der Grund von Technik bleibt stehen.
+        await ereignis(st.id, 'anschluss-abweichung', ANSCHLUSS_WER, e.grund);
+      }
+    }
+  }
+  return ergebnis;
+}
+
+if (ANSCHLUSS_MINUTEN > 0) {
+  const lauf = () => {
+    if (!unifiBereit()) return;
+    anschlussAbgleichen().catch((e) => console.error('[stations] Anschluss-Abgleich:', e.message));
+  };
+  setTimeout(lauf, 90 * 1000).unref();
+  setInterval(lauf, ANSCHLUSS_MINUTEN * 60 * 1000).unref();
+}
+
+// POST /api/stations/admin/:id/anschluss-uebernehmen
+//
+// Der eine Knopf für den Umzug: den Anschluss, an dem die Station jetzt
+// hängt, als gelernt übernehmen — und, wenn der Wächter sie deswegen
+// gesperrt hat, freigeben. Eine von Hand gesperrte Station bleibt gesperrt.
+router.post('/admin/:id/anschluss-uebernehmen', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  const wer = req.user?.email || req.user?.name || 'unbekannt';
+  const { rows: [st] } = await pool.query(
+    `SELECT id, status, gesperrt_von, anschluss, anschluss_abweichung, anschluss_jetzt
+       FROM stations WHERE id = $1 AND revoked_at IS NULL`, [req.params.id]);
+  if (!st) return res.status(404).json({ error: 'Station nicht gefunden' });
+  const neu = st.anschluss_abweichung || st.anschluss_jetzt;
+  if (!neu) return res.status(409).json({ error: 'Noch kein Anschluss aus UniFi bekannt' });
+  const liste = waechter.uebernehmen(st.anschluss, neu);
+  const freigeben = st.status === 'gesperrt' && st.gesperrt_von === ANSCHLUSS_WER;
+  await pool.query(
+    `UPDATE stations SET anschluss = $2, anschluss_gelernt_am = NOW(), anschluss_abweichung = NULL,
+            anschluss_kandidat = NULL
+            ${freigeben ? ", status = 'aktiv', sperr_grund = NULL, gesperrt_von = NULL, gesperrt_am = NULL" : ''}
+      WHERE id = $1`, [st.id, JSON.stringify(liste)]);
+  await ereignis(st.id, 'anschluss-uebernommen', wer, waechter.anschlussText(neu));
+  if (freigeben) await ereignis(st.id, 'entsperrt', wer, 'Anschluss übernommen');
+  res.json({ ok: true, anschluss: liste, freigegeben: freigeben });
+}));
+
+// POST /api/stations/admin/:id/anschluss-vergessen
+//
+// Vor einem geplanten Umzug: nichts mehr gelernt, der nächste Anschluss wird
+// ohne Sperre übernommen.
+router.post('/admin/:id/anschluss-vergessen', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  const wer = req.user?.email || req.user?.name || 'unbekannt';
+  const r = await pool.query(
+    `UPDATE stations SET anschluss = NULL, anschluss_gelernt_am = NULL, anschluss_kandidat = NULL,
+            anschluss_abweichung = NULL WHERE id = $1 AND revoked_at IS NULL RETURNING id`, [req.params.id]);
+  if (!r.rows.length) return res.status(404).json({ error: 'Station nicht gefunden' });
+  await ereignis(req.params.id, 'anschluss-vergessen', wer, 'Nächster Anschluss wird ohne Sperre gelernt');
+  res.json({ ok: true });
+}));
+
+// DELETE /api/stations/admin/:id/doppelt — Meldung "doppelte Station" erledigt.
+// Melden sich danach wieder zwei Geräte, kommt eine neue Meldung.
+router.delete('/admin/:id/doppelt', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  const wer = req.user?.email || req.user?.name || 'unbekannt';
+  const r = await pool.query(
+    `UPDATE stations SET doppelt = NULL WHERE id = $1 AND doppelt IS NOT NULL RETURNING id`, [req.params.id]);
+  if (r.rows.length) {
+    // Die alten Lebenszeichen mit wegräumen — sonst erkennte das nächste
+    // Lebenszeichen dieselbe Überlappung von vorhin gleich wieder.
+    await pool.query('DELETE FROM station_lebenszeichen WHERE station_id = $1', [req.params.id]);
+    await ereignis(req.params.id, 'doppelt-erledigt', wer, null);
+  }
+  res.json({ ok: true });
+}));
+
+// 2. Doppelte Station. Im Lebenszeichen, weil nur dort steht, WER sich
+// meldet: Quelladresse, die lokale Adresse aus dem Zustand und die Laufzeit
+// (daraus die Startzeit). Kein eigener Zyklus nötig.
+const DOPPELT_FENSTER_MIN = 30;
+const DOPPELT_MELDEN_STUNDEN = 6;
+
+async function lebenszeichenPruefen(station, state, quelleIp) {
+  // Nur das regelmässige Lebenszeichen des Agenten zählt (station-agent.sh,
+  // mit Laufzeit). Die einmalige Rückmeldung nach der Einrichtung
+  // (station-setup-server) hat weder Laufzeit noch lokale Adresse und sähe
+  // sonst aus wie ein zweites Gerät.
+  const uptime = Number(state?.uptime_seconds);
+  if (state?.uptime_seconds == null || !Number.isFinite(uptime) || uptime < 0) return;
+  const lokal = typeof state?.ip === 'string' && state.ip && state.ip.length <= 64 ? state.ip : null;
+  await pool.query(
+    `INSERT INTO station_lebenszeichen (station_id, quelle_ip, lokal_ip, boot)
+     VALUES ($1, $2, $3, NOW() - make_interval(secs => $4::float8))`,
+    [station.id, quelleIp, lokal, uptime]);
+  await pool.query(
+    "DELETE FROM station_lebenszeichen WHERE station_id = $1 AND erstellt < NOW() - INTERVAL '2 hours'", [station.id]);
+  const { rows } = await pool.query(
+    `SELECT erstellt AS zeit, quelle_ip, lokal_ip, boot FROM station_lebenszeichen
+      WHERE station_id = $1 AND erstellt > NOW() - make_interval(mins => $2)`, [station.id, DOPPELT_FENSTER_MIN]);
+  const fund = waechter.doppelteErkennen(rows);
+  if (!fund) return;
+
+  const jetzt = new Date().toISOString();
+  const neu = !station.doppelt;
+  const doppelt = { seit: station.doppelt?.seit || jetzt, zuletzt: jetzt, quellen: fund.quellen };
+  const melden = !station.doppelt_gemeldet_am
+    || Date.now() - new Date(station.doppelt_gemeldet_am).getTime() > DOPPELT_MELDEN_STUNDEN * 3600 * 1000;
+  await pool.query(
+    `UPDATE stations SET doppelt = $2 ${melden ? ', doppelt_gemeldet_am = NOW()' : ''} WHERE id = $1`,
+    [station.id, JSON.stringify(doppelt)]);
+  const quellen = fund.quellen.map(waechter.quelleText).join(' und ');
+  if (neu) await ereignis(station.id, 'doppelt', null, `Zwei Geräte melden sich als diese Station: ${quellen}`);
+  if (melden) {
+    technikMelden(`⚠️ Station *${station.id}*: zwei Geräte melden sich gleichzeitig mit ihrem Token (${quellen}). `
+      + `Nicht gesperrt — bitte auf ${STATIONEN_URL} prüfen; ist eines davon fremd: sperren und neu aufsetzen.`,
+    'station-doppelt');
+  }
 }
 
 // Was es bei einem Windows-Rechner nicht gibt: er hat keinen Agenten, der
@@ -1594,18 +1869,26 @@ router.delete('/admin/wartungsschluessel/:sid', authMiddleware, nurTechnik, a(as
   res.json({ ok: true });
 }));
 
+// Sperren, von Hand wie durch den Anschluss-Wächter. Ein Weg, damit beide
+// dasselbe bewirken: Station bekommt keine Config mehr, das Lebenszeichen
+// trägt Sperre und Grund zur Station (station-sperre an).
+async function stationSperren(id, grund, wer) {
+  const r = await pool.query(
+    `UPDATE stations SET status='gesperrt', sperr_grund=$2, gesperrt_von=$3, gesperrt_am=NOW()
+      WHERE id=$1 AND revoked_at IS NULL RETURNING id`,
+    [id, grund, wer],
+  );
+  if (!r.rows.length) return false;
+  await ereignis(id, 'gesperrt', wer, grund);
+  console.log(`[stations] '${id}' gesperrt von ${wer}${grund ? ` (${grund})` : ''}`);
+  return true;
+}
+
 router.post('/admin/:id/block', authMiddleware, nurTechnik, a(async (req, res) => {
   await ensureSchema();
   const grund = (req.body?.grund || '').trim() || null;
   const wer = req.user?.email || req.user?.name || 'unbekannt';
-  const r = await pool.query(
-    `UPDATE stations SET status='gesperrt', sperr_grund=$2, gesperrt_von=$3, gesperrt_am=NOW()
-      WHERE id=$1 AND revoked_at IS NULL RETURNING id`,
-    [req.params.id, grund, wer],
-  );
-  if (!r.rows.length) return res.status(404).json({ error: 'Station nicht gefunden' });
-  await ereignis(req.params.id, 'gesperrt', wer, grund);
-  console.log(`[stations] '${req.params.id}' gesperrt von ${wer}${grund ? ` (${grund})` : ''}`);
+  if (!await stationSperren(req.params.id, grund, wer)) return res.status(404).json({ error: 'Station nicht gefunden' });
   res.json({ ok: true });
 }));
 
@@ -1613,8 +1896,13 @@ router.post('/admin/:id/block', authMiddleware, nurTechnik, a(async (req, res) =
 router.post('/admin/:id/unblock', authMiddleware, nurTechnik, a(async (req, res) => {
   await ensureSchema();
   const wer = req.user?.email || req.user?.name || 'unbekannt';
+  // Ein offener fremder Anschluss wird dabei verworfen, nicht übernommen:
+  // hängt die Station noch dort, sperrt der Wächter nach zwei Abgleichen
+  // erneut. Wer den neuen Anschluss gelten lassen will, nimmt
+  // "Anschluss übernehmen und freigeben".
   const r = await pool.query(
-    `UPDATE stations SET status='aktiv', sperr_grund=NULL, gesperrt_von=NULL, gesperrt_am=NULL
+    `UPDATE stations SET status='aktiv', sperr_grund=NULL, gesperrt_von=NULL, gesperrt_am=NULL,
+            anschluss_abweichung = NULL, anschluss_kandidat = NULL
       WHERE id=$1 AND revoked_at IS NULL RETURNING id`,
     [req.params.id],
   );
@@ -2158,6 +2446,10 @@ router.post('/:id/seen', stationAuth, a(async (req, res) => {
     'UPDATE stations SET last_seen_at = NOW(), last_seen_ip = $3, last_state = $2 WHERE id = $1',
     [req.station.id, JSON.stringify(state), clientIp(req)],
   );
+  // Doppelte Station? Fehler hier dürfen das Lebenszeichen nicht kosten —
+  // über seine Antwort erfährt die Station von Sperre und Update.
+  await lebenszeichenPruefen(req.station, state, clientIp(req))
+    .catch((e) => console.error('[stations] Doppel-Prüfung:', e.message));
   if (state.ereignis) {
     await ereignis(req.station.id, String(state.ereignis).slice(0, 40), null,
       state.text ? String(state.text).slice(0, 500) : null);
@@ -2382,5 +2674,7 @@ router.post('/:id/journal-zertifikat', stationAuth, a(async (req, res) => {
 }));
 
 router.stationAuth = stationAuth;
+// Für den Abgleich von Hand (Tests, Fehlersuche) — der Zyklus ruft ihn selbst.
+router.anschlussAbgleichen = anschlussAbgleichen;
 
 module.exports = router;

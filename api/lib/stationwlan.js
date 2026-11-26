@@ -27,10 +27,10 @@ const UNIFI_API_KEY = process.env.UNIFI_API_KEY || '';
 const CACHE_MS = 5 * 60 * 1000;
 let cache = { zeit: 0, netze: null };
 
-async function unifiHolen(pfad) {
+async function unifiHolen(pfad, timeoutMs = 6000) {
   const antwort = await fetch(`${UNIFI_HOST}/proxy/network/api/s/default/${pfad}`, {
     headers: { 'X-API-Key': UNIFI_API_KEY },
-    signal: AbortSignal.timeout(6000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!antwort.ok) throw new Error(`unifi ${pfad} -> ${antwort.status}`);
   return (await antwort.json()).data || [];
@@ -108,4 +108,8 @@ async function wlanAufloesen(wifi) {
   return w;
 }
 
-module.exports = { wlanAufloesen, netznamen };
+// Für den Anschluss-Wächter (routes/stations.js): dieselbe Abfrage, ohne
+// einen zweiten Weg zu UniFi.
+const unifiBereit = () => !!UNIFI_API_KEY;
+
+module.exports = { wlanAufloesen, netznamen, unifiHolen, unifiBereit };

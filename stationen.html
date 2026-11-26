@@ -54,6 +54,12 @@
                     Station taucht sofort in dieser Liste auf. Eine gesperrte Station bekommt keine
                     Konfiguration mehr und lässt sich nicht weiter einrichten.
                 </p>
+                <p class="text-sm text-blue-800 mt-2">
+                    Zwei Wächter passen zusätzlich auf: Jede fest aufgestellte Station merkt sich ihren
+                    Anschluss (Switch-Port, bei WLAN den Access Point). Taucht sie anderswo auf, wird sie
+                    gesperrt — nach einem Umzug genügt „Anschluss übernehmen und freigeben“. Und melden sich
+                    zwei Geräte mit derselben Station, erscheint hier eine Meldung (ohne Sperre).
+                </p>
             </div>
 
             <!-- Kennzahlen -->
@@ -101,7 +107,11 @@
                          steht, wann zuletzt und mit welchem Ergebnis, damit niemand
                          rätselt, warum ein neuer PC (noch) fehlt. -->
                     <p id="ad-stand" class="w-full text-xs text-gray-500"></p>
+                    <p id="anschluss-stand" class="w-full text-xs text-gray-500 -mt-2"></p>
                 </div>
+
+                <!-- Was die Wächter gerade melden, damit es niemand in der Tabelle suchen muss -->
+                <div id="waechter-hinweis" class="hidden mx-6 mt-4 p-3 rounded border-l-4 border-red-500 bg-red-50 text-sm text-red-800"></div>
 
                 <div id="leer" class="hidden p-10 text-center text-gray-500">
                     Noch keine Station registriert.
@@ -486,6 +496,7 @@
         let typen = [];
         let drucker = [];   // [{name, label}] — die Auswahl für den Standarddrucker
         let adStand = null; // Stand des AD-Abgleichs (api: ad_abgleich)
+        let anschlussStand = null; // Stand des Anschluss-Wächters (api: anschluss_abgleich)
         let winProg = null; // {katalog, vorgabe, geaendert_von, geaendert_am} — erlaubte Windows-Programme
 
         window.addEventListener('DOMContentLoaded', async () => {
@@ -535,6 +546,8 @@
                 drucker = daten.drucker || [];
                 adStand = daten.ad_abgleich || null;
                 adStandZeichnen();
+                anschlussStand = daten.anschluss_abgleich || null;
+                anschlussStandZeichnen();
                 winProg = daten.windows_programme || null;
                 winProgZeichnen();
                 wartungsschluessel = daten.wartungsschluessel || 0;
@@ -665,6 +678,97 @@
             el.className = `w-full text-xs ${st.fehler ? 'text-red-700' : 'text-gray-500'}`;
         }
 
+        // ─── Wächter: Anschluss und doppelte Station ────────────────────
+        // Gleiche Schreibweise wie api/lib/stationwaechter.js (anschlussText),
+        // damit Seite, Sperrgrund und WhatsApp-Meldung dasselbe sagen.
+        function anschlussText(a) {
+            if (!a) return '?';
+            if (a.art === 'wlan') return `WLAN über ${a.geraet_name || a.geraet_mac}`;
+            return `${a.geraet_name || a.geraet_mac} Port ${a.port}${a.port_name ? ` (${a.port_name})` : ''}`;
+        }
+        const anschlussListe = (l) => (l || []).map(anschlussText).join(' / ');
+        const ohneAnschluss = (s) => (anschlussStand?.ohne || ['windows', 'laptop']).includes(s.role);
+        const quelleText = (q) => [q.lokal_ip, q.quelle_ip && q.quelle_ip !== q.lokal_ip ? `über ${q.quelle_ip}` : null].filter(Boolean).join(' ') || 'unbekannte Adresse';
+        const vomWaechter = (s) => s.status === 'gesperrt' && s.gesperrt_von === 'Anschluss-Wächter';
+
+        function anschlussStandZeichnen() {
+            const el = document.getElementById('anschluss-stand');
+            const st = anschlussStand;
+            if (!st) { el.textContent = ''; return; }
+            if (!st.bereit) { el.textContent = 'Anschluss-Wächter aus: der API fehlt der UniFi-Schlüssel.'; return; }
+            if (!(st.minuten > 0)) { el.textContent = 'Anschluss-Wächter ausgeschaltet (STATION_ANSCHLUSS_MINUTEN=0).'; return; }
+            const wann = st.zuletzt ? `zuletzt ${uhr(st.zuletzt)}` : 'noch nicht gelaufen';
+            let text = `Anschlüsse aus UniFi: ${wann}, von selbst alle ${st.minuten} min.`;
+            if (st.fehler) text += ` Fehler: ${st.fehler}`;
+            else if (st.ergebnis && !st.ergebnis.uebersprungen) text += ` ${st.ergebnis.im_netz} von ${st.ergebnis.geprueft} Stationen im Netz gefunden.`;
+            el.textContent = text;
+            el.title = 'Laptops und Windows-Rechner sind ausgenommen — sie haben keinen festen Anschluss.';
+            el.className = `w-full text-xs -mt-2 ${st.fehler ? 'text-red-700' : 'text-gray-500'}`;
+        }
+
+        // Unter dem Zustand: was der Wächter gefunden hat, mit dem einen Knopf dazu.
+        function waechterZeilen(s) {
+            if (s.revoked_at) return '';
+            const id = escape(s.id);
+            let h = '';
+            if (s.anschluss_abweichung) {
+                const knopf = s.status !== 'gesperrt' || vomWaechter(s) ? 'Anschluss übernehmen und freigeben' : 'Anschluss übernehmen';
+                h += `<div class="mt-1 text-xs text-red-700 max-w-xs">🔌 an anderem Anschluss: <b>${escape(anschlussText(s.anschluss_abweichung))}</b>
+                    statt ${escape(anschlussListe(s.anschluss) || '?')}
+                    <button onclick="anschlussUebernehmen('${id}')" class="block mt-1 px-2 py-0.5 rounded bg-green-600 text-white hover:bg-green-700">${knopf}</button></div>`;
+            }
+            if (s.doppelt) {
+                const d = s.doppelt;
+                const quellen = (d.quellen || []).map(quelleText).join(' und ');
+                h += `<div class="mt-1 text-xs text-orange-800 max-w-xs" title="seit ${escape(new Date(d.seit).toLocaleString('de-CH'))}">⚠ Zwei Geräte melden sich als diese Station: ${escape(quellen)}
+                    · zuletzt ${escape(vorZeit(d.zuletzt).text)}
+                    <button onclick="doppeltErledigt('${id}')" class="ml-1 underline hover:text-orange-900">erledigt</button></div>`;
+            }
+            return h;
+        }
+
+        function waechterHinweisZeichnen(offen) {
+            const el = document.getElementById('waechter-hinweis');
+            const anders = offen.filter(s => s.anschluss_abweichung).map(s => s.id);
+            const doppelt = offen.filter(s => s.doppelt).map(s => s.id);
+            const teile = [];
+            if (anders.length) teile.push(`An anderem Anschluss aufgetaucht: <b>${anders.map(escape).join(', ')}</b> — war es ein Umzug, in der Zeile „Anschluss übernehmen und freigeben“.`);
+            if (doppelt.length) teile.push(`Zwei Geräte melden sich als <b>${doppelt.map(escape).join(', ')}</b> — ist eines davon fremd: sperren und neu aufsetzen.`);
+            el.innerHTML = teile.map(t => `<p>${t}</p>`).join('');
+            el.classList.toggle('hidden', !teile.length);
+        }
+
+        function anschlussUebernehmen(id) {
+            const s = (stationen || []).find(x => x.id === id) || {};
+            const neu = s.anschluss_abweichung || s.anschluss_jetzt;
+            const wlan = neu?.art === 'wlan' && (s.anschluss || []).every(a => a.art === 'wlan');
+            dialogOeffnen(
+                `Anschluss für „${id}" übernehmen`,
+                `Ab jetzt gilt ${anschlussText(neu)} als Anschluss dieser Station`
+                + (wlan ? ' — zusätzlich zu den bisherigen Access Points.' : ` statt ${anschlussListe(s.anschluss) || 'keinem'}.`)
+                + (vomWaechter(s) ? ' Die Sperre wird aufgehoben.' : (s.status === 'gesperrt' ? ' Die Sperre bleibt — sie hat einen anderen Grund.' : ''))
+                + ' War es kein Umzug, sondern ein fremdes Gerät: abbrechen und gesperrt lassen.',
+                'Übernehmen', 'bg-green-600 hover:bg-green-700',
+                async () => tuUnd(`/api/stations/admin/${encodeURIComponent(id)}/anschluss-uebernehmen`,
+                    { method: 'POST' }, `Anschluss für „${id}" übernommen.`),
+                false);
+        }
+
+        function anschlussVergessen(id) {
+            dialogOeffnen(
+                `Anschluss für „${id}" neu lernen`,
+                'Für einen geplanten Umzug: die Station vergisst ihren Anschluss und lernt den nächsten, an dem sie auftaucht, ohne gesperrt zu werden.',
+                'Neu lernen', 'bg-blue-600 hover:bg-blue-700',
+                async () => tuUnd(`/api/stations/admin/${encodeURIComponent(id)}/anschluss-vergessen`,
+                    { method: 'POST' }, `„${id}" lernt ihren nächsten Anschluss neu.`),
+                false);
+        }
+
+        function doppeltErledigt(id) {
+            tuUnd(`/api/stations/admin/${encodeURIComponent(id)}/doppelt`,
+                { method: 'DELETE' }, `Meldung für „${id}" erledigt. Melden sich wieder zwei Geräte, kommt sie neu.`);
+        }
+
         async function adAbgleichen() {
             const knopf = document.getElementById('ad-knopf');
             knopf.disabled = true;
@@ -688,7 +792,7 @@
             const liste = stationen.filter(s => {
                 if (!mitEntfernten && s.revoked_at) return false;
                 if (!suche) return true;
-                return [s.id, s.hostname, s.standort, s.haus ? `Rosenweg ${s.haus}` : '', s.role, s.registered_by, geraet(s), standardDrucker(s)]
+                return [s.id, s.hostname, s.standort, s.haus ? `Rosenweg ${s.haus}` : '', s.role, s.registered_by, geraet(s), standardDrucker(s), anschlussListe(s.anschluss)]
                     .some(f => String(f || '').toLowerCase().includes(suche));
             });
 
@@ -700,6 +804,7 @@
                 offen.filter(s => new Date(s.registered_at).getTime() > tag).length;
             document.getElementById('zahl-still').textContent =
                 offen.filter(s => !ohneAgent(s) && (!s.last_seen_at || new Date(s.last_seen_at).getTime() < tag)).length;
+            waechterHinweisZeichnen(offen);
 
             document.getElementById('leer').classList.toggle('hidden', liste.length > 0);
             document.getElementById('tabelle-wrap').classList.toggle('hidden', liste.length === 0);
@@ -715,6 +820,10 @@
                     : (ohneAgent(s) ? '<div class="text-xs text-gray-400" title="drucker.ps1 lässt den bisherigen Standard stehen; gibt es den nicht, nimmt es DruckerR9">🖨 keiner gewählt (sonst DruckerR9)</div>' : '');
                 const st = s.last_state || {};
                 const progZ = ohneAgent(s) ? progZeile(s) : '';
+                // Der gelernte Anschluss, klein unter dem Gerät — beim Umzug
+                // sieht man so, wo die Station bisher stand.
+                const anschlussZ = !ohneAgent(s) && !ohneAnschluss(s)
+                    ? `<div class="text-xs text-gray-400" title="${s.anschluss_gelernt_am ? 'gelernt ' + escape(new Date(s.anschluss_gelernt_am).toLocaleString('de-CH')) : ''}">🔌 ${s.anschluss?.length ? escape(anschlussListe(s.anschluss)) : 'Anschluss noch nicht gelernt'}</div>` : '';
                 const version = st.os_version ? `<div class="text-xs text-gray-400">OS ${escape(st.os_version)}</div>` : '';
                 // Ein Menue je Zeile statt sieben Links nebeneinander (Stefan 25.11.2026)
                 const aktionen = s.revoked_at ? '<span class="text-gray-400 text-xs">—</span>'
@@ -724,10 +833,10 @@
                     <td class="py-3 px-6 font-mono font-medium">${escape(s.id)}${version}</td>
                     <td class="py-3 px-3">${escape(typLabel(s.role))}${druckerZeile}${progZ}</td>
                     <td class="py-3 px-3">${standortZelle(s)}</td>
-                    <td class="py-3 px-3 text-gray-600">${ohneAgent(s) ? `AD-Name <span class="font-mono">${escape(s.hostname || s.id)}</span>${s.ad_betriebssystem ? `<div class="text-xs text-gray-400">${escape(s.ad_betriebssystem)}</div>` : ''}` : escape(geraet(s))}</td>
+                    <td class="py-3 px-3 text-gray-600">${ohneAgent(s) ? `AD-Name <span class="font-mono">${escape(s.hostname || s.id)}</span>${s.ad_betriebssystem ? `<div class="text-xs text-gray-400">${escape(s.ad_betriebssystem)}</div>` : ''}` : escape(geraet(s)) + anschlussZ}</td>
                     <td class="py-3 px-3 text-gray-600">${escape(s.registered_by || '—')}</td>
                     <td class="py-3 px-3 ${gesehen.alt ? 'text-yellow-700' : 'text-gray-600'}">${escape(gesehen.text)}</td>
-                    <td class="py-3 px-3">${zustandBadge(s)}${wartungZeile(s)}</td>
+                    <td class="py-3 px-3">${zustandBadge(s)}${wartungZeile(s)}${waechterZeilen(s)}</td>
                     <td class="py-3 px-6 whitespace-nowrap">${aktionen}</td>
                 </tr>`;
             }).join('');
@@ -2018,8 +2127,14 @@
             let h = e('Jetzt aktualisieren', 'jetztAktualisieren') + e('Einstellen …', 'cfgOeffnen') + e('Logs', 'logsOeffnen');
             if (s.status !== 'gesperrt' && !s.ssh_wartung_bis) h += e('SSH-Wartung freigeben (2 h)', 'wartungFreigeben');
             if (s.ssh_wartung_bis) h += e('SSH-Wartung beenden', 'wartungBeenden');
+            if (!ohneAnschluss(s) && s.anschluss?.length && !s.anschluss_abweichung) h += e('Anschluss neu lernen (Umzug) …', 'anschlussVergessen', 'text-blue-700');
             h += linie;
-            h += s.status === 'gesperrt' ? e('Entsperren', 'entsperren', 'text-green-700') : e('Sperren …', 'sperren', 'text-red-600');
+            // Hängt die Station an einem fremden Anschluss, hilft blosses
+            // Entsperren nicht (der Wächter sperrte gleich wieder) — dann
+            // steht hier nur der eine Knopf, der den Anschluss mitnimmt.
+            if (s.anschluss_abweichung) h += e(s.status !== 'gesperrt' || vomWaechter(s) ? 'Anschluss übernehmen und freigeben …' : 'Anschluss übernehmen …', 'anschlussUebernehmen', 'text-green-700');
+            if (s.status === 'gesperrt' && !(s.anschluss_abweichung && vomWaechter(s))) h += e('Entsperren', 'entsperren', 'text-green-700');
+            if (s.status !== 'gesperrt') h += e('Sperren …', 'sperren', 'text-red-600');
             h += s.zuruecksetzen_angefordert ? e('Zurücksetzen abbrechen', 'zuruecksetzenAbbrechen', 'text-yellow-700')
                                              : e('Zurücksetzen …', 'zuruecksetzen', 'text-orange-600');
             h += linie + e('Entfernen …', 'entfernen', 'text-gray-500');
