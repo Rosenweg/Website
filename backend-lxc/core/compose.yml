@@ -61,6 +61,13 @@ services:
       # CAST_APP_ID: "XXXXXXXX"   (hier oder in .env — hier gesetzt schlüge es .env)
       CAST_WAECHTER_SEKUNDEN: "45"
       CAST_FREMD_MINUTEN: "20"
+      # Kiosk-Fernseher (Rosenweg/rosenweg-tv-kiosk, role 'kiosk' auf /stationen):
+      # STATION_PIN_KEY verschlüsselt die Kiosk-PINs, damit Technik sie auf /stationen
+      # sehen kann (AES-256-GCM, Schlüssel per HKDF abgeleitet). Geheim, nur in .env,
+      # mindestens 32 Zeichen (z. B. `openssl rand -hex 32`). Fehlt er, lassen sich PINs
+      # auf /stationen weder setzen noch zeigen; der Fernseher läuft trotzdem.
+      # Geht er verloren oder wird er gewechselt, sind gespeicherte PINs unlesbar —
+      # dann je Fernseher neu setzen.
     ports: ["3000:3000"]
     volumes:
       - /mnt/documents:/documents

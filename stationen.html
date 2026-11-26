@@ -107,6 +107,10 @@
                             title="Ein Chromecast als Anzeige — zeigt dieselbe Seite wie eine Anzeige-Station, der Cast-Wächter hält ihn dort">
                         Chromecast eintragen
                     </button>
+                    <button onclick="kioskOeffnen()" class="px-3 py-2 text-sm border rounded-lg hover:bg-gray-50"
+                            title="Ein Google-TV-Fernseher mit Rosenweg Kiosk zeigt einen Code (Kiosk-Einstellungen → Mit Rosenweg verbinden) — hier eingeben">
+                        Fernseher koppeln
+                    </button>
                     <!-- Windows-Rechner kommen von selbst aus dem AD (26.11.2026): hier
                          steht, wann zuletzt und mit welchem Ergebnis, damit niemand
                          rätselt, warum ein neuer PC (noch) fehlt. -->
@@ -402,6 +406,58 @@
         </div>
     </div>
 
+    <!-- Kiosk-Fernseher koppeln -->
+    <div id="kiosk-dialog" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] flex flex-col">
+            <div class="p-6 border-b">
+                <h3 class="text-lg font-semibold text-gray-800">Fernseher koppeln</h3>
+                <p class="text-sm text-gray-500">Am Fernseher: PIN → Kiosk-Einstellungen → „Mit Rosenweg verbinden". Er zeigt einen Code und einen QR-Code, der direkt hierher führt. Danach meldet er sich jede Minute, und Diashow-App, PIN und Sperre lassen sich von hier steuern.</p>
+            </div>
+            <div class="flex-1 overflow-y-auto p-6 space-y-4">
+                <label class="block"><span class="text-sm font-medium text-gray-700">Code vom Bildschirm</span>
+                    <input id="kiosk-code" type="text" maxlength="9" autocomplete="off" autocapitalize="characters" spellcheck="false"
+                           class="mt-1 w-full border rounded-lg px-3 py-2 font-mono text-xl tracking-widest uppercase" placeholder="ABCD-EFGH"
+                           oninput="kioskCodeGetippt()"></label>
+                <div id="kiosk-geraet" class="hidden text-sm rounded-lg border p-3 bg-gray-50"></div>
+                <div id="kiosk-felder" class="hidden space-y-4">
+                    <label class="block"><span class="text-sm font-medium text-gray-700">Name</span>
+                        <input id="kiosk-name" type="text" maxlength="63" class="mt-1 w-full border rounded-lg px-3 py-2" placeholder="z. B. Kiosk Heizungsraum R9">
+                        <span class="text-xs text-gray-500">Daraus wird die Kennung (kiosk-heizungsraum-r9).</span></label>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <label class="block"><span class="text-sm font-medium text-gray-700">Haus</span>
+                            <select id="kiosk-haus" class="mt-1 w-full border rounded-lg px-3 py-2"></select></label>
+                        <label class="block"><span class="text-sm font-medium text-gray-700">Standort</span>
+                            <input id="kiosk-standort" type="text" class="mt-1 w-full border rounded-lg px-3 py-2" placeholder="z. B. Heizungsraum"></label>
+                    </div>
+                    <label class="block"><span class="text-sm font-medium text-gray-700">Notiz</span>
+                        <input id="kiosk-notiz" type="text" class="mt-1 w-full border rounded-lg px-3 py-2"></label>
+                    <label class="block"><span class="text-sm font-medium text-gray-700">PIN <span id="kiosk-pin-pflicht" class="text-gray-400 font-normal">freiwillig</span></span>
+                        <input id="kiosk-pin" type="text" inputmode="numeric" maxlength="8" autocomplete="off" class="mt-1 w-full border rounded-lg px-3 py-2 font-mono" placeholder="4 bis 8 Ziffern">
+                        <span class="text-xs text-gray-500" id="kiosk-pin-hinweis"></span></label>
+                </div>
+                <p id="kiosk-meldung" class="text-sm"></p>
+            </div>
+            <div class="p-6 border-t flex justify-end gap-3">
+                <button onclick="kioskSchliessen()" class="px-4 py-2 text-sm border rounded-lg hover:bg-gray-50">Abbrechen</button>
+                <button id="kiosk-ok" onclick="kioskKoppeln()" disabled class="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">Koppeln</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Kiosk: PIN setzen -->
+    <div id="kpin-dialog" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 class="text-lg font-semibold text-gray-800 mb-2" id="kpin-titel">PIN setzen</h3>
+            <p class="text-sm text-gray-600 mb-4">Der Fernseher übernimmt sie beim nächsten Lebenszeichen (bis zu einer Minute) und bekommt dabei nur ihren Hash. Wird sie danach am Fernseher geändert, meldet er die neue hierher — es gilt immer die neueste.</p>
+            <input id="kpin-pin" type="text" inputmode="numeric" maxlength="8" autocomplete="off" class="w-full px-3 py-2 border rounded-lg font-mono text-xl tracking-widest" placeholder="4 bis 8 Ziffern">
+            <p id="kpin-meldung" class="text-sm mt-2"></p>
+            <div class="flex justify-end gap-3 mt-6">
+                <button onclick="kioskPinSchliessen()" class="px-4 py-2 text-sm border rounded-lg hover:bg-gray-50">Abbrechen</button>
+                <button onclick="kioskPinSpeichern()" class="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700">Setzen</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Einstellungen je Station -->
     <div id="cfg-dialog" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[85vh] flex flex-col">
@@ -430,6 +486,15 @@
                         <input id="cfg-cast-adresse" type="text" class="mt-1 w-full border rounded-lg px-3 py-2 font-mono"></label>
                     <label class="block"><span class="text-sm font-medium text-gray-700">MAC (freiwillig)</span>
                         <input id="cfg-cast-mac" type="text" class="mt-1 w-full border rounded-lg px-3 py-2 font-mono"></label>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 hidden" id="cfg-kiosk-block">
+                    <label class="block"><span class="text-sm font-medium text-gray-700">Diashow-App</span>
+                        <select id="cfg-kiosk-paket" class="mt-1 w-full border rounded-lg px-3 py-2"></select>
+                        <span class="text-xs text-gray-500">Die Apps, die der Fernseher zuletzt gemeldet hat. Am Fernseher gewählt gilt genauso — die neueste Wahl gewinnt.</span></label>
+                    <label class="block"><span class="text-sm font-medium text-gray-700">MAC (für den Anschluss-Wächter)</span>
+                        <input id="cfg-kiosk-mac" type="text" class="mt-1 w-full border rounded-lg px-3 py-2 font-mono" placeholder="aa:bb:cc:dd:ee:ff">
+                        <span class="text-xs text-gray-500" id="cfg-kiosk-mac-hinweis"></span></label>
                 </div>
 
                 <div class="border-t pt-4" id="cfg-druck-block">
@@ -566,6 +631,13 @@
             document.getElementById('suche').addEventListener('input', zeichne);
             document.getElementById('zeige-entfernte').addEventListener('change', zeichne);
             await ladeDaten();
+            // QR-Code vom Fernseher: /stationen.html?koppeln=ABCDEFGH öffnet
+            // gleich den Kopplungsdialog mit dem Code.
+            const koppeln = new URLSearchParams(location.search).get('koppeln');
+            if (koppeln) {
+                history.replaceState(null, '', location.pathname);
+                kioskOeffnen(koppeln);
+            }
             // Getrennt und ohne await davor: eine leere oder fehlerhafte Liste
             // der Anzeigegeräte darf die Stationsübersicht nicht aufhalten.
             ladeAnzeigen();
@@ -597,6 +669,7 @@
                 anschlussStandZeichnen();
                 castWaechter = daten.cast_waechter || null;
                 castStandZeichnen();
+                kioskStand = daten.kiosk || null;
                 winProg = daten.windows_programme || null;
                 winProgZeichnen();
                 wartungsschluessel = daten.wartungsschluessel || 0;
@@ -646,6 +719,35 @@
         // ihm etwas bewirken.
         const istCast = (s) => s.role === 'chromecast';
         let castWaechter = null;
+
+        // Ein Kiosk-Fernseher (Rosenweg Kiosk auf Google TV) meldet sich selbst
+        // jede Minute — wie eine Station, nur ohne Stations-OS. Unter dem
+        // Gerät steht, was er gerade zeigt.
+        const istKiosk = (s) => s.role === 'kiosk';
+        let kioskStand = null;
+        const ANSICHT_TEXT = { diashow: 'Diashow', pin: 'PIN-Schirm', apps: 'Menü offen', einstellungen: 'Kiosk-Einstellungen',
+            gesperrt: 'Sperrhinweis', koppeln: 'Kopplung', 'andere-app': 'andere App', leer: '—' };
+
+        function kioskZeile(s) {
+            const st = s.last_state || {};
+            const k = s.kiosk || {};
+            const teile = [];
+            if (st.diashow_vorn === true) teile.push('<span class="text-green-700">Diashow läuft</span>');
+            else if (st.ansicht === 'andere-app' && st.vorn_paket) teile.push(`vorn: ${escape(st.vorn_paket)}`);
+            else if (st.ansicht) teile.push(escape(ANSICHT_TEXT[st.ansicht] || st.ansicht));
+            const paket = k.diashow?.paket || st.diashow_paket;
+            if (paket) {
+                const name = (st.apps || []).find(a => a.paket === paket)?.name || st.diashow_name || paket;
+                teile.push(`${escape(name)}${st.diashow_installiert === false ? ' <span class="text-red-600">(nicht installiert)</span>' : ''}`);
+            }
+            const pin = k.pin_stand
+                ? `PIN ${k.pin_quelle === 'geraet' ? 'am Gerät' : 'hier'} gesetzt ${escape(vorZeit(k.pin_stand).text)}${k.pin_lesbar ? '' : ' (nicht lesbar)'}`
+                : (st.pin_gesetzt ? 'PIN hier noch unbekannt' : '<span class="text-red-600">keine PIN</span>');
+            teile.push(pin);
+            if (k.neustart && k.neustart !== k.neustart_erledigt) teile.push('<span class="text-orange-700">Neustart angefordert</span>');
+            const uptime = Number(st.uptime_seconds) > 0 ? ` · läuft seit ${escape(vorZeit(new Date(Date.now() - st.uptime_seconds * 1000).toISOString()).text.replace('vor ', ''))}` : '';
+            return `<div class="text-xs text-gray-400" title="${escape([st.ip ? 'IP ' + st.ip : '', st.android ? 'Android ' + st.android : ''].filter(Boolean).join(' · '))}">📺 ${teile.join(' · ')}${uptime}</div>`;
+        }
 
         // Was der Wächter beim letzten Lauf gesehen und getan hat.
         function castZeile(s) {
@@ -902,7 +1004,8 @@
                 // sieht man so, wo die Station bisher stand.
                 const anschlussZ = !ohneAgent(s) && !ohneAnschluss(s)
                     ? `<div class="text-xs text-gray-400" title="${s.anschluss_gelernt_am ? 'gelernt ' + escape(new Date(s.anschluss_gelernt_am).toLocaleString('de-CH')) : ''}">🔌 ${s.anschluss?.length ? escape(anschlussListe(s.anschluss)) : 'Anschluss noch nicht gelernt'}</div>` : '';
-                const version = st.os_version ? `<div class="text-xs text-gray-400">OS ${escape(st.os_version)}</div>` : '';
+                const version = st.os_version ? `<div class="text-xs text-gray-400">OS ${escape(st.os_version)}</div>`
+                    : (istKiosk(s) && st.app_version ? `<div class="text-xs text-gray-400">Kiosk ${escape(st.app_version)}</div>` : '');
                 // Ein Menue je Zeile statt sieben Links nebeneinander (Stefan 25.11.2026)
                 const aktionen = s.revoked_at ? '<span class="text-gray-400 text-xs">—</span>'
                     : `<button onclick="aktionsMenue(event, '${escape(s.id)}')" class="px-3 py-1 text-sm border rounded-lg hover:bg-gray-100">Aktionen ▾</button>`;
@@ -911,7 +1014,7 @@
                     <td class="py-3 px-6 font-mono font-medium">${escape(s.id)}${version}</td>
                     <td class="py-3 px-3">${escape(typLabel(s.role))}${druckerZeile}${progZ}</td>
                     <td class="py-3 px-3">${standortZelle(s)}</td>
-                    <td class="py-3 px-3 text-gray-600">${istCast(s) ? `Chromecast <span class="font-mono">${escape(s.hardware?.adresse || '?')}</span>${castZeile(s)}` : ohneAgent(s) ? `AD-Name <span class="font-mono">${escape(s.hostname || s.id)}</span>${s.ad_betriebssystem ? `<div class="text-xs text-gray-400">${escape(s.ad_betriebssystem)}</div>` : ''}` : escape(geraet(s)) + anschlussZ}</td>
+                    <td class="py-3 px-3 text-gray-600">${istKiosk(s) ? escape(geraet(s)) + kioskZeile(s) + anschlussZ : istCast(s) ? `Chromecast <span class="font-mono">${escape(s.hardware?.adresse || '?')}</span>${castZeile(s)}` : ohneAgent(s) ? `AD-Name <span class="font-mono">${escape(s.hostname || s.id)}</span>${s.ad_betriebssystem ? `<div class="text-xs text-gray-400">${escape(s.ad_betriebssystem)}</div>` : ''}` : escape(geraet(s)) + anschlussZ}</td>
                     <td class="py-3 px-3 text-gray-600">${escape(s.registered_by || '—')}</td>
                     <td class="py-3 px-3 ${gesehen.alt ? 'text-yellow-700' : 'text-gray-600'}">${escape(gesehen.text)}</td>
                     <td class="py-3 px-3">${zustandBadge(s)}${wartungZeile(s)}${waechterZeilen(s)}</td>
@@ -990,8 +1093,27 @@
             // Beim Chromecast: kein WLAN, kein Kanal — auf ihm läuft nichts von uns.
             // Die Anzeigeadresse lässt sich wie bei einer Anzeige-Station im JSON
             // unter roles.display.url überschreiben.
-            document.getElementById('cfg-wlan-block').classList.toggle('hidden', win || cast);
-            document.getElementById('cfg-kanal-block').classList.toggle('hidden', win || cast);
+            // Kiosk-Fernseher: weder WLAN noch Kanal noch Drucker von hier —
+            // dafür Diashow-App und MAC.
+            const ki = istKiosk(s);
+            document.getElementById('cfg-wlan-block').classList.toggle('hidden', win || cast || ki);
+            document.getElementById('cfg-kanal-block').classList.toggle('hidden', win || cast || ki);
+            document.getElementById('cfg-kiosk-block').classList.toggle('hidden', !ki);
+            if (ki) {
+                document.getElementById('cfg-druck-block').classList.add('hidden');
+                const st = s.last_state || {};
+                const jetzt = s.kiosk?.diashow?.paket || st.diashow_paket || 'sk.mimac.slideshow';
+                const apps = [...(st.apps || [])];
+                if (!apps.some(a => a.paket === jetzt)) apps.unshift({ paket: jetzt, name: `${jetzt} (nicht gemeldet)` });
+                document.getElementById('cfg-kiosk-paket').innerHTML = apps
+                    .map(a => `<option value="${escape(a.paket)}"${a.paket === jetzt ? ' selected' : ''}>${escape(a.name)} (${escape(a.paket)})</option>`).join('');
+                document.getElementById('cfg-kiosk-paket').dataset.vorher = jetzt;
+                document.getElementById('cfg-kiosk-mac').value = s.hardware?.macs?.eingetragen || '';
+                const gemeldet = Object.entries(s.hardware?.macs || {}).filter(([n]) => n !== 'eingetragen').map(([n, m]) => `${n} ${m}`);
+                document.getElementById('cfg-kiosk-mac-hinweis').textContent = gemeldet.length
+                    ? `Vom Fernseher gemeldet: ${gemeldet.join(', ')} — hier nur nötig, wenn das nicht die Adresse ist, die UniFi sieht.`
+                    : 'Android gibt sie der App nicht immer preis. In UniFi beim Gerät nachsehen (bei WLAN die für dieses Netz).';
+            }
 
             document.getElementById('cfg-dialog').classList.remove('hidden');
         }
@@ -1575,15 +1697,16 @@
 
             const station = (stationen || []).find(x => x.id === cfgStation) || {};
             const cast = istCast(station);
-            // Ohne eigenes OS (Windows, Chromecast): kein Kanal, kein WLAN von hier.
-            const win = station.role === 'windows' || cast;
+            const ki = istKiosk(station);
+            // Ohne eigenes OS (Windows, Chromecast, Kiosk): kein Kanal, kein WLAN von hier.
+            const win = station.role === 'windows' || cast || ki;
 
             // Standarddrucker. Leer heisst „keiner" und geht als null hinaus:
             // die API führt zusammen, ein bloss weggelassener Wert bliebe stehen.
             // Nur anfassen, wenn es etwas zu sagen gibt — sonst stünde nach
             // jedem Speichern ein leeres printing-Objekt in den overrides.
             const wahl = document.getElementById('cfg-drucker').value || null;
-            if (station.role && station.role !== 'display' && !cast && (wahl || standardDrucker(station))) {
+            if (station.role && station.role !== 'display' && !cast && !ki && (wahl || standardDrucker(station))) {
                 overrides.roles = { ...(overrides.roles || {}) };
                 overrides.roles[station.role] = { ...(overrides.roles[station.role] || {}) };
                 overrides.roles[station.role].printing = {
@@ -1673,9 +1796,18 @@
                             adresse: document.getElementById('cfg-cast-adresse').value,
                             mac: document.getElementById('cfg-cast-mac').value,
                         } : {}),
+                        ...(ki ? {
+                            mac: document.getElementById('cfg-kiosk-mac').value.trim(),
+                            // Nur mitschicken, wenn geändert: sonst gälte jedes
+                            // Speichern als „neueste Wahl" und schlüge eine am
+                            // Fernseher getroffene.
+                            ...(document.getElementById('cfg-kiosk-paket').value !== document.getElementById('cfg-kiosk-paket').dataset.vorher
+                                ? { diashow_paket: document.getElementById('cfg-kiosk-paket').value } : {}),
+                        } : {}),
                     },
                 });
-                melden(cast ? 'Gespeichert. Der Cast-Wächter übernimmt es beim nächsten Lauf.'
+                melden(ki ? 'Gespeichert. Der Fernseher übernimmt es beim nächsten Lebenszeichen (bis zu einer Minute).'
+                     : cast ? 'Gespeichert. Der Cast-Wächter übernimmt es beim nächsten Lauf.'
                      : win ? 'Gespeichert. Der Rechner übernimmt es bei der nächsten Anmeldung.'
                            : 'Gespeichert. Die Station übernimmt es beim nächsten Update.', true);
                 await ladeDaten();
@@ -1994,6 +2126,152 @@
                 + (w.fehler ? ` · <span class="text-red-600">${escape(w.fehler)}</span>` : '');
         }
 
+        // ─── Kiosk-Fernseher ───────────────────────────────────────────
+        // Koppeln mit dem Code vom Bildschirm, Diashow neu starten, PIN. Die
+        // PIN zeigt die API nur Technik und Präsident, jedes Ansehen steht im
+        // Ereignisprotokoll der Station.
+        let kioskWartend = null;
+        let kioskSuche = 0;
+
+        function kioskOeffnen(code = '') {
+            kioskWartend = null;
+            document.getElementById('kiosk-code').value = code;
+            for (const f of ['kiosk-name', 'kiosk-standort', 'kiosk-notiz', 'kiosk-pin']) document.getElementById(f).value = '';
+            document.getElementById('kiosk-haus').innerHTML = '<option value="">— kein bestimmtes Haus —</option>'
+                + HAEUSER.map(n => `<option value="${n}">Rosenweg ${n}</option>`).join('');
+            document.getElementById('kiosk-meldung').textContent = '';
+            document.getElementById('kiosk-geraet').classList.add('hidden');
+            document.getElementById('kiosk-felder').classList.add('hidden');
+            document.getElementById('kiosk-ok').disabled = true;
+            document.getElementById('kiosk-dialog').classList.remove('hidden');
+            document.getElementById('kiosk-code').focus();
+            if (code) kioskCodeGetippt();
+        }
+
+        function kioskSchliessen() {
+            document.getElementById('kiosk-dialog').classList.add('hidden');
+            kioskWartend = null;
+        }
+
+        async function kioskCodeGetippt() {
+            const feld = document.getElementById('kiosk-code');
+            const roh = feld.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+            feld.value = roh.length > 4 ? `${roh.slice(0, 4)}-${roh.slice(4)}` : roh;
+            const meldung = document.getElementById('kiosk-meldung');
+            const box = document.getElementById('kiosk-geraet');
+            kioskWartend = null;
+            document.getElementById('kiosk-ok').disabled = true;
+            if (roh.length < 8) { box.classList.add('hidden'); document.getElementById('kiosk-felder').classList.add('hidden'); meldung.textContent = ''; return; }
+            const nr = ++kioskSuche;
+            try {
+                const k = await api(`/api/stations/admin/kiosk/kopplung/${encodeURIComponent(roh)}`);
+                if (nr !== kioskSuche) return;
+                kioskWartend = k;
+                const hw = k.hardware || {};
+                box.innerHTML = `<div class="font-medium text-gray-800">📺 ${escape([hw.hersteller, hw.modell].filter(Boolean).join(' ') || 'Fernseher')}${hw.android ? ` · Android ${escape(hw.android)}` : ''}${hw.app_version ? ` · Kiosk ${escape(hw.app_version)}` : ''}</div>
+                    <div class="text-gray-600">wartet seit ${escape(new Date(k.erstellt).toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' }))}, Code gültig bis ${escape(new Date(k.gueltig_bis).toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' }))}</div>
+                    <div class="${k.aus_dem_hausnetz ? 'text-gray-600' : 'text-orange-700'}">Anfrage von ${escape(k.quelle_ip || '?')}${k.aus_dem_hausnetz ? ' (Hausnetz)' : ' — nicht aus dem Hausnetz! Nur koppeln, wenn du vor diesem Fernseher stehst.'}</div>`;
+                box.classList.remove('hidden');
+                document.getElementById('kiosk-felder').classList.remove('hidden');
+                document.getElementById('kiosk-pin-pflicht').textContent = k.hat_pin ? 'freiwillig' : 'nötig';
+                document.getElementById('kiosk-pin-pflicht').className = k.hat_pin ? 'text-gray-400 font-normal' : 'text-red-600 font-normal';
+                document.getElementById('kiosk-pin-hinweis').textContent = k.hat_pin
+                    ? 'Leer lassen: der Fernseher behält seine PIN und meldet sie hierher, sobald jemand mit ihr entsperrt.'
+                    : 'Der Fernseher hat noch keine PIN — ohne kommt niemand ins Menü.';
+                if (kioskStand && !kioskStand.pin_schluessel) {
+                    document.getElementById('kiosk-pin-hinweis').textContent += ' Achtung: der API fehlt STATION_PIN_KEY, PINs lassen sich hier weder setzen noch zeigen.';
+                }
+                meldung.textContent = '';
+                document.getElementById('kiosk-ok').disabled = false;
+                document.getElementById('kiosk-name').focus();
+            } catch (err) {
+                if (nr !== kioskSuche) return;
+                box.classList.add('hidden');
+                document.getElementById('kiosk-felder').classList.add('hidden');
+                meldung.className = 'text-sm text-red-600';
+                meldung.textContent = err.message;
+            }
+        }
+
+        async function kioskKoppeln() {
+            const meldung = document.getElementById('kiosk-meldung');
+            if (!kioskWartend) return;
+            const name = document.getElementById('kiosk-name').value.trim();
+            try {
+                await api('/api/stations/admin/kiosk', {
+                    method: 'POST',
+                    body: {
+                        code: kioskWartend.code,
+                        name,
+                        haus: document.getElementById('kiosk-haus').value || null,
+                        standort: document.getElementById('kiosk-standort').value,
+                        notiz: document.getElementById('kiosk-notiz').value,
+                        pin: document.getElementById('kiosk-pin').value.trim() || null,
+                    },
+                });
+                kioskSchliessen();
+                zeigeStatus(`„${name}" gekoppelt — der Fernseher meldet sich in wenigen Sekunden.`, true);
+                await ladeDaten();
+            } catch (err) {
+                meldung.className = 'text-sm text-red-600';
+                meldung.textContent = err.message;
+            }
+        }
+
+        function kioskNeustart(id) {
+            tuUnd(`/api/stations/admin/${encodeURIComponent(id)}/kiosk-neustart`, { method: 'POST' },
+                `„${id}" startet die Diashow beim nächsten Lebenszeichen neu (bis zu einer Minute).`);
+        }
+
+        function kioskPinAnzeigen(id) {
+            dialogOeffnen(
+                `PIN von „${id}" anzeigen`,
+                'Das Ansehen wird mit deinem Namen im Ereignisprotokoll der Station vermerkt.',
+                'Anzeigen', 'bg-blue-600 hover:bg-blue-700',
+                async () => {
+                    try {
+                        const r = await api(`/api/stations/admin/${encodeURIComponent(id)}/kiosk-pin/anzeigen`, { method: 'POST' });
+                        dialogOeffnen(`PIN von „${id}"`,
+                            `${r.pin}   —   ${r.pin_quelle === 'geraet' ? 'am Fernseher' : 'auf /stationen'} gesetzt ${r.pin_stand ? new Date(r.pin_stand).toLocaleString('de-CH') : ''}`,
+                            'Schliessen', 'bg-gray-700 hover:bg-gray-800', null, false);
+                        document.getElementById('dialog-text').className = 'text-2xl font-mono tracking-widest text-gray-900 mb-4';
+                    } catch (err) {
+                        zeigeStatus(err.message, false);
+                    }
+                },
+                false);
+        }
+
+        let kpinStation = null;
+        function kioskPinSetzen(id) {
+            kpinStation = id;
+            document.getElementById('kpin-titel').textContent = `PIN für „${id}" setzen`;
+            document.getElementById('kpin-pin').value = '';
+            document.getElementById('kpin-meldung').textContent = '';
+            document.getElementById('kpin-dialog').classList.remove('hidden');
+            document.getElementById('kpin-pin').focus();
+        }
+        function kioskPinSchliessen() {
+            document.getElementById('kpin-dialog').classList.add('hidden');
+            document.getElementById('kpin-pin').value = '';
+            kpinStation = null;
+        }
+        async function kioskPinSpeichern() {
+            const pin = document.getElementById('kpin-pin').value.trim();
+            const el = document.getElementById('kpin-meldung');
+            if (!/^[0-9]{4,8}$/.test(pin)) { el.className = 'text-sm mt-2 text-red-600'; el.textContent = 'Die PIN braucht 4 bis 8 Ziffern.'; return; }
+            try {
+                await api(`/api/stations/admin/${encodeURIComponent(kpinStation)}/kiosk-pin`, { method: 'PUT', body: { pin } });
+                const id = kpinStation;
+                kioskPinSchliessen();
+                zeigeStatus(`PIN für „${id}" gesetzt — der Fernseher übernimmt sie innerhalb einer Minute.`, true);
+                await ladeDaten();
+            } catch (err) {
+                el.className = 'text-sm mt-2 text-red-600';
+                el.textContent = err.message;
+            }
+        }
+
         // ─── Logs ──────────────────────────────────────────────────────
         // Eine Station ist von aussen nicht erreichbar. Was hier steht, hat sie
         // selbst eingesandt — stündlich, mit ihrem eigenen Token. Ohne das käme
@@ -2069,6 +2347,7 @@
         function dialogOeffnen(titel, text, knopf, klasse, aktion, mitGrund) {
             document.getElementById('dialog-titel').textContent = titel;
             document.getElementById('dialog-text').textContent = text;
+            document.getElementById('dialog-text').className = 'text-sm text-gray-600 mb-4';
             const ok = document.getElementById('dialog-ok');
             ok.textContent = knopf;
             ok.className = `px-4 py-2 text-sm text-white rounded-lg ${klasse}`;
@@ -2105,9 +2384,12 @@
         }
 
         function sperren(id) {
+            const s = (stationen || []).find(x => x.id === id) || {};
             dialogOeffnen(
                 `Station „${id}" sperren`,
-                'Die Station bekommt keine Konfiguration mehr und lässt sich nicht weiter einrichten. Rückgängig machbar.',
+                istKiosk(s)
+                    ? 'Der Fernseher zeigt ab dem nächsten Lebenszeichen (bis zu einer Minute) nur noch einen Sperrhinweis — keine Diashow, kein PIN-Menü. Auch ohne Netz bleibt er gesperrt. Rückgängig machbar.'
+                    : 'Die Station bekommt keine Konfiguration mehr und lässt sich nicht weiter einrichten. Rückgängig machbar.',
                 'Sperren', 'bg-red-600 hover:bg-red-700',
                 async (grund) => tuUnd(`/api/stations/admin/${encodeURIComponent(id)}/block`,
                     // Objekt, nicht Zeichenkette — siehe cfgSpeichern. Bisher kam
@@ -2230,6 +2512,8 @@
                     ? 'Der Rechner verschwindet aus der Liste und kommt auch beim AD-Abgleich nicht wieder, solange sein Konto im AD dasselbe bleibt. Bei der nächsten Anmeldung gilt er als unbekannt, und Windows behält den Standarddrucker, den es gerade hat. Zurück holt ihn „Windows-Rechner eintragen“.'
                     : ohneAgent(s)
                     ? 'Der Rechner verschwindet aus der Liste. Bei der nächsten Anmeldung gilt er als unbekannt, und Windows behält den Standarddrucker, den es gerade hat.'
+                    : istKiosk(s)
+                    ? 'Der Fernseher verschwindet aus der Liste, sein Token wird wertlos. Er merkt das beim nächsten Lebenszeichen, vergisst die Kopplung und läuft als Kiosk mit seiner PIN weiter (auch eine Sperre fällt weg). Neu koppeln geht jederzeit.'
                     : 'Die Station verschwindet aus der Liste und ihr Token wird wertlos. Das Gerät selbst bleibt, wie es ist — es lässt sich danach neu aufsetzen.',
                 'Entfernen', 'bg-gray-800 hover:bg-black',
                 async () => tuUnd(`/api/stations/admin/${encodeURIComponent(id)}`,
@@ -2292,6 +2576,31 @@
                 const r = ev.currentTarget.getBoundingClientRect();
                 m.style.left = Math.max(8, Math.min(r.right - m.offsetWidth, window.innerWidth - m.offsetWidth - 8)) + 'px';
                 m.style.top = (r.bottom + 4) + 'px';
+                return;
+            }
+            // Ein Kiosk-Fernseher: Diashow, PIN, Einstellen; Sperren zeigt am
+            // Fernseher nur noch den Sperrhinweis. Kein Update, keine SSH-Wartung,
+            // kein Zurücksetzen — es läuft kein Stations-OS.
+            if (istKiosk(s)) {
+                let h = '';
+                if (s.status !== 'gesperrt') h += e('Diashow neu starten', 'kioskNeustart', 'text-blue-700');
+                h += e('Einstellen …', 'cfgOeffnen');
+                if (s.kiosk?.pin_lesbar) h += e('PIN anzeigen …', 'kioskPinAnzeigen');
+                h += e('PIN setzen …', 'kioskPinSetzen');
+                if (s.anschluss?.length && !s.anschluss_abweichung) h += e('Anschluss neu lernen (Umzug) …', 'anschlussVergessen', 'text-blue-700');
+                h += linie;
+                if (s.anschluss_abweichung) h += e(s.status !== 'gesperrt' || vomWaechter(s) ? 'Anschluss übernehmen und freigeben …' : 'Anschluss übernehmen …', 'anschlussUebernehmen', 'text-green-700');
+                if (s.status === 'gesperrt' && !(s.anschluss_abweichung && vomWaechter(s))) h += e('Entsperren', 'entsperren', 'text-green-700');
+                if (s.status !== 'gesperrt') h += e('Sperren (nur Sperrhinweis) …', 'sperren', 'text-red-600');
+                h += linie + e('Entfernen …', 'entfernen', 'text-gray-500');
+                m.innerHTML = h;
+                m.classList.remove('hidden');
+                const r = ev.currentTarget.getBoundingClientRect();
+                const hoehe = m.offsetHeight;
+                let oben = r.bottom + 4;
+                if (oben + hoehe > window.innerHeight - 8) oben = Math.max(8, r.top - hoehe - 4);
+                m.style.left = Math.max(8, Math.min(r.right - m.offsetWidth, window.innerWidth - m.offsetWidth - 8)) + 'px';
+                m.style.top = oben + 'px';
                 return;
             }
             let h = e('Jetzt aktualisieren', 'jetztAktualisieren') + e('Einstellen …', 'cfgOeffnen') + e('Logs', 'logsOeffnen');

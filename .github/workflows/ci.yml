@@ -42,8 +42,8 @@ jobs:
           done < <(find . -type f -name '*.json' -not -path '*/node_modules/*' -print0)
           echo "✓ Alle JSON-Dateien gueltig"
 
-      - name: Abhaengigkeiten der Tests (castv2 fuer den Cast-Waechter)
-        run: npm install --prefix api --no-save --no-package-lock --omit=dev castv2@0.1.10
+      - name: Abhaengigkeiten der Tests (castv2 fuer den Cast-Waechter, qrcode fuer die Kiosk-Kopplung)
+        run: npm install --prefix api --no-save --no-package-lock --omit=dev castv2@0.1.10 qrcode@1.5.4
 
       - name: API-Tests ohne Datenbank (node --test api/test/)
         run: node --test api/test/

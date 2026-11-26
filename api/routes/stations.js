@@ -49,6 +49,17 @@
 //     DELETE /api/stations/admin/:id          endgültig entfernen
 //     POST   /api/stations/admin/chromecast   Chromecast als Anzeige eintragen
 //     POST   /api/stations/admin/:id/cast-jetzt  Chromecast jetzt auf die Anzeige holen
+//     GET    /api/stations/admin/kiosk/kopplung/:code  wartenden Fernseher ansehen
+//     POST   /api/stations/admin/kiosk        Kiosk-Fernseher mit dem Code koppeln
+//     POST   /api/stations/admin/:id/kiosk-neustart     Diashow neu starten
+//     PUT    /api/stations/admin/:id/kiosk-pin          PIN setzen (Technik/Präsident)
+//     POST   /api/stations/admin/:id/kiosk-pin/anzeigen PIN zeigen (Technik/Präsident, protokolliert)
+//
+//   Kiosk-Fernseher (Rosenweg/rosenweg-tv-kiosk, role 'kiosk')
+//     POST   /api/stations/kiosk/kopplung     ohne Anmeldung: Code für den Bildschirm
+//     GET    /api/stations/kiosk/kopplung     mit dem eigenen Token: schon bestätigt?
+//     POST   /api/stations/:id/seen           Lebenszeichen; Antwort = Kiosk-Konfiguration
+//     PUT    /api/stations/:id/kiosk/pin      am Fernseher geänderte PIN melden
 //
 // Ablauf und Begründung: os-stationen/docs/installer.md
 // ═══════════════════════════════════════════════════════════════════
@@ -73,6 +84,7 @@ const stationos = require('../lib/stationos');
 const { schluesselPruefen, alsZeile } = require('../lib/sshkeys');
 const castw = require('../lib/castwaechter');
 const castv = require('../lib/castverbindung');
+const kiosk = require('../lib/kiosk');
 
 const router = express.Router();
 
@@ -321,6 +333,25 @@ async function ensureSchema() {
       boot       TIMESTAMPTZ
     );
     CREATE INDEX IF NOT EXISTS station_lebenszeichen_id_idx ON station_lebenszeichen (station_id, erstellt DESC);
+    -- Kiosk-Fernseher (role 'kiosk', lib/kiosk.js). 'kiosk' ist der Stand
+    -- ohne Geheimnis im Klartext: Diashow-App {paket, stand, quelle}, PIN-Hash
+    -- für den Fernseher {hash, salz, runden}, pin_stand/pin_quelle,
+    -- neustart (angefordert) und neustart_erledigt. Die PIN selbst steht nur
+    -- verschlüsselt in kiosk_pin_enc (Schlüssel STATION_PIN_KEY der API).
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS kiosk JSONB;
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS kiosk_pin_enc TEXT;
+    -- Wartende Fernseher: der Kiosk zeigt den Code, Technik bestätigt ihn auf
+    -- /stationen. token_hash ist der sha256 des Tokens, das der Fernseher
+    -- selbst erzeugt hat — der Klartext kommt nie hierher.
+    CREATE TABLE IF NOT EXISTS station_kiosk_kopplungen (
+      code        TEXT PRIMARY KEY,
+      token_hash  TEXT NOT NULL UNIQUE,
+      hardware    JSONB NOT NULL DEFAULT '{}'::jsonb,
+      hat_pin     BOOLEAN NOT NULL DEFAULT false,
+      quelle_ip   TEXT,
+      erstellt    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      gueltig_bis TIMESTAMPTZ NOT NULL
+    );
   `).catch((e) => { schemaReady = null; throw e; });
   return schemaReady;
 }
@@ -388,6 +419,12 @@ async function stationAuth(req, res, next) {
     if (req.params.id && req.params.id !== station.id) {
       return res.status(403).json({ error: 'Token gehört zu einer anderen Station' });
     }
+    // Ein Kiosk-Fernseher ist keine Linux-Station: Konfiguration mit
+    // Geheimnissen, Datenpartition, OS-Tarball, Journal-Zertifikat und alles
+    // ausserhalb dieses Routers gehen ihn nichts an.
+    if (station.role === 'kiosk' && !kioskDarf(req)) {
+      return res.status(403).json({ error: 'Für einen Kiosk-Fernseher nicht vorgesehen' });
+    }
     // Gesperrt heisst gesperrt — aber das Lebenszeichen darf durch, sonst
     // sieht die Verwaltung nicht mehr, ob das Gerät noch läuft.
     if (station.status === 'gesperrt' && !req.path.endsWith('/seen')) {
@@ -399,6 +436,16 @@ async function stationAuth(req, res, next) {
     req.station = station;
     next();
   } catch (e) { next(e); }
+}
+
+// Was ein Kiosk-Token darf: Lebenszeichen, die eigene (Kiosk-)Konfiguration,
+// die am Gerät geänderte PIN melden, sich selbst abmelden.
+function kioskDarf(req) {
+  if (!String(req.baseUrl || '').endsWith('/api/stations')) return false;
+  const p = req.path || '';
+  if (/^\/[^/]+\/(seen|config)$/.test(p)) return true;
+  if (req.method === 'PUT' && /^\/[^/]+\/kiosk\/pin$/.test(p)) return true;
+  return req.method === 'DELETE' && /^\/[^/]+$/.test(p);
 }
 
 // Wie nurTechnik, aber fuer die App-Sitzung: dort stehen die Gruppen aus dem
@@ -432,6 +479,14 @@ function nurTechnik(req, res, next) {
   const groups = req.user?.groups || [];
   if (req.user?.isAdmin || isTechnik(groups) || isPraesident(groups)) return next();
   return res.status(403).json({ error: 'Nur Technik darf Stationen verwalten' });
+}
+
+// Strenger: die Kiosk-PIN sehen oder setzen nur Technik und Präsident, auch
+// nicht ein Admin ohne diese Gruppen (Stefan, 26.11.2026).
+function nurTechnikOderPraesident(req, res, next) {
+  const groups = req.user?.groups || [];
+  if (isTechnik(groups) || isPraesident(groups)) return next();
+  return res.status(403).json({ error: 'Nur Technik oder Präsident' });
 }
 
 // ─── Anmeldung (Installer) ──────────────────────────────────────────
@@ -778,7 +833,7 @@ router.get('/admin/list', authMiddleware, nurTechnik, a(async (req, res) => {
            ad_guid IS NOT NULL AS aus_ad, ad_dn, ad_zustand, ad_betriebssystem,
            ad_gesehen_am, ad_aufgenommen_am, ad_standort_regel,
            anschluss, anschluss_gelernt_am, anschluss_jetzt, anschluss_jetzt_am,
-           anschluss_abweichung, doppelt,
+           anschluss_abweichung, doppelt, kiosk, kiosk_pin_enc IS NOT NULL AS kiosk_pin_lesbar,
            w.bis AS ssh_wartung_bis, w.erteilt_von AS ssh_wartung_von
       FROM stations
       LEFT JOIN LATERAL (
@@ -795,7 +850,11 @@ router.get('/admin/list', authMiddleware, nurTechnik, a(async (req, res) => {
   res.json({
     stations: r.rows.map((z) => {
       const { sichtbar, geheim } = ohneGeheimnisse(z.overrides);
-      return { ...z, overrides: sichtbar, overrides_geheim: geheim };
+      // Beim Kiosk ohne PIN-Hash: aus dem Hash einer vierstelligen PIN liesse
+      // sie sich in Sekunden zurückrechnen.
+      const { kiosk_pin_lesbar: lesbar, ...rest } = z;
+      return { ...rest, overrides: sichtbar, overrides_geheim: geheim,
+        kiosk: z.role === 'kiosk' ? kiosk.kioskFuerVerwaltung(z.kiosk || {}, lesbar) : null };
     }),
     // Mit den Arten, die nur die Verwaltung kennt — sonst stünde in der
     // Typ-Spalte eines Windows-Rechners nur die Kennung 'windows'.
@@ -829,6 +888,8 @@ router.get('/admin/list', authMiddleware, nurTechnik, a(async (req, res) => {
       ...castStand, sekunden: CAST_SEKUNDEN, pause_minuten: CAST_PAUSE_MIN,
       empfaenger: castEmpfaenger().art, app_id: castEmpfaenger().appId,
     },
+    // Kiosk-Fernseher: ob die API PINs verschlüsseln (und damit zeigen) kann.
+    kiosk: { pin_schluessel: !!kiosk.pinSchluessel(), abfrage_sekunden: kiosk.ABFRAGE_SEKUNDEN },
   });
 }));
 
@@ -1478,6 +1539,345 @@ router.post('/admin/:id/cast-jetzt', authMiddleware, nurTechnik, a(async (req, r
   res.json(ergebnis[0] || {});
 }));
 
+// ─── Kiosk-Fernseher (Rosenweg Kiosk auf Google TV) ─────────────────
+//
+// Eine Station mit role 'kiosk': eigenes Token, Lebenszeichen, Sperren,
+// Entfernen, Anschluss-Wächter (MAC aus dem Lebenszeichen oder von Hand).
+// Entscheidungen ohne Datenbank in lib/kiosk.js.
+//
+// Kopplung — warum ein Code auf dem Fernseher und kein Login am Gerät:
+// Ein Fernseher hat keine Tastatur; ein Passwort mit der Fernbedienung zu
+// tippen ist mühsam und landet auf einem Gerät, an dem jeder vorbeigeht. Der
+// Authentik-Device-Flow brauchte einen eigenen OAuth-Provider samt
+// Gerätecode-Ablauf, und am Ende hielte der Fernseher ein Personen-Token,
+// das er gar nicht braucht. Wie bei den Stationen gilt dagegen: ein Mensch
+// mit Rosenweg-Konto gibt das Gerät frei, das Gerät bekommt ein eigenes
+// Token. Hier eben auf /stationen statt am Gerät:
+//
+//   1. Der Fernseher erzeugt sein Token selbst (rw_station_…), schickt nur
+//      den sha256 und bekommt einen Code (ABCD-EFGH, 15 min) samt QR-Code
+//      zu /stationen.html?koppeln=CODE.
+//   2. Technik (angemeldet) gibt den Code ein, sieht Modell und Adresse des
+//      wartenden Geräts und koppelt: Name, Haus, Standort, ggf. PIN.
+//   3. Der Fernseher fragt mit seinem Token nach und ist ab dann Station.
+//
+// Der Code allein öffnet nichts: bestätigen kann nur Technik, und das Token
+// hat nie jemand anderes als der Fernseher gesehen.
+const KOPPLUNG_MINUTEN = 15;
+const KOPPLUNG_JE_IP = 10;            // neue Codes je Absender in 10 min
+const KOPPLUNG_OFFEN_MAX = 50;
+const kopplungVersuche = new Map();   // ip -> [zeitpunkte]
+const SITE = (process.env.SITE_URL || 'https://www.rosenweg4303.ch').replace(/\/+$/, '');
+
+function kopplungGebremst(ip) {
+  const jetzt = Date.now();
+  const liste = (kopplungVersuche.get(ip) || []).filter((t) => jetzt - t < 10 * 60 * 1000);
+  if (liste.length >= KOPPLUNG_JE_IP) { kopplungVersuche.set(ip, liste); return true; }
+  liste.push(jetzt);
+  kopplungVersuche.set(ip, liste);
+  return false;
+}
+setInterval(() => {
+  const jetzt = Date.now();
+  for (const [k, v] of kopplungVersuche) if (!v.some((t) => jetzt - t < 10 * 60 * 1000)) kopplungVersuche.delete(k);
+}, 10 * 60 * 1000).unref();
+
+/** Was der Fernseher bei der Kopplung über sich sagt — nur das Inventar. */
+function kioskHardware(roh) {
+  const z = kiosk.zustandBereinigen(roh);
+  return Object.fromEntries(Object.entries({
+    hersteller: z.hersteller, modell: z.modell, android: z.android, app_version: z.app_version,
+    macs: Object.keys(z.macs).length ? z.macs : undefined,
+  }).filter(([, v]) => v !== null && v !== undefined));
+}
+
+// POST /api/stations/kiosk/kopplung  { token_hash, hardware?, hat_pin? }
+router.post('/kiosk/kopplung', a(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  await ensureSchema();
+  const tokenHash = String(req.body?.token_hash || '').toLowerCase();
+  if (!kiosk.TOKEN_HASH_MUSTER.test(tokenHash)) return res.status(400).json({ error: 'token_hash: sha256 des Geräte-Tokens (64 Hex-Zeichen)' });
+  const ip = clientIp(req) || 'unbekannt';
+
+  // Schon gekoppelt (Antwort ging verloren)? Dann gibt es keinen neuen Code.
+  const st = await pool.query('SELECT id FROM stations WHERE token_hash = $1 AND revoked_at IS NULL', [tokenHash]);
+  if (st.rows.length) return res.status(409).json({ error: 'Schon gekoppelt', status: 'gekoppelt', station_id: st.rows[0].id });
+
+  await pool.query('DELETE FROM station_kiosk_kopplungen WHERE gueltig_bis < NOW()');
+  const da = await pool.query('SELECT code, gueltig_bis FROM station_kiosk_kopplungen WHERE token_hash = $1', [tokenHash]);
+  let code = da.rows[0]?.code;
+  let bis = da.rows[0]?.gueltig_bis;
+  const hardware = kioskHardware(req.body?.hardware);
+  const hatPin = req.body?.hat_pin === true;
+  if (code) {
+    // Derselbe Fernseher fragt erneut (Schirm neu geöffnet): gleicher Code,
+    // aufgefrischtes Inventar.
+    await pool.query(
+      `UPDATE station_kiosk_kopplungen SET hardware = CASE WHEN $2::jsonb = '{}'::jsonb THEN hardware ELSE $2::jsonb END,
+              hat_pin = $3, quelle_ip = $4 WHERE code = $1`,
+      [code, JSON.stringify(hardware), hatPin, ip]);
+  } else {
+    if (kopplungGebremst(ip)) return res.status(429).json({ error: 'Zu viele Kopplungsversuche — bitte in 10 Minuten erneut' });
+    const offen = await pool.query('SELECT COUNT(*)::int AS n FROM station_kiosk_kopplungen');
+    if (offen.rows[0].n >= KOPPLUNG_OFFEN_MAX) return res.status(503).json({ error: 'Zu viele wartende Fernseher' });
+    for (let i = 0; i < 5 && !bis; i += 1) {
+      code = kiosk.codeErzeugen();
+      const r = await pool.query(
+        `INSERT INTO station_kiosk_kopplungen (code, token_hash, hardware, hat_pin, quelle_ip, gueltig_bis)
+         VALUES ($1, $2, $3::jsonb, $4, $5, NOW() + make_interval(mins => $6))
+         ON CONFLICT DO NOTHING RETURNING gueltig_bis`,
+        [code, tokenHash, JSON.stringify(hardware), hatPin, ip, KOPPLUNG_MINUTEN]);
+      bis = r.rows[0]?.gueltig_bis;
+    }
+    if (!bis) return res.status(500).json({ error: 'Kein freier Code' });
+    console.log(`[stations] Kiosk wartet auf Kopplung (${hardware.modell || '?'}, Code ${kiosk.codeAnzeige(code)})`);
+  }
+  const link = `${SITE}/stationen.html?koppeln=${code}`;
+  res.json({
+    status: 'wartet',
+    code: kiosk.codeAnzeige(code),
+    gueltig_bis: bis,
+    gueltig_sekunden: Math.max(0, Math.round((new Date(bis).getTime() - Date.now()) / 1000)),
+    abfrage_sekunden: 5,
+    link,
+    qr: kiosk.qrMatrix(link),
+  });
+}));
+
+// GET /api/stations/kiosk/kopplung — mit dem eigenen Token: bestätigt?
+router.get('/kiosk/kopplung', a(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const token = req.headers.authorization?.replace('Bearer ', '') || '';
+  if (!token.startsWith(STATION_PREFIX)) return res.status(401).json({ error: 'Kein Stationstoken' });
+  await ensureSchema();
+  const h = sha256(token);
+  const st = await pool.query(
+    'SELECT id, hostname, haus, standort, status, sperr_grund, kiosk FROM stations WHERE token_hash = $1 AND revoked_at IS NULL', [h]);
+  if (st.rows.length) return res.json({ status: 'gekoppelt', ...kiosk.kioskAntwort(st.rows[0]) });
+  const k = await pool.query('SELECT code, gueltig_bis FROM station_kiosk_kopplungen WHERE token_hash = $1 AND gueltig_bis > NOW()', [h]);
+  if (k.rows.length) return res.json({ status: 'wartet', code: kiosk.codeAnzeige(k.rows[0].code), gueltig_bis: k.rows[0].gueltig_bis });
+  res.status(404).json({ status: 'abgelaufen', error: 'Kein offener Code — bitte neu anfordern' });
+}));
+
+async function kopplungLesen(code) {
+  const c = kiosk.codeNormal(code);
+  if (!c) return null;
+  const r = await pool.query('SELECT * FROM station_kiosk_kopplungen WHERE code = $1 AND gueltig_bis > NOW()', [c]);
+  return r.rows[0] || null;
+}
+
+// GET /api/stations/admin/kiosk/kopplung/:code — was wartet unter dem Code?
+router.get('/admin/kiosk/kopplung/:code', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  if (!kiosk.codeNormal(req.params.code)) return res.status(400).json({ error: 'Code: acht Zeichen wie ABCD-EFGH' });
+  const k = await kopplungLesen(req.params.code);
+  if (!k) return res.status(404).json({ error: 'Kein wartender Fernseher mit diesem Code (abgelaufen oder vertippt?)' });
+  res.json({
+    code: kiosk.codeAnzeige(k.code), hardware: k.hardware, hat_pin: k.hat_pin,
+    quelle_ip: k.quelle_ip, aus_dem_hausnetz: istHausnetz(k.quelle_ip || ''),
+    erstellt: k.erstellt, gueltig_bis: k.gueltig_bis,
+  });
+}));
+
+// POST /api/stations/admin/kiosk  { code, name, haus?, standort?, notiz?, pin?, diashow_paket? }
+router.post('/admin/kiosk', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  const wer = req.user?.email || req.user?.name || 'unbekannt';
+  const k = await kopplungLesen(req.body?.code);
+  if (!k) return res.status(404).json({ error: 'Kein wartender Fernseher mit diesem Code (abgelaufen oder vertippt?)' });
+  const name = String(req.body?.name || '').trim().slice(0, 63);
+  const id = slug(name);
+  if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(id)) {
+    return res.status(400).json({ error: 'Name: mindestens zwei Buchstaben oder Ziffern (z. B. „Kiosk Heizungsraum R9")' });
+  }
+  const haus = req.body?.haus === null || req.body?.haus === undefined || req.body?.haus === ''
+    ? null : (HAEUSER.includes(Number(req.body.haus)) ? Number(req.body.haus) : undefined);
+  if (haus === undefined) return res.status(400).json({ error: 'Unbekannte Hausnummer' });
+  const pin = req.body?.pin ? String(req.body.pin).trim() : '';
+  if (pin && !kiosk.pinGueltig(pin)) return res.status(400).json({ error: 'PIN: 4 bis 8 Ziffern' });
+  if (!pin && !k.hat_pin) return res.status(400).json({ error: 'Der Fernseher hat noch keine PIN — bitte hier eine setzen' });
+  const paket = req.body?.diashow_paket ? String(req.body.diashow_paket).trim() : '';
+  if (paket && !kiosk.paketOk(paket)) return res.status(400).json({ error: 'Diashow-App: Paketname wie sk.mimac.slideshow' });
+  if (pin && !kiosk.pinSchluessel()) {
+    // Der Fernseher bekäme den Hash, /stationen könnte die PIN aber nie zeigen.
+    return res.status(503).json({ error: `${kiosk.PIN_ENV} fehlt in der API — ohne ihn lässt sich hier keine PIN setzen` });
+  }
+  const text = (v) => String(v || '').trim().slice(0, 500) || null;
+  const jetzt = new Date().toISOString();
+  const kioskSpalte = {
+    ...(paket ? { diashow: { paket, stand: jetzt, quelle: 'stationen' } } : {}),
+    ...(pin ? { pin_hash: kiosk.pinHash(pin), pin_stand: jetzt, pin_quelle: 'stationen' } : {}),
+  };
+
+  const doppelt = await pool.query('SELECT id FROM stations WHERE revoked_at IS NULL AND (id = $1 OR token_hash = $2)', [id, k.token_hash]);
+  if (doppelt.rows.length) return res.status(409).json({ error: `Schon vergeben (als '${doppelt.rows[0].id}')` });
+
+  const r = await pool.query(
+    `INSERT INTO stations (id, role, hostname, standort, notiz, haus, token_hash, hardware, overrides,
+                           registered_by, last_seen_ip, status, kiosk, kiosk_pin_enc)
+     VALUES ($1, 'kiosk', $2, $3, $4, $5, $6, $7::jsonb, '{}'::jsonb, $8, $9, 'aktiv', $10::jsonb, $11)
+     ON CONFLICT (id) DO UPDATE SET
+       role = EXCLUDED.role, hostname = EXCLUDED.hostname, standort = EXCLUDED.standort,
+       notiz = EXCLUDED.notiz, haus = EXCLUDED.haus, token_hash = EXCLUDED.token_hash,
+       hardware = EXCLUDED.hardware, overrides = '{}'::jsonb,
+       registered_by = EXCLUDED.registered_by, registered_at = NOW(), revoked_at = NULL,
+       status = 'aktiv', sperr_grund = NULL, gesperrt_von = NULL, gesperrt_am = NULL,
+       zuruecksetzen_angefordert = NULL, zuruecksetzen_angefordert_von = NULL,
+       update_angefordert = NULL, update_angefordert_von = NULL,
+       last_seen_at = NULL, last_seen_ip = EXCLUDED.last_seen_ip, last_state = NULL,
+       anschluss = NULL, anschluss_kandidat = NULL, anschluss_abweichung = NULL, doppelt = NULL,
+       kiosk = EXCLUDED.kiosk, kiosk_pin_enc = EXCLUDED.kiosk_pin_enc
+     WHERE stations.revoked_at IS NOT NULL
+     RETURNING id`,
+    [id, name, text(req.body?.standort), text(req.body?.notiz), haus, k.token_hash,
+      JSON.stringify({ ...(k.hardware || {}), hersteller: k.hardware?.hersteller || 'Google' }), wer, k.quelle_ip,
+      JSON.stringify(kioskSpalte), pin ? kiosk.pinVerschluesseln(pin, id) : null]);
+  if (!r.rows.length) return res.status(409).json({ error: `Kennung '${id}' ist schon vergeben` });
+  await pool.query('DELETE FROM station_kiosk_kopplungen WHERE code = $1', [k.code]);
+  await ereignis(id, 'kiosk-gekoppelt', wer, `Code ${kiosk.codeAnzeige(k.code)} · ${k.hardware?.modell || 'Fernseher'}`);
+  if (pin) await ereignis(id, 'kiosk-pin', wer, 'PIN auf /stationen gesetzt');
+  console.log(`[stations] Kiosk '${name}' (${id}) gekoppelt von ${wer}`);
+  res.status(201).json({ id, name });
+}));
+
+async function kioskZeile(id) {
+  const r = await pool.query("SELECT * FROM stations WHERE id = $1 AND role = 'kiosk' AND revoked_at IS NULL", [id]);
+  return r.rows[0] || null;
+}
+
+// POST /api/stations/admin/:id/kiosk-neustart — Diashow neu starten. Der
+// Fernseher holt das im nächsten Lebenszeichen ab (bis zu einer Minute) und
+// quittiert es im übernächsten.
+router.post('/admin/:id/kiosk-neustart', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  const wer = req.user?.email || req.user?.name || 'unbekannt';
+  const st = await kioskZeile(req.params.id);
+  if (!st) return res.status(404).json({ error: 'Kein Kiosk-Fernseher mit dieser Kennung' });
+  if (st.status === 'gesperrt') return res.status(409).json({ error: 'Gesperrt — der Fernseher zeigt nur den Sperrhinweis' });
+  await pool.query("UPDATE stations SET kiosk = COALESCE(kiosk, '{}'::jsonb) || $2::jsonb WHERE id = $1",
+    [st.id, JSON.stringify({ neustart: new Date().toISOString(), neustart_von: wer })]);
+  await ereignis(st.id, 'kiosk-neustart', wer, 'Diashow-Neustart angefordert');
+  res.json({ ok: true });
+}));
+
+// PUT /api/stations/admin/:id/kiosk-pin  { pin }
+router.put('/admin/:id/kiosk-pin', authMiddleware, nurTechnikOderPraesident, a(async (req, res) => {
+  await ensureSchema();
+  const wer = req.user?.email || req.user?.name || 'unbekannt';
+  const st = await kioskZeile(req.params.id);
+  if (!st) return res.status(404).json({ error: 'Kein Kiosk-Fernseher mit dieser Kennung' });
+  const pin = String(req.body?.pin || '').trim();
+  if (!kiosk.pinGueltig(pin)) return res.status(400).json({ error: 'PIN: 4 bis 8 Ziffern' });
+  if (!kiosk.pinSchluessel()) return res.status(503).json({ error: `${kiosk.PIN_ENV} fehlt in der API` });
+  const jetzt = new Date().toISOString();
+  await pool.query(
+    "UPDATE stations SET kiosk = COALESCE(kiosk, '{}'::jsonb) || $2::jsonb, kiosk_pin_enc = $3 WHERE id = $1",
+    [st.id, JSON.stringify({ pin_hash: kiosk.pinHash(pin), pin_stand: jetzt, pin_quelle: 'stationen' }),
+      kiosk.pinVerschluesseln(pin, st.id)]);
+  await ereignis(st.id, 'kiosk-pin', wer, 'PIN auf /stationen gesetzt');
+  console.log(`[stations] Kiosk-PIN für '${st.id}' gesetzt von ${wer}`);
+  res.json({ ok: true, pin_stand: jetzt });
+}));
+
+// POST /api/stations/admin/:id/kiosk-pin/anzeigen — POST, damit nichts im
+// Verlauf oder in einem Zwischenspeicher hängen bleibt; jedes Ansehen steht
+// im Stationsprotokoll.
+router.post('/admin/:id/kiosk-pin/anzeigen', authMiddleware, nurTechnikOderPraesident, a(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  await ensureSchema();
+  const wer = req.user?.email || req.user?.name || 'unbekannt';
+  const st = await kioskZeile(req.params.id);
+  if (!st) return res.status(404).json({ error: 'Kein Kiosk-Fernseher mit dieser Kennung' });
+  if (!st.kiosk_pin_enc) {
+    return res.status(404).json({ error: st.kiosk?.pin_stand
+      ? `PIN nicht lesbar (${kiosk.PIN_ENV} fehlte, als sie gesetzt wurde) — bitte neu setzen`
+      : 'Die PIN ist hier noch nicht bekannt. Sie kommt, sobald jemand am Fernseher entsperrt, oder hier setzen.' });
+  }
+  let pin;
+  try { pin = kiosk.pinEntschluesseln(st.kiosk_pin_enc, st.id); } catch (e) {
+    console.error(`[stations] Kiosk-PIN '${st.id}' nicht entschlüsselbar:`, e.message);
+    return res.status(500).json({ error: 'PIN nicht entschlüsselbar (anderer Schlüssel?) — bitte neu setzen' });
+  }
+  await ereignis(st.id, 'kiosk-pin-angezeigt', wer, 'PIN auf /stationen angezeigt');
+  res.json({ pin, pin_stand: st.kiosk?.pin_stand || null, pin_quelle: st.kiosk?.pin_quelle || null });
+}));
+
+// Lebenszeichen des Fernsehers (POST /:id/seen, role 'kiosk'). Die Antwort
+// ist seine Konfiguration: Sperre, Diashow-App, PIN-Hash, Neustart.
+//
+// state.diashow_aenderung {paket, am}: am Fernseher gewählt — gilt, wenn
+// neuer als der Stand hier. state.neustart_erledigt: der zuletzt
+// angeforderte Neustart ist erledigt.
+async function kioskLebenszeichen(req, res) {
+  const st = req.station;
+  const ip = clientIp(req);
+  const roh = req.body?.state && typeof req.body.state === 'object' ? req.body.state : {};
+  const state = kiosk.zustandBereinigen(roh);
+
+  // Das Inventar: was das Gerät über sich sagt; eine von Hand eingetragene
+  // MAC bleibt stehen.
+  const hw = { ...(st.hardware || {}) };
+  const eingetragen = hw.macs?.eingetragen;
+  hw.macs = { ...state.macs, ...(eingetragen ? { eingetragen } : {}) };
+  for (const f of ['hersteller', 'modell', 'android', 'app_version']) if (state[f]) hw[f] = state[f];
+
+  const k = st.kiosk || {};
+  const neu = {};
+  const ereignisse = [];
+  const da = roh.diashow_aenderung;
+  if (st.status !== 'gesperrt' && da && kiosk.paketOk(da.paket) && kiosk.neuerAls(da.am, k.diashow?.stand)) {
+    neu.diashow = { paket: da.paket, stand: kiosk.standAus(da.am), quelle: 'geraet' };
+    const name = state.apps.find((x) => x.paket === da.paket)?.name;
+    ereignisse.push(['kiosk-diashow', `Diashow-App am Gerät gewählt: ${name ? `${name} (${da.paket})` : da.paket}`]);
+  }
+  if (k.neustart && roh.neustart_erledigt === k.neustart && k.neustart_erledigt !== k.neustart) {
+    neu.neustart_erledigt = k.neustart;
+    ereignisse.push(['kiosk-neustart-erledigt', 'Diashow neu gestartet']);
+  }
+
+  await pool.query(
+    `UPDATE stations SET last_seen_at = NOW(), last_seen_ip = $3, last_state = $2::jsonb, hardware = $4::jsonb,
+            kiosk = COALESCE(kiosk, '{}'::jsonb) || $5::jsonb WHERE id = $1`,
+    [st.id, JSON.stringify(state), ip, JSON.stringify(hw), JSON.stringify(neu)]);
+  await lebenszeichenPruefen(st, state, ip).catch((e) => console.error('[stations] Doppel-Prüfung:', e.message));
+  for (const [art, text] of ereignisse) await ereignis(st.id, art, null, text);
+  res.json({ ok: true, ...kiosk.kioskAntwort({ ...st, kiosk: { ...k, ...neu } }) });
+}
+
+// PUT /api/stations/:id/kiosk/pin  { pin, geaendert_am, grund? }
+//
+// Am Fernseher geändert (Kiosk-Einstellungen → PIN ändern) — oder, mit
+// grund 'entsperrt', die PIN, mit der gerade jemand entsperrt hat, weil sie
+// hier noch unbekannt ist (Fernseher von vor der Kopplung). Die PIN reist
+// einmal über HTTPS mit dem Stationstoken; hier steht sie danach nur
+// verschlüsselt, am Fernseher nur als Hash.
+//
+// Neueste Änderung gewinnt: ist hier inzwischen eine neuere gesetzt, 409 —
+// der Fernseher übernimmt dann den Hash aus dem nächsten Lebenszeichen.
+router.put('/:id/kiosk/pin', stationAuth, a(async (req, res) => {
+  const st = req.station;
+  if (st.role !== 'kiosk') return res.status(403).json({ error: 'Nur für Kiosk-Fernseher' });
+  const pin = String(req.body?.pin || '');
+  if (!kiosk.pinGueltig(pin)) return res.status(400).json({ error: 'PIN: 4 bis 8 Ziffern' });
+  const k = st.kiosk || {};
+  const entsperrt = req.body?.grund === 'entsperrt';
+  if (entsperrt && k.pin_stand && st.kiosk_pin_enc) return res.json({ ok: true, unveraendert: true, pin_stand: k.pin_stand });
+  if (k.pin_stand && !kiosk.neuerAls(req.body?.geaendert_am, k.pin_stand)) {
+    // Dieselbe PIN noch einmal (Antwort verloren): kein Streit.
+    if (kiosk.pinPruefen(pin, k.pin_hash)) return res.json({ ok: true, unveraendert: true, pin_stand: k.pin_stand });
+    return res.status(409).json({ error: 'Auf /stationen wurde inzwischen eine neuere PIN gesetzt', pin_stand: k.pin_stand });
+  }
+  const stand = kiosk.standAus(req.body?.geaendert_am);
+  let enc = null;
+  try { enc = kiosk.pinSchluessel() ? kiosk.pinVerschluesseln(pin, st.id) : null; } catch { enc = null; }
+  await pool.query(
+    "UPDATE stations SET kiosk = COALESCE(kiosk, '{}'::jsonb) || $2::jsonb, kiosk_pin_enc = $3 WHERE id = $1",
+    [st.id, JSON.stringify({ pin_hash: kiosk.pinHash(pin), pin_stand: stand, pin_quelle: 'geraet' }), enc]);
+  await ereignis(st.id, 'kiosk-pin', null, entsperrt ? 'PIN vom Gerät übernommen (beim Entsperren)' : 'PIN am Gerät geändert');
+  if (!enc) console.warn(`[stations] Kiosk-PIN '${st.id}': ${kiosk.PIN_ENV} fehlt — nur Hash gespeichert`);
+  res.json({ ok: true, pin_stand: stand, lesbar: !!enc });
+}));
+
 // POST /api/stations/admin/:id/anschluss-uebernehmen
 //
 // Der eine Knopf für den Umzug: den Anschluss, an dem die Station jetzt
@@ -1591,6 +1991,9 @@ async function nichtFuerWindows(req, res, next) {
     }
     if (r.rows[0]?.role === 'chromecast') {
       return res.status(400).json({ error: 'Ein Chromecast hat keinen Agenten — das gibt es dort nicht' });
+    }
+    if (r.rows[0]?.role === 'kiosk') {
+      return res.status(400).json({ error: 'Ein Kiosk-Fernseher hat kein Stations-OS — das gibt es dort nicht' });
     }
     next();
   } catch (e) { next(e); }
@@ -1732,6 +2135,27 @@ router.patch('/admin/:id', authMiddleware, nurTechnik, a(async (req, res) => {
     geaendert.push('adresse');
   }
 
+  // Kiosk-Fernseher: MAC von Hand (Android verrät Apps die echte nicht immer,
+  // der Anschluss-Wächter braucht sie) und die Diashow-App.
+  if (vorher.rows[0].role === 'kiosk' && req.body?.mac !== undefined) {
+    const hw = { ...(vorher.rows[0].hardware || {}) };
+    const mac = req.body.mac ? kiosk.normMac(req.body.mac) : null;
+    if (req.body.mac && !mac) return res.status(400).json({ error: 'MAC-Adresse unlesbar (z. B. aa:bb:cc:dd:ee:ff)' });
+    const { eingetragen: _alt, ...macs } = hw.macs || {};
+    hw.macs = mac ? { ...macs, eingetragen: mac } : macs;
+    werte.push(JSON.stringify(hw));
+    felder.push(`hardware = $${werte.length}::jsonb`);
+    geaendert.push('mac');
+  }
+  let kioskEreignis = null;
+  if (vorher.rows[0].role === 'kiosk' && req.body?.diashow_paket !== undefined) {
+    const paket = String(req.body.diashow_paket || '').trim();
+    if (!kiosk.paketOk(paket)) return res.status(400).json({ error: 'Diashow-App: Paketname wie sk.mimac.slideshow' });
+    werte.push(JSON.stringify({ diashow: { paket, stand: new Date().toISOString(), quelle: 'stationen' } }));
+    felder.push(`kiosk = COALESCE(kiosk, '{}'::jsonb) || $${werte.length}::jsonb`);
+    kioskEreignis = `Diashow-App auf /stationen gewählt: ${paket}`;
+  }
+
   // Das Haus bestimmt, welche Ankündigungen die Station zeigt.
   if ('haus' in (req.body || {})) {
     const haus = req.body.haus === null || req.body.haus === '' ? null
@@ -1785,7 +2209,8 @@ router.patch('/admin/:id', authMiddleware, nurTechnik, a(async (req, res) => {
   // Was geändert wurde, steht im Ereignis — aber ohne die Werte. In den
   // overrides kann ein WLAN-Schlüssel stehen, und der gehört nicht in ein
   // Protokoll, das die halbe Verwaltung lesen darf.
-  await ereignis(req.params.id, 'config-geaendert', wer, geaendert.join(', '));
+  if (geaendert.length) await ereignis(req.params.id, 'config-geaendert', wer, geaendert.join(', '));
+  if (kioskEreignis) await ereignis(req.params.id, 'kiosk-diashow', wer, kioskEreignis);
   res.json(r.rows[0]);
 }));
 
@@ -2499,6 +2924,9 @@ router.get('/:id/os/tarball', stationAuth, a(async (req, res) => {
 router.get('/:id/config', stationAuth, a(async (req, res) => {
   await pool.query('UPDATE stations SET last_seen_at = NOW(), last_seen_ip = $2 WHERE id = $1',
     [req.station.id, clientIp(req)]);
+  // Ein Kiosk bekommt seine eigene, kleine Konfiguration — nie buildConfig(),
+  // dort stünden die Geheimnisse der Linux-Stationen.
+  if (req.station.role === 'kiosk') return res.json(kiosk.kioskAntwort(req.station));
 
   // Der WLAN-Schlüssel wird erst hier eingesetzt, frisch aus UniFi. In der
   // Config steht nur der Netzname — so gibt es keinen zweiten Ort, an dem ein
@@ -2670,6 +3098,7 @@ router.get('/:id/persist-key', stationAuth, a(async (req, res) => {
 // Das ist die Rückmeldung, von der die Verwaltung lebt: was für ein Gerät,
 // welche Rolle, welche Version, hat die Einrichtung geklappt.
 router.post('/:id/seen', stationAuth, a(async (req, res) => {
+  if (req.station.role === 'kiosk') return kioskLebenszeichen(req, res);
   const state = req.body?.state || {};
   await pool.query(
     'UPDATE stations SET last_seen_at = NOW(), last_seen_ip = $3, last_state = $2 WHERE id = $1',

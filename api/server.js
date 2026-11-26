@@ -22721,7 +22721,7 @@ app.post('/api/stations/:id/tunnel', stationsRouter.appSession, async (req, res)
     // liessen sich unter Fantasie-Kennungen beliebig Peers anlegen.
     // Ein von Hand eingetragener Windows-Rechner oder Chromecast ist keine Station mit Tunnel.
     const station = await pool.query(
-      "SELECT 1 FROM stations WHERE id = $1 AND revoked_at IS NULL AND status = 'aktiv' AND role NOT IN ('windows', 'chromecast')", [stationId]);
+      "SELECT 1 FROM stations WHERE id = $1 AND revoked_at IS NULL AND status = 'aktiv' AND role NOT IN ('windows', 'chromecast', 'kiosk')", [stationId]);
     if (!station.rowCount) return res.status(404).json({ error: 'Station unbekannt oder gesperrt' });
 
     const email = (req.appUser?.email || '').toLowerCase();
