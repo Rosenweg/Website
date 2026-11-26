@@ -34,6 +34,7 @@ SAM="/var/lib/samba/private/sam.ldb"
 HIER="$(cd "$(dirname "$0")" && pwd)"
 
 [ -f "$HIER/rosenweg-look.ps1" ] || { echo "rosenweg-look.ps1 fehlt neben $0" >&2; exit 1; }
+[ -f "$HIER/programme.ps1" ] || { echo "programme.ps1 fehlt neben $0" >&2; exit 1; }
 for b in hintergrund.png sperrbild.png logo.png startknopf.png; do
     [ -f "$HIER/bilder/$b" ] || { echo "bilder/$b fehlt" >&2; exit 1; }
 done
@@ -53,6 +54,26 @@ if [ ! -f "$HIER/programme/$OPENSHELL_DATEI" ]; then
 fi
 echo "$OPENSHELL_SHA256  $HIER/programme/$OPENSHELL_DATEI" | sha256sum -c --quiet - \
     || { echo "Pruefsumme von $OPENSHELL_DATEI stimmt nicht - Datei loeschen und neu laden" >&2; exit 1; }
+
+# Google Chrome (Browser der Windows-Rechner, rosenweg-look.ps1): das
+# Enterprise-MSI, 64 bit. Google stellt es nur unter einer festen Adresse fuer
+# die jeweils neueste Version bereit - eine feste Pruefsumme hier veraltete mit
+# jeder Version. Darum: einmal holen (danach bleibt die Datei, wie sie ist),
+# Pruefsumme ausgeben, und die Windows-Seite prueft vor dem Installieren die
+# Signatur (gueltig, von Google LLC). Gebraucht wird die Datei nur fuer die
+# Erstinstallation; danach aktualisiert der Google-Updater. Neuere Datei
+# fuer neue Rechner: programme/$CHROME_DATEI loeschen und neu laufen lassen.
+CHROME_DATEI="googlechromestandaloneenterprise64.msi"
+CHROME_URL="https://dl.google.com/dl/chrome/install/$CHROME_DATEI"
+if [ ! -f "$HIER/programme/$CHROME_DATEI" ]; then
+    curl -fsSL -o "$HIER/programme/$CHROME_DATEI.neu" "$CHROME_URL"
+    # Ein MSI beginnt mit der OLE-Kennung D0 CF 11 E0 - faengt eine HTML-
+    # Fehlerseite ab, bevor sie ins sysvol geht.
+    [ "$(head -c 4 "$HIER/programme/$CHROME_DATEI.neu" | od -An -tx1 | tr -d ' ')" = "d0cf11e0" ] \
+        || { echo "$CHROME_DATEI ist kein MSI" >&2; rm -f "$HIER/programme/$CHROME_DATEI.neu"; exit 1; }
+    mv "$HIER/programme/$CHROME_DATEI.neu" "$HIER/programme/$CHROME_DATEI"
+    echo "Chrome geholt: $(sha256sum "$HIER/programme/$CHROME_DATEI" | cut -d' ' -f1)"
+fi
 
 # --- 1. OU ------------------------------------------------------------------
 if ! samba-tool ou list -H "$SAM" | grep -qx "OU=Windows"; then
@@ -125,7 +146,10 @@ install -m 0644 "$HIER"/bilder/*.png "$start_dir/"
 install -m 0644 "$HIER/programme-freigaben.txt" "$start_dir/programme-freigaben.txt"
 install -m 0644 "$HIER/bginfo.ps1" "$start_dir/bginfo.ps1"
 install -m 0644 "$HIER/drucker.ps1" "$start_dir/drucker.ps1"
+install -m 0644 "$HIER/programme.ps1" "$start_dir/programme.ps1"
 install -m 0644 "$HIER/programme/$OPENSHELL_DATEI" "$start_dir/$OPENSHELL_DATEI"
+install -m 0644 "$HIER/programme/$CHROME_DATEI" "$start_dir/$CHROME_DATEI"
+install -m 0644 "$HIER/aufraeumen.ps1" "$start_dir/aufraeumen.ps1"
 
 # scripts.ini statt psscripts.ini: so startet die Richtlinie powershell.exe
 # selbst und kann -ExecutionPolicy Bypass mitgeben. Ein Windows-Client steht

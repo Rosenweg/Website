@@ -131,6 +131,20 @@ $profile = @(@{ Name = 'Default'; Datei = 'C:\Users\Default\NTUSER.DAT' })
 Get-CimInstance Win32_UserProfile | Where-Object { -not $_.Special -and $_.LocalPath } | ForEach-Object {
     $profile += @{ Name = (Split-Path $_.LocalPath -Leaf); Datei = (Join-Path $_.LocalPath 'NTUSER.DAT'); Sid = $_.SID; Geladen = $_.Loaded }
 }
+# Autostarts von OneDrive und Edge (siehe "Browser" unten). Fuer die Vorlage
+# zaehlt das: dort steht OneDriveSetup, das jedes neue Profil einrichtet.
+# Servergespeicherte Profile raeumt aufraeumen.ps1 bei der Anmeldung auf.
+function AutostartsWeg([string]$hive) {
+    $run = "$hive\Software\Microsoft\Windows\CurrentVersion\Run"
+    $k = Get-Item $run -ErrorAction SilentlyContinue
+    if (-not $k) { return }
+    foreach ($name in $k.GetValueNames()) {
+        if ($name -in 'OneDrive', 'OneDriveSetup' -or $name -like 'MicrosoftEdgeAutoLaunch_*') {
+            Remove-ItemProperty -Path $run -Name $name -ErrorAction SilentlyContinue
+            Log "Autostart $name entfernt ($hive)"
+        }
+    }
+}
 foreach ($p in $profile) {
     if (-not (Test-Path $p.Datei)) { continue }
     if ($p.Geladen) {
@@ -139,6 +153,7 @@ foreach ($p in $profile) {
         Setze $k 'TaskbarAl' 0 'DWord'
         Setze "Registry::HKEY_USERS\$($p.Sid)\Software\Microsoft\Windows\CurrentVersion\Policies\ActiveDesktop" 'NoChangingWallPaper' 1 'DWord'
         Setze "Registry::HKEY_USERS\$($p.Sid)\Software\Microsoft\Windows NT\CurrentVersion\Windows" 'LegacyDefaultPrinterMode' 1 'DWord'
+        AutostartsWeg "Registry::HKEY_USERS\$($p.Sid)"
         continue
     }
     & reg.exe load 'HKU\RosenwegLook' $p.Datei 2>&1 | Out-Null
@@ -150,6 +165,7 @@ foreach ($p in $profile) {
         # Standarddrucker gehoert der Station (siehe "Drucker im Profil" unten):
         # Windows soll ihn nicht selbst auf den zuletzt benutzten umstellen.
         Setze 'Registry::HKEY_USERS\RosenwegLook\Software\Microsoft\Windows NT\CurrentVersion\Windows' 'LegacyDefaultPrinterMode' 1 'DWord'
+        AutostartsWeg 'Registry::HKEY_USERS\RosenwegLook'
     } finally {
         [gc]::Collect(); [gc]::WaitForPendingFinalizers()
         & reg.exe unload 'HKU\RosenwegLook' 2>&1 | Out-Null
@@ -197,79 +213,47 @@ if (-not $aufgabe -or $aufgabe.Actions[0].Arguments -ne $befehl) {
 }
 
 # --- Programm-Whitelist (AppLocker) -----------------------------------------
-# Laufen darf, was unter C:\Windows oder den Programme-Ordnern liegt (dorthin
-# schreiben nur Admins - was ein Admin installiert, ist damit automatisch
-# freigegeben), signierte Store-Apps und OneDrive. Alles andere, vor allem
-# Heruntergeladenes in Downloads oder AppData, wird blockiert.
+# Die Regeln baut programme.ps1 (Begruendung dort und im README): durchgesetzt
+# ist der Grundschutz - alles unter C:\Windows und den Programme-Ordnern,
+# signierte Store-Apps, OneDrive, die Defender-Plattform -, die Positivliste
+# von /stationen laeuft in Ueberwachung, bis dort jemand "Durchsetzen" waehlt.
 #
 # Wer ALLES darf: die AD-Gruppe Windows-Programme-frei (enthaelt Domain
 # Admins). Nicht die lokale Gruppe Administratoren: mit UAC traegt das Token
 # eines Admins diese Gruppe nur "deny-only", und AppLocker liesse ihn dann so
 # wenig zu wie alle anderen. Eine gewoehnliche Gruppe filtert UAC nicht.
 #
-# Weitere Freigaben: programme-freigaben.txt neben diesem Skript.
-# Skripte aus SYSVOL/NETLOGON bleiben erlaubt, sonst sperrte sich diese
-# Richtlinie beim naechsten Start selbst aus.
-try {
-    $frei = (New-Object System.Security.Principal.NTAccount('ROSENWEG', 'Windows-Programme-frei')).Translate([System.Security.Principal.SecurityIdentifier]).Value
-} catch { $frei = $null; Log "Gruppe Windows-Programme-frei nicht aufloesbar - Whitelist NICHT gesetzt" }
-if ($frei) {
-    $jeder = 'S-1-1-0'; $admins = 'S-1-5-32-544'
-    $n = 0
-    function Regel([string]$sid, [string]$pfad, [string]$name) {
-        $script:n++
-        $id = [guid]::NewGuid().ToString()
-        $pfadX = [System.Security.SecurityElement]::Escape($pfad)
-        "<FilePathRule Id=""$id"" Name=""$name"" Description="""" UserOrGroupSid=""$sid"" Action=""Allow""><Conditions><FilePathCondition Path=""$pfadX"" /></Conditions></FilePathRule>"
+# Das Skript liegt unter Programme (nur Admins schreiben dort) und laeuft
+# jetzt einmal und danach alle 30 Minuten als SYSTEM: so kommt eine Aenderung
+# auf /stationen ohne Neustart an, und die Auswertung liest das Protokoll
+# nach, bevor es (1 MB ab Werk) ueberlaeuft. programme-freigaben.txt kommt
+# mit, die Aufgabe liest sie dort.
+$prog = Join-Path $env:ProgramFiles 'Rosenweg'
+New-Item -ItemType Directory -Force -Path $prog | Out-Null
+foreach ($datei in 'programme.ps1', 'programme-freigaben.txt') {
+    $von = Join-Path $Quelle $datei; $nach = Join-Path $prog $datei
+    if ((Test-Path $von) -and (-not (Test-Path $nach) -or (Get-FileHash $von).Hash -ne (Get-FileHash $nach).Hash)) {
+        Copy-Item $von $nach -Force
+        Log "$datei aktualisiert"
     }
-    $extra = @()
-    $liste = Join-Path $Quelle 'programme-freigaben.txt'
-    if (Test-Path $liste) {
-        $extra = Get-Content $liste | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith('#') }
-    }
-    $exe = @(
-        (Regel $jeder '%WINDIR%\*' 'Windows'),
-        (Regel $jeder '%PROGRAMFILES%\*' 'Programme'),
-        (Regel $frei '*' 'Windows-Programme-frei: alles'),
-        (Regel $admins '*' 'Administratoren (mit Admin-Token): alles')
-    ) + ($extra | ForEach-Object { Regel $jeder $_ "Freigabe: $_" })
-    $onedrive = '<FilePublisherRule Id="' + [guid]::NewGuid() + '" Name="OneDrive" Description="" UserOrGroupSid="S-1-1-0" Action="Allow"><Conditions><FilePublisherCondition PublisherName="O=MICROSOFT CORPORATION, L=REDMOND, S=WASHINGTON, C=US" ProductName="MICROSOFT ONEDRIVE" BinaryName="*"><BinaryVersionRange LowSection="*" HighSection="*" /></FilePublisherCondition></Conditions></FilePublisherRule>'
-    $skript = @(
-        (Regel $jeder '%WINDIR%\*' 'Windows'),
-        (Regel $jeder '%PROGRAMFILES%\*' 'Programme'),
-        (Regel $jeder '\\ad.rosenweg4303.ch\SysVol\*' 'Gruppenrichtlinien (SYSVOL)'),
-        (Regel $jeder '\\ad.rosenweg4303.ch\NETLOGON\*' 'Anmeldeskripte (NETLOGON)'),
-        (Regel $frei '*' 'Windows-Programme-frei: alles'),
-        (Regel $admins '*' 'Administratoren: alles')
-    )
-    $msi = @(
-        (Regel $jeder '%WINDIR%\Installer\*' 'Windows Installer'),
-        (Regel $frei '*.*' 'Windows-Programme-frei: alles'),
-        (Regel $admins '*.*' 'Administratoren: alles')
-    )
-    $appx = '<FilePublisherRule Id="a9e18c21-ff8f-43cf-b9fc-db40eed693ba" Name="Signierte Store-Apps" Description="" UserOrGroupSid="S-1-1-0" Action="Allow"><Conditions><FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="*"><BinaryVersionRange LowSection="0.0.0.0" HighSection="*" /></FilePublisherCondition></Conditions></FilePublisherRule>'
-    $xml = "<AppLockerPolicy Version=""1"">" +
-        "<RuleCollection Type=""Exe"" EnforcementMode=""Enabled"">$($exe -join '')$onedrive</RuleCollection>" +
-        "<RuleCollection Type=""Msi"" EnforcementMode=""Enabled"">$($msi -join '')</RuleCollection>" +
-        "<RuleCollection Type=""Script"" EnforcementMode=""Enabled"">$($skript -join '')</RuleCollection>" +
-        "<RuleCollection Type=""Appx"" EnforcementMode=""Enabled"">$appx</RuleCollection>" +
-        "</AppLockerPolicy>"
-    # Nur neu setzen, wenn sich die Regeln (ohne die zufaelligen IDs) geaendert haben
-    $kern = ($xml -replace 'Id="[0-9a-f-]+"', '')
-    $stand = Join-Path $Ziel 'applocker.stand'
-    if (-not (Test-Path $stand) -or (Get-Content $stand -Raw) -ne $kern) {
-        $datei = Join-Path $Ziel 'applocker.xml'
-        Set-Content -Path $datei -Value $xml -Encoding UTF8
-        try {
-            Set-AppLockerPolicy -XmlPolicy $datei -ErrorAction Stop
-            Set-Content -Path $stand -Value $kern -NoNewline
-            Log "AppLocker-Regeln gesetzt ($($extra.Count) Zusatzfreigaben)"
-        } catch { Log "AppLocker FEHLER: $($_.Exception.Message)" }
-    }
-    # Ohne den Dienst AppIDSvc setzt Windows keine Regel durch.
-    Setze 'HKLM:\SYSTEM\CurrentControlSet\Services\AppIDSvc' 'Start' 2 'DWord'
-    Start-Service AppIDSvc -ErrorAction SilentlyContinue
 }
+$alteStand = Join-Path $Ziel 'applocker.stand'   # bis 26.11.2026, ersetzt durch programme\aktiv.xml
+if (Test-Path $alteStand) { Remove-Item $alteStand, (Join-Path $Ziel 'applocker.xml') -Force -ErrorAction SilentlyContinue }
+$prSkript = Join-Path $prog 'programme.ps1'
+if (Test-Path $prSkript) {
+    & $prSkript
+    Log "Programme (AppLocker): siehe $prog\programme\programme.log"
+    $prArg = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$prSkript`""
+    $prAufgabe = Get-ScheduledTask -TaskName 'Rosenweg Programme' -ErrorAction SilentlyContinue
+    if (-not $prAufgabe -or $prAufgabe.Actions[0].Arguments -ne $prArg) {
+        $a = New-ScheduledTaskAction -Execute "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -Argument $prArg
+        $t = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddMinutes(5) -RepetitionInterval (New-TimeSpan -Minutes 30)
+        $p = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -LogonType ServiceAccount -RunLevel Highest
+        $o = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+        Register-ScheduledTask -TaskName 'Rosenweg Programme' -Action $a -Trigger $t -Principal $p -Settings $o -Force | Out-Null
+        Log "Aufgabe 'Rosenweg Programme' eingerichtet"
+    }
+} else { Log "programme.ps1 fehlt in der Richtlinie - AppLocker-Regeln bleiben, wie sie sind" }
 
 # --- BGInfo -----------------------------------------------------------------
 # Rechner, Adressen, Person, Windows-Stand und letztes Update unten rechts auf
@@ -348,6 +332,190 @@ try {
         Log "Standarddrucker laut Verwaltung: $(if ($antwort.standard) { $antwort.standard } elseif ($antwort.bekannt) { 'keiner' } else { 'Rechner nicht eingetragen' })"
     }
 } catch { Log "Standarddrucker: Verwaltung nicht erreichbar ($($_.Exception.Message)) - bleibt beim zuletzt bekannten" }
+
+# --- Browser: Chrome statt Edge, kein OneDrive -----------------------------
+# Stefan, 26.11.2026: auf allen Windows-Rechnern Google Chrome als Browser,
+# Edge und OneDrive gesperrt. Aufgeteilt nach Wirkung:
+#
+#   sofort (hier):  Chrome installieren und einstellen, Chrome als Standard
+#                   fuer Webseiten und PDF, Edge-Verknuepfungen weg und keine
+#                   neuen, Edge ohne Erstausfuehrung und Hintergrund, OneDrive
+#                   per Richtlinie aus und deinstalliert. Nichts davon loescht
+#                   Daten; der Ordner %USERPROFILE%\OneDrive bleibt.
+#   mit der Liste:  das eigentliche Startverbot fuer Edge und OneDrive steht
+#                   als AppLocker-Verbot in der Positivliste (programme.ps1,
+#                   api/lib/windowsprogramme.js) und wird zuerst nur
+#                   ueberwacht, bis auf /stationen "Durchsetzen" gewaehlt ist.
+#                   WebView2 bleibt dabei erlaubt.
+#
+# Chrome: das Enterprise-MSI (64 bit) legt einrichten.sh einmal neben dieses
+# Skript. Google veroeffentlicht es nur unter einer festen Adresse fuer die
+# jeweils neueste Version - eine feste Pruefsumme im Git veraltete mit jeder
+# Version. Geprueft wird deshalb die Signatur (gueltig, von Google LLC), hier
+# vor dem Installieren. Installiert wird nur, wenn Chrome fehlt; danach
+# aktualisiert sich Chrome ueber den Google-Updater (laeuft als SYSTEM).
+# Bewusst so: der Browser ist das Programm mit den meisten Sicherheits-
+# updates, eine im sysvol eingefrorene Version waere nach Wochen ein Risiko.
+$ChromeMsi = 'googlechromestandaloneenterprise64.msi'
+$chromeExe = @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+               "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $chromeExe) {
+    $von = Join-Path $Quelle $ChromeMsi
+    if (-not (Test-Path $von)) {
+        Log "Chrome: $ChromeMsi fehlt in der Richtlinie - nicht installiert"
+    } else {
+        # Nach C:\Windows\Temp wie bei Open-Shell: nur Admins/SYSTEM schreiben dort.
+        $tmp = Join-Path $env:WINDIR "Temp\Rosenweg-$ChromeMsi"
+        Copy-Item $von $tmp -Force
+        $sig = Get-AuthenticodeSignature -FilePath $tmp
+        if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'O=Google LLC') {
+            Log "Chrome: Signatur NICHT in Ordnung ($($sig.Status), $($sig.SignerCertificate.Subject)) - nicht installiert"
+        } else {
+            $pr = Start-Process -FilePath "$env:WINDIR\System32\msiexec.exe" -Wait -PassThru `
+                -ArgumentList '/i', "`"$tmp`"", '/qn', '/norestart'
+            Log "Chrome installiert (Rueckgabe $($pr.ExitCode))"
+        }
+        Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+        $chromeExe = @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+                       "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+    }
+}
+
+# Chrome-Richtlinien, angelehnt an die Linux-Stationen (os-stationen,
+# roles/desktop/parts/65-browser.sh): keine Uebersetzung, Anmeldung per
+# Kerberos nur an Authentik. Dazu fuer geteilte Rechner: keine Anmeldung bei
+# Google und kein Sync (sonst landen Verlauf und Passwoerter im Google-Konto
+# einer Person, die gerade an einem Hausrechner sitzt), keine Werbe-Tabs,
+# kein Chrome im Hintergrund. Der Passwortmanager bleibt an wie auf den
+# Stationen - er speichert im eigenen Profil.
+$cr = 'HKLM:\SOFTWARE\Policies\Google\Chrome'
+Setze $cr 'TranslateEnabled' 0 'DWord'
+Setze $cr 'AuthSchemes' 'basic,digest,negotiate'
+Setze $cr 'AuthServerAllowlist' 'authentik.rosenweg4303.ch'
+Setze $cr 'DisableAuthNegotiateCnameLookup' 1 'DWord'
+Setze $cr 'BrowserSignin' 0 'DWord'
+Setze $cr 'SyncDisabled' 1 'DWord'
+Setze $cr 'PromotionalTabsEnabled' 0 'DWord'
+Setze $cr 'MetricsReportingEnabled' 0 'DWord'
+Setze $cr 'BackgroundModeEnabled' 0 'DWord'
+# Standardbrowser setzt die Richtlinie unten - Chrome soll nicht selbst fragen.
+Setze $cr 'DefaultBrowserSettingEnabled' 0 'DWord'
+Setze $cr 'HomepageLocation' 'https://www.rosenweg4303.ch'
+Setze $cr 'HomepageIsNewTabPage' 0 'DWord'
+Setze $cr 'ShowHomeButton' 1 'DWord'
+# Startseite nur empfohlen: wer lieber die letzten Tabs wiederhat, darf.
+Setze "$cr\Recommended" 'RestoreOnStartup' 4 'DWord'
+Setze "$cr\Recommended\RestoreOnStartupURLs" '1' 'https://www.rosenweg4303.ch'
+
+# Chrome als Standard fuer Webseiten und PDF. Windows liest die Datei bei
+# jeder Anmeldung (Richtlinie "Standardzuordnungen", nur in der Domaene).
+# Erst wenn Chrome da ist - sonst zeigten Links ins Leere.
+$zuordnung = Join-Path $prog 'standardprogramme.xml'
+if ($chromeExe) {
+    $xml = @'
+<?xml version="1.0" encoding="UTF-8"?>
+<DefaultAssociations>
+  <Association Identifier=".htm" ProgId="ChromeHTML" ApplicationName="Google Chrome" />
+  <Association Identifier=".html" ProgId="ChromeHTML" ApplicationName="Google Chrome" />
+  <Association Identifier=".pdf" ProgId="ChromePDF" ApplicationName="Google Chrome" />
+  <Association Identifier="http" ProgId="ChromeHTML" ApplicationName="Google Chrome" />
+  <Association Identifier="https" ProgId="ChromeHTML" ApplicationName="Google Chrome" />
+</DefaultAssociations>
+'@
+    if (-not (Test-Path $zuordnung) -or (Get-Content $zuordnung -Raw) -ne $xml) {
+        Set-Content -Path $zuordnung -Value $xml -Encoding UTF8 -NoNewline
+        Log "Standardprogramme: Chrome fuer http/https/.htm/.html/.pdf"
+    }
+    Setze 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System' 'DefaultAssociationsConfiguration' $zuordnung
+}
+
+# Taskleiste (nur Windows 11): Explorer und Chrome statt der Vorgaben von
+# Windows (Edge, Store). Richtlinie "Startlayout"; Windows nimmt sie bei der
+# naechsten Anmeldung und dann bei jeder Aenderung der Datei. Selbst
+# angeheftetes bleibt. Nicht auf Windows 10: dort sperrte dieselbe
+# Richtlinie auch die Kacheln im Startmenue.
+$build = [Environment]::OSVersion.Version.Build
+if ($build -ge 22000 -and $chromeExe) {
+    $leiste = Join-Path $prog 'taskleiste.xml'
+    $xml = @'
+<?xml version="1.0" encoding="utf-8"?>
+<LayoutModificationTemplate
+    xmlns="http://schemas.microsoft.com/Start/2014/LayoutModification"
+    xmlns:defaultlayout="http://schemas.microsoft.com/Start/2014/FullDefaultLayout"
+    xmlns:start="http://schemas.microsoft.com/Start/2014/StartLayout"
+    xmlns:taskbar="http://schemas.microsoft.com/Start/2014/TaskbarLayout"
+    Version="1">
+  <CustomTaskbarLayoutCollection PinListPlacement="Replace">
+    <defaultlayout:TaskbarLayout>
+      <taskbar:TaskbarPinList>
+        <taskbar:DesktopApp DesktopApplicationID="Microsoft.Windows.Explorer"/>
+        <taskbar:DesktopApp DesktopApplicationLinkPath="%ALLUSERSPROFILE%\Microsoft\Windows\Start Menu\Programs\Google Chrome.lnk"/>
+      </taskbar:TaskbarPinList>
+    </defaultlayout:TaskbarLayout>
+  </CustomTaskbarLayoutCollection>
+</LayoutModificationTemplate>
+'@
+    if (-not (Test-Path $leiste) -or (Get-Content $leiste -Raw) -ne $xml) {
+        Set-Content -Path $leiste -Value $xml -Encoding UTF8 -NoNewline
+        Log "Taskleiste: Explorer und Chrome"
+    }
+    Setze 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer' 'StartLayoutFile' $leiste 'ExpandString'
+    Setze 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer' 'LockedStartLayout' 1 'DWord'
+}
+
+# Edge: keine Erstausfuehrung, kein Import, nicht im Hintergrund, kein
+# Vorstart, keine Frage nach dem Standardbrowser - falls ihn doch jemand
+# oeffnet, solange die Sperre nur ueberwacht wird. Und keine neuen
+# Verknuepfungen auf dem Schreibtisch, wenn er sich aktualisiert
+# ({56EB18F8-...} ist Edge Stable beim Updater).
+$ed = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
+Setze $ed 'HideFirstRunExperience' 1 'DWord'
+Setze $ed 'AutoImportAtFirstRun' 4 'DWord'
+Setze $ed 'BackgroundModeEnabled' 0 'DWord'
+Setze $ed 'StartupBoostEnabled' 0 'DWord'
+Setze $ed 'DefaultBrowserSettingEnabled' 0 'DWord'
+$eu = 'HKLM:\SOFTWARE\Policies\Microsoft\EdgeUpdate'
+Setze $eu 'CreateDesktopShortcutDefault' 0 'DWord'
+Setze $eu 'CreateDesktopShortcut{56EB18F8-B008-4CBD-B6D2-8C97FE7E9062}' 0 'DWord'
+# Rechnerweite Verknuepfungen; die im Profil raeumt aufraeumen.ps1 auf.
+# Ein Edge-Update legt die im Startmenue neu an - darum bei jedem Start.
+foreach ($lnk in "$env:PUBLIC\Desktop\Microsoft Edge.lnk",
+                 "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Microsoft Edge.lnk") {
+    if (Test-Path -LiteralPath $lnk) { Remove-Item -LiteralPath $lnk -Force; Log "entfernt: $lnk" }
+}
+
+# OneDrive: per Richtlinie aus (startet nicht, synchronisiert nicht) und das
+# rechnerweite Programm deinstalliert. Der Ordner %USERPROFILE%\OneDrive und
+# alles in der Cloud bleiben; Desktop/Dokumente/Bilder liegen ohnehin auf
+# dem Home (Ordnerumleitung).
+Setze 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\OneDrive' 'DisableFileSyncNGSC' 1 'DWord'
+$odSetup = Get-ChildItem "$env:ProgramFiles\Microsoft OneDrive\*\OneDriveSetup.exe", "${env:ProgramFiles(x86)}\Microsoft OneDrive\*\OneDriveSetup.exe" -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if ($odSetup) {
+    Get-Process -Name OneDrive -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    $pr = Start-Process -FilePath $odSetup.FullName -Wait -PassThru -ArgumentList '/uninstall', '/allusers'
+    Log "OneDrive deinstalliert (Rueckgabe $($pr.ExitCode))"
+}
+$odLnk = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\OneDrive.lnk"
+if (Test-Path -LiteralPath $odLnk) { Remove-Item -LiteralPath $odLnk -Force; Log "entfernt: $odLnk" }
+
+# Aufraeumen im Profil bei jeder Anmeldung (servergespeicherte Profile)
+$auQuelle = Join-Path $Quelle 'aufraeumen.ps1'
+$auZiel = Join-Path $prog 'aufraeumen.ps1'
+if ((Test-Path $auQuelle) -and (-not (Test-Path $auZiel) -or (Get-FileHash $auQuelle).Hash -ne (Get-FileHash $auZiel).Hash)) {
+    Copy-Item $auQuelle $auZiel -Force
+    Log "aufraeumen.ps1 aktualisiert"
+}
+$auArg = "--headless $env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$auZiel`""
+$auAufgabe = Get-ScheduledTask -TaskName 'Rosenweg Aufraeumen' -ErrorAction SilentlyContinue
+if ((Test-Path $auZiel) -and (-not $auAufgabe -or $auAufgabe.Actions[0].Arguments -ne $auArg)) {
+    $a = New-ScheduledTaskAction -Execute "$env:WINDIR\System32\conhost.exe" -Argument $auArg
+    $t = New-ScheduledTaskTrigger -AtLogOn
+    $p = New-ScheduledTaskPrincipal -GroupId 'S-1-5-32-545' -RunLevel Limited
+    $o = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+    Register-ScheduledTask -TaskName 'Rosenweg Aufraeumen' -Action $a -Trigger $t -Principal $p -Settings $o -Force | Out-Null
+    Log "Aufgabe 'Rosenweg Aufraeumen' eingerichtet"
+}
 
 # --- Startmenue: Open-Shell mit Rosenweg-Knopf ------------------------------
 # Das klassische Startmenue (Windows-7-Stil, zwei Spalten) statt dem von
