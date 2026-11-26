@@ -2178,6 +2178,15 @@ APPS_REGISTER = {
         "fuer": "Buchen dürfen die Bewohner von Rosenweg 2, 4 und 9, die Kooperation (Lager im "
                 "Rosenweg 10) und die Technik. Alle anderen sehen nur einen Hinweis.",
     },
+    # Stefan 26.11.2026: Android-TV-Startseite mit PIN (Diashow im Heizungsraum). Nur /apps,
+    # NICHT im Katalog der geteilten Telefone: eine Startseiten-App gehoert nie auf ein Telefon.
+    "kiosk": {
+        "name": "Rosenweg Kiosk", "repo": "Rosenweg/rosenweg-tv-kiosk", "paket": "ch.rosenweg4303.kiosk",
+        "logo": "/img/apps/rosenweg-kiosk.png", "reihenfolge": 40,
+        "text": "Startseite für Android-TV-Geräte (z.B. Chromecast mit Google TV): zeigt dauernd die "
+                "Diashow, das Menü dahinter nur mit PIN.",
+        "fuer": "Für die Technik beim Einrichten eines Fernsehers als Anzeige.",
+    },
     # Noch kein Repo/Release (26.11.2026): steht bereit, erscheint mit der ersten Datei.
     "profil": {
         "name": "Rosenweg Profil", "repo": "Rosenweg/rosenweg-profil", "paket": "ch.rosenweg4303.profil",
