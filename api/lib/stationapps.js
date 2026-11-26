@@ -14,7 +14,86 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
+const { stwegVonHaus } = require('./haeuser');
+
 const SITE_URL = (process.env.SITE_URL || 'https://www.rosenweg4303.ch').replace(/\/$/, '');
+
+// Adresse der STWEG-Seite eines Hauses (nginx.stweg.conf bedient stweg1..7).
+const stwegUrl = (n) => `https://stweg${n}.rosenweg4303.ch`;
+
+// Nur eigene Adressen werden zu Programmen. Alles andere (fremde Dienste,
+// http ohne s) bleibt draussen — auch wenn es in nav.js steht.
+function eigeneAdresse(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'https:' || u.port) return false;
+    const h = u.hostname.toLowerCase();
+    return h === 'rosenweg4303.ch' || h.endsWith('.rosenweg4303.ch')
+      || h === 'rosenweg9.ch' || h === 'www.rosenweg9.ch';
+  } catch { return false; }
+}
+
+// Symbol je Gruppe, als Name im Symbol-Thema der Station (z. B.
+// /usr/share/icons/hicolor/<groesse>/apps/rosenweg-telefon.png). Die Dateien
+// kommen spaeter; bis dahin nimmt die Station rosenweg-logo. Eine Gruppe, die
+// hier fehlt, bekommt einen Namen aus ihrem Titel — neu in nav.js heisst also
+// nicht namenlos.
+const GRUPPEN_SYMBOL = {
+  'Rosenweg': 'rosenweg-start',
+  'Bewohner': 'rosenweg-bewohner',
+  'Mein Haus': 'rosenweg-haus',
+  'Verwaltung & Objekte': 'rosenweg-verwaltung',
+  'E-Mail': 'rosenweg-mail',
+  'Mail-Outbox (Genehmigung)': 'rosenweg-mail-outbox',
+  'WhatsApp & Meldungen': 'rosenweg-telefon',
+  'Betrieb & Admin': 'rosenweg-betrieb',
+};
+function gruppenSymbol(titel) {
+  if (GRUPPEN_SYMBOL[titel]) return GRUPPEN_SYMBOL[titel];
+  const slug = String(titel || '').toLowerCase()
+    .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return slug ? 'rosenweg-' + slug : 'rosenweg-logo';
+}
+
+// Seiten, die nicht in SERVICES_GROUPS stehen, weil die Website sie anders
+// verlinkt (Kopfzeile, Bewohner-Menue in nav.js). Für alle sichtbar; die Seite
+// selbst verlangt die Anmeldung, wo noetig. WLAN und TV liegen nur auf dem
+// ISP-Frontend (siehe Kommentar im Bewohner-Menue von nav.js), Schaden melden
+// und Terminumfragen in der PWA.
+const FESTE_SEITEN = [
+  { id: 'rosenweg-dashboard', name: 'Dashboard', url: `${SITE_URL}/dashboard.html`, gruppe: 'Rosenweg' },
+  { id: 'rosenweg-profil', name: 'Mein Profil', url: `${SITE_URL}/profil.html`, gruppe: 'Rosenweg' },
+  { id: 'rosenweg-apps', name: 'Rosenweg-Apps', url: `${SITE_URL}/apps.html`, gruppe: 'Rosenweg' },
+  { id: 'rosenweg-hilfe', name: 'Hilfe', url: `${SITE_URL}/hilfe.html`, gruppe: 'Rosenweg' },
+  { id: 'rosenweg-telefonbuch', name: 'Telefonbuch', url: `${SITE_URL}/telefonbuch.html`, gruppe: 'Bewohner' },
+  { id: 'rosenweg-isp-wlan', name: 'WLAN-Zugang', url: 'https://isp.rosenweg4303.ch/wlan.html', gruppe: 'Bewohner' },
+  { id: 'rosenweg-isp-tv', name: 'TV / Fernsehen', url: 'https://isp.rosenweg4303.ch/tv.html', gruppe: 'Bewohner' },
+  { id: 'rosenweg-isp-internet', name: 'Internet / ISP', url: 'https://isp.rosenweg4303.ch/', gruppe: 'Bewohner' },
+  { id: 'rosenweg-isp-mein-zugang', name: 'Mein Zugang', url: 'https://isp.rosenweg4303.ch/isp-mein-zugang.html', gruppe: 'Bewohner' },
+  { id: 'rosenweg-pwa-reparatur', name: 'Schaden melden', url: 'https://pwa.rosenweg4303.ch/reparatur/', gruppe: 'Bewohner' },
+  { id: 'rosenweg-pwa-doodle', name: 'Terminumfragen', url: 'https://pwa.rosenweg4303.ch/doodle/', gruppe: 'Bewohner' },
+];
+
+// Seiten, die es nur im eigenen Haus gibt. Die Station kennt ihr Haus
+// (stations.haus), daraus folgt die STWEG. Ohne Haus erscheinen sie nicht.
+//   Waschküche: nur wo das Modul zugeschaltet ist (docker-stack.yml,
+//               WASCHKUECHE=1 — heute nur STWEG 3).
+//   ZEV:        nur Haus 9 (STWEG 3) rechnet über den ZEV ab.
+const WASCHKUECHE_STWEG = [3];
+const ZEV_STWEG = [3];
+function hausSeiten(stweg) {
+  if (!stweg) return [];
+  const basis = stwegUrl(stweg);
+  const raus = [];
+  if (WASCHKUECHE_STWEG.includes(stweg)) {
+    raus.push({ id: 'rosenweg-haus-waschkueche', name: 'Waschküche', url: `${basis}/waschkueche.html` });
+  }
+  if (ZEV_STWEG.includes(stweg)) {
+    raus.push({ id: 'rosenweg-haus-zev-rechnungen', name: 'ZEV-Rechnungen', url: `${basis}/pages/zev-meine-rechnungen.html` });
+  }
+  return raus.map((a) => ({ ...a, beschreibung: 'Mein Haus', gruppe: 'Mein Haus', icon: gruppenSymbol('Mein Haus'), rechte: null, rechte_art: null }));
+}
 
 // Im Image liegt nav.js neben server.js; im Repo eine Ebene höher in js/.
 const NAV_PFADE = [
@@ -84,12 +163,12 @@ function kennung(href) {
 }
 
 /**
- * Programme, die eine Station anzeigen soll.
+ * Programme, die jede Station anzeigen soll (ohne die Seiten des eigenen
+ * Hauses, die haengen an der Station — siehe gruppenJeApp).
  *
- * Nur Seiten der eigenen Website: die Einträge in nav.js, die auf fremde
- * Oberflächen zeigen (Proxmox, MQTT-Browser, WhatsApp-Gateway), sind
- * Werkzeuge für die Technik und gehören nicht auf einen Arbeitsplatz im
- * Treppenhaus.
+ * Nur eigene Adressen (eigeneAdresse). Einträge mit stwegOnly zeigen in nav.js
+ * relativ auf die STWEG-Seite (pages/reklamationen.html) und gäben auf www eine
+ * 404; sie werden hier zurückgehalten und je Haus aufgelöst.
  */
 function stationApps() {
   if (zwischenspeicher) return zwischenspeicher;
@@ -101,20 +180,31 @@ function stationApps() {
     beschreibung: 'Startseite der Siedlung',
     url: SITE_URL + '/',
     gruppe: 'Rosenweg',
-    icon: '🏠',
+    icon: gruppenSymbol('Rosenweg'),
+    rechte: null,
+    rechte_art: null,
   }];
+  for (const f of FESTE_SEITEN) {
+    if (!eigeneAdresse(f.url)) continue;
+    apps.push({ ...f, beschreibung: f.gruppe, icon: gruppenSymbol(f.gruppe), rechte: null, rechte_art: null });
+  }
 
   for (const gruppe of gruppen || []) {
     for (const eintrag of gruppe.items || []) {
       const href = String(eintrag.href || '');
-      if (!href || /^https?:\/\//i.test(href)) continue;   // fremde Oberfläche
+      if (!href) continue;
+      const absolut = /^https?:\/\//i.test(href);
+      if (absolut && !eigeneAdresse(href)) continue;      // fremde Oberfläche
       apps.push({
-        id: kennung(href),
+        id: absolut ? kennung(new URL(href).hostname.split('.')[0] + new URL(href).pathname) : kennung(href),
         name: eintrag.label,
         beschreibung: gruppe.title || '',
-        url: `${SITE_URL}/${href.replace(/^\/+/, '')}`,
+        url: absolut ? href : `${SITE_URL}/${href.replace(/^\/+/, '')}`,
+        // relativer Pfad für die Auflösung je Haus (nur bei stwegOnly)
+        stweg_pfad: eintrag.stwegOnly && !absolut ? href.replace(/^\/+/, '') : undefined,
         gruppe: gruppe.title || 'Rosenweg',
-        icon: gruppe.icon || '',
+        icon: gruppenSymbol(gruppe.title || 'Rosenweg'),
+        emoji: gruppe.icon || '',
         // Wer die Seite sehen darf. Die beiden Angaben in nav.js bedeuten
         // Verschiedenes, deshalb steht dabei, WELCHE es war:
         //
@@ -131,10 +221,28 @@ function stationApps() {
   }
 
   if (!gruppen) {
-    console.warn('[stations] nav.js nicht gefunden — nur die Startseite als Programm.');
+    console.warn('[stations] nav.js nicht gefunden — nur die festen Seiten als Programme.');
   }
-  zwischenspeicher = apps;
-  return apps;
+  // Doppelte Kennungen (zwei Menüpunkte auf dieselbe Seite) nur einmal.
+  const gesehen = new Set();
+  zwischenspeicher = apps.filter((a) => (gesehen.has(a.id) ? false : gesehen.add(a.id)));
+  return zwischenspeicher;
+}
+
+/**
+ * Die Liste für EINE Station: stwegOnly-Einträge auf die STWEG-Seite ihres
+ * Hauses umgeschrieben (ohne Haus: weggelassen), dazu die Seiten des Hauses.
+ */
+function appsFuerHaus(haus) {
+  const stweg = haus ? stwegVonHaus(haus) : null;
+  const raus = [];
+  for (const a of stationApps()) {
+    const { stweg_pfad: pfad, ...rest } = a;
+    if (pfad === undefined) { raus.push(rest); continue; }
+    if (!stweg || stweg > 7) continue;
+    raus.push({ ...rest, url: `${stwegUrl(stweg)}/${pfad}` });
+  }
+  return [...raus, ...hausSeiten(stweg)];
 }
 
 /**
@@ -165,8 +273,8 @@ function stationApps() {
  */
 const IMMER_ERLAUBT = ['technik', 'praesident', 'präsident'];
 
-async function gruppenJeApp(pool) {
-  const apps = stationApps();
+async function gruppenJeApp(pool, { haus = null } = {}) {
+  const apps = appsFuerHaus(haus);
   const rechteSeiten = [...new Set(
     apps.filter((a) => a.rechte_art === 'seite' && a.rechte).map((a) => String(a.rechte)),
   )];
@@ -204,4 +312,4 @@ async function gruppenJeApp(pool) {
   });
 }
 
-module.exports = { stationApps, gruppenJeApp, SITE_URL };
+module.exports = { stationApps, appsFuerHaus, gruppenJeApp, eigeneAdresse, gruppenSymbol, SITE_URL };

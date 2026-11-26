@@ -258,7 +258,7 @@ app.post('/api/otp/verify', async (req, res) => {
 // Authentik/OAuth/PVE-Config + OAUTH_ALLOWED_HOSTS + oauthRedirectUri -> lib/config.js
 const { AUTHENTIK_URL, AUTHENTIK_EXTERNAL_URL, AUTHENTIK_CLIENT_ID, AUTHENTIK_CLIENT_SECRET, AUTHENTIK_API_TOKEN, SITE_URL, PVE_API_URL, PVE_API_TOKEN, OAUTH_ALLOWED_HOSTS, oauthRedirectUri, MQTT_PASSWORD_LOGIN } = require('./lib/config');
 // Auth-Helfer -> lib/auth.js
-const { authentikAPI, tokenCache, validateAuthentikToken, authentikPasswordLogin, MANAGED_PAGES, ACCESS_LEVELS, resolveAncestorGroups, getUserPermissions } = require('./lib/auth');
+const { authentikAPI, tokenCache, validateAuthentikToken, authentikPasswordLogin, appTokensVergessen, MANAGED_PAGES, ACCESS_LEVELS, resolveAncestorGroups, getUserPermissions } = require('./lib/auth');
 // Auth-Middleware -> middleware/auth.js (authMiddleware/adminOnly/requirePermission/requireUserLogin)
 const { authMiddleware, adminOnly, requirePermission, requireUserLogin } = require('./middleware/auth');
 // Web-Push (VAPID) -> lib/webpush.js (Opt-in-Benachrichtigungen fuer PWAs)
@@ -6939,6 +6939,7 @@ async function lokalesKontoNachLoeschung(email) {
     if (ids.length) await pool.query('DELETE FROM sessions WHERE user_id = ANY($1::int[])', [ids]);
     await pool.query('UPDATE api_tokens SET revoked_at = NOW() WHERE LOWER(user_email) = $1 AND revoked_at IS NULL', [e]);
     for (const [t, v] of tokenCache) { if (String(v.user?.email || '').toLowerCase() === e) tokenCache.delete(t); }
+    appTokensVergessen(e);
     console.log(`[Authentik] Lokales Konto ${e} nach Loeschung: ${ids.length} Zeile(n)${nochKonto ? '' : ' deaktiviert'}, Sitzungen/PATs beendet`);
   } catch (err) {
     console.error(`[Authentik] Lokales Konto ${e} nach Loeschung nicht bereinigt:`, err.message);
