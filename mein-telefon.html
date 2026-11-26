@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mein Telefon - Rosenweg</title>
+    <link rel="icon" href="/logo-rosenweg.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=5"></script>
+    <script src="/js/nav.js?v=3"></script>
+    <style>
+        .knopf { padding:.35rem .7rem; border-radius:.5rem; font-size:.85rem; background:#e2e8f0; white-space:nowrap; }
+        .knopf:hover { background:#cbd5e1; }
+        .knopf.rot { background:#fee2e2; color:#991b1b; }
+        .knopf.blau { background:#1e3a8a; color:#fff; }
+        .feld { display:block; width:100%; margin-top:.2rem; padding:.45rem .55rem; border:1px solid #cbd5e1; border-radius:.5rem; background:#fff; }
+        .punkt { display:inline-block; width:.6rem; height:.6rem; border-radius:50%; }
+        .wahl { display:flex; gap:.6rem; align-items:flex-start; padding:.7rem .8rem; border:1px solid #e2e8f0; border-radius:.7rem; cursor:pointer; }
+        .wahl:has(input:checked) { border-color:#1e3a8a; background:#eff6ff; }
+        .qr { background:#fff; border-radius:14px; padding:12px; width:min(100%, 280px); aspect-ratio:1; margin:0 auto; }
+        .qr svg { width:100%; height:100%; display:block; }
+        .qr.alt { opacity:.25; }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800">
+<nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+<script>RosenwegNav.init({ active: 'mein-telefon' });</script>
+
+<main class="max-w-3xl mx-auto px-4 py-6 space-y-5">
+    <div class="flex items-center gap-3">
+        <img src="/logo-rosenweg.png" alt="" class="w-12 h-12">
+        <div>
+            <h1 class="text-2xl font-bold">Mein Telefon</h1>
+            <div class="text-sm text-slate-500">Deine Rosenweg-Nummer, deine Geräte und wie man dich erreicht</div>
+        </div>
+    </div>
+
+    <div id="meldung" class="hidden rounded-lg px-4 py-3 text-sm"></div>
+
+    <div id="gate" class="hidden bg-white rounded-xl shadow p-5">
+        <p class="mb-3">Bitte zuerst mit dem Rosenweg-Konto anmelden.</p>
+        <button onclick="AuthentikAuth.login(location.pathname)" class="px-4 py-2 rounded-lg bg-blue-600 text-white">Mit Rosenweg-Konto anmelden</button>
+    </div>
+
+    <div id="ohneNummer" class="hidden bg-white rounded-xl shadow p-5 text-sm">
+        <p class="font-medium mb-1">Du hast noch keine Rosenweg-Nummer.</p>
+        <p class="text-slate-600">Nummern bekommen alle, die mit E-Mail im Rosenweg eingetragen sind. Fehlt deine, melde dich bei der Technik.</p>
+    </div>
+
+    <div id="inhalt" class="hidden space-y-5">
+        <!-- Nummer -->
+        <section class="bg-white rounded-xl shadow p-5">
+            <div class="text-sm text-slate-500">Deine Nummer</div>
+            <div class="flex items-baseline gap-3 flex-wrap">
+                <div class="text-3xl font-bold font-mono" id="nummer"></div>
+                <div class="text-slate-600" id="wer"></div>
+            </div>
+            <p class="text-sm text-slate-600 mt-2">Wer im Rosenweg diese Nummer wählt, erreicht dich auf allen Geräten unten gleichzeitig –
+                am eigenen Handy mit Rosenweg Telefon und an jedem geteilten Telefon, an dem du gerade angemeldet bist.</p>
+        </section>
+
+        <!-- Geräte -->
+        <section class="bg-white rounded-xl shadow p-5">
+            <div class="flex items-center gap-3 mb-2">
+                <h2 class="font-semibold flex-1">Meine Geräte</h2>
+                <button class="knopf blau" onclick="assistent(true)">+ Gerät</button>
+            </div>
+            <ul id="geraete" class="divide-y text-sm"></ul>
+
+            <div id="assistent" class="hidden mt-4 border-t pt-4">
+                <div class="font-medium mb-2">Was willst du verbinden?</div>
+                <div class="grid sm:grid-cols-2 gap-3 text-sm">
+                    <label class="wahl"><input type="radio" name="weg" value="handy" onchange="weg(this.value)" class="mt-1">
+                        <span><b>Mein Handy (Android)</b><br><span class="text-slate-500">Rosenweg Telefon installieren, dann klingelt deine Nummer auch dort.</span></span></label>
+                    <label class="wahl"><input type="radio" name="weg" value="geteilt" onchange="weg(this.value)" class="mt-1">
+                        <span><b>An einem geteilten Telefon</b><br><span class="text-slate-500">Mit dem Anmelde-QR oder deiner Rosenweg-Karte anmelden.</span></span></label>
+                </div>
+                <div id="weg-handy" class="hidden mt-4 text-sm space-y-2">
+                    <ol class="list-decimal ml-5 space-y-1">
+                        <li>Auf dem Handy die <a href="/apps" class="text-red-700 underline">Apps-Seite</a> öffnen und <b>Rosenweg Telefon</b> installieren.</li>
+                        <li>Die App öffnen und <b>„Mit Rosenweg-Konto anmelden“</b> tippen.</li>
+                        <li>Fertig – das Handy erscheint oben in der Liste.</li>
+                    </ol>
+                    <p class="text-slate-500">Tipp: Wenn die App fragt, ob sie im Hintergrund laufen darf, mit Ja antworten – sonst klingelt es nach ein paar Minuten nicht mehr.</p>
+                </div>
+                <div id="weg-geteilt" class="hidden mt-4 text-sm">
+                    <p class="mb-3">Am gesperrten geteilten Telefon <b>„QR-Code scannen“</b> tippen und diesen Code vor die Kamera halten.
+                        Er gilt einmal und nur kurz; diese Seite holt von selbst einen neuen. Noch einfacher: deine Rosenweg-Karte hinten ans Telefon halten.</p>
+                    <div class="qr" id="qr"></div>
+                    <div class="text-center text-slate-500 mt-2" id="frist"></div>
+                </div>
+                <div class="mt-4"><button class="knopf" onclick="assistent(false)">Schliessen</button></div>
+            </div>
+        </section>
+
+        <!-- Erreichbarkeit -->
+        <section class="bg-white rounded-xl shadow p-5">
+            <h2 class="font-semibold mb-1">Erreichbarkeit</h2>
+            <p class="text-sm text-slate-500 mb-3">Was passiert, wenn jemand deine Nummer anruft. Gilt ab dem nächsten Anruf.</p>
+            <div class="space-y-2 text-sm">
+                <label class="wahl"><input type="radio" name="wl" value="aus" onchange="zeigeZiel()" class="mt-1">
+                    <span><b>Keine Weiterleitung</b><br><span class="text-slate-500">Es klingelt nur auf deinen Geräten.</span></span></label>
+                <label class="wahl"><input type="radio" name="wl" value="nicht_erreichbar" onchange="zeigeZiel()" class="mt-1">
+                    <span><b>Weiterleiten, wenn ich nicht abnehme</b><br><span class="text-slate-500">Zuerst klingeln deine Geräte, danach die Nummer unten – auch wenn gerade keines deiner Geräte verbunden ist.</span></span></label>
+                <label class="wahl"><input type="radio" name="wl" value="immer" onchange="zeigeZiel()" class="mt-1">
+                    <span><b>Immer weiterleiten</b><br><span class="text-slate-500">Deine Geräte klingeln nicht, nur die Nummer unten.</span></span></label>
+            </div>
+            <div id="zielBox" class="grid sm:grid-cols-2 gap-3 mt-3 text-sm">
+                <label class="block">An Nummer<input id="ziel" class="feld" inputmode="tel" placeholder="079 123 45 67 oder +49 …"></label>
+                <label class="block" id="sekBox">Nach
+                    <select id="sek" class="feld"><option>10</option><option>15</option><option>20</option><option>30</option><option>45</option><option>60</option></select>
+                    <span class="text-xs text-slate-500">Sekunden Klingeln</span></label>
+            </div>
+            <label class="flex items-start gap-2 mt-4 text-sm"><input type="checkbox" id="vm" class="mt-1">
+                <span><b>Voicemail</b> – nimmt niemand ab, kann man dir eine Nachricht hinterlassen. Du hörst sie in Rosenweg Telefon.
+                    <span class="text-slate-500">Nachrichten werden nach 90 Tagen gelöscht.</span></span></label>
+            <p class="text-xs text-slate-500 mt-3">In Gruppen (z.B. Ring-Group Technik) gilt deine Weiterleitung, deine Voicemail nicht – sonst nähme sie den Anruf für die ganze Gruppe an.
+                Anrufe an Nummern ausserhalb des Rosenwegs kosten die Gemeinschaft Gebühren.</p>
+            <div class="flex items-center gap-3 mt-4">
+                <button class="knopf blau" onclick="speichern()">Speichern</button>
+                <span class="text-xs text-slate-500" id="zuletzt"></span>
+            </div>
+        </section>
+
+        <!-- Gruppen -->
+        <section class="bg-white rounded-xl shadow p-5" id="gruppenBox">
+            <h2 class="font-semibold mb-2">Meine Gruppen</h2>
+            <ul id="gruppen" class="text-sm space-y-1"></ul>
+            <p class="text-xs text-slate-500 mt-2">Ändern kann das die Technik.</p>
+        </section>
+    </div>
+</main>
+
+<script>
+const PBX = 'https://pbx.rosenweg4303.ch';
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const zeit = t => t ? new Date(String(t).replace(' ', 'T') + (/[zZ+]/.test(String(t).slice(10)) ? '' : 'Z'))
+                       .toLocaleString('de-CH', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) : '';
+let abgelaufen = false, qrAn = false, bisMs = 0, holt = false, daten = null;
+
+function melde(text, fehler) {
+    const m = $('meldung');
+    m.textContent = text;
+    m.className = 'rounded-lg px-4 py-3 text-sm ' + (fehler ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800');
+}
+async function api(pfad, opts) {
+    const r = await AuthentikAuth.apiFetch(PBX + pfad, opts);
+    // nach einem 401 nicht weiter abfragen (CrowdSec zaehlt gescheiterte Versuche)
+    if (r.status === 401) { abgelaufen = true; zeigeGate(); throw new Error('auth'); }
+    return r;
+}
+async function json(r) { return r.json().catch(() => ({})); }
+function zeigeGate() { $('inhalt').classList.add('hidden'); $('gate').classList.remove('hidden'); }
+
+async function lade() {
+    const r = await api('/api/telefon/ich');
+    const d = await json(r);
+    if (!r.ok) { melde(d.error || 'Telefonanlage nicht erreichbar.', true); return; }
+    if (!d.nummer) { $('ohneNummer').classList.remove('hidden'); $('inhalt').classList.add('hidden'); return; }
+    daten = d;
+    $('inhalt').classList.remove('hidden');
+    $('nummer').textContent = d.nummer;
+    $('wer').textContent = d.name + (d.haus != null ? ' · Haus ' + (d.haus === 0 ? 'MEG' : d.haus) : '') + (d.wohnung ? ', Wohnung ' + d.wohnung : '');
+    zeigeGeraete(d.geraete || []);
+    zeigeErreichbarkeit(d.erreichbarkeit, d.zuletzt_geaendert);
+    zeigeGruppen(d.gruppen || []);
+}
+
+function zeigeGeraete(gs) {
+    const punkt = ok => `<span class="punkt" style="background:${ok ? '#16a34a' : '#cbd5e1'}"></span>`;
+    $('geraete').innerHTML = gs.map(g => g.art === 'geteilt'
+        ? `<li class="py-2 flex items-center gap-2"><div class="flex-1"><b>${esc(g.name)}</b>
+             <div class="text-xs text-slate-500">${punkt(g.erreichbar)} Geteiltes Telefon (${esc(g.ext)}) · angemeldet seit ${esc(zeit(g.seit))}</div></div>
+             <button class="knopf" onclick="geteiltAbmelden('${esc(g.ext)}', '${esc(g.name)}')">Abmelden</button></li>`
+        : `<li class="py-2 flex items-center gap-2"><div class="flex-1"><b>${esc(g.name)}</b>
+             <div class="text-xs text-slate-500">${punkt(g.erreichbar)} Rosenweg Telefon · ${g.erreichbar ? 'verbunden' : 'gerade nicht verbunden'} · seit ${esc(zeit(g.seit))}</div></div>
+             <button class="knopf rot" onclick="handyEntfernen(${Number(g.id)}, '${esc(g.name)}')">Entfernen</button></li>`).join('')
+        || '<li class="py-2 text-slate-500">Noch kein Gerät. Mit „+ Gerät“ verbindest du dein Handy oder meldest dich an einem geteilten Telefon an.</li>';
+}
+
+function zeigeErreichbarkeit(e, zuletzt) {
+    document.querySelector(`input[name=wl][value="${e.weiterleitung}"]`).checked = true;
+    $('ziel').value = e.ziel || '';
+    $('sek').value = String([10, 15, 20, 30, 45, 60].reduce((a, b) => Math.abs(b - e.sekunden) < Math.abs(a - e.sekunden) ? b : a));
+    $('vm').checked = !!e.voicemail;
+    $('zuletzt').textContent = zuletzt ? 'Zuletzt geändert ' + zeit(zuletzt.zeit) + (zuletzt.durch && zuletzt.durch !== 'selbst' ? ' durch ' + zuletzt.durch : ' von dir') : '';
+    zeigeZiel();
+}
+function zeigeZiel() {
+    const wl = document.querySelector('input[name=wl]:checked')?.value || 'aus';
+    $('zielBox').classList.toggle('hidden', wl === 'aus');
+    $('sekBox').classList.toggle('hidden', wl !== 'nicht_erreichbar');
+}
+async function speichern() {
+    const wl = document.querySelector('input[name=wl]:checked')?.value || 'aus';
+    if (wl !== 'aus' && !$('ziel').value.trim()) { melde('Bitte die Nummer angeben, an die weitergeleitet wird.', true); return; }
+    const r = await api('/api/telefon/ich/erreichbarkeit', {method: 'PUT', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({weiterleitung: wl, ziel: $('ziel').value, sekunden: Number($('sek').value), voicemail: $('vm').checked})});
+    const d = await json(r);
+    if (!r.ok) { melde(d.error || 'Speichern fehlgeschlagen.', true); return; }
+    melde('Gespeichert – gilt ab dem nächsten Anruf.');
+    lade().catch(() => {});
+}
+
+function zeigeGruppen(gs) {
+    $('gruppenBox').classList.toggle('hidden', !gs.length);
+    $('gruppen').innerHTML = gs.map(g => `<li>Du klingelst in der <b>${esc(g.name)} (${esc(g.nummer)})</b>` +
+        (g.dienste && g.dienste.length ? ` und damit für ${esc(g.dienste.join(' und '))}` : '') +
+        (g.immer ? ', auch ausserhalb der Geschäftszeiten' : ', während der Geschäftszeiten') + '.</li>').join('');
+}
+
+// ── Geräte ──
+async function handyEntfernen(id, name) {
+    if (!confirm(name + ' entfernen? Deine Nummer klingelt dort dann nicht mehr. Wieder verbinden: in der App „Mit Rosenweg-Konto anmelden“.')) return;
+    const r = await api('/api/telefon/privat/' + id, {method: 'DELETE'});
+    melde(r.ok ? name + ' entfernt.' : ((await json(r)).error || 'Entfernen fehlgeschlagen.'), !r.ok);
+    lade().catch(() => {});
+}
+async function geteiltAbmelden(ext, name) {
+    if (!confirm('Am geteilten Telefon ' + name + ' abmelden?')) return;
+    const r = await api('/api/telefon/' + encodeURIComponent(ext) + '/abmelden', {method: 'POST'});
+    melde(r.ok ? 'Abgemeldet.' : ((await json(r)).error || 'Abmelden fehlgeschlagen.'), !r.ok);
+    lade().catch(() => {});
+}
+
+// ── Assistent "+ Gerät" ──
+function assistent(an) {
+    $('assistent').classList.toggle('hidden', !an);
+    if (!an) { document.querySelectorAll('input[name=weg]').forEach(i => i.checked = false); weg(''); }
+}
+function weg(w) {
+    $('weg-handy').classList.toggle('hidden', w !== 'handy');
+    $('weg-geteilt').classList.toggle('hidden', w !== 'geteilt');
+    qrAn = w === 'geteilt';
+    if (qrAn) holeQr();
+}
+async function holeQr() {
+    if (holt || !qrAn) return; holt = true;
+    try {
+        const r = await api('/api/telefon/ausweis', {method: 'POST'});
+        const d = await json(r);
+        if (!r.ok) { $('qr').innerHTML = ''; $('frist').textContent = d.error || 'Kein Anmelde-QR.'; bisMs = 0; return; }
+        $('qr').innerHTML = d.qr_svg;   // vom Server erzeugtes SVG
+        $('qr').classList.remove('alt');
+        bisMs = Date.now() + (d.ttl_seconds || 90) * 1000;
+    } catch (e) { if (e.message !== 'auth') $('frist').textContent = 'Keine Verbindung zur Telefonanlage.'; }
+    finally { holt = false; }
+}
+function tick() {
+    if (!qrAn || document.hidden || abgelaufen) return;
+    const s = Math.round((bisMs - Date.now()) / 1000);
+    if (bisMs && s > 0) $('frist').textContent = 'gültig noch ' + s + ' s';
+    else { $('frist').textContent = 'wird erneuert …'; $('qr').classList.add('alt'); }
+    if (s <= 10) holeQr();
+}
+
+(async () => {
+    AuthentikAuth.handleCallback();
+    if (AuthentikAuth.ready) await AuthentikAuth.ready;
+    if (!AuthentikAuth.isLoggedIn()) { zeigeGate(); return; }
+    try { await lade(); } catch (e) { if (e.message !== 'auth') melde('Telefonanlage nicht erreichbar.', true); }
+    setInterval(tick, 1000);
+    // Geräteliste aktuell halten (z.B. nach dem Anmelden am geteilten Telefon), Formular nicht überschreiben
+    setInterval(async () => {
+        if (document.hidden || abgelaufen) return;
+        try { const r = await api('/api/telefon/ich'); const d = await json(r); if (r.ok && d.nummer) zeigeGeraete(d.geraete || []); } catch (e) {}
+    }, 15000);
+})();
+</script>
+</body>
+</html>

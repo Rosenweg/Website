@@ -2760,6 +2760,148 @@ def telefon_meine():
         conn.close()
 
 
+# ─── "Mein Telefon" (docs/plans/telefon-benutzerfuehrung.md, Schritt 1) ─────────────
+# Alles zur eigenen persoenlichen Nummer in einer Antwort, und die Erreichbarkeit
+# (Weiterleitung, Voicemail) selbst einstellen. Bisher stand beides nur in der Datenbank.
+
+def _ziel_normalisieren(z):
+    """Zielnummer fuer die Weiterleitung: Leerzeichen/Striche weg, 0041 -> +41."""
+    z = re.sub(r"[\s\-/().]", "", str(z or ""))
+    if z.startswith("00"):
+        z = "+" + z[2:]
+    return z
+
+
+def _erreichbarkeit(p):
+    wl = p["weiterleitung"] if p["weiterleitung"] in ("aus", "immer", "nicht_erreichbar") else "aus"
+    return {"weiterleitung": wl, "ziel": p["weiterleitung_ziel"] or "",
+            "sekunden": max(5, min(int(p["weiterleitung_sekunden"] or 20), 60)),
+            "voicemail": bool(p["voicemail"])}
+
+
+def _gruppen_der_nummer(conn, nummer):
+    """In welchen Gruppen/Diensten die Person klingelt (heute: Ring-Group Technik)."""
+    r = conn.execute("SELECT bypass_hours, enabled FROM ring_members WHERE kind = 'person' AND phone = ?",
+                     (str(nummer),)).fetchone()
+    if not r or not r["enabled"]:
+        return []
+    return [{"nummer": "1000", "name": "Ring-Group Technik",
+             "dienste": ["2000 Dienst Technik", "Amtsnummer"],
+             "immer": bool(r["bypass_hours"])}]
+
+
+@app.get("/api/telefon/ich")
+def telefon_ich():
+    """Mein Telefon: Nummer, Geraete, Erreichbarkeit, Gruppen der angemeldeten Person."""
+    user = current_user()
+    if not user:
+        return jsonify({"error": "Nicht angemeldet"}), 401
+    conn = db.connect()
+    try:
+        email = (user.get("email") or "").lower()
+        nummer = str(_nummer_der_person(conn, email, user.get("name")) or "")
+        if not nummer:
+            return jsonify({"name": user.get("name"), "nummer": None})
+        p = conn.execute("SELECT nummer, name, haus, wohnung, weiterleitung, weiterleitung_ziel, "
+                         "weiterleitung_sekunden, voicemail FROM personen_nummern WHERE nummer = ?",
+                         (nummer,)).fetchone()
+        try:
+            regs = ami.registered_aors()
+        except Exception:  # noqa: BLE001
+            regs = set()
+        geraete = [{"art": "app", "id": r["id"], "name": r["geraet"] or "Handy", "seit": r["created_at"],
+                    "kennung": f"{r['nummer']}-p{r['id']}", "erreichbar": f"{r['nummer']}-p{r['id']}" in regs}
+                   for r in conn.execute("SELECT id, nummer, geraet, created_at FROM telefon_sip_privat "
+                                         "WHERE nummer = ? ORDER BY id", (nummer,))]
+        geraete += [{"art": "geteilt", "ext": r["ext"], "name": r["geraet"], "seit": r["seit"],
+                     "erreichbar": str(r["ext"]) in regs}
+                    for r in conn.execute("SELECT s.ext, e.name AS geraet, s.seit FROM telefon_sitzungen s "
+                                          "JOIN sip_extensions e ON e.ext = s.ext WHERE lower(s.email) = ? "
+                                          "ORDER BY s.ext", (email,))]
+        letzte = conn.execute("SELECT ereignis, durch, zeit FROM telefon_log WHERE ext = ? AND ereignis LIKE "
+                              "'Erreichbarkeit%' ORDER BY id DESC LIMIT 1", (nummer,)).fetchone()
+        return jsonify({
+            "name": p["name"], "nummer": nummer, "haus": p["haus"], "wohnung": p["wohnung"],
+            "erreichbarkeit": _erreichbarkeit(p), "geraete": geraete,
+            "gruppen": _gruppen_der_nummer(conn, nummer),
+            "zuletzt_geaendert": dict(letzte) if letzte else None,
+            "darf": _telefon_darf(conn, user),
+        })
+    finally:
+        conn.close()
+
+
+def _erreichbarkeit_speichern(conn, nummer, b, durch):
+    """Gemeinsam fuer die Person selbst und Technik. Gibt (dict, None) oder (None, fehler)."""
+    p = conn.execute("SELECT * FROM personen_nummern WHERE nummer = ?", (nummer,)).fetchone()
+    if not p:
+        return None, "Nummer unbekannt"
+    wl = b.get("weiterleitung", p["weiterleitung"])
+    if wl not in ("aus", "immer", "nicht_erreichbar"):
+        return None, "Weiterleitung: aus, immer oder nicht_erreichbar"
+    ziel = _ziel_normalisieren(b["ziel"]) if "ziel" in b else (p["weiterleitung_ziel"] or "")
+    if wl != "aus" and not _ZIEL_RE.match(ziel):
+        return None, "Zielnummer ungültig (z.B. 079 123 45 67 oder +49 …)"
+    try:
+        sek = int(b.get("sekunden", p["weiterleitung_sekunden"] or 20))
+    except (TypeError, ValueError):
+        return None, "Sekunden: Zahl 5–60"
+    sek = max(5, min(sek, 60))
+    vm = 1 if b.get("voicemail", bool(p["voicemail"])) else 0
+    conn.execute("UPDATE personen_nummern SET weiterleitung = ?, weiterleitung_ziel = ?, "
+                 "weiterleitung_sekunden = ?, voicemail = ? WHERE nummer = ?",
+                 (wl, ziel or None, sek, vm, nummer))
+    text = {"aus": "Weiterleitung aus", "immer": f"Weiterleitung immer an {ziel}",
+            "nicht_erreichbar": f"Weiterleitung nach {sek} s an {ziel}"}[wl] + (", Voicemail an" if vm else ", Voicemail aus")
+    # Ziel nur gekuerzt ins Protokoll (Telefonnummer = Personendatum)
+    text_log = text.replace(ziel, "…" + ziel[-3:]) if ziel else text
+    conn.execute("INSERT INTO telefon_log (ext, ereignis, name, durch) VALUES (?,?,?,?)",
+                 (nummer, "Erreichbarkeit: " + text_log, p["name"], durch))
+    conn.commit()
+    return _erreichbarkeit(conn.execute("SELECT * FROM personen_nummern WHERE nummer = ?", (nummer,)).fetchone()), None
+
+
+@app.put("/api/telefon/ich/erreichbarkeit")
+def telefon_ich_erreichbarkeit():
+    """Die Person stellt Weiterleitung (aus/immer/nicht_erreichbar, Ziel, Sekunden) und
+    Voicemail an/aus fuer ihre persoenliche Nummer ein. Gilt beim naechsten Anruf."""
+    user = current_user()
+    if not user:
+        return jsonify({"error": "Nicht angemeldet"}), 401
+    conn = db.connect()
+    try:
+        nummer = str(_nummer_der_person(conn, (user.get("email") or "").lower(), user.get("name")) or "")
+        if not nummer:
+            return jsonify({"error": "Du hast keine persönliche Nummer"}), 404
+        e, fehler = _erreichbarkeit_speichern(conn, nummer, request.get_json(silent=True) or {}, "selbst")
+    finally:
+        conn.close()
+    if fehler:
+        return jsonify({"error": fehler}), 400
+    app.logger.info("Erreichbarkeit %s geaendert (selbst)", nummer)
+    return jsonify({"ok": True, "erreichbarkeit": e})
+
+
+@app.put("/api/pbx/personen/<nummer>/erreichbarkeit")
+def pbx_person_erreichbarkeit(nummer):
+    """Technik/Praesident aendert die Erreichbarkeit einer Person (Entscheid Stefan 25.11.2026),
+    protokolliert mit Namen."""
+    user, deny = require_admin()
+    if deny:
+        return deny
+    if not re.fullmatch(r"3[0-9]{5}", nummer):
+        return jsonify({"error": "Nummer ungültig"}), 400
+    conn = db.connect()
+    try:
+        e, fehler = _erreichbarkeit_speichern(conn, nummer, request.get_json(silent=True) or {}, actor(user))
+    finally:
+        conn.close()
+    if fehler:
+        return jsonify({"error": fehler}), 400
+    app.logger.info("Erreichbarkeit %s geaendert durch %s", nummer, actor(user))
+    return jsonify({"ok": True, "erreichbarkeit": e})
+
+
 @app.delete("/api/telefon/privat/<int:zid>")
 def telefon_privat_entfernen(zid):
     """Aus dem Browser: eigenes Handy abmelden (Zugang sperren), Technik/Praesident jedes."""
