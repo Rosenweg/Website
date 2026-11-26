@@ -3,6 +3,7 @@
 Beliebige Displays (Kiosk-Browser, ESP32, LED-Matrix, e-ink, Home-Assistant …)
 können Ankündigungen und Notfall-Meldungen aus dem Rosenweg-MQTT-Broker anzeigen.
 Web-Kiosk-Referenz: **display.rosenweg4303.ch** (`display.html`).
+Chromecasts zeigen dieselbe Seite über einen eigenen Cast-Empfänger — siehe [cast.md](cast.md).
 
 ## Topics (retained)
 

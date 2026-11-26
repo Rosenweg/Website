@@ -430,11 +430,11 @@ async function istStationHost(hostname) {
   if (h.rows.length) return true;
   try {
     const kurz = hostname.toLowerCase().split('.')[0];
-    // Ohne 'windows': ein Windows-Rechner steht nur wegen seiner
-    // Einstellungen in der Stationsliste (Standarddrucker) und ist keine
-    // Station mit sitzungsgebundenem SSH.
+    // Ohne 'windows' und 'chromecast': beide stehen nur wegen ihrer
+    // Einstellungen in der Stationsliste (Standarddrucker, Anzeige) und sind
+    // keine Station mit sitzungsgebundenem SSH.
     const s = await pool.query(
-      `SELECT 1 FROM stations WHERE revoked_at IS NULL AND status = 'aktiv' AND role <> 'windows'
+      `SELECT 1 FROM stations WHERE revoked_at IS NULL AND status = 'aktiv' AND role NOT IN ('windows', 'chromecast')
           AND (LOWER(hostname) = $1 OR LOWER(id) = $1) LIMIT 1`, [kurz]);
     return s.rows.length > 0;
   } catch (e) {

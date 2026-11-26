@@ -11295,6 +11295,9 @@ app.use('/api/stations', stationsRouter);
 // kam ihm sonst zuvor — mit dem Ergebnis, dass ein echter Alarm auf keiner
 // Tafel landete.
 stationsRouter.ensureSchema().catch(e => console.error('[stationen] Schema:', e.message));
+// Der Cast-Wächter übergeht die Rücksichtspause, solange ein Notfall läuft.
+// displayCache steht weiter unten; gelesen wird er erst zur Laufzeit.
+stationsRouter.castNotfallQuelle(() => notfallAktiv(displayCache.emergency));
 
 // ── Desktop-Stil an den Stationen ──────────────────────────────────
 // Der Desktop einer Station erinnert an Windows: Leiste unten, Menü links,
@@ -17326,6 +17329,10 @@ async function tafelnAlarmSchalten(aktiv) {
   const ersterStand = _alarmStand === null;
   if (_alarmStand === aktiv) return;
   _alarmStand = aktiv;
+  // Chromecasts: display.html zeigt den Notfall selbst — sofern sie laeuft.
+  // Castet gerade jemand anderes, holt der Wächter die Anzeige jetzt zurück,
+  // ohne die übliche Pause abzuwarten (routes/stations.js, Cast-Wächter).
+  if (aktiv) stationsRouter.castAbgleichen().catch(e => console.error('[cast] Notfall:', e.message));
   // Der erste Stand nach dem Start ist keine Aenderung, sondern das, was
   // ohnehin schon galt. Nur ein laufender Alarm wird dann noch einmal
   // durchgesetzt — eine Entwarnung nicht, sonst raeumte jeder Neustart der
@@ -22712,9 +22719,9 @@ app.post('/api/stations/:id/tunnel', stationsRouter.appSession, async (req, res)
     if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(stationId)) return res.status(400).json({ error: 'Ungültige Stationskennung' });
     // Nur fuer registrierte, nicht gesperrte/zurueckgezogene Stationen — sonst
     // liessen sich unter Fantasie-Kennungen beliebig Peers anlegen.
-    // Ein von Hand eingetragener Windows-Rechner ist keine Station mit Tunnel.
+    // Ein von Hand eingetragener Windows-Rechner oder Chromecast ist keine Station mit Tunnel.
     const station = await pool.query(
-      "SELECT 1 FROM stations WHERE id = $1 AND revoked_at IS NULL AND status = 'aktiv' AND role <> 'windows'", [stationId]);
+      "SELECT 1 FROM stations WHERE id = $1 AND revoked_at IS NULL AND status = 'aktiv' AND role NOT IN ('windows', 'chromecast')", [stationId]);
     if (!station.rowCount) return res.status(404).json({ error: 'Station unbekannt oder gesperrt' });
 
     const email = (req.appUser?.email || '').toLowerCase();

@@ -47,6 +47,8 @@
 //     GET/POST/DELETE /api/stations/admin/wartungsschluessel[/:sid]
 //                                      Schlüssel, die eine Freigabe hereinlässt
 //     DELETE /api/stations/admin/:id          endgültig entfernen
+//     POST   /api/stations/admin/chromecast   Chromecast als Anzeige eintragen
+//     POST   /api/stations/admin/:id/cast-jetzt  Chromecast jetzt auf die Anzeige holen
 //
 // Ablauf und Begründung: os-stationen/docs/installer.md
 // ═══════════════════════════════════════════════════════════════════
@@ -69,6 +71,8 @@ const { telefonbuch } = require('../lib/telefonbuch');
 const winprog = require('../lib/windowsprogramme');
 const stationos = require('../lib/stationos');
 const { schluesselPruefen, alsZeile } = require('../lib/sshkeys');
+const castw = require('../lib/castwaechter');
+const castv = require('../lib/castverbindung');
 
 const router = express.Router();
 
@@ -819,6 +823,12 @@ router.get('/admin/list', authMiddleware, nurTechnik, a(async (req, res) => {
       regeln: STANDORT_REGELN.map((r) => r.text) },
     // Stand des Anschluss-Wächters, wie beim AD-Abgleich.
     anschluss_abgleich: { ...anschlussStand, bereit: unifiBereit(), minuten: ANSCHLUSS_MINUTEN, ohne: ANSCHLUSS_OHNE },
+    // Stand des Cast-Wächters (Chromecasts als Anzeige): welcher Empfänger,
+    // welche Pause — damit die Seite sagt, was der Wächter gerade tut.
+    cast_waechter: {
+      ...castStand, sekunden: CAST_SEKUNDEN, pause_minuten: CAST_PAUSE_MIN,
+      empfaenger: castEmpfaenger().art, app_id: castEmpfaenger().appId,
+    },
   });
 }));
 
@@ -1157,7 +1167,10 @@ async function technikMelden(text, sourceType) {
 // fremde Anschluss zweimal in Folge gesehen wurde.
 const ANSCHLUSS_MINUTEN = Number(process.env.STATION_ANSCHLUSS_MINUTEN ?? 3);
 const ANSCHLUSS_WER = 'Anschluss-Wächter';
-const ANSCHLUSS_OHNE = ['windows', 'laptop'];   // Rollen ohne festen Anschluss
+// Rollen ohne festen Anschluss. Ein Chromecast hängt im WLAN und hat kein
+// Inventar mit MACs (seine MAC steht unter hardware.mac, nicht .macs) — ihn an
+// einen AP zu binden hiesse, ihn beim ersten Roaming zu sperren.
+const ANSCHLUSS_OHNE = ['windows', 'laptop', 'chromecast'];
 let anschlussStand = { zuletzt: null, ergebnis: null, fehler: null };
 let anschlussLaeuft = null;
 
@@ -1272,6 +1285,199 @@ if (ANSCHLUSS_MINUTEN > 0) {
   setInterval(lauf, ANSCHLUSS_MINUTEN * 60 * 1000).unref();
 }
 
+// ─── Chromecast als Anzeige ─────────────────────────────────────────
+//
+// Ein Chromecast ist für Technik eine Anzeige-Station: dieselbe Seite
+// (roles.display.url mit ?haus=N, aus buildConfig wie bei einer Station mit
+// der Rolle display), dasselbe Haus, dieselben overrides unter roles.display,
+// dieselben retained MQTT-Meldungen — die holt display.html selbst. Was ihm
+// fehlt, ist ein Betriebssystem, das die Seite von sich aus öffnet und offen
+// hält. Das macht der Cast-Wächter: alle CAST_WAECHTER_SEKUNDEN fragt er über
+// das Cast-Protokoll (TCP 8009, direkt per IP) nach, was läuft, und holt die
+// Anzeige zurück, wenn das Gerät neu gestartet hat oder jemand anderes castet.
+//
+// Rücksicht auf Absicht: castet jemand, bleibt das stehen, bis es endet —
+// höchstens aber CAST_FREMD_MINUTEN (Vorgabe 20). Bei einem Notfall
+// (display/emergency) gilt keine Pause.
+//
+// Gesperrt heisst hier: der Wächter lässt das Gerät in Ruhe — wie eine
+// gesperrte Station keine Konfiguration mehr bekommt.
+//
+// Empfänger: mit CAST_APP_ID (Google Cast Developer Console) der eigene unter
+// cast.rosenweg4303.ch/empfaenger/, sonst der öffentliche DashCast. Siehe
+// docs/cast.md.
+const CAST_SEKUNDEN = Number(process.env.CAST_WAECHTER_SEKUNDEN ?? 45);
+const CAST_PAUSE_MIN = Number(process.env.CAST_FREMD_MINUTEN ?? 20);
+const CAST_WER = 'Cast-Wächter';
+let castStand = { zuletzt: null, ergebnis: null, fehler: null };
+let castLaeuft = null;
+let castNotfall = () => false;
+
+const castEmpfaenger = () => castw.empfaengerWahl(process.env.CAST_APP_ID);
+
+/** Was die Anzeige dieses Geräts zeigt — genau wie bei einer display-Station. */
+function castZiel(st) {
+  const cfg = buildConfig({ ...st, role: 'display' });
+  const d = cfg.roles?.display || {};
+  return {
+    url: d.url,
+    reloadMinuten: Number(d.reload_interval_minutes) || 0,
+    erlaubt: castw.adresseErlaubt(d.url, d.allowed_domains),
+  };
+}
+
+async function castGeraetAbgleichen(st, { erzwingen = false } = {}) {
+  const hw = st.hardware || {};
+  const alt = st.last_state?.cast || {};
+  const ziel = castZiel(st);
+  let e;
+  if (!hw.adresse) {
+    e = { aktion: 'aus', grund: 'keine Adresse eingetragen', zustand: { ...alt, fehler: 'keine Adresse eingetragen' } };
+  } else if (!ziel.erlaubt) {
+    // Eine überschriebene Adresse ausserhalb der allowed_domains zeigte der
+    // eigene Empfänger ohnehin nicht — lieber hier deutlich sagen.
+    e = { aktion: 'aus', grund: 'Anzeigeadresse nicht erlaubt', zustand: { ...alt, fehler: `Adresse nicht erlaubt: ${ziel.url}` } };
+  } else {
+    e = await castv.abgleichen({
+      geraet: { adresse: hw.adresse }, url: ziel.url, reloadMinuten: ziel.reloadMinuten,
+      empfaenger: castEmpfaenger(), zustand: alt, pauseMs: CAST_PAUSE_MIN * 60 * 1000,
+      notfall: castNotfall(), erzwingen, gesperrt: st.status === 'gesperrt',
+    });
+  }
+  const z = { ...e.zustand, aktion: e.aktion, grund: e.grund, url: ziel.url };
+  await pool.query(
+    `UPDATE stations SET last_state = jsonb_set(COALESCE(last_state, '{}'::jsonb), '{cast}', $2::jsonb),
+            last_seen_at = CASE WHEN $3 THEN NOW() ELSE last_seen_at END,
+            last_seen_ip = CASE WHEN $3 THEN $4 ELSE last_seen_ip END
+      WHERE id = $1`,
+    [st.id, JSON.stringify(z), z.erreichbar === true, hw.adresse || null]);
+
+  // Ins Ereignisprotokoll nur, was sich ändert — nicht jeder Lauf.
+  if (e.wiederhergestellt) await ereignis(st.id, 'cast-wiederhergestellt', CAST_WER, e.grund);
+  else if (e.aktion === 'gescheitert' && (alt.fehlversuche || 0) === 0) await ereignis(st.id, 'cast-gescheitert', CAST_WER, e.grund);
+  if (alt.erreichbar === true && z.erreichbar === false) await ereignis(st.id, 'cast-unerreichbar', CAST_WER, z.fehler);
+  if (alt.erreichbar === false && z.erreichbar === true) await ereignis(st.id, 'cast-erreichbar', CAST_WER, null);
+  if (e.aktion === 'warten' && z.fremd_app && !alt.fremd_seit) await ereignis(st.id, 'cast-fremd', CAST_WER, e.grund);
+  return { id: st.id, aktion: e.aktion, grund: e.grund };
+}
+
+async function castAbgleichen({ nur = null, erzwingen = false } = {}) {
+  if (castLaeuft && !nur) return castLaeuft;
+  // Ein Lauf von Hand wartet den periodischen ab — sonst hielte der die
+  // Sperre, und der Knopf meldete „läuft anderswo".
+  if (castLaeuft && nur) await castLaeuft.catch(() => {});
+  const lauf = (async () => {
+    await ensureSchema();
+    // Nur eine API-Instanz hält die Geräte — zwei Wächter würden sich die
+    // Anzeige gegenseitig neu starten.
+    const sperre = await pool.connect();
+    try {
+      const { rows: [l] } = await sperre.query("SELECT pg_try_advisory_lock(hashtext('stations-cast')) AS ok");
+      if (!l.ok) { castv.alleSchliessen(); return { uebersprungen: 'läuft schon anderswo' }; }
+      try {
+        const { rows } = await pool.query(
+          `SELECT id, role, hostname, standort, notiz, haus, overrides, hardware, status, last_state, registered_by
+             FROM stations WHERE role = 'chromecast' AND revoked_at IS NULL ${nur ? 'AND id = $1' : ''}`,
+          nur ? [nur] : []);
+        const ergebnis = [];
+        for (const st of rows) {
+          try { ergebnis.push(await castGeraetAbgleichen(st, { erzwingen })); } catch (e) {
+            console.error(`[stations] Cast ${st.id}:`, e.message);
+            ergebnis.push({ id: st.id, aktion: 'fehler', grund: e.message });
+          }
+        }
+        // Verbindungen zu entfernten Geräten nicht offen lassen.
+        if (!nur) castv.alleSchliessen(new Set(rows.map((r) => `${r.hardware?.adresse}:8009`)));
+        return ergebnis;
+      } finally {
+        await sperre.query("SELECT pg_advisory_unlock(hashtext('stations-cast'))").catch(() => {});
+      }
+    } finally {
+      sperre.release();
+    }
+  })();
+  if (!nur) {
+    castLaeuft = lauf
+      .then((ergebnis) => { castStand = { zuletzt: new Date().toISOString(), ergebnis, fehler: null }; return ergebnis; })
+      .catch((e) => { castStand = { ...castStand, zuletzt: new Date().toISOString(), fehler: e.message }; throw e; })
+      .finally(() => { castLaeuft = null; });
+    return castLaeuft;
+  }
+  return lauf;
+}
+
+if (CAST_SEKUNDEN > 0) {
+  const lauf = () => castAbgleichen().catch((e) => console.error('[stations] Cast-Wächter:', e.message));
+  setTimeout(lauf, 60 * 1000).unref();
+  setInterval(lauf, CAST_SEKUNDEN * 1000).unref();
+}
+
+// POST /api/stations/admin/chromecast  { name, adresse, mac?, haus?, standort?, notiz? }
+//
+// Wie „Windows-Rechner eintragen": eine Zeile in der Stationsliste, ohne
+// Token, ohne Agent. Die Adresse ist die feste IP (DHCP-Reservierung) — der
+// Wächter spricht das Gerät direkt an, mDNS reicht nicht über die VLANs.
+router.post('/admin/chromecast', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  const wer = req.user?.email || req.user?.name || 'unbekannt';
+  const name = String(req.body?.name || '').trim().slice(0, 63);
+  const id = slug(name);
+  if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(id)) {
+    return res.status(400).json({ error: 'Name: mindestens zwei Buchstaben oder Ziffern (z. B. „Anzeige Eingang R9")' });
+  }
+  const adresse = castw.adressePruefen(req.body?.adresse);
+  if (!adresse) return res.status(400).json({ error: 'Adresse: IPv4 oder Hostname des Chromecast, ohne Port' });
+  const mac = req.body?.mac ? castw.macPruefen(req.body.mac) : null;
+  if (req.body?.mac && !mac) return res.status(400).json({ error: 'MAC-Adresse unlesbar (z. B. aa:bb:cc:dd:ee:ff)' });
+  const haus = req.body?.haus === null || req.body?.haus === undefined || req.body?.haus === ''
+    ? null : (HAEUSER.includes(Number(req.body.haus)) ? Number(req.body.haus) : undefined);
+  if (haus === undefined) return res.status(400).json({ error: 'Unbekannte Hausnummer' });
+  const text = (v) => String(v || '').trim().slice(0, 500) || null;
+
+  const doppelt = await pool.query(
+    `SELECT id FROM stations WHERE revoked_at IS NULL
+        AND (id = $1 OR (role = 'chromecast' AND hardware->>'adresse' = $2))`, [id, adresse]);
+  if (doppelt.rows.length) return res.status(409).json({ error: `Schon eingetragen (als '${doppelt.rows[0].id}')` });
+
+  const hardware = { hersteller: 'Google', modell: 'Chromecast', adresse, ...(mac ? { mac } : {}) };
+  // token_hash wie bei Windows: ein Wert, den sha256 nie liefert.
+  const r = await pool.query(
+    `INSERT INTO stations (id, role, hostname, standort, notiz, haus, token_hash, hardware, overrides,
+                           registered_by, status)
+     VALUES ($1, 'chromecast', $2, $3, $4, $5, $6, $7::jsonb, '{}'::jsonb, $8, 'aktiv')
+     ON CONFLICT (id) DO UPDATE SET
+       role = EXCLUDED.role, hostname = EXCLUDED.hostname, standort = EXCLUDED.standort,
+       notiz = EXCLUDED.notiz, haus = EXCLUDED.haus, token_hash = EXCLUDED.token_hash,
+       hardware = EXCLUDED.hardware, overrides = '{}'::jsonb,
+       registered_by = EXCLUDED.registered_by, registered_at = NOW(), revoked_at = NULL,
+       status = 'aktiv', sperr_grund = NULL, gesperrt_von = NULL, gesperrt_am = NULL,
+       zuruecksetzen_angefordert = NULL, zuruecksetzen_angefordert_von = NULL,
+       update_angefordert = NULL, update_angefordert_von = NULL,
+       last_seen_at = NULL, last_seen_ip = NULL, last_state = NULL
+     WHERE stations.revoked_at IS NOT NULL
+     RETURNING id`,
+    [id, name, text(req.body?.standort), text(req.body?.notiz), haus,
+      'ohne-token:' + crypto.randomBytes(16).toString('hex'), JSON.stringify(hardware), wer]);
+  if (!r.rows.length) return res.status(409).json({ error: `Kennung '${id}' ist schon vergeben` });
+  await ereignis(id, 'chromecast-eingetragen', wer, adresse);
+  console.log(`[stations] Chromecast '${name}' (${id}) eingetragen von ${wer}`);
+  // Gleich einmal nachsehen, damit die Liste nicht 45 s lang „neu" zeigt.
+  castAbgleichen({ nur: id }).catch((e) => console.error('[stations] Cast nach Eintragen:', e.message));
+  res.status(201).json({ id, name });
+}));
+
+// POST /api/stations/admin/:id/cast-jetzt — sofort prüfen und die Anzeige
+// zurückholen, auch wenn gerade jemand castet (die Pause gilt nicht).
+router.post('/admin/:id/cast-jetzt', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  const r = await pool.query("SELECT status FROM stations WHERE id = $1 AND role = 'chromecast' AND revoked_at IS NULL", [req.params.id]);
+  if (!r.rows.length) return res.status(404).json({ error: 'Kein Chromecast mit dieser Kennung' });
+  if (r.rows[0].status === 'gesperrt') return res.status(409).json({ error: 'Gesperrt — erst entsperren, dann hält der Wächter ihn wieder' });
+  const ergebnis = await castAbgleichen({ nur: req.params.id, erzwingen: true });
+  if (ergebnis.uebersprungen) return res.status(409).json({ error: 'Der Wächter läuft auf einer anderen API-Instanz' });
+  res.json(ergebnis[0] || {});
+}));
+
 // POST /api/stations/admin/:id/anschluss-uebernehmen
 //
 // Der eine Knopf für den Umzug: den Anschluss, an dem die Station jetzt
@@ -1375,12 +1581,16 @@ async function lebenszeichenPruefen(station, state, quelleIp) {
 // Was es bei einem Windows-Rechner nicht gibt: er hat keinen Agenten, der
 // eine Aufforderung abholen würde. Ein Klick darauf täte nichts, ausser
 // glauben zu lassen, es sei etwas passiert.
+// Dasselbe gilt für einen Chromecast: auf ihm läuft nichts von uns.
 async function nichtFuerWindows(req, res, next) {
   try {
     await ensureSchema();
     const r = await pool.query('SELECT role FROM stations WHERE id = $1', [req.params.id]);
     if (r.rows[0]?.role === 'windows') {
       return res.status(400).json({ error: 'Ein Windows-Rechner hat keinen Agenten — das gibt es dort nicht' });
+    }
+    if (r.rows[0]?.role === 'chromecast') {
+      return res.status(400).json({ error: 'Ein Chromecast hat keinen Agenten — das gibt es dort nicht' });
     }
     next();
   } catch (e) { next(e); }
@@ -1494,7 +1704,7 @@ router.patch('/admin/:id', authMiddleware, nurTechnik, a(async (req, res) => {
   const wer = req.user?.email || req.user?.name || 'unbekannt';
 
   const vorher = await pool.query(
-    'SELECT overrides FROM stations WHERE id = $1 AND revoked_at IS NULL',
+    'SELECT overrides, role, hardware FROM stations WHERE id = $1 AND revoked_at IS NULL',
     [req.params.id],
   );
   if (!vorher.rows.length) return res.status(404).json({ error: 'Station nicht gefunden' });
@@ -1502,6 +1712,25 @@ router.patch('/admin/:id', authMiddleware, nurTechnik, a(async (req, res) => {
   const felder = [];
   const werte = [req.params.id];
   const geaendert = [];
+
+  // Beim Chromecast stehen Adresse und MAC im Inventar (hardware) — bei einer
+  // Station meldet das Gerät sie selbst, hier trägt Technik sie ein.
+  if (vorher.rows[0].role === 'chromecast' && (req.body?.adresse !== undefined || req.body?.mac !== undefined)) {
+    const hw = { ...(vorher.rows[0].hardware || {}) };
+    if (req.body.adresse !== undefined) {
+      const adresse = castw.adressePruefen(req.body.adresse);
+      if (!adresse) return res.status(400).json({ error: 'Adresse: IPv4 oder Hostname des Chromecast, ohne Port' });
+      hw.adresse = adresse;
+    }
+    if (req.body.mac !== undefined) {
+      const mac = req.body.mac ? castw.macPruefen(req.body.mac) : null;
+      if (req.body.mac && !mac) return res.status(400).json({ error: 'MAC-Adresse unlesbar (z. B. aa:bb:cc:dd:ee:ff)' });
+      if (mac) hw.mac = mac; else delete hw.mac;
+    }
+    werte.push(JSON.stringify(hw));
+    felder.push(`hardware = $${werte.length}::jsonb`);
+    geaendert.push('adresse');
+  }
 
   // Das Haus bestimmt, welche Ankündigungen die Station zeigt.
   if ('haus' in (req.body || {})) {
@@ -2674,6 +2903,10 @@ router.post('/:id/journal-zertifikat', stationAuth, a(async (req, res) => {
 }));
 
 router.stationAuth = stationAuth;
+// Cast-Wächter: von Hand anstossen, und woher er weiss, ob ein Notfall läuft
+// (server.js führt display/emergency im displayCache mit).
+router.castAbgleichen = castAbgleichen;
+router.castNotfallQuelle = (fn) => { castNotfall = typeof fn === 'function' ? fn : () => false; };
 // Für den Abgleich von Hand (Tests, Fehlersuche) — der Zyklus ruft ihn selbst.
 router.anschlussAbgleichen = anschlussAbgleichen;
 
