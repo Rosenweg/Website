@@ -47,6 +47,14 @@ services:
       WG_CONTROL_URL: "http://100.64.2.34:3001"
       NOC_PUBLIC_OPEN: "1"
       JOURNAL_URL: "https://100.64.2.52:19532"
+      # Sicherungen (routes/sicherungen.js, Seite sicherungen.html). Geheim und
+      # deshalb nur in .env: PBS_AUDIT_TOKEN, PBS_PC_TOKEN. Nicht geheim, aber
+      # je Anlage: PBS_FINGERPRINT, PXE_VORMERK_ZIEL (ebenfalls .env).
+      PBS_URL: "https://100.64.2.23:8007"
+      PBS_DATASTORE: storage
+      PBS_PC_REPO: "sicherung@pbs!pc@100.64.2.23:storage"
+      PBS_PC_NS: Rosenweg9/pc
+      PBS_ERWARTUNG: "Rosenweg9/pc=0,*=36"
     ports: ["3000:3000"]
     volumes:
       - /mnt/documents:/documents
@@ -54,6 +62,9 @@ services:
       # (POST /api/stations/:id/journal-zertifikat). Siehe journal-remote/README.md.
       - /opt/rosenweg-core/journal-tls/ca.key:/journal-tls/ca.key:ro
       - /opt/rosenweg-core/journal-tls/ca.crt:/journal-tls/ca.crt:ro
+      # Sicherungen: id_ed25519 (Wartungsschluessel fuers Sicherungs-System),
+      # pxe_vormerkung (+ known_hosts_pxe) fuer CT 135. Nur root lesbar (0600).
+      - /opt/rosenweg-core/sicherung:/sicherung:ro
     depends_on:
       postgres: {condition: service_healthy}
     restart: unless-stopped

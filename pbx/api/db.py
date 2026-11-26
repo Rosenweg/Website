@@ -229,6 +229,7 @@ CREATE TABLE IF NOT EXISTS telefon_sip_privat (
     nummer       TEXT NOT NULL,            -- persoenliche Nummer 3HHWWP
     email        TEXT NOT NULL,
     geraet       TEXT NOT NULL DEFAULT '', -- Anzeige, z.B. "Pixel 8" (von der App)
+    geraet_kennung TEXT NOT NULL DEFAULT '', -- sha256("rosenweg:"+ANDROID_ID), gleich in allen Rosenweg-Apps
     passwort     TEXT NOT NULL,
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -451,6 +452,9 @@ def init_db():
             conn.execute("ALTER TABLE telefon_apps ADD COLUMN version_code INTEGER")
         if "version_name" not in spalten:
             conn.execute("ALTER TABLE telefon_apps ADD COLUMN version_name TEXT")
+        # Geraetekennung der eigenen Handys (26.11.2026): im Portal jedes Handy einmal, mit allen Apps
+        if "geraet_kennung" not in [r[1] for r in conn.execute("PRAGMA table_info(telefon_sip_privat)")]:
+            conn.execute("ALTER TABLE telefon_sip_privat ADD COLUMN geraet_kennung TEXT NOT NULL DEFAULT ''")
         # Gruppen der Person (fuer die App-Freigaben) an Ausweis und Sitzung.
         for tab in ("telefon_ausweise", "telefon_sitzungen"):
             if "gruppen" not in [r[1] for r in conn.execute(f"PRAGMA table_info({tab})")]:
