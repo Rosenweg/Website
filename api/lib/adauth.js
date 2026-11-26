@@ -58,6 +58,16 @@ function tlsOptions() {
   };
 }
 
+/** Ein LDAPS-Client mit gepinnter CA — auch für lib/adrechner.js. */
+function neuerClient() {
+  return new Client({
+    url: AD_URL,
+    timeout: 8000,
+    connectTimeout: 8000,
+    tlsOptions: tlsOptions(),
+  });
+}
+
 /**
  * Zugangsdaten gegen das AD prüfen.
  *
@@ -75,12 +85,7 @@ async function authenticateAD(username, password) {
 
   const user = String(username).trim();
   const upn = user.includes('@') ? user : `${user}@${AD_DOMAIN}`;
-  const client = new Client({
-    url: AD_URL,
-    timeout: 8000,
-    connectTimeout: 8000,
-    tlsOptions: tlsOptions(),
-  });
+  const client = neuerClient();
 
   try {
     try {
@@ -118,4 +123,4 @@ async function authenticateAD(username, password) {
   }
 }
 
-module.exports = { authenticateAD, AD_DOMAIN, AD_BASE_DN };
+module.exports = { authenticateAD, neuerClient, AD_DOMAIN, AD_BASE_DN };

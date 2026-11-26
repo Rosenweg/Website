@@ -75,7 +75,7 @@ Geprüft mit `Test-AppLockerPolicy`: Eine Kopie von notepad.exe unter `C:\Users\
 
 **Warum Loopback:** Abmeldeskripte stehen im Benutzerteil einer Richtlinie. Die Konten liegen aber nicht in OU=Windows. Darum schaltet `rosenweg-look.ps1` Loopback im Modus «Zusammenführen» ein (`UserPolicyMode=1`). Die eigenen Benutzerrichtlinien gelten weiter, und der Benutzerteil dieser Richtlinie kommt dazu.
 
-**Standarddrucker einstellen:** Auf /stationen beim Rechner unter «Aktionen ▾» → «Einstellen …» → «Drucken» → Standarddrucker wählen. Ein Windows-Rechner wird dort vorher einmal mit «Windows-Rechner eintragen» angelegt, mit dem Namen wie im AD, z. B. `WIN11-1`.
+**Standarddrucker einstellen:** Auf /stationen beim Rechner unter «Aktionen ▾» → «Einstellen …» → «Drucken» → Standarddrucker wählen. Windows-Rechner der Domäne erscheinen dort von selbst (AD-Abgleich alle 15 min oder «Windows aus AD abgleichen»), mit Haus und Drucker aus OU oder Namensanfang (`R9-…` → DruckerR9); nur ein Rechner, der nicht im AD steht, wird mit «Windows-Rechner eintragen» angelegt.
 
 Das Skript fragt `https://www.rosenweg4303.ch/api/stations/drucker/<RECHNER>` mit einer Zeitgrenze von 4 s. Die Antworten:
 

@@ -29,6 +29,7 @@
 //   Verwaltung (Anmeldung im Web, Gruppe technik)
 //     GET    /api/stations/admin/list     alle Stationen mit Zustand
 //     POST   /api/stations/admin/windows  Windows-Rechner von Hand eintragen
+//     POST   /api/stations/admin/ad-abgleich  Windows-Rechner jetzt aus dem AD lesen
 //     PATCH  /api/stations/admin/:id      Haus, Standort, Notiz, overrides
 //     GET    /api/stations/admin/:id/logs      eingesandte Logs, ohne Inhalt
 //     GET    /api/stations/admin/:id/logs/:logId   ein Log im Klartext
@@ -47,6 +48,7 @@ const express = require('express');
 const crypto = require('crypto');
 const { pool } = require('../lib/db');
 const { authenticateAD } = require('../lib/adauth');
+const { windowsRechnerLesen, adLesbar, STANDORT_REGELN } = require('../lib/adrechner');
 const { authMiddleware } = require('../middleware/auth');
 const { isTechnik, isPraesident } = require('../lib/groups');
 const {
@@ -139,6 +141,20 @@ async function ensureSchema() {
     -- faellt erst auf, wenn am Geraet ein Symbol fehlt.
     ALTER TABLE stations ADD COLUMN IF NOT EXISTS programme JSONB;
     ALTER TABLE stations ADD COLUMN IF NOT EXISTS programme_gemeldet_am TIMESTAMPTZ;
+    -- Windows-Rechner aus dem AD (26.11.2026). Erkannt wird ein Rechner an
+    -- seiner objectGUID, nicht am Namen: ein umbenannter Rechner bleibt
+    -- derselbe, und ein auf /stationen entfernter kommt nicht beim nächsten
+    -- Abgleich wieder — wohl aber ein neu beigetretener mit gleichem Namen.
+    --   ad_zustand: 'vorhanden' | 'deaktiviert' | 'fehlt' (im AD gelöscht)
+    --   ad_standort_regel: woraus das Haus bei der Aufnahme abgeleitet wurde
+    --     (z. B. 'Name R9-PC1'), leer = nicht erkennbar
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS ad_guid TEXT;
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS ad_dn TEXT;
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS ad_zustand TEXT;
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS ad_betriebssystem TEXT;
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS ad_gesehen_am TIMESTAMPTZ;
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS ad_aufgenommen_am TIMESTAMPTZ;
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS ad_standort_regel TEXT;
     -- Anzeigegeraete: Android-Tafeln mit der App SlideShow (sk.mimac.slideshow).
     -- Sie sind KEINE Stationen — kein eigenes OS, kein install.sh, kein Update
     -- ueber uns. Gemeinsam ist nur die Verwaltung: hier steht, welches Geraet
@@ -602,6 +618,8 @@ router.get('/admin/list', authMiddleware, nurTechnik, a(async (req, res) => {
            last_seen_at, last_seen_ip, last_state, revoked_at,
            update_angefordert, update_angefordert_von, overrides,
            programme, programme_gemeldet_am, haus,
+           ad_guid IS NOT NULL AS aus_ad, ad_dn, ad_zustand, ad_betriebssystem,
+           ad_gesehen_am, ad_aufgenommen_am, ad_standort_regel,
            w.bis AS ssh_wartung_bis, w.erteilt_von AS ssh_wartung_von
       FROM stations
       LEFT JOIN LATERAL (
@@ -637,6 +655,10 @@ router.get('/admin/list', authMiddleware, nurTechnik, a(async (req, res) => {
     // die Seite sagt es, bevor jemand vergeblich auf den Knopf drueckt.
     wartungsschluessel: Number((await pool.query(
       'SELECT COUNT(*)::int AS n FROM station_wartung_schluessel')).rows[0].n),
+    // Stand des AD-Abgleichs, damit die Seite „zuletzt 14:15, 2 Rechner"
+    // zeigen kann — und warum er nicht läuft, falls er nicht läuft.
+    ad_abgleich: { ...adStand, lesbar: adLesbar(), minuten: AD_ABGLEICH_MINUTEN,
+      regeln: STANDORT_REGELN.map((r) => r.text) },
   });
 }));
 
@@ -716,6 +738,213 @@ router.post('/admin/windows', authMiddleware, nurTechnik, a(async (req, res) => 
   console.log(`[stations] Windows-Rechner '${hostname}' (${id}) eingetragen von ${wer}`);
   res.status(201).json({ id, hostname });
 }));
+
+// ─── Windows-Rechner aus dem AD ─────────────────────────────────────
+//
+// Stefan, 26.11.2026: „Wieso lesen wir die Windows-Rechner nicht aus dem AD
+// und teilen ihnen bei der Aufnahme einmalig den Standort/Drucker zu?"
+//
+// Alle AD_ABGLEICH_MINUTEN (Vorgabe 15) und auf Knopfdruck liest die
+// Verwaltung die Windows-Computerkonten (lib/adrechner.js) und:
+//   - nimmt neue als Art 'windows' auf, mit Haus und Drucker aus OU/Namen
+//     (Regeln dort, STANDORT_REGELN). Ohne erkennbares Haus bleibt beides
+//     leer, die Seite sagt „Standort fehlt".
+//   - verknüpft einen schon von Hand eingetragenen Rechner gleichen Namens,
+//     OHNE an seinen Einstellungen etwas zu ändern.
+//   - schreibt Haus und Drucker NIE wieder. Was danach auf /stationen
+//     gewählt wird, gilt — der Abgleich fasst nur die ad_*-Spalten und den
+//     Namen an (ein umbenannter Rechner fragt drucker.ps1 unter dem neuen).
+//   - markiert Rechner, die im AD deaktiviert oder gelöscht sind, statt sie
+//     zu entfernen: ob ein Rechner wirklich weg ist, entscheidet ein Mensch.
+//   - holt einen auf /stationen entfernten Rechner nicht zurück, solange er
+//     im AD dasselbe Konto (objectGUID) hat. Sonst wäre „Entfernen" für
+//     AD-Rechner wirkungslos.
+//
+// Eine Station mit demselben Namen, die KEIN Windows-Rechner ist (etwa R9-PC1
+// nach dem Umbau auf Linux, solange das alte AD-Konto noch steht), wird nicht
+// angetastet und nur als Namenskonflikt gemeldet: sonst bekäme drucker.ps1
+// je nach Reihenfolge die eine oder die andere Antwort.
+const AD_ABGLEICH_MINUTEN = Number(process.env.AD_ABGLEICH_MINUTEN ?? 15);
+const AD_ABGLEICH_WER = 'AD-Abgleich';
+let adStand = { zuletzt: null, ergebnis: null, fehler: null };
+let adLaeuft = null;
+
+async function adAbgleichen(wer = AD_ABGLEICH_WER) {
+  // Ein zweiter Klick während eines Laufs wartet auf denselben Lauf, statt
+  // parallel dieselben Zeilen anzulegen.
+  if (adLaeuft) return adLaeuft;
+  adLaeuft = (async () => {
+    try {
+      const ergebnis = await adAbgleichDurchfuehren(wer);
+      adStand = { zuletzt: new Date().toISOString(), ergebnis, fehler: null };
+      return ergebnis;
+    } catch (e) {
+      adStand = { ...adStand, zuletzt: new Date().toISOString(), fehler: e.message };
+      throw e;
+    } finally {
+      adLaeuft = null;
+    }
+  })();
+  return adLaeuft;
+}
+
+async function adAbgleichDurchfuehren(wer) {
+  await ensureSchema();
+  const imAd = await windowsRechnerLesen();
+
+  // Laufen je zwei API-Instanzen, gleicht nur eine ab. Sitzungssperre auf
+  // einer eigenen Verbindung; geschrieben wird über pool.query, damit der
+  // Audit-Kontext greift wie überall sonst.
+  const sperre = await pool.connect();
+  try {
+    const { rows: [l] } = await sperre.query("SELECT pg_try_advisory_lock(hashtext('stations-ad-abgleich')) AS ok");
+    if (!l.ok) return { uebersprungen: 'läuft schon anderswo' };
+    try {
+      return await adAbgleichSchreiben(imAd, wer);
+    } finally {
+      await sperre.query("SELECT pg_advisory_unlock(hashtext('stations-ad-abgleich'))").catch(() => {});
+    }
+  } finally {
+    sperre.release();
+  }
+}
+
+async function adAbgleichSchreiben(imAd, wer) {
+  const ergebnis = {
+    gefunden: imAd.length, neu: [], verknuepft: [], ohne_standort: [],
+    deaktiviert: [], fehlt: [], konflikte: [], entfernt_belassen: [],
+  };
+  const { rows: alle } = await pool.query(
+    'SELECT id, role, hostname, revoked_at, ad_guid, ad_zustand FROM stations');
+  const nameGleich = (z, name) => String(z.hostname || z.id).toLowerCase() === name.toLowerCase();
+
+  for (const r of imAd) {
+    const zustand = r.deaktiviert ? 'deaktiviert' : 'vorhanden';
+    if (r.deaktiviert) ergebnis.deaktiviert.push(r.name);
+
+    // 1. Schon bekannt (am Konto, nicht am Namen)?
+    let z = alle.find((x) => x.ad_guid === r.guid && !x.revoked_at);
+    if (!z && alle.some((x) => x.ad_guid === r.guid && x.revoked_at)) {
+      ergebnis.entfernt_belassen.push(r.name);
+      continue;
+    }
+    // 2. Von Hand eingetragen (oder altes AD-Konto, neu beigetreten)?
+    let verknuepfen = false;
+    if (!z) {
+      const gleich = alle.filter((x) => !x.revoked_at && nameGleich(x, r.name));
+      const fremd = gleich.find((x) => x.role !== 'windows');
+      if (fremd) { ergebnis.konflikte.push(`${r.name} (schon als ${fremd.role} '${fremd.id}')`); continue; }
+      z = gleich[0];
+      verknuepfen = !!z;
+    }
+
+    if (z) {
+      const umbenannt = !nameGleich(z, r.name);
+      await pool.query(
+        `UPDATE stations SET ad_guid = $2, ad_dn = $3, ad_zustand = $4, ad_betriebssystem = $5,
+                ad_gesehen_am = NOW(), hostname = $6
+          WHERE id = $1`,
+        [z.id, r.guid, r.dn, zustand, r.betriebssystem, r.name],
+      );
+      if (verknuepfen) {
+        ergebnis.verknuepft.push(r.name);
+        await ereignis(z.id, 'ad-verknuepft', wer, `${r.dn} — Einstellungen unverändert`);
+      } else if (z.ad_zustand !== zustand) {
+        await ereignis(z.id, 'ad-zustand', wer, `im AD ${zustand}`);
+      }
+      if (umbenannt) await ereignis(z.id, 'ad-umbenannt', wer, `${z.hostname || z.id} → ${r.name}`);
+      continue;
+    }
+
+    // 3. Neu: einmalig Haus und Drucker zuteilen.
+    const id = slug(r.name);
+    if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(id) || !RECHNER_MUSTER.test(r.name)) {
+      ergebnis.konflikte.push(`${r.name} (Name taugt nicht als Kennung)`);
+      continue;
+    }
+    if (alle.some((x) => x.id === id && !x.revoked_at)) {
+      ergebnis.konflikte.push(`${r.name} (Kennung '${id}' ist vergeben)`);
+      continue;
+    }
+    const overrides = r.drucker ? { roles: { windows: { printing: { default: r.drucker } } } } : {};
+    // Wiederbelebt wird nur eine entfernte Zeile OHNE dieses AD-Konto (siehe
+    // oben) — dieselbe Regel wie bei /admin/windows: Verlauf bleibt, die
+    // Einstellungen kommen neu.
+    const ins = await pool.query(
+      `INSERT INTO stations (id, role, hostname, haus, token_hash, overrides, registered_by, status,
+                             ad_guid, ad_dn, ad_zustand, ad_betriebssystem, ad_gesehen_am,
+                             ad_aufgenommen_am, ad_standort_regel)
+       VALUES ($1, 'windows', $2, $3, $4, $5::jsonb, $6, 'aktiv', $7, $8, $9, $10, NOW(), NOW(), $11)
+       ON CONFLICT (id) DO UPDATE SET
+         role = EXCLUDED.role, hostname = EXCLUDED.hostname, standort = NULL, notiz = NULL,
+         haus = EXCLUDED.haus, token_hash = EXCLUDED.token_hash, overrides = EXCLUDED.overrides,
+         hardware = '{}'::jsonb, registered_by = EXCLUDED.registered_by, registered_at = NOW(),
+         revoked_at = NULL, status = 'aktiv', sperr_grund = NULL, gesperrt_von = NULL, gesperrt_am = NULL,
+         zuruecksetzen_angefordert = NULL, zuruecksetzen_angefordert_von = NULL,
+         update_angefordert = NULL, update_angefordert_von = NULL,
+         last_seen_at = NULL, last_seen_ip = NULL, last_state = NULL,
+         programme = NULL, programme_gemeldet_am = NULL,
+         ad_guid = EXCLUDED.ad_guid, ad_dn = EXCLUDED.ad_dn, ad_zustand = EXCLUDED.ad_zustand,
+         ad_betriebssystem = EXCLUDED.ad_betriebssystem, ad_gesehen_am = NOW(),
+         ad_aufgenommen_am = NOW(), ad_standort_regel = EXCLUDED.ad_standort_regel
+       WHERE stations.revoked_at IS NOT NULL
+       RETURNING id`,
+      [id, r.name, r.haus, 'ohne-token:' + crypto.randomBytes(16).toString('hex'),
+        JSON.stringify(overrides), AD_ABGLEICH_WER, r.guid, r.dn, zustand, r.betriebssystem, r.regel],
+    );
+    if (!ins.rows.length) { ergebnis.konflikte.push(`${r.name} (Kennung '${id}' ist vergeben)`); continue; }
+    ergebnis.neu.push(r.name);
+    if (!r.haus) ergebnis.ohne_standort.push(r.name);
+    await ereignis(id, 'ad-aufgenommen', wer, r.haus
+      ? `Rosenweg ${r.haus} (aus ${r.regel}), Drucker ${r.drucker || '— (keiner für dieses Haus)'}`
+      : 'Standort fehlt — kein Haus aus OU oder Name erkennbar, Drucker leer');
+    console.log(`[stations] AD: '${r.name}' aufgenommen (${r.haus ? `Haus ${r.haus}, ${r.drucker || 'ohne Drucker'}` : 'Standort fehlt'})`);
+  }
+
+  // 4. Im AD gelöscht. Eine leere Antwort bei bekannten Rechnern ist eher ein
+  // Rechte- oder Suchproblem als „alle auf einmal gelöscht" — dann lieber
+  // nichts markieren als alles.
+  const guids = new Set(imAd.map((r) => r.guid));
+  const verschwunden = alle.filter((x) => x.ad_guid && !x.revoked_at && !guids.has(x.ad_guid));
+  if (imAd.length === 0 && verschwunden.length) {
+    console.warn(`[stations] AD-Abgleich: keine Windows-Rechner gefunden, ${verschwunden.length} bekannte — nichts als fehlend markiert`);
+    ergebnis.warnung = 'Das AD lieferte keinen einzigen Windows-Rechner — nichts als fehlend markiert.';
+  } else {
+    for (const x of verschwunden) {
+      ergebnis.fehlt.push(x.hostname || x.id);
+      if (x.ad_zustand === 'fehlt') continue;
+      await pool.query("UPDATE stations SET ad_zustand = 'fehlt' WHERE id = $1", [x.id]);
+      await ereignis(x.id, 'ad-zustand', wer, 'im AD nicht mehr vorhanden');
+    }
+  }
+  return ergebnis;
+}
+
+// POST /api/stations/admin/ad-abgleich — „Jetzt abgleichen"
+router.post('/admin/ad-abgleich', authMiddleware, nurTechnik, a(async (req, res) => {
+  if (!adLesbar()) {
+    return res.status(503).json({ error: 'Kein Konto zum Lesen des AD (STATION_AD_JOIN_USER/-PASSWORD fehlen)' });
+  }
+  const wer = req.user?.email || req.user?.name || 'unbekannt';
+  try {
+    const ergebnis = await adAbgleichen(`${AD_ABGLEICH_WER} (${wer})`);
+    res.json({ ...adStand, ergebnis });
+  } catch (e) {
+    console.error('[stations] AD-Abgleich:', e.message);
+    res.status(502).json({ error: `AD nicht lesbar: ${e.message}` });
+  }
+}));
+
+// Regelmässig. Eine Minute nach dem Start, damit ein Neustart nicht als
+// Erstes am DC hängt; unref, damit der Timer keinen Prozess am Leben hält.
+if (AD_ABGLEICH_MINUTEN > 0) {
+  const lauf = () => {
+    if (!adLesbar()) return;
+    adAbgleichen().catch((e) => console.error('[stations] AD-Abgleich:', e.message));
+  };
+  setTimeout(lauf, 60 * 1000).unref();
+  setInterval(lauf, AD_ABGLEICH_MINUTEN * 60 * 1000).unref();
+}
 
 // Was es bei einem Windows-Rechner nicht gibt: er hat keinen Agenten, der
 // eine Aufforderung abholen würde. Ein Klick darauf täte nichts, ausser
