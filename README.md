@@ -156,4 +156,6 @@ Nur die Namen – alle Variablen je Dienst: [docs/api.md](docs/api.md) (Abschnit
 
 ## Lizenz
 
-Keine Lizenz hinterlegt – alle Rechte vorbehalten.
+GPL-3.0-or-later, siehe [LICENSE](LICENSE).
+
+Ausgenommen sind eingebundene Fremdbibliotheken mit eigener Lizenz: `js/mqtt.min.js` (MQTT.js, MIT) und `js/qrious.min.js` (QRious, GPL-3.0). Abhängigkeiten aus npm (`package.json` in `api/`, `mcp/`, `whatsapp-bot/` u. a.) behalten ihre eigenen Lizenzen.
