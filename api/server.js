@@ -22649,8 +22649,9 @@ app.post('/api/stations/:id/tunnel', stationsRouter.appSession, async (req, res)
     if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(stationId)) return res.status(400).json({ error: 'Ungültige Stationskennung' });
     // Nur fuer registrierte, nicht gesperrte/zurueckgezogene Stationen — sonst
     // liessen sich unter Fantasie-Kennungen beliebig Peers anlegen.
+    // Ein von Hand eingetragener Windows-Rechner ist keine Station mit Tunnel.
     const station = await pool.query(
-      "SELECT 1 FROM stations WHERE id = $1 AND revoked_at IS NULL AND status = 'aktiv'", [stationId]);
+      "SELECT 1 FROM stations WHERE id = $1 AND revoked_at IS NULL AND status = 'aktiv' AND role <> 'windows'", [stationId]);
     if (!station.rowCount) return res.status(404).json({ error: 'Station unbekannt oder gesperrt' });
 
     const email = (req.appUser?.email || '').toLowerCase();

@@ -16,6 +16,9 @@
 //     GET    /api/stations/types          Computer-Typen
 //     POST   /api/stations/register       anlegen -> Kennung, Token, Config
 //
+//   Rechner im Haus (ohne Anmeldung, nur aus dem internen Netz)
+//     GET    /api/stations/drucker/:rechner   Standarddrucker dieses Rechners
+//
 //   Station selbst (Stationstoken)
 //     GET    /api/stations/:id/config     Konfiguration abholen
 //     POST   /api/stations/:id/seen       Lebenszeichen und Zustand melden
@@ -25,6 +28,8 @@
 //
 //   Verwaltung (Anmeldung im Web, Gruppe technik)
 //     GET    /api/stations/admin/list     alle Stationen mit Zustand
+//     POST   /api/stations/admin/windows  Windows-Rechner von Hand eintragen
+//     PATCH  /api/stations/admin/:id      Haus, Standort, Notiz, overrides
 //     GET    /api/stations/admin/:id/logs      eingesandte Logs, ohne Inhalt
 //     GET    /api/stations/admin/:id/logs/:logId   ein Log im Klartext
 //     POST   /api/stations/admin/:id/update   Update anfordern
@@ -44,7 +49,9 @@ const { pool } = require('../lib/db');
 const { authenticateAD } = require('../lib/adauth');
 const { authMiddleware } = require('../middleware/auth');
 const { isTechnik, isPraesident } = require('../lib/groups');
-const { STATION_TYPES, buildConfig, missingSecrets, hausWlan } = require('../lib/stationconfig');
+const {
+  STATION_TYPES, VERWALTUNGS_TYPEN, DRUCKER, buildConfig, missingSecrets, hausWlan,
+} = require('../lib/stationconfig');
 const { HAEUSER } = require('../lib/haeuser');
 const { wlanAufloesen, netznamen } = require('../lib/stationwlan');
 const { stationApps, gruppenJeApp } = require('../lib/stationapps');
@@ -456,6 +463,85 @@ router.post('/login', a(async (req, res) => {
 // GET /api/stations/types
 router.get('/types', setupSession, (req, res) => res.json({ types: STATION_TYPES }));
 
+// ─── Standarddrucker je Rechner ─────────────────────────────────────
+//
+// GET /api/stations/drucker/:rechner
+//
+// Für das Anmeldeskript der Windows-Rechner (und später jeden anderen
+// Rechner, der fragen will): „welcher Drucker ist hier der Standard?"
+// Gepflegt wird er in der Verwaltung unter „Einstellen …" der Station.
+//
+// Ohne Anmeldung, weil ein Anmeldeskript nichts hat, womit es sich
+// ausweisen könnte — und ein Geheimnis dafür auf jeden Rechner zu legen,
+// schützte eine Antwort, die selbst nichts Geheimes enthält: einen
+// Druckernamen, der ohnehin in jedem Druckdialog im Haus steht. Was bleibt,
+// ist „nur von innen": draussen soll niemand die Rechnernamen des Hauses
+// durchprobieren können.
+//
+// Das Format ist mit dem Windows-Anmeldeskript vereinbart und darf sich nicht
+// ändern:
+//   {"rechner":"WIN11-1","bekannt":true,"standard":"DruckerR9"}
+//   {"rechner":"WIN11-1","bekannt":true,"standard":null}     keiner gewählt
+//   {"rechner":"…","bekannt":false,"standard":null}           unbekannt
+// Gesperrte und entfernte Stationen gelten als unbekannt: eine Station, die
+// jemand gesperrt hat, soll nicht weiter Einstellungen verteilen.
+//
+// MUSS vor den /:id-Routen stehen: '/drucker/os' passte sonst auf '/:id/os'.
+const RECHNER_MUSTER = /^[A-Za-z0-9-]{1,63}$/;
+
+// Nur aus dem internen Netz. JEDE Adresse der Kette muss innen liegen — die
+// eigenen Proxys (Edge, Frontend) sind es, der Client hinter ihnen muss es
+// auch sein. Kommt die Anfrage über Cloudflare oder von aussen herein, steht
+// dort eine fremde Adresse, und das genügt für ein Nein.
+//
+// Anders als clientIp() wird hier nicht "der Client" gesucht, sondern
+// geprüft, ob irgendwo ein Fremder in der Kette steht. Ein vorgetäuschtes
+// "10.0.0.5" hilft damit niemandem: Traefik verwirft eingehende Werte und
+// setzt die Adresse, die es sieht — und selbst wenn ein Proxy sie nur
+// anhängte, stünde die echte, fremde Adresse dahinter und gäbe das Nein.
+// Innen heisst INTERN_NETZE (wie beim Schlüssel der Datenpartition), also mit
+// dem IPv6-Präfix des Hauses: ein Rechner, der den Edge über IPv6 erreicht,
+// kommt mit seiner öffentlichen, aber eigenen Adresse an.
+function nurAusDemHausnetz(req) {
+  const kette = String(req.headers['x-forwarded-for'] || '')
+    .split(',').map((s) => s.trim()).filter(Boolean);
+  kette.push(req.socket?.remoteAddress || '');
+  return kette.every((ip) => istHausnetz(ip));
+}
+
+/** Der in der Verwaltung gewählte Standarddrucker — oder null für „keiner". */
+function standardDrucker(station) {
+  const wert = station?.overrides?.roles?.[station.role]?.printing?.default;
+  return typeof wert === 'string' && wert.trim() ? wert.trim() : null;
+}
+
+router.get('/drucker/:rechner', a(async (req, res) => {
+  // Vor allem anderen: auch eine Fehlermeldung soll nirgends liegen bleiben.
+  res.set('Cache-Control', 'no-store');
+  if (!nurAusDemHausnetz(req)) {
+    return res.status(403).json({ error: 'Nur aus dem internen Netz' });
+  }
+  const rechner = String(req.params.rechner || '');
+  if (!RECHNER_MUSTER.test(rechner)) {
+    return res.status(400).json({ error: 'Ungültiger Rechnername' });
+  }
+  await ensureSchema();
+  // Gross/klein egal: Windows meldet WIN11-1, eine Linux-Station heisst
+  // r9-pc1. Gäbe es den Namen doppelt (zwei Linux-Stationen, gleicher
+  // Hostname), gewinnt die, die sich zuletzt gemeldet hat — die andere ist
+  // vermutlich das alte Gerät.
+  const r = await pool.query(
+    `SELECT role, overrides FROM stations
+      WHERE LOWER(COALESCE(hostname, id)) = LOWER($1)
+        AND revoked_at IS NULL AND status = 'aktiv'
+      ORDER BY last_seen_at DESC NULLS LAST, registered_at DESC
+      LIMIT 1`,
+    [rechner],
+  );
+  if (!r.rows.length) return res.json({ rechner, bekannt: false, standard: null });
+  res.json({ rechner, bekannt: true, standard: standardDrucker(r.rows[0]) });
+}));
+
 // ─── Versionen des Stations-Betriebssystems ─────────────────────────
 // MUSS vor den /:id-Routen stehen.
 
@@ -534,7 +620,11 @@ router.get('/admin/list', authMiddleware, nurTechnik, a(async (req, res) => {
       const { sichtbar, geheim } = ohneGeheimnisse(z.overrides);
       return { ...z, overrides: sichtbar, overrides_geheim: geheim };
     }),
-    types: STATION_TYPES,
+    // Mit den Arten, die nur die Verwaltung kennt — sonst stünde in der
+    // Typ-Spalte eines Windows-Rechners nur die Kennung 'windows'.
+    types: [...STATION_TYPES, ...VERWALTUNGS_TYPEN],
+    // Die Auswahl für den Standarddrucker, mit Klartextnamen.
+    drucker: DRUCKER,
     // Die Hausvorgabe zum WLAN. Ohne sie sähe die Verwaltung nur die
     // stationseigene Ebene — also ein leeres Feld — und jemand trüge das Netz
     // ein zweites Mal ein, obwohl es längst für alle gilt.
@@ -549,6 +639,97 @@ router.get('/admin/list', authMiddleware, nurTechnik, a(async (req, res) => {
       'SELECT COUNT(*)::int AS n FROM station_wartung_schluessel')).rows[0].n),
   });
 }));
+
+// POST /api/stations/admin/windows  { hostname, haus?, standort?, notiz?, drucker? }
+//
+// Einen Windows-Rechner von Hand eintragen. Er hat keinen Installer, der ihn
+// registrieren könnte, und keinen Agenten — er steht hier nur, damit seine
+// Einstellungen (heute: der Standarddrucker) dort gepflegt werden, wo auch
+// die der Stationen stehen.
+//
+// Der Name muss genau der Rechnername im AD sein (WIN11-1, R9-PC1): unter
+// ihm fragt das Anmeldeskript nach.
+//
+// token_hash ist NOT NULL, ein Token gibt es aber nicht. Statt eines
+// zufälligen Hashes steht dort ein Wert, den sha256 nie liefern kann
+// ('ohne-token:…' ist kein 64-stelliger Hexwert). Damit kann stationAuth
+// diese Zeile mit keinem denkbaren Token treffen — nicht nur „mit keinem,
+// das jemand kennt". Der Zufallsteil hält die Werte trotzdem verschieden,
+// falls die Spalte je einen Index bekommt.
+router.post('/admin/windows', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  const wer = req.user?.email || req.user?.name || 'unbekannt';
+  const hostname = String(req.body?.hostname || '').trim();
+  if (!RECHNER_MUSTER.test(hostname)) {
+    return res.status(400).json({ error: 'Rechnername: nur Buchstaben, Ziffern und Bindestrich, wie im AD (z. B. WIN11-1)' });
+  }
+  const id = slug(hostname);
+  if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(id)) {
+    return res.status(400).json({ error: `Aus „${hostname}" lässt sich keine Kennung bilden` });
+  }
+  const haus = req.body?.haus === null || req.body?.haus === undefined || req.body?.haus === ''
+    ? null : (HAEUSER.includes(Number(req.body.haus)) ? Number(req.body.haus) : undefined);
+  if (haus === undefined) return res.status(400).json({ error: 'Unbekannte Hausnummer' });
+  const drucker = req.body?.drucker ? String(req.body.drucker) : null;
+  if (drucker && !DRUCKER.some((d) => d.name === drucker)) {
+    return res.status(400).json({ error: `Unbekannter Drucker '${drucker}'` });
+  }
+  const text = (v) => String(v || '').trim().slice(0, 500) || null;
+
+  // Derselbe Name zweimal hiesse: das Anmeldeskript bekäme je nach Laune die
+  // eine oder die andere Einstellung. Also gar nicht erst zulassen.
+  const doppelt = await pool.query(
+    `SELECT id FROM stations
+      WHERE revoked_at IS NULL AND (id = $1 OR LOWER(COALESCE(hostname, id)) = LOWER($2))`,
+    [id, hostname],
+  );
+  if (doppelt.rows.length) {
+    return res.status(409).json({ error: `„${hostname}" steht schon in der Liste (als '${doppelt.rows[0].id}')` });
+  }
+
+  const overrides = drucker ? { roles: { windows: { printing: { default: drucker } } } } : {};
+  // Eine früher entfernte Zeile mit derselben Kennung wird wiederbelebt —
+  // wie bei /register: Verlauf und Ereignisse sollen bleiben, und id ist der
+  // Primärschlüssel. Die alten Einstellungen dagegen nicht: wer den Rechner
+  // neu einträgt, wählt neu.
+  const r = await pool.query(
+    `INSERT INTO stations (id, role, hostname, standort, notiz, haus, token_hash, overrides,
+                           registered_by, status)
+     VALUES ($1, 'windows', $2, $3, $4, $5, $6, $7::jsonb, $8, 'aktiv')
+     ON CONFLICT (id) DO UPDATE SET
+       role = EXCLUDED.role, hostname = EXCLUDED.hostname, standort = EXCLUDED.standort,
+       notiz = EXCLUDED.notiz, haus = EXCLUDED.haus, token_hash = EXCLUDED.token_hash,
+       overrides = EXCLUDED.overrides, hardware = '{}'::jsonb,
+       registered_by = EXCLUDED.registered_by, registered_at = NOW(), revoked_at = NULL,
+       status = 'aktiv', sperr_grund = NULL, gesperrt_von = NULL, gesperrt_am = NULL,
+       zuruecksetzen_angefordert = NULL, zuruecksetzen_angefordert_von = NULL,
+       update_angefordert = NULL, update_angefordert_von = NULL,
+       last_seen_at = NULL, last_seen_ip = NULL, last_state = NULL,
+       programme = NULL, programme_gemeldet_am = NULL
+     WHERE stations.revoked_at IS NOT NULL
+     RETURNING id`,
+    [id, hostname, text(req.body?.standort), text(req.body?.notiz), haus,
+      'ohne-token:' + crypto.randomBytes(16).toString('hex'), JSON.stringify(overrides), wer],
+  );
+  if (!r.rows.length) return res.status(409).json({ error: `Kennung '${id}' ist schon vergeben` });
+  await ereignis(id, 'windows-eingetragen', wer, hostname);
+  console.log(`[stations] Windows-Rechner '${hostname}' (${id}) eingetragen von ${wer}`);
+  res.status(201).json({ id, hostname });
+}));
+
+// Was es bei einem Windows-Rechner nicht gibt: er hat keinen Agenten, der
+// eine Aufforderung abholen würde. Ein Klick darauf täte nichts, ausser
+// glauben zu lassen, es sei etwas passiert.
+async function nichtFuerWindows(req, res, next) {
+  try {
+    await ensureSchema();
+    const r = await pool.query('SELECT role FROM stations WHERE id = $1', [req.params.id]);
+    if (r.rows[0]?.role === 'windows') {
+      return res.status(400).json({ error: 'Ein Windows-Rechner hat keinen Agenten — das gibt es dort nicht' });
+    }
+    next();
+  } catch (e) { next(e); }
+}
 
 // GET /api/stations/admin/:id/events
 router.get('/admin/:id/events', authMiddleware, nurTechnik, a(async (req, res) => {
@@ -592,7 +773,7 @@ router.get('/admin/:id/logs/:logId', authMiddleware, nurTechnik, a(async (req, r
 // hinter der Firewall und hat keinen offenen Port. Also wird die Aufforderung
 // hier vermerkt und beim nächsten Lebenszeichen ausgeliefert
 // (agent.status_interval_seconds, Vorgabe 300).
-router.post('/admin/:id/update', authMiddleware, nurTechnik, a(async (req, res) => {
+router.post('/admin/:id/update', authMiddleware, nurTechnik, nichtFuerWindows, a(async (req, res) => {
   await ensureSchema();
   const wer = req.user?.email || req.user?.name || 'unbekannt';
   const r = await pool.query(
@@ -689,6 +870,15 @@ router.patch('/admin/:id', authMiddleware, nurTechnik, a(async (req, res) => {
     const eingang = req.body.overrides;
     if (!eingang || typeof eingang !== 'object' || Array.isArray(eingang)) {
       return res.status(400).json({ error: 'overrides muss ein Objekt sein' });
+    }
+    // Der Standarddrucker muss einer sein, den es gibt. Ein Tippfehler im
+    // JSON-Kasten fiele sonst erst auf, wenn am Rechner gar nichts passiert.
+    for (const [rolle, zweig] of Object.entries(eingang.roles || {})) {
+      const wahl = zweig?.printing?.default;
+      if (wahl === undefined || wahl === null) continue;
+      if (!DRUCKER.some((d) => d.name === wahl)) {
+        return res.status(400).json({ error: `Unbekannter Standarddrucker '${wahl}' (roles.${rolle})` });
+      }
     }
     const zusammen = tiefZusammenfuehren(vorher.rows[0].overrides || {}, eingang);
     werte.push(JSON.stringify(zusammen));
@@ -939,7 +1129,7 @@ const uhrzeit = (d) => new Date(d).toLocaleTimeString('de-CH',
 // POST /api/stations/admin/:id/ssh-wartung — freigeben oder verlaengern.
 // Ein zweiter Druck auf den Knopf verlaengert auf zwei Stunden ab jetzt, statt
 // eine zweite Freigabe danebenzustellen.
-router.post('/admin/:id/ssh-wartung', authMiddleware, nurTechnik, a(async (req, res) => {
+router.post('/admin/:id/ssh-wartung', authMiddleware, nurTechnik, nichtFuerWindows, a(async (req, res) => {
   await ensureSchema();
   const wer = req.user?.email || req.user?.name || 'unbekannt';
   const st = await pool.query(
@@ -1058,7 +1248,7 @@ router.post('/admin/:id/unblock', authMiddleware, nurTechnik, a(async (req, res)
 // die Aufforderung im Lebenszeichen ab, loescht ihre Identitaet und startet in
 // den Einrichtungszustand — danach meldet sie sich selbst ab, und erst dadurch
 // wird das Token entwertet.
-router.post('/admin/:id/zuruecksetzen', authMiddleware, nurTechnik, a(async (req, res) => {
+router.post('/admin/:id/zuruecksetzen', authMiddleware, nurTechnik, nichtFuerWindows, a(async (req, res) => {
   await ensureSchema();
   const wer = req.user?.email || req.user?.name || 'unbekannt';
   const r = await pool.query(
