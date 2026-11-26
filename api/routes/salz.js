@@ -98,6 +98,20 @@ async function lagerRechte(user) {
   return erlaubteLager(user, r.rows);
 }
 
+/**
+ * Alle Gruppen, die irgendwo buchen dürfen — für die Stationen, die den
+ * Starter der App „Rosenweg Salz“ genau diesen Gruppen zeigen
+ * (lib/stationapps.js, /api/stations/<id>/apps). Technik, Präsident,
+ * SALZ_GRUPPEN und die bewohner_gruppen der aktiven Lager, so wie sie im
+ * Portal gerade stehen. Obergruppen braucht es hier nicht: Authentik vergibt
+ * sie beim Zuweisen mit (docs/anleitung-technik.md 1.1).
+ */
+async function buchungsGruppen() {
+  const r = await pool.query(
+    'SELECT DISTINCT LOWER(g) AS g FROM salz_lager, unnest(bewohner_gruppen) AS g WHERE aktiv');
+  return [...new Set(['technik', 'praesident', ...SALZ_GRUPPEN, ...r.rows.map(z => z.g)])];
+}
+
 let schemaVersprechen = null;
 function ensureSchema() {
   if (!schemaVersprechen) {
@@ -679,4 +693,4 @@ function salzRouter({ rateLimitGuard }) {
   return router;
 }
 
-module.exports = { salzRouter, ensureSchema, starteSalzCron, meldelauf, einfuelllauf, lagerUebersicht, erlaubteLager, darfAlleLager, istVerwalter, LAGER_START };
+module.exports = { salzRouter, ensureSchema, starteSalzCron, meldelauf, einfuelllauf, lagerUebersicht, erlaubteLager, darfAlleLager, istVerwalter, buchungsGruppen, LAGER_START };
