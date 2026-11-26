@@ -296,59 +296,6 @@ if (-not $bgAufgabe -or $bgAufgabe.Actions[0].Arguments -ne $bgArg) {
     Log "Aufgabe 'Rosenweg BGInfo' eingerichtet"
 }
 
-# --- Drucker im Profil ------------------------------------------------------
-# Servergespeicherte Profile wandern mit. Darin standen Druckerverbindungen von
-# frueheren PCs (\\100.64.2.32\DruckerR9 per SMB, Brother, AnyDesk, PDF24 ...)
-# und als Standard ein Drucker, den es auf dem Rechner gar nicht gibt -
-# Programme druckten dann ins Leere, beim CUPS kam nie etwas an (win11-1,
-# 26.11.2026). drucker.ps1 raeumt das im Namen der Person auf und setzt den
-# Standarddrucker der Station (gepflegt auf /stationen):
-#   - bei jeder Anmeldung (geplante Aufgabe wie BGInfo)
-#   - bei jeder Abmeldung (Abmeldeskript der Richtlinie, vor dem Hochladen des
-#     Profils - so kommt es sauber auf den naechsten Rechner)
-# Liegt unter Programme, weil die Programm-Whitelist Skripte nur von dort und
-# aus Windows startet; das Abmeldeskript ruft dieselbe Datei auf.
-$drQuelle = Join-Path $Quelle 'drucker.ps1'
-$drZiel = Join-Path $prog 'drucker.ps1'
-if ((Test-Path $drQuelle) -and (-not (Test-Path $drZiel) -or (Get-FileHash $drQuelle).Hash -ne (Get-FileHash $drZiel).Hash)) {
-    Copy-Item $drQuelle $drZiel -Force
-    Log "drucker.ps1 aktualisiert"
-}
-$drArg = "--headless $env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$drZiel`" -Anlass Anmelden"
-$drAufgabe = Get-ScheduledTask -TaskName 'Rosenweg Drucker' -ErrorAction SilentlyContinue
-if (-not $drAufgabe -or $drAufgabe.Actions[0].Arguments -ne $drArg) {
-    $a = New-ScheduledTaskAction -Execute "$env:WINDIR\System32\conhost.exe" -Argument $drArg
-    $t = New-ScheduledTaskTrigger -AtLogOn
-    $p = New-ScheduledTaskPrincipal -GroupId 'S-1-5-32-545' -RunLevel Limited
-    $o = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
-    Register-ScheduledTask -TaskName 'Rosenweg Drucker' -Action $a -Trigger $t -Principal $p -Settings $o -Force | Out-Null
-    Log "Aufgabe 'Rosenweg Drucker' eingerichtet"
-}
-# Protokoll ins Ereignisprotokoll (Anwendung, Quelle "Rosenweg Drucker").
-# Eine Quelle anlegen darf nur ein Admin - darum hier; schreiben duerfen
-# angemeldete Personen dann selbst.
-if (-not [System.Diagnostics.EventLog]::SourceExists('Rosenweg Drucker')) {
-    New-EventLog -LogName Application -Source 'Rosenweg Drucker'
-    Log "Ereignisquelle 'Rosenweg Drucker' angelegt"
-}
-# Abmeldeskripte stehen im Benutzerteil der Richtlinie. Die Konten liegen
-# nicht in OU=Windows, also wirkt dieser Teil nur mit Loopback ("Zusammen-
-# fuehren": die eigenen Benutzerrichtlinien gelten weiter, die Benutzerteile
-# der Richtlinien an OU=Windows kommen dazu).
-Setze 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System' 'UserPolicyMode' 1 'DWord'
-# Standarddrucker dieser Station auf Vorrat holen. drucker.ps1 fragt bei der
-# Anmeldung selbst nach; ist die Verwaltung dann nicht erreichbar, gilt der
-# hier zuletzt geholte Wert. Nur ueberschreiben, wenn eine Antwort kam.
-try {
-    $antwort = Invoke-RestMethod -UseBasicParsing -TimeoutSec 5 `
-        -Uri "https://www.rosenweg4303.ch/api/stations/drucker/$env:COMPUTERNAME"
-    if ($null -ne $antwort.bekannt) {
-        $stand = [ordered]@{ bekannt = [bool]$antwort.bekannt; standard = $antwort.standard; geholt = (Get-Date -Format s) }
-        $stand | ConvertTo-Json | Set-Content -Path (Join-Path $Ziel 'standarddrucker.json') -Encoding UTF8
-        Log "Standarddrucker laut Verwaltung: $(if ($antwort.standard) { $antwort.standard } elseif ($antwort.bekannt) { 'keiner' } else { 'Rechner nicht eingetragen' })"
-    }
-} catch { Log "Standarddrucker: Verwaltung nicht erreichbar ($($_.Exception.Message)) - bleibt beim zuletzt bekannten" }
-
 # --- Nextcloud als Laufwerk N: (WebDAV) ---------------------------------------
 # Die Anmeldung und das Verbinden macht nextcloud-laufwerk.ps1 im Namen der
 # Person (Begruendung dort und im README). Hier nur das Rechnerweite: das
@@ -416,6 +363,59 @@ if ($NextcloudAn) {
     Remove-Item $ncMenue, $ncZiel -Force -ErrorAction SilentlyContinue
     Remove-ItemProperty $ncZonen -Name 'https://nextcloud.rosenweg4303.ch', 'https://authentik.rosenweg4303.ch' -ErrorAction SilentlyContinue
 }
+
+# --- Drucker im Profil ------------------------------------------------------
+# Servergespeicherte Profile wandern mit. Darin standen Druckerverbindungen von
+# frueheren PCs (\\100.64.2.32\DruckerR9 per SMB, Brother, AnyDesk, PDF24 ...)
+# und als Standard ein Drucker, den es auf dem Rechner gar nicht gibt -
+# Programme druckten dann ins Leere, beim CUPS kam nie etwas an (win11-1,
+# 26.11.2026). drucker.ps1 raeumt das im Namen der Person auf und setzt den
+# Standarddrucker der Station (gepflegt auf /stationen):
+#   - bei jeder Anmeldung (geplante Aufgabe wie BGInfo)
+#   - bei jeder Abmeldung (Abmeldeskript der Richtlinie, vor dem Hochladen des
+#     Profils - so kommt es sauber auf den naechsten Rechner)
+# Liegt unter Programme, weil die Programm-Whitelist Skripte nur von dort und
+# aus Windows startet; das Abmeldeskript ruft dieselbe Datei auf.
+$drQuelle = Join-Path $Quelle 'drucker.ps1'
+$drZiel = Join-Path $prog 'drucker.ps1'
+if ((Test-Path $drQuelle) -and (-not (Test-Path $drZiel) -or (Get-FileHash $drQuelle).Hash -ne (Get-FileHash $drZiel).Hash)) {
+    Copy-Item $drQuelle $drZiel -Force
+    Log "drucker.ps1 aktualisiert"
+}
+$drArg = "--headless $env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$drZiel`" -Anlass Anmelden"
+$drAufgabe = Get-ScheduledTask -TaskName 'Rosenweg Drucker' -ErrorAction SilentlyContinue
+if (-not $drAufgabe -or $drAufgabe.Actions[0].Arguments -ne $drArg) {
+    $a = New-ScheduledTaskAction -Execute "$env:WINDIR\System32\conhost.exe" -Argument $drArg
+    $t = New-ScheduledTaskTrigger -AtLogOn
+    $p = New-ScheduledTaskPrincipal -GroupId 'S-1-5-32-545' -RunLevel Limited
+    $o = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+    Register-ScheduledTask -TaskName 'Rosenweg Drucker' -Action $a -Trigger $t -Principal $p -Settings $o -Force | Out-Null
+    Log "Aufgabe 'Rosenweg Drucker' eingerichtet"
+}
+# Protokoll ins Ereignisprotokoll (Anwendung, Quelle "Rosenweg Drucker").
+# Eine Quelle anlegen darf nur ein Admin - darum hier; schreiben duerfen
+# angemeldete Personen dann selbst.
+if (-not [System.Diagnostics.EventLog]::SourceExists('Rosenweg Drucker')) {
+    New-EventLog -LogName Application -Source 'Rosenweg Drucker'
+    Log "Ereignisquelle 'Rosenweg Drucker' angelegt"
+}
+# Abmeldeskripte stehen im Benutzerteil der Richtlinie. Die Konten liegen
+# nicht in OU=Windows, also wirkt dieser Teil nur mit Loopback ("Zusammen-
+# fuehren": die eigenen Benutzerrichtlinien gelten weiter, die Benutzerteile
+# der Richtlinien an OU=Windows kommen dazu).
+Setze 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System' 'UserPolicyMode' 1 'DWord'
+# Standarddrucker dieser Station auf Vorrat holen. drucker.ps1 fragt bei der
+# Anmeldung selbst nach; ist die Verwaltung dann nicht erreichbar, gilt der
+# hier zuletzt geholte Wert. Nur ueberschreiben, wenn eine Antwort kam.
+try {
+    $antwort = Invoke-RestMethod -UseBasicParsing -TimeoutSec 5 `
+        -Uri "https://www.rosenweg4303.ch/api/stations/drucker/$env:COMPUTERNAME"
+    if ($null -ne $antwort.bekannt) {
+        $stand = [ordered]@{ bekannt = [bool]$antwort.bekannt; standard = $antwort.standard; geholt = (Get-Date -Format s) }
+        $stand | ConvertTo-Json | Set-Content -Path (Join-Path $Ziel 'standarddrucker.json') -Encoding UTF8
+        Log "Standarddrucker laut Verwaltung: $(if ($antwort.standard) { $antwort.standard } elseif ($antwort.bekannt) { 'keiner' } else { 'Rechner nicht eingetragen' })"
+    }
+} catch { Log "Standarddrucker: Verwaltung nicht erreichbar ($($_.Exception.Message)) - bleibt beim zuletzt bekannten" }
 
 # --- Startmenue: Open-Shell mit Rosenweg-Knopf ------------------------------
 # Das klassische Startmenue (Windows-7-Stil, zwei Spalten) statt dem von
