@@ -11,7 +11,9 @@
 #      Container laesst sich keine Richtlinie haengen)
 #   2. die genannten Rechner dorthin verschieben
 #   3. die Richtlinie anlegen (einmal) und an OU=Windows haengen
-#   4. Skript und Bilder ins sysvol, Startskript eintragen, Version hochzaehlen
+#   4. Skript und Bilder ins sysvol, Startskript (Rechner) und Abmeldeskript
+#      (Benutzer) eintragen, Version hochzaehlen; den Open-Shell-Installer
+#      einmal mit Pruefsumme holen
 #   5. Rechte im sysvol neu setzen
 #
 # Auf dc1 als root, im Verzeichnis mit rosenweg-look.ps1 und bilder/:
@@ -32,9 +34,25 @@ SAM="/var/lib/samba/private/sam.ldb"
 HIER="$(cd "$(dirname "$0")" && pwd)"
 
 [ -f "$HIER/rosenweg-look.ps1" ] || { echo "rosenweg-look.ps1 fehlt neben $0" >&2; exit 1; }
-for b in hintergrund.png sperrbild.png logo.png; do
+for b in hintergrund.png sperrbild.png logo.png startknopf.png; do
     [ -f "$HIER/bilder/$b" ] || { echo "bilder/$b fehlt" >&2; exit 1; }
 done
+
+# Open-Shell (klassisches Startmenue, rosenweg-look.ps1): feste Version, nicht
+# im Git (10 MB Fremd-Binary), sondern hier geholt und gegen die Pruefsumme
+# geprueft. Liegt danach neben diesem Skript in programme/ und wird nicht
+# erneut geladen. Ohne Netz auf dc1: Datei von Hand dorthin legen.
+# Version und Pruefsumme stehen auch in rosenweg-look.ps1 - beide aendern.
+OPENSHELL_DATEI="OpenShellSetup_4_4_198.exe"
+OPENSHELL_URL="https://github.com/Open-Shell/Open-Shell-Menu/releases/download/v4.4.198/$OPENSHELL_DATEI"
+OPENSHELL_SHA256="a4d2d4459de55b5e962ba2a14f7bb794170511649138173dfa72949837b48c3f"
+mkdir -p "$HIER/programme"
+if [ ! -f "$HIER/programme/$OPENSHELL_DATEI" ]; then
+    curl -fsSL -o "$HIER/programme/$OPENSHELL_DATEI.neu" "$OPENSHELL_URL"
+    mv "$HIER/programme/$OPENSHELL_DATEI.neu" "$HIER/programme/$OPENSHELL_DATEI"
+fi
+echo "$OPENSHELL_SHA256  $HIER/programme/$OPENSHELL_DATEI" | sha256sum -c --quiet - \
+    || { echo "Pruefsumme von $OPENSHELL_DATEI stimmt nicht - Datei loeschen und neu laden" >&2; exit 1; }
 
 # --- 1. OU ------------------------------------------------------------------
 if ! samba-tool ou list -H "$SAM" | grep -qx "OU=Windows"; then
@@ -106,6 +124,8 @@ install -m 0644 "$HIER/rosenweg-look.ps1" "$start_dir/rosenweg-look.ps1"
 install -m 0644 "$HIER"/bilder/*.png "$start_dir/"
 install -m 0644 "$HIER/programme-freigaben.txt" "$start_dir/programme-freigaben.txt"
 install -m 0644 "$HIER/bginfo.ps1" "$start_dir/bginfo.ps1"
+install -m 0644 "$HIER/drucker.ps1" "$start_dir/drucker.ps1"
+install -m 0644 "$HIER/programme/$OPENSHELL_DATEI" "$start_dir/$OPENSHELL_DATEI"
 
 # scripts.ini statt psscripts.ini: so startet die Richtlinie powershell.exe
 # selbst und kann -ExecutionPolicy Bypass mitgeben. Ein Windows-Client steht
@@ -116,16 +136,33 @@ printf '\r\n[Startup]\r\n0CmdLine=%s\r\n0Parameters=%s\r\n' \
     "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"$unc\"" \
     | iconv -f UTF-8 -t UTF-16LE | { printf '\xff\xfe'; cat; } > "$gpo_dir/Machine/Scripts/scripts.ini"
 
-# Erweiterung "Skripts" eintragen und Version (Computer-Teil, untere 16 Bit)
-# hochzaehlen - ohne beides holt Windows die Aenderung nicht.
+# Abmeldeskript (Benutzerteil): raeumt die Drucker im Profil auf, BEVOR das
+# servergespeicherte Profil hochgeladen wird (drucker.ps1). Es ruft die Kopie
+# unter Programme auf, die rosenweg-look.ps1 beim Start hinlegt - die
+# Programm-Whitelist laesst Skripte nur von dort zu, und so gibt es nur eine
+# Datei. Wirkt, weil rosenweg-look.ps1 Loopback (Zusammenfuehren) einschaltet:
+# die Konten liegen nicht in OU=Windows.
+mkdir -p "$gpo_dir/User/Scripts/Logoff"
+printf '\r\n[Logoff]\r\n0CmdLine=%s\r\n0Parameters=%s\r\n' \
+    'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' \
+    '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "C:\Program Files\Rosenweg\drucker.ps1" -Anlass Abmelden' \
+    | iconv -f UTF-8 -t UTF-16LE | { printf '\xff\xfe'; cat; } > "$gpo_dir/User/Scripts/scripts.ini"
+
+# Erweiterung "Skripts" fuer beide Teile eintragen und beide Versionen
+# hochzaehlen (Rechner: untere 16 Bit, Benutzer: obere 16 Bit) - ohne das
+# holt Windows die Aenderung nicht.
 gpo_dn="CN=$guid,CN=Policies,CN=System,$BASIS"
 alt="$(ldbsearch -H "$SAM" -b "$gpo_dn" -s base versionNumber | sed -n 's/^versionNumber: //p')"
-neu=$(( ${alt:-0} + 1 ))
+alt=${alt:-0}
+neu=$(( ((((alt >> 16) & 0xFFFF) + 1) << 16) | (((alt & 0xFFFF) + 1) & 0xFFFF) ))
 ldbmodify -H "$SAM" >/dev/null <<EOF
 dn: $gpo_dn
 changetype: modify
 replace: gPCMachineExtensionNames
 gPCMachineExtensionNames: [{42B5FAAE-6536-11D2-AE5A-0000F87571E3}{40B6664F-4972-11D1-A7CA-0000F87571E3}]
+-
+replace: gPCUserExtensionNames
+gPCUserExtensionNames: [{42B5FAAE-6536-11D2-AE5A-0000F87571E3}{40B6664F-4972-11D1-A7CA-0000F87571E3}]
 -
 replace: versionNumber
 versionNumber: $neu
@@ -135,4 +172,5 @@ echo "Inhalt aktualisiert, Version $neu."
 
 # --- 5. Rechte --------------------------------------------------------------
 samba-tool ntacl sysvolreset
-echo "Fertig. Wirkt beim naechsten Start der Rechner (oder: gpupdate /force und Neustart)."
+echo "Fertig. Wirkt beim naechsten Start der Rechner (oder: gpupdate /force und Neustart);"
+echo "das Abmeldeskript ab der zweiten Anmeldung danach (Loopback setzt erst der Start)."

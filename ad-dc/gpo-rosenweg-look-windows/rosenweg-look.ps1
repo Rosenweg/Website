@@ -40,7 +40,7 @@ Log "Start (Quelle $Quelle)"
 Add-Type -AssemblyName System.Drawing
 
 # --- Bilder auf den Rechner -------------------------------------------------
-foreach ($b in 'hintergrund.png', 'sperrbild.png', 'logo.png') {
+foreach ($b in 'hintergrund.png', 'sperrbild.png', 'logo.png', 'startknopf.png') {
     $von = Join-Path $Quelle $b
     $nach = Join-Path $Ziel $b
     if (Test-Path $von) {
@@ -134,6 +134,7 @@ foreach ($p in $profile) {
         $k = "Registry::HKEY_USERS\$($p.Sid)\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
         Setze $k 'TaskbarAl' 0 'DWord'
         Setze "Registry::HKEY_USERS\$($p.Sid)\Software\Microsoft\Windows\CurrentVersion\Policies\ActiveDesktop" 'NoChangingWallPaper' 1 'DWord'
+        Setze "Registry::HKEY_USERS\$($p.Sid)\Software\Microsoft\Windows NT\CurrentVersion\Windows" 'LegacyDefaultPrinterMode' 1 'DWord'
         continue
     }
     & reg.exe load 'HKU\RosenwegLook' $p.Datei 2>&1 | Out-Null
@@ -142,6 +143,9 @@ foreach ($p in $profile) {
         Setze 'Registry::HKEY_USERS\RosenwegLook\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' 'TaskbarAl' 0 'DWord'
         # Hintergrund gehoert der Station (wie auf den Linux-Stationen)
         Setze 'Registry::HKEY_USERS\RosenwegLook\Software\Microsoft\Windows\CurrentVersion\Policies\ActiveDesktop' 'NoChangingWallPaper' 1 'DWord'
+        # Standarddrucker gehoert der Station (siehe "Drucker im Profil" unten):
+        # Windows soll ihn nicht selbst auf den zuletzt benutzten umstellen.
+        Setze 'Registry::HKEY_USERS\RosenwegLook\Software\Microsoft\Windows NT\CurrentVersion\Windows' 'LegacyDefaultPrinterMode' 1 'DWord'
     } finally {
         [gc]::Collect(); [gc]::WaitForPendingFinalizers()
         & reg.exe unload 'HKU\RosenwegLook' 2>&1 | Out-Null
@@ -286,6 +290,149 @@ if (-not $bgAufgabe -or $bgAufgabe.Actions[0].Arguments -ne $bgArg) {
     $o = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
     Register-ScheduledTask -TaskName 'Rosenweg BGInfo' -Action $a -Trigger $t -Principal $p -Settings $o -Force | Out-Null
     Log "Aufgabe 'Rosenweg BGInfo' eingerichtet"
+}
+
+# --- Drucker im Profil ------------------------------------------------------
+# Servergespeicherte Profile wandern mit. Darin standen Druckerverbindungen von
+# frueheren PCs (\\100.64.2.32\DruckerR9 per SMB, Brother, AnyDesk, PDF24 ...)
+# und als Standard ein Drucker, den es auf dem Rechner gar nicht gibt -
+# Programme druckten dann ins Leere, beim CUPS kam nie etwas an (win11-1,
+# 26.11.2026). drucker.ps1 raeumt das im Namen der Person auf und setzt den
+# Standarddrucker der Station (gepflegt auf /stationen):
+#   - bei jeder Anmeldung (geplante Aufgabe wie BGInfo)
+#   - bei jeder Abmeldung (Abmeldeskript der Richtlinie, vor dem Hochladen des
+#     Profils - so kommt es sauber auf den naechsten Rechner)
+# Liegt unter Programme, weil die Programm-Whitelist Skripte nur von dort und
+# aus Windows startet; das Abmeldeskript ruft dieselbe Datei auf.
+$drQuelle = Join-Path $Quelle 'drucker.ps1'
+$drZiel = Join-Path $prog 'drucker.ps1'
+if ((Test-Path $drQuelle) -and (-not (Test-Path $drZiel) -or (Get-FileHash $drQuelle).Hash -ne (Get-FileHash $drZiel).Hash)) {
+    Copy-Item $drQuelle $drZiel -Force
+    Log "drucker.ps1 aktualisiert"
+}
+$drArg = "--headless $env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$drZiel`" -Anlass Anmelden"
+$drAufgabe = Get-ScheduledTask -TaskName 'Rosenweg Drucker' -ErrorAction SilentlyContinue
+if (-not $drAufgabe -or $drAufgabe.Actions[0].Arguments -ne $drArg) {
+    $a = New-ScheduledTaskAction -Execute "$env:WINDIR\System32\conhost.exe" -Argument $drArg
+    $t = New-ScheduledTaskTrigger -AtLogOn
+    $p = New-ScheduledTaskPrincipal -GroupId 'S-1-5-32-545' -RunLevel Limited
+    $o = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+    Register-ScheduledTask -TaskName 'Rosenweg Drucker' -Action $a -Trigger $t -Principal $p -Settings $o -Force | Out-Null
+    Log "Aufgabe 'Rosenweg Drucker' eingerichtet"
+}
+# Protokoll ins Ereignisprotokoll (Anwendung, Quelle "Rosenweg Drucker").
+# Eine Quelle anlegen darf nur ein Admin - darum hier; schreiben duerfen
+# angemeldete Personen dann selbst.
+if (-not [System.Diagnostics.EventLog]::SourceExists('Rosenweg Drucker')) {
+    New-EventLog -LogName Application -Source 'Rosenweg Drucker'
+    Log "Ereignisquelle 'Rosenweg Drucker' angelegt"
+}
+# Abmeldeskripte stehen im Benutzerteil der Richtlinie. Die Konten liegen
+# nicht in OU=Windows, also wirkt dieser Teil nur mit Loopback ("Zusammen-
+# fuehren": die eigenen Benutzerrichtlinien gelten weiter, die Benutzerteile
+# der Richtlinien an OU=Windows kommen dazu).
+Setze 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System' 'UserPolicyMode' 1 'DWord'
+# Standarddrucker dieser Station auf Vorrat holen. drucker.ps1 fragt bei der
+# Anmeldung selbst nach; ist die Verwaltung dann nicht erreichbar, gilt der
+# hier zuletzt geholte Wert. Nur ueberschreiben, wenn eine Antwort kam.
+try {
+    $antwort = Invoke-RestMethod -UseBasicParsing -TimeoutSec 5 `
+        -Uri "https://www.rosenweg4303.ch/api/stations/drucker/$env:COMPUTERNAME"
+    if ($null -ne $antwort.bekannt) {
+        $stand = [ordered]@{ bekannt = [bool]$antwort.bekannt; standard = $antwort.standard; geholt = (Get-Date -Format s) }
+        $stand | ConvertTo-Json | Set-Content -Path (Join-Path $Ziel 'standarddrucker.json') -Encoding UTF8
+        Log "Standarddrucker laut Verwaltung: $(if ($antwort.standard) { $antwort.standard } elseif ($antwort.bekannt) { 'keiner' } else { 'Rechner nicht eingetragen' })"
+    }
+} catch { Log "Standarddrucker: Verwaltung nicht erreichbar ($($_.Exception.Message)) - bleibt beim zuletzt bekannten" }
+
+# --- Startmenue: Open-Shell mit Rosenweg-Knopf ------------------------------
+# Das klassische Startmenue (Windows-7-Stil, zwei Spalten) statt dem von
+# Windows 11, und als Start-Knopf das Rosenweg-Wappen statt der Muschel.
+# Open-Shell: https://github.com/Open-Shell/Open-Shell-Menu (MIT).
+#
+# Nur Windows 11 (Build 22000 und hoeher): dort fehlt das alte Startmenue, und
+# der Knopf sitzt links, weil die Taskleiste links steht (oben). Windows 10
+# bliebe unberuehrt; wer es dort will, senkt $OpenShellAbBuild auf 10240.
+#
+# Installiert wird nur die Startmenue-Komponente (kein Explorer-Zusatz, kein
+# IE-Teil, kein Update-Dienst: Updates kommen von hier, in fester Version).
+# Der Installer liegt neben diesem Skript im sysvol (einrichten.sh holt ihn
+# mit Pruefsumme); er wird hier vor dem Start nochmals geprueft.
+#
+# Zuruecknehmen: $OpenShellAn = $false, einrichten.sh - beim naechsten Start
+# wird Open-Shell still entfernt und die Einstellungen geloescht.
+$OpenShellAn      = $true
+$OpenShellAbBuild = 22000
+$OpenShellVersion = '4.4.198'
+$OpenShellDatei   = 'OpenShellSetup_4_4_198.exe'
+$OpenShellSha256  = 'A4D2D4459DE55B5E962BA2A14F7BB794170511649138173DFA72949837B48C3F'
+
+$osRichtlinie = 'HKLM:\SOFTWARE\Policies\OpenShell'
+$osEintrag = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
+    Where-Object { $_.DisplayName -eq 'Open-Shell' } | Select-Object -First 1
+$osExe = Join-Path $env:ProgramFiles 'Open-Shell\StartMenu.exe'
+$build = [Environment]::OSVersion.Version.Build
+
+if ($OpenShellAn -and $build -ge $OpenShellAbBuild) {
+    if (-not $osEintrag -or $osEintrag.DisplayVersion -ne $OpenShellVersion -or -not (Test-Path $osExe)) {
+        $von = Join-Path $Quelle $OpenShellDatei
+        # Nach C:\Windows\Temp: dort darf laut Programm-Whitelist alles laufen,
+        # und nur Admins/SYSTEM koennen hineinschreiben.
+        $tmp = Join-Path $env:WINDIR "Temp\Rosenweg-$OpenShellDatei"
+        if (-not (Test-Path $von)) {
+            Log "Open-Shell: $OpenShellDatei fehlt in der Richtlinie - nicht installiert"
+        } else {
+            Copy-Item $von $tmp -Force
+            if ((Get-FileHash $tmp -Algorithm SHA256).Hash -ne $OpenShellSha256) {
+                Log "Open-Shell: Pruefsumme stimmt NICHT - nicht installiert"
+            } else {
+                # NOSTART=1: der Installer startete das Menue sonst gleich als
+                # SYSTEM. Es startet ohnehin bei jeder Anmeldung (HKLM\...\Run).
+                # START_MENU_FOLDER=0: kein Ordner "Open-Shell" im Startmenue,
+                # Einstellungen gibt es per Rechtsklick auf den Knopf.
+                $pr = Start-Process -FilePath $tmp -Wait -PassThru `
+                    -ArgumentList '/qn', 'ADDLOCAL=StartMenu', 'NOSTART=1', 'START_MENU_FOLDER=0'
+                Log "Open-Shell $OpenShellVersion installiert (Rueckgabe $($pr.ExitCode))"
+            }
+            Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    # Einstellungen als Richtlinie (HKLM\SOFTWARE\Policies\OpenShell, wie die
+    # ADMX von Open-Shell sie schreibt): zu jedem Wert ein <Name>_State -
+    # 0 = fest, 2 = nur Vorgabe, die Person darf es aendern
+    # (Src/Lib/Settings.cpp, CSetting::LoadValue).
+    $sm = "$osRichtlinie\StartMenu"
+    function OsRegel([string]$name, $wert, [string]$typ, [int]$state = 0) {
+        Setze $sm $name $wert $typ
+        Setze $sm "${name}_State" $state 'DWord'
+    }
+    OsRegel 'MenuStyle'         2 'DWord'          # Windows 7: zwei Spalten
+    OsRegel 'MouseClick'        1 'DWord'          # Klick auf den Knopf: klassisches Menue
+    OsRegel 'WinKey'            1 'DWord'          # Windows-Taste: klassisches Menue
+    # Umschalt+Klick / Umschalt+Win bleiben beim Windows-11-Menue (Vorgabe von
+    # Open-Shell) - wer es braucht, kommt so noch hin.
+    OsRegel 'EnableStartButton' 1 'DWord'
+    OsRegel 'StartButtonType'   2 'DWord'          # eigenes Bild
+    OsRegel 'StartButtonPath'   (Join-Path $Ziel 'startknopf.png') 'String'
+    # Breite bei 100 %, so hoch wie die Taskleiste; Open-Shell skaliert mit der
+    # Anzeige hoch, das Bild hat dafuer 144 px je Zustand.
+    OsRegel 'StartButtonSize'   48 'DWord'
+    # "Immersive" folgt hell/dunkel und der Akzentfarbe (Mint-Blau, oben) -
+    # sieht damit aus wie der Rest von Windows 11. Nur Vorgabe.
+    OsRegel 'SkinW7'            'Immersive' 'String' 2
+    # Kein Update-Hinweis bei den Leuten: die Version kommt von hier.
+    Setze "$osRichtlinie\OpenShell" 'Update' 0 'DWord'
+    Setze "$osRichtlinie\OpenShell" 'Update_State' 0 'DWord'
+} elseif (-not $OpenShellAn) {
+    if ($osEintrag) {
+        $code = [regex]::Match([string]$osEintrag.UninstallString, '\{[0-9A-Fa-f-]{36}\}').Value
+        if ($code) {
+            $pr = Start-Process -FilePath "$env:WINDIR\System32\msiexec.exe" -Wait -PassThru -ArgumentList '/x', $code, '/qn', '/norestart'
+            Log "Open-Shell entfernt (Rueckgabe $($pr.ExitCode))"
+        }
+    }
+    if (Test-Path $osRichtlinie) { Remove-Item $osRichtlinie -Recurse -Force; Log "Open-Shell-Einstellungen entfernt" }
 }
 
 Log "Fertig"
