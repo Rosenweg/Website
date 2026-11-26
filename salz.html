@@ -55,6 +55,12 @@
                 <label>Erinnerung nach (Tagen, 0 = nie)
                     <input id="eWiederholung" type="number" min="0" max="90" step="1" class="feld"></label>
             </div>
+            <label class="flex items-start gap-2 text-sm">
+                <input id="eEinfuellen" type="checkbox" class="mt-1">
+                <span>Am Tag, an dem der nächste Sack fällig ist, um 8 Uhr erinnern – per Mail an den Hauswart
+                    (ohne Hauswart an die Technik), dazu Push an Hauswarte, die in der Rosenweg-Web-App (pwa.rosenweg4303.ch) Benachrichtigungen eingeschaltet haben.
+                    <span id="dNaechster" class="text-slate-500"></span></span>
+            </label>
             <div class="grid sm:grid-cols-2 gap-4 text-sm" id="zuordnung">
                 <label>Hauswart – bekommt die Meldung „nachbestellen“ zusätzlich zur Technik (Mailadressen, eine pro Zeile)
                     <textarea id="eHauswart" rows="2" class="feld font-mono"></textarea></label>
@@ -119,6 +125,18 @@ function reichweiteText(l) {
     return 'Reichweite: noch zu wenig Daten';
 }
 
+// "Nächster Sack etwa am Do, 3. Dez." — war der Tag schon, "war … fällig".
+function naechsterSackText(l) {
+    if (!l.naechster_sack) return '';
+    const tag = new Date(l.naechster_sack + 'T12:00:00');
+    const heute = new Date(); heute.setHours(12, 0, 0, 0);
+    const t = tag.toLocaleDateString('de-CH', { weekday: 'short', day: 'numeric', month: 'short' });
+    const diff = Math.round((tag - heute) / 86400000);
+    if (diff === 0) return 'Nächster Sack heute';
+    if (diff === 1) return 'Nächster Sack morgen (' + t + ')';
+    return diff < 0 ? `Nächster Sack war etwa am ${t} fällig` : `Nächster Sack etwa am ${t}`;
+}
+
 function zeichneKarten() {
     $('karten').innerHTML = lager.map(l => `
         <button class="karte ${!l.in_betrieb ? 'leer' : l.knapp ? 'knapp' : 'gut'} ${gewaehlt === l.id ? 'gewaehlt' : ''} bg-white rounded-xl shadow p-4 text-left"
@@ -126,6 +144,7 @@ function zeichneKarten() {
             <div class="text-sm text-slate-500">${esc(l.name)}${l.ort ? ' · ' + esc(l.ort) : ''}</div>
             <div class="text-3xl font-bold">${Number(l.bestand_saecke)} <span class="text-base font-normal">${l.bestand_saecke === 1 ? 'Sack' : 'Säcke'}</span></div>
             <div class="text-sm">${esc(reichweiteText(l))}</div>
+            ${l.naechster_sack ? `<div class="text-sm">${esc(naechsterSackText(l))}</div>` : ''}
             <div class="text-xs text-slate-500 mt-1">${l.verbrauch_kg_woche != null ? esc(l.verbrauch_kg_woche) + ' kg/Woche · ' : ''}${Math.round(l.bestand_kg)} kg</div>
             ${l.meldung_seit ? `<div class="text-xs text-red-700 mt-1">Nachbestellen gemeldet am ${esc(datum(l.meldung_seit))}</div>` : ''}
         </button>`).join('');
@@ -153,7 +172,9 @@ async function zeigeDetail() {
     $('eMindest').value = l.mindest_saecke;
     $('eWiederholung').value = l.wiederholung_tage;
     $('iSaecke').value = '';
-    for (const id of ['eSchwelle', 'eMindest', 'eWiederholung']) $(id).disabled = !darfEinstellen;
+    $('eEinfuellen').checked = l.erinnerung_einfuellen !== false;
+    $('dNaechster').textContent = l.naechster_sack ? '(' + naechsterSackText(l) + ')' : '(noch kein Termin – zu wenig Verbrauchsdaten)';
+    for (const id of ['eSchwelle', 'eMindest', 'eWiederholung', 'eEinfuellen']) $(id).disabled = !darfEinstellen;
     $('verwalten').classList.toggle('hidden', !darfEinstellen);
     $('dErklaerung').textContent = l.modus === 'reichweite'
         ? `Verbrauch aus ${l.einfuellungen_im_fenster} Einfüllungen der letzten 26 Wochen: ${l.verbrauch_kg_woche} kg pro Woche. `
@@ -178,6 +199,7 @@ async function speichern() {
     try {
         await api('/lager/' + gewaehlt, { method: 'PUT', body: {
             schwelle_wochen: $('eSchwelle').value, mindest_saecke: $('eMindest').value, wiederholung_tage: $('eWiederholung').value,
+            erinnerung_einfuellen: $('eEinfuellen').checked,
             hauswart_emails: $('eHauswart').value, bewohner_gruppen: $('eGruppen').value } });
         melde('Gespeichert.');
         await lade();

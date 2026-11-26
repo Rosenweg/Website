@@ -25,7 +25,11 @@ const { isTechnik, isPraesident, STWEG_GROUPS } = require('../lib/groups');
 const { resolveAncestorGroups } = require('../lib/auth');
 const { HAEUSER, stwegVonHaus } = require('../lib/haeuser');
 const { loggedSendMail, MAIL_FROM } = require('../lib/mail');
-const { FENSTER_TAGE, verbrauchProWoche, lagerStand, meldeEntscheid, meldungsText, reichtText } = require('../lib/salz');
+const {
+  verbrauchProWoche, lagerStand, meldeEntscheid, meldungsText, reichtText,
+  naechsterSack, einfuellErinnern, einfuellText, tagText,
+} = require('../lib/salz');
+const webpush = require('../lib/webpush');
 
 const MELDUNG_AN = process.env.SALZ_MELDUNG_AN || 'technik@rosenweg4303.ch';
 const PORTAL_URL = process.env.SALZ_PORTAL_URL || 'https://rosenweg4303.ch/salz.html';
@@ -118,7 +122,9 @@ function ensureSchema() {
       await pool.query(`ALTER TABLE salz_lager
           ADD COLUMN IF NOT EXISTS ort TEXT,
           ADD COLUMN IF NOT EXISTS hauswart_emails TEXT[] NOT NULL DEFAULT '{}',
-          ADD COLUMN IF NOT EXISTS bewohner_gruppen TEXT[]`);
+          ADD COLUMN IF NOT EXISTS bewohner_gruppen TEXT[],
+          ADD COLUMN IF NOT EXISTS erinnerung_einfuellen BOOLEAN NOT NULL DEFAULT true,
+          ADD COLUMN IF NOT EXISTS einfuellen_gemeldet_fuer DATE`);
       await pool.query(`
         CREATE TABLE IF NOT EXISTS salz_sorten (
           barcode TEXT PRIMARY KEY,
@@ -170,7 +176,8 @@ async function lagerUebersicht(lagerId = null, db = pool) {
             COALESCE(SUM(b.saecke * b.kg_je_sack) FILTER (WHERE b.storniert_am IS NULL), 0)::float AS bestand_kg,
             MAX(b.gebucht_am) FILTER (WHERE b.storniert_am IS NULL AND b.art = 'anlieferung') AS letzte_anlieferung,
             MAX(b.gebucht_am) FILTER (WHERE b.storniert_am IS NULL AND b.art = 'eingefuellt') AS letzte_einfuellung,
-            COUNT(b.id) FILTER (WHERE b.storniert_am IS NULL)::int AS buchungen
+            COUNT(b.id) FILTER (WHERE b.storniert_am IS NULL)::int AS buchungen,
+            l.einfuellen_gemeldet_fuer::text AS gemeldet_fuer
        FROM salz_lager l LEFT JOIN salz_buchungen b ON b.lager_id = l.id
       WHERE l.aktiv AND ($1::int IS NULL OR l.id = $1)
       GROUP BY l.id ORDER BY l.reihenfolge, l.id`, [lagerId]);
@@ -190,6 +197,10 @@ async function lagerUebersicht(lagerId = null, db = pool) {
     // Ein Lager, in dem noch nie gebucht wurde, ist noch nicht in Betrieb:
     // kein Alarm für „0 Säcke“, bevor jemand die erste Lieferung erfasst hat.
     const inBetrieb = l.buchungen > 0;
+    // Nächster Sack: letzte Einfüllung + ihre kg ÷ Verbrauch pro Woche.
+    const letzte = ein.rows.filter(e => e.lager_id === l.id)
+      .reduce((m, e) => (!m || new Date(e.am) > new Date(m.am) ? e : m), null);
+    const faellig = naechsterSack({ letzteAm: letzte?.am, letzteKg: letzte?.kg, kgProWoche: v.kgProWoche });
     return {
       id: l.id, schluessel: l.schluessel, name: l.name, haus: l.haus, ort: l.ort || null, in_betrieb: inBetrieb,
       bestand_saecke: l.bestand_saecke, bestand_kg: Math.round(l.bestand_kg * 10) / 10,
@@ -200,6 +211,8 @@ async function lagerUebersicht(lagerId = null, db = pool) {
       meldung_seit: l.meldung_seit, meldung_zuletzt: l.meldung_zuletzt,
       letzte_anlieferung: l.letzte_anlieferung, letzte_einfuellung: l.letzte_einfuellung,
       hauswart_emails: l.hauswart_emails || [], bewohner_gruppen: l.bewohner_gruppen || [],
+      naechster_sack: faellig, erinnerung_einfuellen: l.erinnerung_einfuellen !== false,
+      einfuellen_gemeldet_fuer: l.gemeldet_fuer || null,
     };
   });
 }
@@ -270,11 +283,62 @@ function meldelaufBald(lagerId) {
   setImmediate(() => meldelauf({ lagerId }).catch(e => console.error('[salz] Meldelauf:', e.message)));
 }
 
-/** Stündlich prüfen (Erinnerungen, gleitendes Verbrauchsfenster). */
+// ─── Erinnerung: nächster Sack einfüllen ───────────────────────────
+//
+// Am fälligen Tag ab 8 Uhr, einmal je Fälligkeit, an die Hauswart-Adressen
+// des Lagers — ohne Hauswart an die Technik. Dazu Web-Push (lib/webpush.js,
+// dieselben Abos wie die Rosenweg-PWA) an die Hauswart-Konten. Wer früher
+// einfüllt, verschiebt die Fälligkeit; je Lager abschaltbar.
+let einfuelllaufAktiv = false;
+async function einfuelllauf({ jetzt = new Date() } = {}) {
+  if (einfuelllaufAktiv) return;
+  einfuelllaufAktiv = true;
+  try {
+    await ensureSchema();
+    for (const l of await lagerUebersicht()) {
+      if (!einfuellErinnern({ faellig: l.naechster_sack, gemeldetFuer: l.einfuellen_gemeldet_fuer,
+        eingeschaltet: l.erinnerung_einfuellen, inBetrieb: l.in_betrieb, jetzt })) continue;
+      // Erst merken (bedingt, gegen doppelte Läufe), dann senden; bei Fehler zurück.
+      const gesetzt = await pool.query(
+        `UPDATE salz_lager SET einfuellen_gemeldet_fuer = $2::date
+          WHERE id = $1 AND einfuellen_gemeldet_fuer IS DISTINCT FROM $2::date RETURNING id`, [l.id, l.naechster_sack]);
+      if (!gesetzt.rowCount) continue;
+      const hauswart = (l.hauswart_emails || []).map(e => String(e).trim().toLowerCase()).filter(Boolean);
+      const an = hauswart.length ? hauswart : [MELDUNG_AN];
+      try {
+        await loggedSendMail({
+          from: MAIL_FROM, to: an.join(', '),
+          subject: `Salz einfüllen – ${l.name} (${tagText(l.naechster_sack)})`,
+          text: einfuellText({ lager: l.name, ort: l.ort, faellig: l.naechster_sack, bestandSaecke: l.bestand_saecke,
+            kgProWoche: l.verbrauch_kg_woche, portalUrl: PORTAL_URL }),
+        }, 'salz-einfuellen');
+        console.log(`[salz] ${l.name}: Einfüll-Erinnerung (${l.naechster_sack}) an ${an.length} Empfänger`);
+      } catch (e) {
+        console.error(`[salz] Einfüll-Mail ${l.name}:`, e.message);
+        await pool.query('UPDATE salz_lager SET einfuellen_gemeldet_fuer = $2::date WHERE id = $1', [l.id, l.einfuellen_gemeldet_fuer]);
+        continue;
+      }
+      if (hauswart.length) {
+        webpush.sendToEmails(hauswart, {
+          title: `Salz einfüllen – ${l.name}`,
+          body: `Heute müsste der nächste Sack in die Enthärtungsanlage${l.ort ? ` (${l.ort})` : ''}.`,
+          url: PORTAL_URL, tag: `salz-einfuellen-${l.id}`,
+        }).catch(e => console.warn('[salz] Push:', e.message));
+      }
+    }
+  } finally {
+    einfuelllaufAktiv = false;
+  }
+}
+
+/** Stündlich prüfen (Erinnerungen, gleitendes Verbrauchsfenster); Einfüll-Erinnerung alle 15 Minuten (kurz nach 8 Uhr). */
 function starteSalzCron(intervalle = []) {
   const lauf = () => meldelauf({ nurTagsueber: true }).catch(e => console.error('[salz] Meldelauf:', e.message));
   intervalle.push(setInterval(lauf, 60 * 60 * 1000));
   setTimeout(lauf, 2 * 60 * 1000);
+  const einfuellen = () => einfuelllauf().catch(e => console.error('[salz] Einfüll-Erinnerung:', e.message));
+  intervalle.push(setInterval(einfuellen, 15 * 60 * 1000));
+  setTimeout(einfuellen, 3 * 60 * 1000);
 }
 
 // ─── Router ────────────────────────────────────────────────────────
@@ -387,6 +451,7 @@ function salzRouter({ rateLimitGuard }) {
     if (hauswart && (hauswart.length > 10 || hauswart.some(e => !EMAIL_RE.test(e) || e.length > 200))) {
       return res.status(400).json({ error: 'Hauswart: gültige Mailadressen (höchstens 10)' });
     }
+    const erinnerung = b.erinnerung_einfuellen == null ? null : (b.erinnerung_einfuellen === true || b.erinnerung_einfuellen === 'true');
     const gruppen = liste(b.bewohner_gruppen);
     if (gruppen && (gruppen.length > 10 || gruppen.some(g => !/^[\p{L}0-9._-]{2,80}$/u.test(g)))) {
       return res.status(400).json({ error: 'Bewohnergruppen: Gruppennamen aus Authentik (höchstens 10)' });
@@ -397,10 +462,11 @@ function salzRouter({ rateLimitGuard }) {
                 mindest_saecke = COALESCE($3, mindest_saecke),
                 wiederholung_tage = COALESCE($4, wiederholung_tage),
                 hauswart_emails = COALESCE($5, hauswart_emails),
-                bewohner_gruppen = COALESCE($6, bewohner_gruppen), geaendert_am = NOW()
+                bewohner_gruppen = COALESCE($6, bewohner_gruppen),
+                erinnerung_einfuellen = COALESCE($7, erinnerung_einfuellen), geaendert_am = NOW()
           WHERE id = $1 AND aktiv RETURNING id`,
         [id, schwelle, mindest == null ? null : Math.round(mindest), wiederholung == null ? null : Math.round(wiederholung),
-          hauswart && hauswart.map(e => e.toLowerCase()), gruppen && gruppen.map(g => g.toLowerCase())]);
+          hauswart && hauswart.map(e => e.toLowerCase()), gruppen && gruppen.map(g => g.toLowerCase()), erinnerung]);
       if (!r.rowCount) return res.status(404).json({ error: 'Lager nicht gefunden' });
       meldelaufBald(id);
       res.json({ lager: (await lagerUebersicht(id))[0] });
@@ -613,4 +679,4 @@ function salzRouter({ rateLimitGuard }) {
   return router;
 }
 
-module.exports = { salzRouter, ensureSchema, starteSalzCron, meldelauf, lagerUebersicht, erlaubteLager, darfAlleLager, istVerwalter, LAGER_START };
+module.exports = { salzRouter, ensureSchema, starteSalzCron, meldelauf, einfuelllauf, lagerUebersicht, erlaubteLager, darfAlleLager, istVerwalter, LAGER_START };

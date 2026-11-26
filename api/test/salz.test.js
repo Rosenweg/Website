@@ -87,3 +87,47 @@ test('Reichweite unter einer Woche heisst nicht "0 Wochen"', () => {
   assert.equal(reichtText(1), 'etwa 1 Woche');
   assert.equal(reichtText(3.5), 'etwa 3.5 Wochen');
 });
+
+// ── Nächster Sack ──
+const { naechsterSack, einfuellErinnern, einfuellText, zuerichTag } = require('../lib/salz');
+
+test('naechster Sack: letzte Einfuellung + kg / kg pro Woche, auf den Tag', () => {
+  // 25 kg bei 14.8 kg/Woche = 11.8 Tage nach dem 1.12. 10:00 Zuerich -> 13.12.
+  assert.equal(naechsterSack({ letzteAm: '2026-12-01T09:00:00Z', letzteKg: 25, kgProWoche: 14.8 }), '2026-12-13');
+  // 2 Saecke auf einmal reichen doppelt so lang
+  assert.equal(naechsterSack({ letzteAm: '2026-12-01T09:00:00Z', letzteKg: 50, kgProWoche: 25 }), '2026-12-15');
+  assert.equal(naechsterSack({ letzteAm: '2026-12-01T09:00:00Z', letzteKg: 25, kgProWoche: null }), null);
+  assert.equal(naechsterSack({ letzteAm: null, letzteKg: 25, kgProWoche: 10 }), null);
+});
+
+test('Tag in Zuerich, nicht UTC', () => {
+  assert.equal(zuerichTag('2026-12-01T23:30:00Z'), '2026-12-02');
+});
+
+test('Einfuell-Erinnerung: am Tag ab 8 Uhr, einmal, abschaltbar, keine alten Faelligkeiten', () => {
+  const basis = { faellig: '2026-12-13', gemeldetFuer: null, eingeschaltet: true, inBetrieb: true };
+  // 07:30 Zuerich (06:30 UTC) noch nicht, 08:05 schon
+  assert.equal(einfuellErinnern({ ...basis, jetzt: new Date('2026-12-13T06:30:00Z') }), false);
+  assert.equal(einfuellErinnern({ ...basis, jetzt: new Date('2026-12-13T07:05:00Z') }), true);
+  // Tag davor nicht
+  assert.equal(einfuellErinnern({ ...basis, jetzt: new Date('2026-12-12T15:00:00Z') }), false);
+  // schon gemeldet fuer diese Faelligkeit
+  assert.equal(einfuellErinnern({ ...basis, gemeldetFuer: '2026-12-13', jetzt: new Date('2026-12-13T10:00:00Z') }), false);
+  // fuer eine fruehere Faelligkeit gemeldet -> neue Faelligkeit zaehlt
+  assert.equal(einfuellErinnern({ ...basis, gemeldetFuer: '2026-12-01', jetzt: new Date('2026-12-13T10:00:00Z') }), true);
+  // nachholen bis 2 Tage, danach nicht mehr (z. B. importierte alte Listen)
+  assert.equal(einfuellErinnern({ ...basis, jetzt: new Date('2026-12-15T05:00:00Z') }), true);
+  assert.equal(einfuellErinnern({ ...basis, jetzt: new Date('2026-12-16T10:00:00Z') }), false);
+  assert.equal(einfuellErinnern({ ...basis, eingeschaltet: false, jetzt: new Date('2026-12-13T10:00:00Z') }), false);
+  assert.equal(einfuellErinnern({ ...basis, faellig: null, jetzt: new Date('2026-12-13T10:00:00Z') }), false);
+});
+
+test('Einfuell-Text nennt Lager, Ort, Tag und Verbrauch', () => {
+  const t = einfuellText({ lager: 'Rosenweg Kooperation', ort: 'Lager im Rosenweg 10', faellig: '2026-12-13',
+    bestandSaecke: 4, kgProWoche: 14.83, portalUrl: 'https://x' });
+  assert.match(t, /Rosenweg Kooperation/);
+  assert.match(t, /13\. Dezember/);
+  assert.match(t, /Ort: Lager im Rosenweg 10/);
+  assert.match(t, /14\.8 kg pro Woche/);
+  assert.match(t, /4 Säcke/);
+});
