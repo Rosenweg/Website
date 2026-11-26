@@ -1768,7 +1768,7 @@ router.post('/register', setupSession, a(async (req, res) => {
 // was zur Gruppenzugehörigkeit der angemeldeten Person passt — bisher zeigte
 // sie jeder Person alles und überliess die Prüfung der Seite nach dem Klick.
 router.get('/:id/apps', stationAuth, a(async (req, res) => {
-  res.json({ apps: await gruppenJeApp(pool) });
+  res.json({ apps: await gruppenJeApp(pool, { haus: req.station.haus }) });
 }));
 
 // POST /api/stations/:id/programme  { programme: [{ id, name }, …] }

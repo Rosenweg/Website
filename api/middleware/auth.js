@@ -5,7 +5,7 @@
 const crypto = require('crypto');
 const { pool, auditCtx } = require('../lib/db');
 const { AUTHENTIK_CLIENT_ID } = require('../lib/config');
-const { validateAuthentikToken, resolveAncestorGroups, ACCESS_LEVELS } = require('../lib/auth');
+const { validateAuthentikToken, validateAppToken, istAppToken, resolveAncestorGroups, ACCESS_LEVELS } = require('../lib/auth');
 
 // Pfade, die einen Ausweis erzeugen oder ändern — für Zugangstoken tabu.
 // Relativ zu /api/, Präfix-Vergleich auf Segmentgrenze.
@@ -35,6 +35,31 @@ function scopeErlaubt(scopes, pfad, method) {
   const unter = teile.length > 1 ? segment + '/' + teile[1] : null;
   const passt = (s, name) => s === name + ':*' || s === name + ':' + need;
   return scopes.map(s => String(s).toLowerCase()).some(s => s === '*' || s === 'all:' + need || passt(s, segment) || (unter && passt(s, unter)));
+}
+
+// Absender fuer die Bremse der App-Token-Pruefung. Der ERSTE
+// X-Forwarded-For-Eintrag stammt vom Client und ist frei faelschbar (damit
+// koennte jemand eine fremde Adresse sperren oder die Bremse umgehen); die
+// Proxies haengen hinten an. Also die hinterste nicht-interne Adresse — wie
+// vmSignaturIp() in server.js.
+const net = require('net');
+function absenderIp(req) {
+  const intern = (a) => {
+    const s = String(a || '').replace(/^::ffff:/i, '');
+    if (net.isIP(s) === 4) {
+      const [x, y] = s.split('.').map(Number);
+      return x === 10 || x === 127 || (x === 172 && y >= 16 && y <= 31) || (x === 192 && y === 168)
+        || (x === 100 && y >= 64 && y <= 127) || (x === 169 && y === 254);
+    }
+    if (net.isIP(s) === 6) return /^(::1$|f[cd]|fe[89ab])/i.test(s);
+    return true;
+  };
+  const kette = String(req.headers['x-forwarded-for'] || '').split(',').map(s => s.trim()).filter(Boolean);
+  kette.push(req.socket?.remoteAddress || '');
+  for (let i = kette.length - 1; i >= 0; i--) {
+    if (!intern(kette[i])) return kette[i].replace(/^::ffff:/i, '');
+  }
+  return (req.socket?.remoteAddress || req.ip || '').replace(/^::ffff:/i, '') || 'intern';
 }
 
 async function authMiddleware(req, res, next) {
@@ -126,7 +151,21 @@ async function authMiddleware(req, res, next) {
       return auditCtx.run({ userEmail: req.user.email || req.user.name || 'unknown' }, next);
     }
 
-    // 2. Try Authentik OAuth2 token
+    // 2. Access-Token der Rosenweg-Apps (Authentik "rosenweg-apps", PKCE).
+    //    Vorsortiert nach aud/azp im JWT, damit App-Tokens nicht erst die
+    //    Introspektion des Website-Clients durchlaufen (die kennt sie nicht).
+    //    Geprueft wird danach ueber userinfo, siehe lib/auth.js.
+    if (istAppToken(token)) {
+      const user = await validateAppToken(token, absenderIp(req));
+      if (user?.gebremst) return res.status(429).json({ error: 'Zu viele Anmeldeversuche — bitte kurz warten.' });
+      if (user) {
+        req.user = user;
+        return auditCtx.run({ userEmail: user.email || user.name || 'unknown' }, next);
+      }
+      return res.status(401).json({ error: 'Anmeldung abgelaufen' });
+    }
+
+    // 3. Try Authentik OAuth2 token (Website-Client, Introspektion)
     if (AUTHENTIK_CLIENT_ID) {
       const user = await validateAuthentikToken(token);
       if (user) {
