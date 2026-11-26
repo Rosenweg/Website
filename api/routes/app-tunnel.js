@@ -94,8 +94,13 @@ function appTunnelRoutes(app, { pool, rateLimitGuard }) {
         return res.status(401).json({ error: 'Token gehört nicht zu den Rosenweg-Apps' });
       }
       const email = String(info.email || '').trim().toLowerCase();
-      if (!email || info.email_verified === false) {
-        return res.status(400).json({ error: 'Zu diesem Konto ist keine bestätigte Mailadresse hinterlegt' });
+      // Kein Blick auf email_verified (26.11.2026): Authentik meldet fuer alle
+      // Rosenweg-Konten false, weil die Verwaltung die Adressen eintraegt und
+      // niemand sie per Mail bestaetigt. Die Bindung an die Person leisten die
+      // Pruefungen darunter (Zeile aktiv, gleiches authentik_sub) - wie beim
+      // Browser-Login, der email_verified ebenfalls nicht verlangt.
+      if (!email) {
+        return res.status(400).json({ error: 'Zu diesem Konto ist keine Mailadresse hinterlegt' });
       }
       // Dieselben Regeln wie beim Login im Browser: deaktivierte Zeile oder
       // Zeile eines anderen Authentik-Kontos mit gleicher Mail -> nein.
