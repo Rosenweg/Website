@@ -8,6 +8,10 @@ Website der STWEG-Kooperation Rosenweg in Kaiseraugst, Aargau.
 - **Authentik SSO** für Authentifizierung
 - **API-Backend** für Verteilerlisten, Waschküche, Verwaltung
 - **Energie-Monitor** mit Solartarif/Netztarif-Tracking
+- **Telefonanlage** (Asterisk, `pbx/`) mit geteilten Smartphones (`/smartphones`), eigenen Handys und der Seite `/mein-telefon`
+- **Apps** auf `/apps`: Downloads der Rosenweg-Apps; neue Versionen schicken die App-Repos beim Release selbst (wiederverwendbarer Workflow `.github/workflows/apps-release.yml`, Anmeldung per GitHub-OIDC)
+- **Stationen**: Rosenweg OS und Windows-Rechner aus dem Active Directory; GPOs für Rosenweg-Look, Ordnerumleitung, Nextcloud als Laufwerk N: und die Programm-Positivliste (`ad-dc/`)
+- **Salzvorrat** der Enthärtungsanlagen (`salz.html`, App Rosenweg Salz)
 
 ## Architektur
 
@@ -33,6 +37,9 @@ Website der STWEG-Kooperation Rosenweg in Kaiseraugst, Aargau.
 │   ├── authentik-auth.js   # SSO Integration
 │   └── site-config.js      # Konfiguration
 ├── api/                    # Node.js API Backend
+├── pbx/                    # Telefonanlage: Asterisk-Konfiguration, PBX-API, App-Katalog und /apps
+├── ad-dc/                  # Samba AD: zweiter DC, SYSVOL-Abgleich, GPOs, Windows-OU
+├── apps.html, smartphones.html, salz.html, stationen.html  # Seiten zu den Abschnitten oben
 ├── energy-collector/       # Energie-Datensammler
 ├── stweg1..7/, meg/        # STWEG-/MEG-Seiten
 ├── api/vorlagen/aushaenge/ # Türschilder + Poster (Druck mit Token-QR via tuerschilder.html)
@@ -53,7 +60,11 @@ Ein Push auf `main` lässt GitHub Actions die Images bauen (`ghcr.io/rosenweg/�
 - Frontends: `frontends-lxc/deploy.sh` im jeweiligen Container bzw. `scripts/rw-web-ausrollen.sh` für einzelne Dateien
 
 Einzelheiten: [`docs/infrastruktur.md`](docs/infrastruktur.md) und
-[`docs/website.md`](docs/website.md).
+[`docs/website.md`](docs/website.md); Telefonanlage und PBX-API:
+[`pbx/README.md`](pbx/README.md).
+
+App-Releases an `/apps`: Abschnitt „Seite /apps und App-Releases“ in
+[`pbx/README.md`](pbx/README.md).
 
 ## Sicherheit
 
