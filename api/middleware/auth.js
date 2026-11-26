@@ -215,4 +215,4 @@ function requireUserLogin(req, res, next) {
   next();
 }
 
-module.exports = { authMiddleware, adminOnly, requirePermission, requireUserLogin, scopeErlaubt };
+module.exports = { authMiddleware, adminOnly, requirePermission, requireUserLogin, scopeErlaubt, absenderIp };

@@ -11275,6 +11275,11 @@ app.use('/api/raum-qr', require('./routes/raum-qr'));
 const salz = require('./routes/salz');
 app.use('/api/salz', salz.salzRouter({ rateLimitGuard }));
 
+// Rosenweg Messenger auf dem eigenen Handy: Zugang je Geraet -> routes/messenger-zugang.js
+const messengerZugang = require('./routes/messenger-zugang');
+const { brokerBenutzername: msgBrokerBenutzername } = require('./lib/messenger-zugang');
+app.use('/api/messenger', messengerZugang.messengerZugangRouter({ rateLimitGuard }));
+
 // STATIONEN (Rosenweg/os-stationen) -> routes/stations.js
 // Bewusst ohne authMiddleware: der Installer läuft auf einem Gerät ohne
 // Browser und ohne Identität und meldet sich mit Benutzer + Passwort gegen
@@ -16425,7 +16430,10 @@ app.post('/api/mqtt/getuser', mqttBrokerGuard, async (req, res) => {
     // Messenger neu: Benutzername "msg-<sub>", JWT als Passwort. Der Name muss zum JWT passen,
     // sonst koennte jemand Claims unter fremdem Namen hinterlegen.
     const pwClaims = messengerJwtClaims(password);
-    if (pwClaims && String(username || '') === 'msg-' + String(pwClaims.sub || '')) {
+    // Eigenes Handy (Claim mz = Zugang aus routes/messenger-zugang.js): Name msg-<sub>-z<mz>,
+    // und den Zugang muss es noch geben (im Portal abgemeldet -> sofort abgewiesen).
+    if (pwClaims && String(username || '') === msgBrokerBenutzername(pwClaims)) {
+      if (pwClaims.mz != null && !(await messengerZugang.zugangGueltig(pwClaims.mz))) return res.status(403).end();
       await msgSitzungMerken(String(username), pwClaims);
       return res.status(200).end();
     }
@@ -16482,7 +16490,7 @@ app.post('/api/mqtt/superuser', mqttBrokerGuard, async (req, res) => {
     const { username, password } = req.body || {};
     // Messenger: nur das Backend-Token (backend:true) ist Superuser; per-User nein.
     const mj = messengerJwtClaims(username) || messengerJwtClaims(password) || await msgSitzungClaims(username);
-    if (mj) return res.status(mj.backend === true ? 200 : 403).end();
+    if (mj) return res.status(mj.backend === true && mj.mz == null ? 200 : 403).end();
     const u = await mqttUserByUsername(username);
     return res.status(u && u.is_technik ? 200 : 403).end();
   } catch (err) { console.error('[mqtt] superuser:', err.message); return res.status(500).end(); }
@@ -16507,7 +16515,9 @@ app.post('/api/mqtt/aclcheck', mqttBrokerGuard, async (req, res) => {
     // 2=write, 3=readwrite). Backend-Token darf alles.
     const mj = messengerJwtClaims(username) || messengerJwtClaims(password) || await msgSitzungClaims(username);
     if (mj) {
-      if (mj.backend === true) return res.status(200).end();
+      if (mj.backend === true && mj.mz == null) return res.status(200).end();
+      // eigenes Handy: abgemeldeter Zugang verliert sofort alle Themen (go-auth puffert 60 s)
+      if (mj.mz != null && !(await messengerZugang.zugangGueltig(mj.mz))) return res.status(403).end();
       const a = Number(acc);
       let ok;
       if (a === 2) ok = msgTopicAllowed(mj.pub_topics, topic);
