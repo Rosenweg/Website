@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sicherungen - Rosenweg</title>
+    <link rel="icon" href="/logo-rosenweg.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=5"></script>
+    <script src="/js/nav.js?v=3"></script>
+    <style>
+        .knopf { padding:.35rem .7rem; border-radius:.5rem; font-size:.85rem; background:#e2e8f0; white-space:nowrap; }
+        .knopf:hover { background:#cbd5e1; }
+        .knopf.blau { background:#1e3a8a; color:#fff; }
+        .knopf.blau:hover { background:#1e40af; }
+        .knopf:disabled { opacity:.5; cursor:not-allowed; }
+        .feld { display:block; width:100%; margin-top:.2rem; padding:.4rem .5rem; border:1px solid #cbd5e1; border-radius:.5rem; background:#fff; }
+        .marke { display:inline-block; padding:.05rem .5rem; border-radius:999px; font-size:.75rem; white-space:nowrap; }
+        .m-gut { background:#dcfce7; color:#166534; }
+        .m-warn { background:#fef3c7; color:#92400e; }
+        .m-schlecht { background:#fee2e2; color:#991b1b; }
+        .m-info { background:#dbeafe; color:#1e3a8a; }
+        .m-grau { background:#f1f5f9; color:#475569; }
+        tr.warnung td { background:#fffbeb; }
+        .balken { height:.5rem; border-radius:999px; background:#e2e8f0; overflow:hidden; }
+        .balken > div { height:100%; background:#1e3a8a; transition:width .5s; }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800">
+<nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+<script>RosenwegNav.init({ active: 'sicherungen' });</script>
+
+<main class="max-w-6xl mx-auto px-4 py-6 space-y-5">
+    <div class="flex items-center gap-3">
+        <img src="/logo-rosenweg.png" alt="" class="w-12 h-12">
+        <div>
+            <h1 class="text-2xl font-bold">Sicherungen</h1>
+            <div class="text-sm text-slate-500">Was auf dem Proxmox Backup Server liegt – und PCs als Plattenabbild sichern</div>
+        </div>
+    </div>
+
+    <div id="meldung" class="hidden rounded-lg px-4 py-3 text-sm"></div>
+    <div id="laden" class="text-slate-500 text-sm">Lade …</div>
+    <div id="gate" class="hidden bg-white rounded-xl shadow p-5">
+        <p class="mb-3">Bitte zuerst mit dem Rosenweg-Konto anmelden.</p>
+        <div id="login-container"></div>
+    </div>
+    <div id="keinRecht" class="hidden bg-white rounded-xl shadow p-5 text-sm">Die Sicherungen sieht nur die Technik.</div>
+
+    <div id="inhalt" class="hidden space-y-5">
+        <div class="flex gap-2 border-b border-slate-300">
+            <button id="tab-pbs" class="px-4 py-2 -mb-px border-b-2 font-medium" onclick="zeigeTab('pbs')">Übersicht</button>
+            <button id="tab-pc" class="px-4 py-2 -mb-px border-b-2 font-medium" onclick="zeigeTab('pc')">PC sichern</button>
+        </div>
+
+        <!-- ── Übersicht PBS ─────────────────────────────────────── -->
+        <section id="sek-pbs" class="space-y-4">
+            <div class="bg-white rounded-xl shadow p-5">
+                <div class="flex items-start gap-3 flex-wrap">
+                    <div class="flex-1 min-w-[14rem]">
+                        <div class="text-sm text-slate-500">Proxmox Backup Server · <span id="pbsDs">storage</span></div>
+                        <div id="pbsKopf" class="text-xl font-semibold">…</div>
+                        <div id="pbsBelegung" class="text-sm text-slate-600"></div>
+                    </div>
+                    <button class="knopf" onclick="ladePbs(true)">Neu laden</button>
+                </div>
+                <div id="pbsFehlt" class="hidden mt-3 rounded-lg bg-amber-50 text-amber-900 text-sm px-3 py-2"></div>
+            </div>
+            <div id="pbsBereiche" class="space-y-3"></div>
+            <details id="ohneBox" class="hidden bg-white rounded-xl shadow p-5">
+                <summary class="cursor-pointer font-medium">VMs und Container ohne Sicherung (<span id="ohneZahl">0</span>)</summary>
+                <p class="text-xs text-slate-500 mt-2">Im Cluster vorhanden, aber in keinem Namespace gesichert. Vorlagen sind nicht mitgezählt. Das kann gewollt sein (Test-VMs).</p>
+                <div id="ohneListe" class="mt-2 text-sm flex flex-wrap gap-2"></div>
+            </details>
+            <p class="text-xs text-slate-500">Nur lesend. Gelb: letzte Sicherung älter als erwartet (Stunden je Namespace in <code>PBS_ERWARTUNG</code>) oder Prüfung fehlgeschlagen. Für VMs, die es im Cluster nicht mehr gibt, gibt es keine Altersmeldung.</p>
+        </section>
+
+        <!-- ── PC sichern ────────────────────────────────────────── -->
+        <section id="sek-pc" class="hidden space-y-4">
+            <div class="bg-white rounded-xl shadow p-5 text-sm space-y-2">
+                <div class="font-medium">So geht es</div>
+                <ol class="list-decimal ml-5 space-y-1 text-slate-700">
+                    <li><b>Vormerken</b> – beim nächsten Netzstart startet der PC das Sicherungs-System statt des Menüs.</li>
+                    <li><b>PC per Netz starten</b> – unter Windows als Administrator <code>netzstart-einmal.ps1 -Setzen -Neustart</code>, sonst im Startmenü des PCs „Netzwerk / PXE“ wählen.</li>
+                    <li><b>Sicherung starten</b>, sobald hier „wartet auf Start“ steht. Die Platten werden nur gelesen; es dauert Stunden.</li>
+                    <li>Bei <b>Erfolg</b> die Vormerkung entfernen. Danach darf der PC aus.</li>
+                </ol>
+                <div id="pcFehlt" class="hidden rounded-lg bg-amber-50 text-amber-900 px-3 py-2"></div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow p-5 space-y-3">
+                <div class="flex gap-2 items-center flex-wrap">
+                    <input id="suche" class="feld max-w-xs" style="margin-top:0" placeholder="Rechner suchen …">
+                    <label class="text-sm flex items-center gap-1"><input id="nurAktive" type="checkbox"> nur vorgemerkte / laufende</label>
+                    <span class="flex-1"></span>
+                    <span id="pcStand" class="text-xs text-slate-500"></span>
+                </div>
+                <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="text-left text-slate-500"><tr>
+                        <th class="py-1 pr-3">Rechner</th><th class="pr-3">MAC / Adresse</th>
+                        <th class="pr-3">Stand</th><th class="pr-3 text-right">Aktion</th></tr></thead>
+                    <tbody id="pcListe" class="divide-y"></tbody>
+                </table>
+                </div>
+            </div>
+
+            <details class="bg-white rounded-xl shadow p-5 text-sm">
+                <summary class="cursor-pointer font-medium">Als VM wiederherstellen</summary>
+                <ol class="list-decimal ml-5 mt-2 space-y-1 text-slate-700">
+                    <li>Proxmox → Knoten → Speicher <b>PBS-PC-Sicherungen</b> → <b>Backups</b>. Die Sicherung heisst <code>vm/&lt;Nummer&gt;/&lt;Zeit&gt;</code>, die Notiz nennt den PC.</li>
+                    <li><b>Restore</b>: freie VM-Nummer, Speicher <code>vms</code>, <b>„Unique“ ankreuzen</b>.</li>
+                    <li>Bei UEFI nach Wunsch eine EFI-Disk anlegen („Pre-Enroll keys“ aus).</li>
+                    <li>Starten. Windows startet an SATA. Netz erst hinzufügen, wenn der echte PC umgestellt ist.</li>
+                </ol>
+                <p class="mt-2 text-slate-500">Ausführlich (auch virtio, einzelne Dateien, alte Sicherungen):
+                    <a class="text-blue-800 underline" href="https://github.com/Rosenweg/os-stationen/blob/main/sicherung/README.md#als-vm-im-cluster-starten" target="_blank" rel="noopener">os-stationen, sicherung/README.md</a></p>
+            </details>
+        </section>
+    </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const datum = t => t ? new Date(t).toLocaleString('de-CH', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' }) : '–';
+function groesse(b) {
+    if (b == null) return '–';
+    const e = ['B','KB','MB','GB','TB','PB']; let i = 0, v = Number(b);
+    while (v >= 1024 && i < e.length - 1) { v /= 1024; i++; }
+    return (v >= 100 || i === 0 ? Math.round(v) : v.toFixed(1)) + ' ' + e[i];
+}
+function alter(h) {
+    if (h == null) return '';
+    if (h < 1) return 'vor ' + Math.max(1, Math.round(h * 60)) + ' Min.';
+    if (h < 48) return 'vor ' + Math.round(h) + ' h';
+    return 'vor ' + Math.round(h / 24) + ' Tagen';
+}
+function dauer(s) {
+    if (s == null || s < 0) return '';
+    const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+    return h ? `${h} h ${m} Min.` : `${m} Min.`;
+}
+
+function melde(text, fehler) {
+    const m = $('meldung');
+    m.textContent = text;
+    m.className = 'rounded-lg px-4 py-3 text-sm ' + (fehler ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800');
+    if (!fehler) setTimeout(() => m.classList.add('hidden'), 5000);
+}
+async function api(pfad, opts) {
+    const r = await AuthentikAuth.apiFetch('/api/sicherungen' + pfad, opts);
+    const d = await r.json().catch(() => ({ error: 'Server gerade nicht erreichbar' }));
+    if (!r.ok) throw new Error(d.error || ('Fehler ' + r.status));
+    return d;
+}
+
+// ── Tabs ─────────────────────────────────────────────────────────
+function zeigeTab(t) {
+    for (const x of ['pbs', 'pc']) {
+        $('sek-' + x).classList.toggle('hidden', x !== t);
+        $('tab-' + x).className = 'px-4 py-2 -mb-px border-b-2 font-medium ' + (x === t ? 'border-blue-900 text-blue-900' : 'border-transparent text-slate-500');
+    }
+    try { localStorage.setItem('sicherungen-tab', t); } catch {}
+    if (t === 'pc') ladePcs();
+}
+
+// ── PBS ──────────────────────────────────────────────────────────
+const TYP = { vm: 'VM', ct: 'CT', host: 'Host' };
+const PRUEF = {
+    ok: '<span class="marke m-gut">geprüft</span>',
+    fehler: '<span class="marke m-schlecht">Prüfung fehlgeschlagen</span>',
+    offen: '<span class="marke m-grau">nicht geprüft</span>',
+};
+
+async function ladePbs(frisch) {
+    $('pbsKopf').textContent = 'Lade …';
+    try {
+        const d = await api('/pbs' + (frisch ? '?frisch=1' : ''));
+        zeichnePbs(d);
+    } catch (e) {
+        $('pbsKopf').textContent = 'PBS nicht lesbar';
+        $('pbsBelegung').textContent = e.message;
+    }
+}
+
+function zeichnePbs(d) {
+    if (!d.eingerichtet) {
+        $('pbsKopf').textContent = 'Noch nicht eingerichtet';
+        $('pbsFehlt').classList.remove('hidden');
+        $('pbsFehlt').textContent = 'Auf dem Server fehlt: ' + d.fehlt.join(', ') + '. Ohne das Lese-Token zeigt die Seite nichts vom PBS.';
+        return;
+    }
+    $('pbsFehlt').classList.add('hidden');
+    $('pbsDs').textContent = d.datastore;
+    const n = d.bereiche.reduce((s, b) => s + b.gruppen.length, 0);
+    $('pbsKopf').innerHTML = d.warnungen
+        ? `<span class="text-amber-700">${d.warnungen} ${d.warnungen === 1 ? 'Warnung' : 'Warnungen'}</span> <span class="text-base font-normal text-slate-500">· ${n} Gruppen</span>`
+        : `<span class="text-green-700">Alles aktuell</span> <span class="text-base font-normal text-slate-500">· ${n} Gruppen</span>`;
+    const b = d.belegung;
+    $('pbsBelegung').textContent = (b && b.gesamt ? `Belegt ${groesse(b.belegt)} von ${groesse(b.gesamt)} (${Math.round(b.belegt / b.gesamt * 100)} %) · ` : '')
+        + 'Stand ' + datum(d.stand) + (d.cluster_fehler ? ' · Proxmox nicht lesbar, Namen fehlen' : '');
+
+    $('pbsBereiche').innerHTML = d.bereiche.map(ber => `
+        <details class="bg-white rounded-xl shadow p-5" ${ber.warnungen ? 'open' : ''}>
+            <summary class="cursor-pointer flex items-center gap-2 flex-wrap">
+                <span class="font-semibold">${esc(ber.ns || '(oberste Ebene)')}</span>
+                <span class="text-sm text-slate-500">${ber.gruppen.length} Gruppen · ${groesse(ber.groesse)}
+                    · ${ber.erwartung_stunden ? 'erwartet alle ' + ber.erwartung_stunden + ' h' : 'ohne Altersgrenze'}</span>
+                ${ber.warnungen ? `<span class="marke m-warn">${ber.warnungen} Warnung${ber.warnungen === 1 ? '' : 'en'}</span>` : '<span class="marke m-gut">in Ordnung</span>'}
+            </summary>
+            <div class="overflow-x-auto mt-3">
+            <table class="w-full text-sm">
+                <thead class="text-left text-slate-500"><tr>
+                    <th class="py-1 pr-3">Gruppe</th><th class="pr-3">Name / Notiz</th><th class="pr-3">Letzte Sicherung</th>
+                    <th class="pr-3 text-right">Anzahl</th><th class="pr-3 text-right">Grösse</th><th class="pr-3">Prüfung</th></tr></thead>
+                <tbody class="divide-y">${ber.gruppen.map(g => `
+                    <tr class="${g.warnung ? 'warnung' : ''}">
+                        <td class="py-1 pr-3 whitespace-nowrap font-mono">${esc(TYP[g.typ] || g.typ)} ${esc(g.id)}</td>
+                        <td class="pr-3">${esc(g.name || g.notiz || '')}${g.im_cluster === false ? ' <span class="marke m-grau">nicht mehr im Cluster</span>' : ''}</td>
+                        <td class="pr-3 whitespace-nowrap">${esc(datum(g.letzte))} <span class="text-slate-500">${esc(alter(g.alter_stunden))}</span>
+                            ${g.warnung ? `<span class="marke m-warn">${esc(g.warnung)}</span>` : ''}</td>
+                        <td class="pr-3 text-right">${Number(g.anzahl)}</td>
+                        <td class="pr-3 text-right whitespace-nowrap">${groesse(g.groesse)}</td>
+                        <td class="pr-3 whitespace-nowrap" title="${g.geprueft_am ? 'zuletzt ' + esc(datum(g.geprueft_am)) : ''}">${PRUEF[g.pruefung] || ''}</td>
+                    </tr>`).join('') || '<tr><td colspan="6" class="py-2 text-slate-500">Keine Sicherungen.</td></tr>'}</tbody>
+            </table>
+            </div>
+        </details>`).join('');
+
+    const ohne = d.ohne_sicherung || [];
+    $('ohneBox').classList.toggle('hidden', !ohne.length);
+    $('ohneZahl').textContent = ohne.length;
+    $('ohneListe').innerHTML = ohne.map(o => `<span class="marke m-grau">${esc(TYP[o.typ])} ${o.vmid}${o.name ? ' ' + esc(o.name) : ''}</span>`).join('');
+}
+
+// ── PCs ──────────────────────────────────────────────────────────
+let pcs = [], einr = null, pcNs = 'Rosenweg9/pc', offen = null, pcTimer = null;
+const extraPruefen = new Set();
+
+function laufAktiv(p) { return p.lauf && !p.lauf.beendet_am; }
+
+// Ein Stand je PC: was ist, und was ist der eine nächste Schritt.
+function stand(p) {
+    const st = p.live && p.live.erreichbar ? p.live.status : null;
+    if (laufAktiv(p)) {
+        const s = (st && st.zustand === 'laeuft') ? st : p.lauf.status;
+        return { art: 'laeuft', s };
+    }
+    if (st && st.zustand === 'laeuft') return { art: 'laeuft', s: st };
+    if (st && ['erfolg', 'nicht_in_ordnung', 'fehler'].includes(st.zustand)) return { art: st.zustand, s: st };
+    if (st) return { art: 'wartet', s: st };
+    if (!p.mac) return { art: 'keine_mac' };
+    if (p.vorgemerkt) return { art: 'vorgemerkt' };
+    return { art: 'bereit' };
+}
+
+function standHtml(p, x) {
+    const letzte = p.lauf && p.lauf.beendet_am
+        ? `<div class="text-xs text-slate-500">Zuletzt ${esc(datum(p.lauf.beendet_am))}: ${esc({ erfolg: 'erfolgreich', nicht_in_ordnung: 'nicht in Ordnung', fehler: 'Fehler', verloren: 'Verbindung verloren' }[p.lauf.zustand] || p.lauf.zustand)}, VM ${Number(p.lauf.vmid)}</div>` : '';
+    const pbs = p.letzte_pbs ? `<div class="text-xs text-slate-500">Im PBS: ${esc(datum(p.letzte_pbs.zeit))}, ${groesse(p.letzte_pbs.groesse)}, ${p.letzte_pbs.pruefung === 'ok' ? 'geprüft' : 'nicht geprüft'}</div>` : '';
+    const s = x.s;
+    switch (x.art) {
+        case 'keine_mac': return '<span class="marke m-grau">MAC fehlt</span>' + letzte + pbs;
+        case 'bereit': return '<span class="text-slate-500">–</span>' + letzte + pbs;
+        case 'vorgemerkt': return `<span class="marke m-info">vorgemerkt</span>
+            <div class="text-xs text-slate-600 mt-1">Jetzt den PC per Netz starten. ${p.ip ? '' : 'Adresse noch unbekannt.'}</div>` + letzte + pbs;
+        case 'wartet': return `<span class="marke m-info">im Sicherungs-System – wartet auf Start</span>
+            ${s && s.platten && s.platten.length ? `<div class="text-xs text-slate-600 mt-1">Platten: ${s.platten.map(d => esc(d.name) + (d.groesse ? ' ' + groesse(d.groesse) : '') + (d.modell ? ' (' + esc(d.modell) + ')' : '') + (d.nur_gelesen === false ? ' <b class="text-red-700">nicht schreibgeschützt!</b>' : '')).join(', ')}</div>` : ''}` + letzte + pbs;
+        case 'laeuft': {
+            const pm = s && s.promille != null ? s.promille : null;
+            return `<span class="marke m-info">Sicherung läuft</span>
+                ${s && s.schritt ? `<div class="text-xs text-slate-600 mt-1">Schritt ${s.schritt.nr || '?'}/${s.schritt.zahl || '?'}: ${esc(s.schritt.name)}</div>` : '<div class="text-xs text-slate-600 mt-1">startet …</div>'}
+                ${pm != null ? `<div class="balken mt-1 w-56"><div style="width:${Math.min(100, pm / 10)}%"></div></div>
+                    <div class="text-xs text-slate-500">${(pm / 10).toFixed(1)} %${s.rest_s ? ' · noch etwa ' + dauer(s.rest_s) : ''}</div>` : ''}
+                ${p.live && !p.live.erreichbar ? '<div class="text-xs text-amber-700">Gerade keine Verbindung zum PC</div>' : ''}`;
+        }
+        case 'erfolg': return `<span class="marke m-gut">Erfolg – vollständig und geprüft</span>
+            ${s && s.snapshot ? `<div class="text-xs text-slate-600 mt-1 font-mono">${esc(s.snapshot)}</div>` : ''}
+            <div class="text-xs text-slate-600">Vormerkung entfernen, dann darf der PC aus.</div>` + pbs;
+        default: return `<span class="marke m-schlecht">${x.art === 'fehler' ? 'Fehler' : 'Nicht in Ordnung'}</span>
+            ${s && s.grund ? `<div class="text-xs text-red-800 mt-1">${esc(s.grund)}</div>` : ''}` + pbs;
+    }
+}
+
+function aktionHtml(p, x) {
+    const id = esc(p.id);
+    const kannVormerken = einr && !einr.vormerken.length;
+    const kannSichern = einr && !einr.sichern.length;
+    const weg = p.vorgemerkt && kannVormerken ? `<button class="knopf" onclick="vormerkungWeg('${id}')">Vormerkung entfernen</button>` : '';
+    const einst = `<button class="knopf" onclick="einstellen('${id}')" title="MAC und Adresse">⚙</button>`;
+    let haupt = '';
+    switch (x.art) {
+        case 'keine_mac': haupt = `<button class="knopf blau" onclick="einstellen('${id}')">MAC eintragen</button>`; return haupt;
+        case 'bereit': haupt = kannVormerken ? `<button class="knopf blau" onclick="vormerken('${id}')">Sicherung vormerken</button>` : ''; break;
+        case 'vorgemerkt': haupt = `<button class="knopf" onclick="pruefen('${id}')">Nachsehen</button>`; break;
+        case 'wartet': haupt = kannSichern ? `<button class="knopf blau" onclick="starten('${id}')">Sicherung starten</button>` : ''; break;
+        case 'laeuft': return '';
+        case 'erfolg': return weg || einst;
+        default: haupt = kannSichern ? `<button class="knopf blau" onclick="starten('${id}')">Erneut starten</button>` : '';
+    }
+    return [haupt, weg, einst].filter(Boolean).join(' ');
+}
+
+function zeichnePcs() {
+    const q = $('suche').value.trim().toLowerCase();
+    const nurAktive = $('nurAktive').checked;
+    const liste = pcs.map(p => ({ p, x: stand(p) }))
+        .filter(({ p, x }) => !q || [p.hostname, p.mac, p.ip, p.standort].some(v => v && String(v).toLowerCase().includes(q)))
+        .filter(({ x }) => !nurAktive || !['bereit', 'keine_mac'].includes(x.art))
+        // Wo etwas geschieht, steht oben.
+        .sort((a, b) => (['bereit', 'keine_mac'].includes(a.x.art) - ['bereit', 'keine_mac'].includes(b.x.art)) || a.p.hostname.localeCompare(b.p.hostname));
+    $('pcListe').innerHTML = liste.map(({ p, x }) => `
+        <tr class="align-top">
+            <td class="py-2 pr-3"><div class="font-medium">${esc(p.hostname)}</div>
+                <div class="text-xs text-slate-500">${esc(p.role === 'windows' ? 'Windows' : p.role)}${p.haus ? ' · Haus ' + esc(p.haus) : ''}${p.standort ? ' · ' + esc(p.standort) : ''}${p.vmid ? ' · VM ' + Number(p.vmid) : ''}</div></td>
+            <td class="py-2 pr-3 text-xs font-mono">${p.mac ? esc(p.mac.replace(/-/g, ':')) : '<span class="text-slate-400">–</span>'}
+                <div>${p.ip ? esc(p.ip) + (p.ip_quelle === 'eingetragen' ? ' (von Hand)' : '') : '<span class="text-slate-400">keine Adresse</span>'}</div></td>
+            <td class="py-2 pr-3">${standHtml(p, x)}</td>
+            <td class="py-2 pr-3 text-right space-x-1 whitespace-nowrap">${aktionHtml(p, x)}</td>
+        </tr>
+        ${offen === p.id ? editorHtml(p) : ''}`).join('')
+        || '<tr><td colspan="4" class="py-2 text-slate-500">Keine Rechner gefunden.</td></tr>';
+}
+
+function editorHtml(p) {
+    const vor = (p.mac_vorschlaege || []).filter(m => m !== p.mac);
+    return `<tr><td colspan="4" class="pb-3">
+        <div class="bg-slate-50 rounded-lg p-3 grid sm:grid-cols-3 gap-3 text-sm items-end">
+            <label>MAC-Adresse der Netzkarte, über die der PC startet
+                <input id="eMac" class="feld font-mono" value="${esc(p.mac ? p.mac.replace(/-/g, ':') : '')}" placeholder="aa:bb:cc:dd:ee:ff">
+                ${vor.length ? `<span class="text-xs text-slate-500">Bekannt: ${vor.map(m => `<a href="#" class="underline" onclick="$('eMac').value='${m.replace(/-/g, ':')}';return false">${m.replace(/-/g, ':')}</a>`).join(', ')}</span>` : ''}
+                ${p.mac_quelle && p.mac_quelle !== 'eingetragen' ? `<span class="text-xs text-slate-500">(aus ${p.mac_quelle === 'unifi' ? 'UniFi' : 'der Station'})</span>` : ''}</label>
+            <label>Adresse – nur falls UniFi sie nicht kennt
+                <input id="eIp" class="feld font-mono" value="${esc(p.adresse_eingetragen || '')}" placeholder="leer = aus UniFi"></label>
+            <div class="flex gap-2"><button class="knopf blau" onclick="speichern('${esc(p.id)}')">Speichern</button>
+                <button class="knopf" onclick="offen=null;zeichnePcs()">Abbrechen</button></div>
+        </div></td></tr>`;
+}
+
+async function ladePcs() {
+    clearTimeout(pcTimer);
+    try {
+        const d = await api('/pcs' + (extraPruefen.size ? '?pruefen=' + encodeURIComponent([...extraPruefen].join(',')) : ''));
+        pcs = d.pcs || []; einr = d.einrichtung; pcNs = d.ns || pcNs;
+        const fehlt = [];
+        if (einr.vormerken.length) fehlt.push('Vormerken: ' + einr.vormerken.join(', '));
+        if (einr.sichern.length) fehlt.push('Sichern: ' + einr.sichern.join(', '));
+        if (einr.adressen.length) fehlt.push('Adressen: ' + einr.adressen.join(', '));
+        if (d.vormerk_fehler) fehlt.push('CT 135 nicht erreichbar: ' + d.vormerk_fehler);
+        $('pcFehlt').classList.toggle('hidden', !fehlt.length);
+        $('pcFehlt').innerHTML = 'Auf dem Server noch nicht eingerichtet:<br>' + fehlt.map(esc).join('<br>');
+        $('pcStand').textContent = 'Stand ' + new Date().toLocaleTimeString('de-CH');
+        if (offen === null) zeichnePcs();
+    } catch (e) { melde(e.message, true); }
+    // Solange etwas geschieht, alle 5 s; sonst jede Minute.
+    const aktiv = pcs.some(p => !['bereit', 'keine_mac'].includes(stand(p).art));
+    if (!$('sek-pc').classList.contains('hidden')) pcTimer = setTimeout(ladePcs, aktiv ? 5000 : 60000);
+}
+
+function pcName(id) { const p = pcs.find(x => x.id === id); return p ? p.hostname : id; }
+
+function einstellen(id) { offen = id; zeichnePcs(); }
+
+async function speichern(id) {
+    try {
+        await api('/pcs/' + encodeURIComponent(id), { method: 'PUT', body: { mac: $('eMac').value, adresse: $('eIp').value } });
+        offen = null; melde('Gespeichert.'); await ladePcs();
+    } catch (e) { melde(e.message, true); }
+}
+
+async function vormerken(id) {
+    if (!confirm(`${pcName(id)} vormerken?\n\nBeim nächsten Netzstart startet der PC das Sicherungs-System statt des Menüs. Am PC wird nichts verändert.`)) return;
+    try { await api(`/pcs/${encodeURIComponent(id)}/vormerkung`, { method: 'POST' }); melde('Vorgemerkt. Jetzt den PC per Netz starten.'); await ladePcs(); }
+    catch (e) { melde(e.message, true); }
+}
+
+async function vormerkungWeg(id) {
+    try { await api(`/pcs/${encodeURIComponent(id)}/vormerkung`, { method: 'DELETE' }); melde('Vormerkung entfernt.'); await ladePcs(); }
+    catch (e) { melde(e.message, true); }
+}
+
+async function pruefen(id) { extraPruefen.add(id); await ladePcs(); }
+
+async function starten(id) {
+    const p = pcs.find(x => x.id === id);
+    if (!confirm(`${p.hostname} jetzt sichern?\n\nGesichert wird jede interne Platte als VM-Sicherung ${p.vmid ? 'VM ' + p.vmid : '(nächste freie Nummer ab 9001)'} in ${pcNs}. Die Platten werden nur gelesen. Es dauert mehrere Stunden; der PC muss so lange an bleiben.`)) return;
+    try {
+        const r = await api(`/pcs/${encodeURIComponent(id)}/start`, { method: 'POST' });
+        melde(`Gestartet (VM ${r.vmid}).`); await ladePcs();
+    } catch (e) { melde(e.message, true); }
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
+    const user = await AuthentikAuth.init({ requireAuth: false });
+    $('laden').classList.add('hidden');
+    if (!user) { $('gate').classList.remove('hidden'); AuthentikAuth.createLoginButton('login-container'); return; }
+    const groups = (user.groups || []).map(g => g.toLowerCase());
+    if (!groups.includes('technik') && !groups.includes('präsident') && !groups.includes('praesident')) {
+        $('keinRecht').classList.remove('hidden'); return;
+    }
+    $('inhalt').classList.remove('hidden');
+    $('suche').addEventListener('input', zeichnePcs);
+    $('nurAktive').addEventListener('change', zeichnePcs);
+    let tab = 'pbs';
+    try { tab = localStorage.getItem('sicherungen-tab') || 'pbs'; } catch {}
+    if (location.hash === '#pc' || location.hash === '#pbs') tab = location.hash.slice(1);
+    zeigeTab(tab === 'pc' ? 'pc' : 'pbs');
+    ladePbs(false);
+});
+</script>
+</body>
+</html>
