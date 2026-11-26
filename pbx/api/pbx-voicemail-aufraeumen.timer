@@ -1,0 +1,9 @@
+[Unit]
+Description=Rosenweg PBX: Voicemail-Loeschfrist taeglich pruefen
+
+[Timer]
+OnCalendar=*-*-* 03:30
+Persistent=true
+
+[Install]
+WantedBy=timers.target

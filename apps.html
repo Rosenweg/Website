@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rosenweg-Apps</title>
+    <link rel="icon" href="/logo-rosenweg.png">
+    <style>
+        :root { --rot: #b91c1c; --text: #1f2937; --leise: #6b7280; --flaeche: #ffffff; --grund: #f3f4f6; --linie: #e5e7eb; }
+        @media (prefers-color-scheme: dark) {
+            :root { --text: #e5e7eb; --leise: #9ca3af; --flaeche: #1f2937; --grund: #111827; --linie: #374151; --rot: #f87171; }
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--grund); color: var(--text); line-height: 1.55; }
+        main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+        header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+        header img { width: 64px; height: 64px; }
+        h1 { margin: 0; font-size: 1.6rem; }
+        h2 { font-size: 1.15rem; margin: 32px 0 8px; }
+        p { margin: 8px 0; }
+        a { color: var(--rot); }
+        .karte { background: var(--flaeche); border: 1px solid var(--linie); border-radius: 12px; padding: 16px 20px; margin-top: 16px; }
+        ul.apps { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 16px; }
+        ul.apps li { padding: 6px 0; border-bottom: 1px solid var(--linie); }
+        ul.apps b { display: block; }
+        ul.apps span { color: var(--leise); font-size: .9rem; }
+        .leise { color: var(--leise); font-size: .9rem; }
+        table.dl { width: 100%; border-collapse: collapse; }
+        table.dl td { padding: 8px 4px; border-bottom: 1px solid var(--linie); vertical-align: middle; }
+        table.dl td.v { color: var(--leise); font-size: .9rem; white-space: nowrap; }
+        a.knopf { display: inline-block; padding: 6px 12px; border-radius: 8px; background: var(--rot); color: #fff; text-decoration: none; font-size: .9rem; white-space: nowrap; }
+        code { font-size: .8rem; word-break: break-all; }
+    </style>
+</head>
+<body>
+<main>
+    <header>
+        <img src="/logo-rosenweg.png" alt="">
+        <div>
+            <h1>Rosenweg-Apps</h1>
+            <div class="leise">Die Apps auf den Rosenweg-Telefonen</div>
+        </div>
+    </header>
+
+    <div class="karte">
+        <p>Die Rosenweg-Apps laufen auf den geteilten Telefonen der Siedlung und auf privaten Handys.
+        Sie arbeiten mit der Rosenweg-Anlage zusammen: Telefonie über die eigene Telefonanlage,
+        Dateien, Kontakte und Kalender in der Rosenweg-Nextcloud, Nachrichten über den Rosenweg Messenger.
+        Sie enthalten keine Werbung und schicken keine Daten an fremde Dienste.</p>
+        <p>Auf einem geteilten Telefon meldest du dich mit deinem Rosenweg-Konto an. Deine Einstellungen
+        liegen auf der Anlage und kommen auf jedem Telefon mit. Beim Abmelden werden deine Daten vom Gerät entfernt.</p>
+    </div>
+
+    <h2>Die Apps</h2>
+    <div class="karte">
+        <ul class="apps">
+            <li><b>Rosenweg Gerät</b><span>Anmeldung, Sperre, App-Verwaltung</span></li>
+            <li><b>Rosenweg Telefon</b><span>Telefonieren über die Anlage</span></li>
+            <li><b>Rosenweg Messenger</b><span>Chats, Ankündigungen, Notfall, SMS</span></li>
+            <li><b>Kontakte</b><span>Adressbuch aus der Nextcloud</span></li>
+            <li><b>Kalender</b><span>Termine aus der Nextcloud</span></li>
+            <li><b>Notizen</b><span>Notizen und Checklisten</span></li>
+            <li><b>Dateien</b><span>Nextcloud und Telefon</span></li>
+            <li><b>Dokumente</b><span>Dokumente ansehen und bearbeiten</span></li>
+            <li><b>Kamera</b><span>Fotos landen in deiner Nextcloud</span></li>
+            <li><b>Galerie</b><span>Fotos und Videos</span></li>
+            <li><b>Zeichnen</b><span>Skizzen</span></li>
+            <li><b>Sprachrekorder</b><span>Aufnahmen</span></li>
+            <li><b>Uhr</b><span>Wecker, Timer, Stoppuhr</span></li>
+            <li><b>Rechner</b><span>Rechner</span></li>
+            <li><b>Startseite</b><span>Startbildschirm, pro Person gespeichert</span></li>
+            <li><b>Tastatur</b><span>Tastatur ohne Datenweitergabe</span></li>
+        </ul>
+    </div>
+
+    <h2>Herunterladen</h2>
+    <div class="karte">
+        <p>Für dein eigenes Android-Handy. Auf den geteilten Telefonen hält Rosenweg Gerät die Apps selbst aktuell.</p>
+        <table class="dl"><tbody id="downloads"><tr><td class="leise">Lade die Liste …</td></tr></tbody></table>
+        <p class="leise">Installieren: APK auf dem Handy öffnen; beim ersten Mal fragt Android, ob der Browser Apps
+        installieren darf. Alle Apps sind mit dem Rosenweg-Schlüssel signiert (SHA-256
+        <code id="signatur">7b3bac26e82b6103546b96861dcf1bb89b3239424ff11fdf684975cf78c5a5ae</code>);
+        Updates lassen sich nur über eine App mit derselben Signatur einspielen.
+        Rosenweg Telefon: nach dem Installieren im Menü „Mit Rosenweg anmelden“.</p>
+    </div>
+
+    <h2>Grundlage: Fossify</h2>
+    <div class="karte">
+        <p>Die meisten Rosenweg-Apps sind Anpassungen der freien Apps von
+        <a href="https://www.fossify.org" rel="noopener">Fossify</a>, einer Gemeinschaft, die einfache,
+        werbefreie Android-Apps als freie Software entwickelt. Ohne ihre Arbeit gäbe es die Rosenweg-Apps
+        in dieser Form nicht. Wer Fossify unterstützen möchte, findet auf fossify.org den Weg dazu.</p>
+        <p>Rosenweg Gerät beruht auf <a href="https://github.com/i-p-tel/sipdroid" rel="noopener">Sipdroid</a>.</p>
+        <p>Lizenz: GNU General Public License, Version 3 (GPL-3.0). Den Quellcode aller Anpassungen gibt es unter
+        <a href="https://github.com/Rosenweg" rel="noopener">github.com/Rosenweg</a>; die Lizenzen der verwendeten
+        Bibliotheken stehen in jeder App unter „Über“ → „Lizenzen von Drittanbietern“.</p>
+    </div>
+
+    <p class="leise" style="margin-top:32px">Fragen und Probleme: Ressort Technik, <a href="/hilfe.html">Hilfe &amp; Anleitungen</a>.</p>
+</main>
+<script>
+(async () => {
+    const ziel = document.getElementById('downloads');
+    const basis = 'https://pbx.rosenweg4303.ch';
+    try {
+        const r = await fetch(basis + '/api/apps/index.json', { cache: 'no-store' });
+        if (!r.ok) throw new Error(r.status);
+        const d = await r.json();
+        if (d.signatur_sha256) document.getElementById('signatur').textContent = d.signatur_sha256;
+        ziel.textContent = '';
+        for (const a of d.apps) {
+            const tr = document.createElement('tr');
+            const name = document.createElement('td');
+            name.textContent = a.name;
+            const v = document.createElement('td');
+            v.className = 'v';
+            v.textContent = [a.version_name ? 'Version ' + a.version_name : '',
+                             a.groesse ? (a.groesse / 1048576).toFixed(1) + ' MB' : ''].filter(Boolean).join(' · ');
+            const k = document.createElement('td');
+            k.style.textAlign = 'right';
+            const link = document.createElement('a');
+            link.className = 'knopf';
+            link.href = basis + a.url;
+            link.textContent = 'Laden';
+            link.setAttribute('download', '');
+            k.appendChild(link);
+            tr.append(name, v, k);
+            ziel.appendChild(tr);
+        }
+    } catch (e) {
+        ziel.innerHTML = '<tr><td class="leise">Die Liste ist gerade nicht erreichbar.</td></tr>';
+    }
+})();
+</script>
+</body>
+</html>

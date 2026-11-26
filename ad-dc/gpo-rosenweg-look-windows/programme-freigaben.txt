@@ -1,0 +1,13 @@
+# Programm-Whitelist (AppLocker) - zusaetzliche Freigaben fuer alle
+# ============================================================================
+# Erlaubt ist ohnehin: alles unter C:\Windows und C:\Program Files (x86),
+# signierte Store-Apps und OneDrive. Was ein Admin dort installiert, laeuft
+# also sofort - die Ordner sind fuer normale Benutzer nicht beschreibbar.
+#
+# Hier nur, was ausserhalb liegt. Eine Zeile je Ordner oder Datei, * am Ende
+# fuer alles darunter. NUR Orte, die normale Benutzer NICHT beschreiben
+# koennen - ein freigegebener Ordner, in den jeder schreiben darf, hebelt die
+# ganze Liste aus. Danach auf dc1 ./einrichten.sh, wirkt beim naechsten Start.
+#
+# Beispiel:
+# C:\Tools\Steuerprogramm\*

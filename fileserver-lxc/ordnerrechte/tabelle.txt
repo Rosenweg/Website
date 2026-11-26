@@ -1,0 +1,77 @@
+# Ordnerrechte der Freigabe [dokumente] (/mnt/cephfs-stage)
+#
+# Quelle der Regeln: api/server.js (isDocPathAllowed, canWriteDocPath,
+# DOC_SPERR_ORDNER, DOC_AUSSCHUSS_ORDNER) und api/lib/groups.js (STWEG_GROUPS).
+# Aendert sich dort etwas, muss es hier nachgezogen werden.
+#
+# Aufbau:  pfad | lesen | schreiben
+#   pfad  /       = nur die Wurzel selbst und die Dateien darin
+#         name    = Ordner der obersten Ebene, mit allem darunter
+#         ~name   = jeder Ordner dieses Namens auf Ebene 1 oder 2
+#                   (gross/klein egal), mit allem darunter; gilt nach den
+#                   anderen Zeilen und gewinnt
+#   lesen, schreiben: Komma-Liste, g:gruppe oder u:konto (ohne Praefix =
+#         Gruppe), "-" = niemand. Wer schreiben darf, darf auch lesen.
+#   ADMIN: bekommt ueberall lesen+schreiben (wie isTechnik/isPraesident),
+#         dazu das Dienstkonto der Website.
+#
+# Ordner der obersten Ebene, die hier NICHT stehen, sind nur fuer ADMIN
+# offen - so wie die Website sie ausser Technik/Praesident niemandem zeigt.
+# .git, .github, .claude und .recycle fasst das Skript nie an, dazu was in
+# der NIE-Zeile steht (Komma-Liste von Namen, auf jeder Ebene).
+
+ADMIN | g:technik,g:präsident,u:api-svc
+
+# Testordner des Probelaufs hat eigene Rechte (tabelle-probelauf.txt)
+NIE   | _acltest
+
+# Wurzel: alle duerfen hinein und die Dateien der obersten Ebene lesen
+# (Website wertet sie als 'allgemein'). Schreiben nur ADMIN.
+# u:scanner braucht den Durchgang fuer die Freigabe [scans].
+/          | g:rosenweg,u:scanner | -
+
+# allgemein: lesen alle, schreiben jeder Ausschuss
+allgemein  | g:rosenweg | stweg1-ausschuss,stweg2-ausschuss,stweg3-ausschuss,stweg4-ausschuss,stweg5-ausschuss,stweg6-ausschuss,stweg7-ausschuss,meg-ausschuss,stweg8-ausschuss
+
+# Scans: lesen alle, schreiben nur der Scanner (und ADMIN)
+Scans      | g:rosenweg | u:scanner
+
+# projekte: lesen alle Eigentuemer, schreiben jeder Ausschuss
+# (gibt es heute noch nicht, das Skript ueberspringt fehlende Ordner)
+projekte   | eigentuemer,stweg1-eigentuemer,stweg2-eigentuemer,r9-eigentuemer,stweg4-eigentuemer,stweg5-eigentuemer,r1-eigentuemer,stweg7-eigentuemer,meg-eigentuemer | stweg1-ausschuss,stweg2-ausschuss,stweg3-ausschuss,stweg4-ausschuss,stweg5-ausschuss,stweg6-ausschuss,stweg7-ausschuss,meg-ausschuss,stweg8-ausschuss
+
+# STWEG-Ordner: lesen Bewohner+Eigentuemer+Ausschuss der STWEG,
+# schreiben nur deren Ausschuss. STWEG 3 = r9-*, STWEG 6 = r1-*, STWEG 8 = meg-*.
+stweg1     | stweg1-bewohner,stweg1-eigentuemer | stweg1-ausschuss
+stweg2     | stweg2-bewohner,stweg2-eigentuemer | stweg2-ausschuss
+stweg3     | r9-bewohner,r9-eigentuemer         | stweg3-ausschuss
+stweg4     | stweg4-bewohner,stweg4-eigentuemer | stweg4-ausschuss
+stweg5     | stweg5-bewohner,stweg5-eigentuemer | stweg5-ausschuss
+stweg6     | r1-bewohner,r1-eigentuemer         | stweg6-ausschuss
+stweg7     | stweg7-bewohner,stweg7-eigentuemer | stweg7-ausschuss
+meg        | meg-bewohner,meg-eigentuemer       | meg-ausschuss
+stweg8     | meg-bewohner,meg-eigentuemer       | meg-ausschuss
+
+# Ordner der obersten Ebene ohne STWEG-Bezug: auf der Website nur fuer
+# Technik/Praesident (isDocPathAllowed kennt sie nicht). Waeren auch ohne
+# Zeile nur ADMIN - hier ausdruecklich, damit es dokumentiert ist
+# (Entscheid Stefan 22.11.2026).
+dump                                                        | - | -
+template                                                    | - | -
+archiv                                                      | - | -
+vorlagen                                                    | - | -
+anzeigen                                                    | - | -
+20260609 Verträge Rosenweg                                  | - | -
+Immosense Vertrag und Start                                 | - | -
+Messages aus der Immoapp von LangPartners nur RW 14 und 6   | - | -
+
+# Sperrordner (DOC_SPERR_ORDNER): nur ADMIN
+~auslagen              | - | -
+~anzeigen              | - | -
+~reklamationen         | - | -
+~unterschriftenlisten  | - | -
+~grundbuch-bilder      | - | -
+~druckauftraege        | - | -
+
+# Brief-Fotos (DOC_AUSSCHUSS_ORDNER): nur Ausschuss
+~fotos_von_versendeten_briefen | - | stweg1-ausschuss,stweg2-ausschuss,stweg3-ausschuss,stweg4-ausschuss,stweg5-ausschuss,stweg6-ausschuss,stweg7-ausschuss,meg-ausschuss,stweg8-ausschuss

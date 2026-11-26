@@ -97,11 +97,11 @@
   <!-- Ring-Group -->
   <div class="card">
     <h2>🔔 Ring-Group Mitglieder</h2>
-    <table><thead><tr><th>Name</th><th>Ziel</th><th>Typ</th><th>Intern</th><th>Prio</th><th>Zeitsperre</th><th>Aktiv</th><th></th></tr></thead>
+    <table><thead><tr><th>Name</th><th>Ziel</th><th>Typ</th><th>Prio</th><th>Zeitsperre</th><th>Aktiv</th><th></th></tr></thead>
       <tbody id="members"></tbody></table>
     <div class="row" style="margin-top:.8rem;border-top:1px solid #f1f5f9;padding-top:.8rem">
       <label class="f">Name<input id="m_name"></label>
-      <label class="f">Typ<select id="m_kind" onchange="kindHint()"><option value="mobile">Mobil (Trunk)</option><option value="sip">SIP-Telefon</option></select></label>
+      <label class="f">Typ<select id="m_kind" onchange="kindHint()"><option value="person">Person (3HHWWP)</option><option value="mobile">Mobil (Trunk)</option><option value="sip">SIP-Telefon</option></select></label>
       <label class="f"><span id="m_phone_lbl">Nummer (+41…)</span><input id="m_phone"></label>
       <label class="f">Prio<input id="m_prio" type="number" value="10" style="width:70px"></label>
       <label class="f">Klingelt immer<select id="m_bypass"><option value="0">nein (Zeitsperre)</option><option value="1">ja (immer)</option></select></label>
@@ -113,14 +113,55 @@
   <div class="card">
     <h2>☎️ SIP-Telefone (LAN/VPN)</h2>
     <p class="muted" style="font-size:.82rem;margin-bottom:.7rem">Registrierung am Server <b class="mono">100.64.2.29</b> (Port 5060, nur im LAN/VPN). Benutzername = Extension, Passwort wie unten. Danach als Ring-Mitglied „SIP-Telefon" hinzufügbar.</p>
-    <table><thead><tr><th>Ext</th><th>Name</th><th>Passwort</th><th>Registriert</th><th>Status</th><th></th></tr></thead>
+    <table><thead><tr><th>Ext</th><th>Name</th><th>App</th><th>Nutzung</th><th>Passwort</th><th>Registriert</th><th>Status</th><th></th></tr></thead>
       <tbody id="exts"></tbody></table>
     <div class="row" style="margin-top:.8rem;border-top:1px solid #f1f5f9;padding-top:.8rem">
       <label class="f">Extension (leer = auto)<input id="e_ext" placeholder="2000+" style="width:90px"></label>
       <label class="f">Name<input id="e_name"></label>
       <label class="f">Passwort (leer = generiert)<input id="e_secret"></label>
+      <label class="f">App<select id="e_client"><option value="linphone">Linphone</option><option value="android-sip">Android SIP (Telefon-App)</option></select></label>
       <button onclick="addExt()" style="align-self:flex-end">+ Telefon</button>
     </div>
+  </div>
+
+  <!-- Geteilte Telefone -->
+  <div class="card">
+    <h2>📱 Geteilte Telefone <span class="act" onclick="loadTelefone()">Neu laden</span></h2>
+    <p class="muted" style="font-size:.82rem;margin-bottom:.7rem">Nebenstellen mit Nutzung „geteilt": ohne Anmeldung nur Notrufe.
+      Anmelden: auf dem eigenen Handy <b class="mono">rosenweg4303.ch/smartphones</b> öffnen und den Anmelde-QR vor die Kamera des gesperrten Telefons halten.</p>
+    <table><thead><tr><th>Ext</th><th>Angemeldet</th><th>Konto</th><th>Seit (UTC)</th><th></th></tr></thead>
+      <tbody id="tel_sitz"></tbody></table>
+    <div class="row" style="margin-top:.6rem;gap:.5rem;align-items:center">
+      <span class="muted" style="font-size:.85rem">Verlegtes Telefon klingeln lassen (auch ohne Anmeldung):</span>
+      <input id="tel_suchen_ext" class="mono" placeholder="Nebenstelle, z.B. 2002" style="width:11rem">
+      <button class="sec" onclick="telSuchen($('tel_suchen_ext').value.trim())">🔔 Klingeln</button>
+      <button class="sec" onclick="telWlanDebug($('tel_suchen_ext').value.trim(), 60)" title="Debugging über WLAN für 1 Stunde (Wartung, auch ohne Anmeldung)">🛠 WLAN-Debugging 1 Std.</button>
+      <button class="sec" onclick="telWlanDebug($('tel_suchen_ext').value.trim(), 0)">aus</button>
+    </div>
+    <div class="row" style="margin-top:.8rem;border-top:1px solid #f1f5f9;padding-top:.8rem">
+      <label class="f" style="flex:1">Erlaubte Authentik-Gruppen (Komma)<input id="tel_gruppen"></label>
+      <button onclick="saveTelGruppen()" style="align-self:flex-end">Speichern</button>
+    </div>
+    <div class="row" style="margin-top:.8rem">
+      <label class="f" style="flex:1">Immer ausblenden (System-Apps, Paketnamen durch Komma) — WebView, Telefonie und Notruf schützt das Telefon selbst
+        <textarea id="tel_aus" rows="3" style="padding:.45rem .6rem;border:1px solid #d1d5db;border-radius:8px;font-family:ui-monospace,monospace;font-size:.8rem"></textarea></label>
+      <button onclick="saveTelAus()" style="align-self:flex-end">Speichern</button>
+    </div>
+    <div class="row" style="margin-top:.6rem">
+      <label class="f" style="flex:1">Nur unsichtbar (bleiben funktionsfähig, z.B. System-Telefon für Notrufe, System-Kamera für „Foto aufnehmen")
+        <textarea id="tel_unsichtbar" rows="2" style="padding:.45rem .6rem;border:1px solid #d1d5db;border-radius:8px;font-family:ui-monospace,monospace;font-size:.8rem"></textarea></label>
+    </div>
+    <details style="margin-top:.8rem"><summary class="muted" style="cursor:pointer;font-size:.82rem">Verlauf</summary>
+      <table style="margin-top:.5rem"><thead><tr><th>Zeit (UTC)</th><th>Ext</th><th>Was</th><th>Wer</th><th>Durch</th></tr></thead>
+        <tbody id="tel_log"></tbody></table></details>
+  </div>
+
+  <!-- App-Katalog der geteilten Telefone -->
+  <div class="card">
+    <h2>🧩 App-Katalog</h2>
+    <p class="muted" style="font-size:.85rem">Der App-Katalog der geteilten Telefone wird jetzt auf
+      <a href="https://www.rosenweg4303.ch/smartphones">rosenweg4303.ch/smartphones</a> verwaltet
+      (Liste, Bearbeiten, APK hochladen, Löschen).</p>
   </div>
 
   <!-- Konferenz -->
@@ -142,10 +183,17 @@
     <h3 id="qr_titel">Linphone einrichten</h3>
     <div class="muted" id="qr_frist" style="font-size:.78rem"></div>
     <div class="qr" id="qr_bild"></div>
-    <div class="steps">
+    <div class="steps" id="qr_steps_linphone">
       <b>Am Telefon:</b> Linphone öffnen → Assistent →
       „Fetch Remote Configuration" → QR-Code scannen.
       Danach ist Konto, Transport und Rufnummer gesetzt — nichts abzutippen.
+    </div>
+    <div class="steps" id="qr_steps_androidsip" style="display:none">
+      <b>Am Telefon:</b> QR-Code mit der Kamera scannen → der Browser lädt
+      <span class="mono">androidsip-&lt;ext&gt;.xml</span> in „Downloads".
+      Dann Android SIP öffnen → ⋮ → <i>Import</i> → Downloads → Datei wählen.
+      Danach unter „System Calling Accounts" das Konto aktivieren.
+      <b>Die Datei danach aus Downloads löschen</b> — sie enthält das SIP-Passwort.
     </div>
     <div class="lnk" id="qr_url"></div>
     <details id="qr_cd" style="display:none">
@@ -170,7 +218,7 @@ const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&l
 function showErr(m){ $('err').style.display='block'; $('err').textContent=m; setTimeout(()=>$('err').style.display='none',6000); }
 async function api(path, opts){ const r = await AuthentikAuth.apiFetch(path, opts); if(r.status===401||r.status===403){ gate(); throw new Error('auth'); } return r; }
 
-function kindHint(){ $('m_phone_lbl').textContent = $('m_kind').value==='sip' ? 'Extension (z.B. 11)' : 'Nummer (+41…)'; }
+function kindHint(){ const k=$('m_kind').value; $('m_phone_lbl').textContent = k==='sip' ? 'Extension (z.B. 11)' : k==='person' ? 'Persönliche Nummer (3HHWWP)' : 'Nummer (+41…)'; }
 
 async function loadTrunk(){
   try { const d = await (await api('/api/pbx/trunk-status')).json();
@@ -205,8 +253,7 @@ async function loadMembers(){
   $('members').innerHTML = ms.map(m=>`<tr>
     <td>${esc(m.name)}</td>
     <td class="mono">${esc(m.phone)}</td>
-    <td><span class="tag">${m.kind==='sip'?'SIP':'Mobil'}</span></td>
-    <td class="mono">${esc(m.internal_ext||'—')}</td>
+    <td><span class="tag">${m.kind==='sip'?'SIP':m.kind==='person'?'Person':'Mobil'}</span></td>
     <td>${esc(m.priority)}</td>
     <td><label style="display:inline-flex;align-items:center;gap:.4rem;cursor:pointer" title="angehakt = nur in Geschäftszeit (Zeitsperre); aus = klingelt immer">
       <input type="checkbox" ${m.bypass_hours?'':'checked'} onchange="toggleZeitsperre(${m.id},this.checked)">
@@ -233,12 +280,16 @@ async function loadExts(){
   const inRing = new Set(ringMembers.filter(m=>m.kind==='sip').map(m=>String(m.phone)));
   $('exts').innerHTML = xs.map(x=>`<tr>
     <td class="mono">${esc(x.ext)}</td><td>${esc(x.name)}</td>
+    <td><select onchange="setClient('${esc(x.ext)}',this.value)">${[['linphone','Linphone'],['android-sip','Android SIP']]
+        .map(([v,l])=>`<option value="${v}"${(x.client||'linphone')===v?' selected':''}>${l}</option>`).join('')}</select></td>
+    <td><select onchange="setKontext('${esc(x.ext)}',this.value)">${[['internal','persönlich'],['geteilt','geteilt (Anmeldung)']]
+        .map(([v,l])=>`<option value="${v}"${(x.context||'internal')===v?' selected':''}>${l}</option>`).join('')}</select></td>
     <td class="mono">${esc(x.secret)}</td>
     <td>${x.registered?'<span class="pill ok">● registriert</span>':'<span class="muted">nicht angemeldet</span>'}</td>
     <td>${x.enabled?'<span class="pill ok">aktiv</span>':'<span class="muted">aus</span>'}</td>
     <td>${inRing.has(String(x.ext))?'<span class="pill ok">in Ring-Group</span>':`<button class="sec" onclick="addSipToRing('${esc(x.ext)}')">+ Ring-Group</button>`}
-        <button class="sec" onclick="qrZeigen('${esc(x.ext)}')" title="QR-Code für Linphone">📱 QR</button>
-        <button class="danger" onclick="delExt('${esc(x.ext)}')">Löschen</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Keine SIP-Telefone.</td></tr>';
+        <button class="sec" onclick="qrZeigen('${esc(x.ext)}')" title="QR-Code zum Einrichten">📱 QR</button>
+        <button class="danger" onclick="delExt('${esc(x.ext)}')">Löschen</button></td></tr>`).join('') || '<tr><td colspan="8" class="muted">Keine SIP-Telefone.</td></tr>';
 }
 async function addSipToRing(ext){
   const ph = sipPhones.find(x=>String(x.ext)===String(ext));
@@ -246,8 +297,79 @@ async function addSipToRing(ext){
   if(!r.ok){ showErr((await r.json()).error||'Fehler'); return; }
   await loadMembers(); loadExts();
 }
+async function setKontext(ext, context){
+  if(context==='geteilt' && !confirm('Nebenstelle '+ext+' als geteiltes Telefon führen?\nOhne Anmeldung gehen dort dann nur noch Notrufe.')){ loadExts(); return; }
+  const r = await api('/api/pbx/sip-extensions/'+encodeURIComponent(ext),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({context})});
+  if(!r.ok){ showErr((await r.json()).error||'Fehler'); }
+  loadExts(); loadTelefone();
+}
+async function loadTelefone(){
+  const d = await (await api('/api/pbx/telefon-sitzungen')).json();
+  $('tel_sitz').innerHTML = (d.sitzungen||[]).map(s=>`<tr><td class="mono">${esc(s.ext)}</td><td>${esc(s.name)}</td>
+    <td class="muted">${esc(s.email||'')}</td><td class="mono">${esc(String(s.seit||'').slice(0,16))}</td>
+    <td><button class="sec" onclick="telSuchen('${esc(s.ext)}')" title="Telefon klingeln lassen">🔔</button>
+      <button class="danger" onclick="telAbmelden('${esc(s.ext)}')">Abmelden</button></td></tr>`).join('')
+    || '<tr><td colspan="5" class="muted">Niemand angemeldet.</td></tr>';
+  $('tel_log').innerHTML = (d.log||[]).map(l=>`<tr><td class="mono">${esc(String(l.zeit||'').slice(0,16))}</td><td class="mono">${esc(l.ext)}</td>
+    <td>${({an:'angemeldet',ab:'abgemeldet','karte-abgelehnt':'Karte abgelehnt','karte-info':'Karte abgefragt','karte-zu':'Karte zugeordnet','karte-weg':'Karte entzogen','karte-geloescht':'Karte gelöscht',gefunden:'Telefon gefunden'})[l.ereignis]||esc(l.ereignis)}</td><td>${esc(l.name||'')}</td><td class="muted">${esc(l.durch||'')}</td></tr>`).join('')
+    || '<tr><td colspan="5" class="muted">Noch nichts.</td></tr>';
+  $('tel_gruppen').value = (d.gruppen||[]).join(', ');
+  $('tel_aus').value = (d.ausblenden||'').split(',').map(s=>s.trim()).filter(Boolean).join(',\n');
+  $('tel_unsichtbar').value = (d.unsichtbar||'').split(',').map(s=>s.trim()).filter(Boolean).join(',\n');
+}
+async function saveTelAus(){
+  const v = $('tel_aus').value.split(/[,\s]+/).map(s=>s.trim()).filter(Boolean).join(',');
+  const u = $('tel_unsichtbar').value.split(/[,\s]+/).map(s=>s.trim()).filter(Boolean).join(',');
+  const r = await api('/api/pbx/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({telefon_ausblenden:v, telefon_unsichtbar:u})});
+  if(!r.ok){ showErr((await r.json()).error||'Fehler'); return; }
+  showErr('Gespeichert — die Telefone übernehmen es beim nächsten Abgleich.'); loadTelefone();
+}
+async function telAbmelden(ext){
+  if(!confirm('Anmeldung an '+ext+' beenden?')) return;
+  const r = await api('/api/telefon/'+encodeURIComponent(ext)+'/abmelden',{method:'POST'});
+  if(!r.ok){ showErr((await r.json()).error||'Fehler'); }
+  loadTelefone();
+}
+async function telSuchen(ext){
+  if(!/^[0-9]{2,8}$/.test(ext||'')){ showErr('Nebenstelle angeben, z.B. 2002.'); return; }
+  const r = await api('/api/telefon/'+encodeURIComponent(ext)+'/suchen',{method:'POST'});
+  showErr(r.ok ? ('Telefon '+ext+' klingelt jetzt bis zu 45 Sekunden.') : ((await r.json().catch(()=>({}))).error||'Fehler'));
+  if (!r.ok) return;
+  for (let i = 0; i < 20; i++) {
+    await new Promise(res => setTimeout(res, 3000));
+    const s = await api('/api/telefon/'+encodeURIComponent(ext)+'/suchen').catch(() => null);
+    const d = s && s.ok ? await s.json().catch(() => ({})) : {};
+    if (d.gefunden) {
+      showErr('Telefon '+ext+' gefunden um '+new Date(d.gefunden).toLocaleTimeString('de-CH',{hour:'2-digit',minute:'2-digit'})
+        +(d.gefunden_von ? ' ('+d.gefunden_von+')' : '')+'.');
+      loadTelefone();
+      return;
+    }
+  }
+}
+async function telWlanDebug(ext, minuten){
+  if(!/^[0-9]{2,8}$/.test(ext||'')){ showErr('Nebenstelle angeben, z.B. 2002.'); return; }
+  const r = await api('/api/telefon/'+encodeURIComponent(ext)+'/wlan-debug',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({minuten})});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok){ showErr(d.error||'Fehler'); return; }
+  showErr(minuten
+    ? ('Debugging über WLAN an '+ext+' bis '+new Date(d.wlan_debug_bis*1000).toLocaleTimeString('de-CH',{hour:'2-digit',minute:'2-digit'})
+       +(d.geweckt ? '. Das Telefon wird kurz angerufen (2098 Wartung) und schaltet es ein.' : '. Telefon nicht erreicht, es übernimmt den Stand beim nächsten Kontakt.')
+       +' Am Mac: adb mdns services, dann adb connect <IP>:<Port>.')
+    : ('Debugging über WLAN an '+ext+' wird ausgeschaltet.'));
+}
+async function saveTelGruppen(){
+  const r = await api('/api/pbx/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({telefon_gruppen:$('tel_gruppen').value})});
+  if(!r.ok){ showErr((await r.json()).error||'Fehler'); return; }
+  loadTelefone();
+}
+async function setClient(ext, client){
+  const r = await api('/api/pbx/sip-extensions/'+encodeURIComponent(ext),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({client})});
+  if(!r.ok){ showErr((await r.json()).error||'Fehler'); }
+  loadExts();
+}
 async function addExt(){
-  const body = { ext:$('e_ext').value.trim(), name:$('e_name').value.trim(), secret:$('e_secret').value.trim() };
+  const body = { ext:$('e_ext').value.trim(), name:$('e_name').value.trim(), secret:$('e_secret').value.trim(), client:$('e_client').value };
   if(!body.name){ showErr('Name erforderlich'); return; }
   const r = await api('/api/pbx/sip-extensions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!r.ok){ showErr((await r.json()).error||'Fehler'); return; }
@@ -258,10 +380,13 @@ async function qrZeigen(ext){
   const r = await api('/api/pbx/sip-extensions/'+encodeURIComponent(ext)+'/provisioning',{method:'POST'});
   if(!r.ok){ showErr((await r.json()).error||'Fehler'); return; }
   const d = await r.json();
-  $('qr_titel').textContent = 'Linphone einrichten — '+d.name+' ('+d.ext+')';
+  const asip = d.client==='android-sip';
+  $('qr_titel').textContent = (asip?'Android SIP':'Linphone')+' einrichten — '+d.name+' ('+d.ext+')';
+  $('qr_steps_linphone').style.display = asip ? 'none' : 'block';
+  $('qr_steps_androidsip').style.display = asip ? 'block' : 'none';
   $('qr_bild').innerHTML = d.qr_svg;   // vom Server erzeugtes SVG, kein Fremd-Skript
   $('qr_url').textContent = d.url;
-  const cd = d.carddav;
+  const cd = asip ? null : d.carddav;   // Telefonbuch-Felder gelten nur fuer Linphone
   $('qr_cd').style.display = cd ? 'block' : 'none';
   if(cd){
     const felder = [['Anzeigename',cd.name],['Server-URL',cd.url],['Benutzername',cd.user],
@@ -299,7 +424,9 @@ async function loadCalls(){
     <td>${c.duration_seconds!=null?c.duration_seconds+'s':'—'}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Noch keine Anrufe.</td></tr>';
 }
 
-function gate(){ $('content').style.display='none'; $('gate').style.display='block'; }
+// Nach einem 401 nicht weiter abfragen (CrowdSec sperrt nach 8 gescheiterten Versuchen 24 h)
+let abgelaufen = false;
+function gate(){ abgelaufen = true; $('content').style.display='none'; $('gate').style.display='block'; }
 async function start(){
   // Token aus dem #auth=-Fragment nach dem Authentik-Redirect in localStorage schreiben.
   AuthentikAuth.handleCallback();
@@ -312,8 +439,8 @@ async function start(){
   $('logout').onclick = ()=>AuthentikAuth.logout();
   $('content').style.display='block';
   kindHint();
-  try { await loadMembers(); await Promise.all([loadTrunk(),loadHours(),loadExts(),loadCalls()]); } catch(e){}
-  setInterval(()=>{ if(!document.hidden && AuthentikAuth.isLoggedIn()){ loadTrunk(); loadCalls(); } }, 15000);
+  try { await loadMembers(); await Promise.all([loadTrunk(),loadHours(),loadExts(),loadCalls(),loadTelefone()]); } catch(e){}
+  setInterval(()=>{ if(!document.hidden && !abgelaufen && AuthentikAuth.isLoggedIn()){ loadTrunk(); loadCalls(); } }, 15000);
 }
 start();
 </script>

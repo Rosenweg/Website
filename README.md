@@ -35,7 +35,7 @@ Website der STWEG-Kooperation Rosenweg in Kaiseraugst, Aargau.
 ├── api/                    # Node.js API Backend
 ├── energy-collector/       # Energie-Datensammler
 ├── stweg1..7/, meg/        # STWEG-/MEG-Seiten
-├── door-signs/             # Türschilder (A4 PDF)
+├── api/vorlagen/aushaenge/ # Türschilder + Poster (Druck mit Token-QR via tuerschilder.html)
 ├── frontends-lxc/          # nginx-Konfiguration + deploy.sh der Frontend-LXCs
 ├── backend-lxc/            # Compose-Dateien API (CT 128) und Energie (CT 129)
 ├── edge-traefik/           # Reverse-Proxy (CT 245)

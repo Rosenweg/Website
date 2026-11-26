@@ -11,7 +11,7 @@
 # - Echte Client-IP bei Cloudflare aus Cf-Connecting-Ip — nur wenn die
 #   Verbindung von einer Cloudflare-Adresse kommt (forwardedHeadersTrustedIPs).
 # - Eigene Netze werden nie geprueft (clientTrustedIPs), gleiche Liste wie
-#   die CrowdSec-Whitelist crowdsec/rosenweg-intern.yaml.
+#   die CrowdSec-Whitelist crowdsec/rosenweg-intern-whitelist.yaml (plus private Netze).
 # - Der LAPI-Schluessel liegt in /etc/traefik/crowdsec-bouncer.key (0600),
 #   nicht hier. Anlegen: cscli bouncers add traefik-bouncer (README).
 http:
@@ -61,4 +61,3 @@ http:
             - 127.0.0.0/8
             - 2a02:16a:1400::/48
             - 37.17.232.133/32
-            - 37.17.232.136/32

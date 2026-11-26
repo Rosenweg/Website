@@ -1,0 +1,160 @@
+{
+  "_hinweis": "Alle Personen-, Wohnungs-, Kontakt- und Kontodaten in dieser Datei sind frei erfunden. E-Mail-Domains .example, IP-Adressen aus Dokumentations-Bereichen (RFC 3849 / RFC 5737).",
+  "mappe": {
+    "datum": "21.11.2026",
+    "empfaenger": "Musterverwaltung AG",
+    "jetzt_iso": "2026-11-16T09:42:00+01:00"
+  },
+  "site_url": "https://www.rosenweg4303.ch",
+  "verwaltung": {
+    "firma": "Musterverwaltung AG",
+    "adresse": "Musterstrasse 1, 4000 Basel",
+    "email": "verwaltung@musterverwaltung.example",
+    "telefon": "+41 61 000 00 00",
+    "website": "www.musterverwaltung.example"
+  },
+  "bisherige_verwaltung": "Bisherige Verwaltung AG",
+
+  "unterschriftenliste": {
+    "stweg": 3,
+    "opts": {
+      "datum": "16.11.2026",
+      "anlass_titel": "Zustimmung zum Verwaltungsvertrag mit der Musterverwaltung AG",
+      "anlass_zweck": "Die Eigentümerversammlung hat die Musterverwaltung AG als neue Liegenschaftsverwaltung gewählt.\nMit Ihrer Unterschrift bestätigen Sie die Zustimmung zum Verwaltungsvertrag ab 1. Januar 2027.",
+      "ruecksendung_bis": "15.12.2026",
+      "ruecksendung_an": "Ausschuss STWEG-Kooperation Rosenweg, Rosenweg 9, 4303 Kaiseraugst",
+      "zeichnungsberechtigte": [
+        { "funktion": "Präsident Ausschuss", "name": "Hans Muster" },
+        { "funktion": "Mitglied Ausschuss", "name": "Petra Probe" },
+        { "funktion": "Mitglied Ausschuss", "name": "Lukas Fiktiv" }
+      ]
+    },
+    "snapshot": {
+      "_generated_at": "2026-11-16T09:42:00+01:00",
+      "wohnungen": [
+        { "bezeichnung": "9.EG.1", "typ": "Wohnung", "wertquote": "182/1000", "eigentuemer": ["Max Muster"], "verwalter": [], "korrespondenz_adressen": ["Rosenweg 9, 4303 Kaiseraugst"] },
+        { "bezeichnung": "9.EG.2", "typ": "Wohnung", "wertquote": "176/1000", "eigentuemer": ["Erika Beispiel", "Thomas Beispiel"], "verwalter": [], "korrespondenz_adressen": ["Rosenweg 9, 4303 Kaiseraugst"] },
+        { "bezeichnung": "9.1OG.1", "typ": "Wohnung", "wertquote": "201/1000", "eigentuemer": ["Anna Exempel"], "verwalter": ["Musterverwaltung AG"], "korrespondenz_adressen": ["Musterstrasse 12, 8000 Zürich"] },
+        { "bezeichnung": "9.1OG.2", "typ": "Wohnung", "wertquote": "188/1000", "eigentuemer": ["Hans Muster"], "verwalter": [], "korrespondenz_adressen": ["Rosenweg 9, 4303 Kaiseraugst"] },
+        { "bezeichnung": "9.2OG.1", "typ": "Wohnung", "wertquote": "219/1000", "eigentuemer": ["Petra Probe"], "verwalter": [], "korrespondenz_adressen": ["Rosenweg 10, 4303 Kaiseraugst"] },
+        { "bezeichnung": "9.UG.H1", "typ": "Hobbyraum", "wertquote": "34/1000", "eigentuemer": ["Lukas Fiktiv"], "verwalter": [], "korrespondenz_adressen": ["Rosenweg 9, 4303 Kaiseraugst"] }
+      ]
+    }
+  },
+
+  "vollmachten": [
+    {
+      "id": 101, "doc_hash": "MX7KQ4PA", "art": "generell", "status": "aktiv", "stweg": 3,
+      "created_at": "2026-11-10T14:05:00+01:00",
+      "gueltig_ab": "2026-11-10", "gueltig_bis": null, "widerrufen_am": null,
+      "geltungsbereich": "Vertretung an Eigentümerversammlungen der STWEG 3 inkl. Stimmabgabe, Entgegennahme von Abrechnungen und Korrespondenz sowie Verkehr mit der Liegenschaftsverwaltung in allen Belangen der Wohnung 9.1OG.1.",
+      "signatur_typ": "digital",
+      "vollmachtgeber_name": "Anna Exempel", "vollmachtgeber_email": "anna.exempel@mail.example", "vollmachtgeber_adresse": "Musterstrasse 12\n8000 Zürich",
+      "digital_signed_at": "2026-11-10T14:07:31+01:00", "digital_signed_ip": "2001:db8:4303::17",
+      "vollmachtgeber_liste": [
+        { "name": "Anna Exempel", "email": "anna.exempel@mail.example", "adresse": "Musterstrasse 12\n8000 Zürich", "signatur_typ": "digital", "signed_at": "2026-11-10T14:07:31+01:00", "signed_ip": "2001:db8:4303::17" }
+      ],
+      "bevollmaechtigter_name": "Musterverwaltung AG", "bevollmaechtigter_typ": "verwaltung",
+      "bevollmaechtigter_adresse": "Musterstrasse 1\n4000 Basel", "bevollmaechtigter_email": "verwaltung@musterverwaltung.example", "bevollmaechtigter_telefon": "+41 61 000 00 00",
+      "wohnung_id": 3, "wohnung_bezeichnung": "9.1OG.1", "wohnung_typ": "Wohnung", "wohnung_stockwerk": "1. OG", "wohnung_zimmer": "4.5", "wohnung_flaeche": "112"
+    },
+    {
+      "id": 102, "doc_hash": "PB3NW8TE", "art": "spezifisch", "status": "aktiv", "stweg": 3,
+      "created_at": "2026-11-12T19:20:00+01:00",
+      "gueltig_ab": "2026-11-12", "gueltig_bis": "2026-12-31", "widerrufen_am": null,
+      "geltungsbereich": "Vertretung an der ausserordentlichen Eigentümerversammlung der STWEG 3 vom 2. Dezember 2026, insbesondere Stimmabgabe zu Traktandum 4 (Verwaltungsvertrag).",
+      "signatur_typ": "papier",
+      "vollmachtgeber_name": "Erika Beispiel", "vollmachtgeber_email": "erika.beispiel@mail.example", "vollmachtgeber_adresse": "Rosenweg 9\n4303 Kaiseraugst",
+      "vollmachtgeber_liste": [
+        { "name": "Erika Beispiel", "email": "erika.beispiel@mail.example", "adresse": "Rosenweg 9\n4303 Kaiseraugst", "signatur_typ": "papier" },
+        { "name": "Thomas Beispiel", "email": "thomas.beispiel@mail.example", "adresse": "Rosenweg 9\n4303 Kaiseraugst", "signatur_typ": "papier" }
+      ],
+      "bevollmaechtigter_name": "Max Muster", "bevollmaechtigter_typ": "eigentuemer",
+      "bevollmaechtigter_adresse": "Rosenweg 9\n4303 Kaiseraugst", "bevollmaechtigter_email": "max.muster@mail.example", "bevollmaechtigter_telefon": "+41 79 000 00 01",
+      "wohnung_id": 2, "wohnung_bezeichnung": "9.EG.2", "wohnung_typ": "Wohnung", "wohnung_stockwerk": "EG", "wohnung_zimmer": "3.5", "wohnung_flaeche": "89"
+    },
+    {
+      "id": 103, "doc_hash": "QR5DZ2HU", "art": "auskunft", "status": "aktiv", "stweg": 3,
+      "created_at": "2026-11-14T10:00:00+01:00",
+      "gueltig_ab": "2026-11-14", "gueltig_bis": "2027-11-13", "widerrufen_am": null,
+      "geltungsbereich": "Auskunft über Nebenkosten- und Heizkostenabrechnungen, Zählerstände und Wohnungsdaten der Einheit 9.EG.1 gegenüber der Liegenschaftsverwaltung und dem Ausschuss (Art. 25 DSG).",
+      "signatur_typ": "digital",
+      "vollmachtgeber_name": "Max Muster", "vollmachtgeber_email": "max.muster@mail.example", "vollmachtgeber_adresse": "Rosenweg 9\n4303 Kaiseraugst",
+      "digital_signed_at": "2026-11-14T10:02:12+01:00", "digital_signed_ip": "2001:db8:4303::29",
+      "vollmachtgeber_liste": [
+        { "name": "Max Muster", "email": "max.muster@mail.example", "adresse": "Rosenweg 9\n4303 Kaiseraugst", "signatur_typ": "digital", "signed_at": "2026-11-14T10:02:12+01:00", "signed_ip": "2001:db8:4303::29" }
+      ],
+      "bevollmaechtigter_name": "Lea Muster", "bevollmaechtigter_typ": "mieter",
+      "bevollmaechtigter_adresse": "Rosenweg 9\n4303 Kaiseraugst", "bevollmaechtigter_email": "lea.muster@mail.example", "bevollmaechtigter_telefon": null,
+      "wohnung_id": 1, "wohnung_bezeichnung": "9.EG.1", "wohnung_typ": "Wohnung", "wohnung_stockwerk": "EG", "wohnung_zimmer": "4.5", "wohnung_flaeche": "108"
+    }
+  ],
+
+  "deckblatt": {
+    "recipientInfo": { "name": "Erika Beispiel", "strasse": "Rosenweg 9, 4303 Kaiseraugst", "wohnung": "9.EG.2", "stweg": 3 },
+    "recipientTag": "Erika Beispiel",
+    "printer": "DruckerR9",
+    "senderEmailRaw": "verwaltung@musterverwaltung.example",
+    "subject": "Nebenkostenabrechnung 2026 – Wohnung 9.EG.2",
+    "totalItems": 2,
+    "printableAtts": [ { "filename": "NK-Abrechnung-2026-9.EG.2.pdf" }, { "filename": "Begleitbrief.pdf" } ],
+    "pickupUrl": "https://www.rosenweg4303.ch/abholung.html?token=MUSTER7F3A9C"
+  },
+
+  "mails": {
+    "auslage-auszahlung": {
+      "stweg_label": "STWEG 3 (Rosenweg 9)",
+      "auslage": { "id": 4711, "user_name": "Max Muster", "user_email": "max.muster@mail.example", "kategorie": "Unterhalt / Reparatur", "betrag_chf": 238.4, "iban": "CH00 0000 0000 0000 0000 0", "beschreibung": "Ersatz Leuchtmittel Treppenhaus Rosenweg 9 (6 Stück LED, Beleg Baumarkt)", "bemerkung_eigentuemer": "Defekte Lampen im 1. und 2. OG ersetzt.", "bemerkung_ausschuss": "" },
+      "projekt": null,
+      "datum": "04.11.2026",
+      "freigeber": "Hans Muster (Ausschuss)",
+      "freigabe_am": "12.11.2026",
+      "has_attachment": true,
+      "ausschuss_email": "ausschuss@rosenweg4303.ch",
+      "site_url": "https://www.rosenweg4303.ch"
+    },
+    "auslage-auszahlung-nachgereicht": {
+      "stweg_label": "STWEG 3 (Rosenweg 9)",
+      "auslage": { "id": 4698, "user_name": "Petra Probe", "user_email": "petra.probe@mail.example", "kategorie": "Garten / Umgebung", "betrag_chf": 96.0, "iban": "CH00 0000 0000 0000 0000 1", "beschreibung": "Blumenerde und Setzlinge Rabatte Hauseingang", "bemerkung_eigentuemer": "", "bemerkung_ausschuss": "Gemäss Budget Umgebung 2026." },
+      "projekt": { "title": "Umgebungspflege 2026" },
+      "datum": "28.10.2026",
+      "freigeber": "Petra Probe (Ausschuss)",
+      "freigabe_am": "30.10.2026",
+      "has_attachment": true,
+      "ausschuss_email": "ausschuss@rosenweg4303.ch",
+      "site_url": "https://www.rosenweg4303.ch"
+    },
+    "auslage-auszahlung-reminder": {
+      "tage": 14, "stweg_label": "STWEG 3 (Rosenweg 9)", "betrag_chf": 238.4, "auslage_id": 4711,
+      "user_name": "Max Muster", "user_email": "max.muster@mail.example",
+      "beschreibung": "Ersatz Leuchtmittel Treppenhaus Rosenweg 9", "iban": "CH00 0000 0000 0000 0000 0",
+      "genehmigt_am": "12.11.2026", "site_url": "https://www.rosenweg4303.ch"
+    },
+    "objekt-änderung": {
+      "stweg_label": "STWEG 3 (Rosenweg 9)", "today_de": "16.11.2026",
+      "erste_aenderung": "Wohnung 9.EG.2 – Eigentümer/in\n  vorher: Erika Beispiel\n  nachher: Erika Beispiel, Thomas Beispiel\n\nWohnung 9.1OG.1 – Korrespondenzadresse\n  vorher: Rosenweg 9, 4303 Kaiseraugst\n  nachher: Musterstrasse 12, 8000 Zürich",
+      "site_url": "https://www.rosenweg4303.ch"
+    },
+    "wasch-billing": {
+      "user_name": "Erika Beispiel", "monat": "Oktober", "jahr": 2026, "wohnung": "9.EG.2",
+      "total_sessions": 3, "gesamtdauer": "4 h 05 min", "gesamtverbrauch": "6.9 kWh", "tarif": "CHF 0.32 / kWh", "gesamtbetrag": "CHF 2.21",
+      "rows": [
+        { "datum": "03.10.2026", "raum": "Waschküche RW9", "zeit": "08:10–09:42", "verbrauch": "2.6 kWh", "kosten": "CHF 0.83" },
+        { "datum": "14.10.2026", "raum": "Waschküche RW9", "zeit": "18:05–19:20", "verbrauch": "2.1 kWh", "kosten": "CHF 0.67" },
+        { "datum": "27.10.2026", "raum": "Trockenraum RW9", "zeit": "10:00–11:18", "verbrauch": "2.2 kWh", "kosten": "CHF 0.71" }
+      ]
+    }
+  },
+
+  "excel_objektverwaltung": [
+    { "Bezeichnung": "9.EG.1", "Stockwerk": "EG", "Zimmer": "4.5", "Fläche m²": "108", "Typ": "Wohnung", "Wertquote": "182/1000", "Bewohnung": "Selbstbewohnt", "Waschküche": "Ja", "Rolle": "Eigentümer/in", "Name": "Max Muster", "E-Mail": "max.muster@mail.example", "Telefon": "+41 79 000 00 01", "Adresse": "Rosenweg 9, 4303 Kaiseraugst" },
+    { "Bezeichnung": "9.EG.2", "Stockwerk": "EG", "Zimmer": "3.5", "Fläche m²": "89", "Typ": "Wohnung", "Wertquote": "176/1000", "Bewohnung": "Selbstbewohnt", "Waschküche": "Ja", "Rolle": "Eigentümer/in", "Name": "Erika Beispiel", "E-Mail": "erika.beispiel@mail.example", "Telefon": "+41 79 000 00 02", "Adresse": "Rosenweg 9, 4303 Kaiseraugst" },
+    { "Bezeichnung": "", "Stockwerk": "", "Zimmer": "", "Fläche m²": "", "Typ": "", "Wertquote": "", "Bewohnung": "", "Waschküche": "", "Rolle": "Eigentümer/in", "Name": "Thomas Beispiel", "E-Mail": "thomas.beispiel@mail.example", "Telefon": "", "Adresse": "Rosenweg 9, 4303 Kaiseraugst" },
+    { "Bezeichnung": "9.1OG.1", "Stockwerk": "1. OG", "Zimmer": "4.5", "Fläche m²": "112", "Typ": "Wohnung", "Wertquote": "201/1000", "Bewohnung": "Vermietet", "Waschküche": "Ja", "Rolle": "Eigentümer/in", "Name": "Anna Exempel", "E-Mail": "anna.exempel@mail.example", "Telefon": "", "Adresse": "Musterstrasse 12, 8000 Zürich" },
+    { "Bezeichnung": "", "Stockwerk": "", "Zimmer": "", "Fläche m²": "", "Typ": "", "Wertquote": "", "Bewohnung": "", "Waschküche": "", "Rolle": "Mieter/in", "Name": "Jonas Probe", "E-Mail": "jonas.probe@mail.example", "Telefon": "+41 79 000 00 05", "Adresse": "Rosenweg 9, 4303 Kaiseraugst" }
+  ],
+
+  "vcards": [
+    { "name": "Max Muster", "telefon": "+41 79 000 00 01", "email": "max.muster@mail.example", "wohnungen": [ { "stweg": 3, "bezeichnung": "9.EG.1", "rolle": "eigentuemer" } ] }
+  ]
+}

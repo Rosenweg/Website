@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Waschküchen-Regeln</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: white;
+        }
+
+        /* A4 Format für Druck */
+        .poster {
+            width: 210mm;
+            min-height: 297mm;
+            margin: 0 auto;
+            padding: 20mm;
+            padding-bottom: 30mm;
+            background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+            position: relative;
+            page-break-after: always;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 15px;
+            text-align: center;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(22, 163, 74, 0.3);
+            flex-shrink: 0;
+        }
+
+        .header h1 {
+            font-size: 42px;
+            font-weight: 800;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .header p {
+            font-size: 18px;
+            opacity: 0.95;
+        }
+
+        /* Wichtige Regel Box */
+        .important-rule {
+            background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+            border: 4px solid #dc2626;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 18px;
+            box-shadow: 0 5px 20px rgba(220, 38, 38, 0.2);
+            flex-shrink: 0;
+        }
+
+        .important-rule h2 {
+            color: #991b1b;
+            font-size: 28px;
+            font-weight: 800;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .important-rule p {
+            color: #7f1d1d;
+            font-size: 19px;
+            line-height: 1.5;
+            font-weight: 600;
+        }
+
+        /* Regeln Liste */
+        .rules {
+            background: white;
+            border-radius: 15px;
+            padding: 18px;
+            margin-bottom: 15px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+            flex-shrink: 0;
+        }
+
+        .rules h3 {
+            color: #15803d;
+            font-size: 24px;
+            margin-bottom: 15px;
+            font-weight: 700;
+        }
+
+        .rules ul {
+            list-style: none;
+        }
+
+        .rules li {
+            font-size: 16px;
+            margin-bottom: 10px;
+            padding-left: 30px;
+            position: relative;
+            color: #1f2937;
+            line-height: 1.4;
+        }
+
+        .rules li:before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #16a34a;
+            font-weight: bold;
+            font-size: 20px;
+        }
+
+        /* QR Code Bereich */
+        .qr-section {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+            flex-shrink: 0;
+        }
+
+        .qr-section h3 {
+            color: #15803d;
+            font-size: 22px;
+            margin-bottom: 12px;
+            font-weight: 700;
+        }
+
+        .qr-code {
+            width: 180px;
+            height: 180px;
+            margin: 15px auto;
+            background: white;
+            padding: 12px;
+            border: 3px solid #16a34a;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .qr-code img {
+            width: 100%;
+            height: 100%;
+        }
+
+        .qr-text {
+            font-size: 14px;
+            color: #4b5563;
+            margin-top: 8px;
+        }
+
+        .url {
+            font-size: 13px;
+            color: #16a34a;
+            font-weight: 600;
+            margin-top: 5px;
+            word-break: break-all;
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            color: #6b7280;
+            font-size: 14px;
+            padding-top: 20px;
+            margin-top: auto;
+            border-top: 2px solid #d1d5db;
+        }
+
+        /* Druck-Optimierung */
+        @media print {
+            body {
+                margin: 0;
+                padding: 0;
+            }
+
+            .poster {
+                margin: 0;
+                box-shadow: none;
+            }
+
+            @page {
+                size: A4;
+                margin: 0;
+            }
+        }
+
+        /* Icon Styles */
+        .icon {
+            font-size: 36px;
+        }
+
+        .warning-icon {
+            background: #dc2626;
+            color: white;
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="poster">
+        <!-- Header -->
+        <div class="header">
+            <h1>🧺 Waschküche</h1>
+            <p>{{ORT}}</p>
+        </div>
+
+        <!-- Wichtigste Regel -->
+        <div class="important-rule">
+            <h2>
+                <span class="warning-icon">⚠</span>
+                Wichtige Regel!
+            </h2>
+            <p>
+                Die Fenster in der Waschküche müssen GESCHLOSSEN bleiben!
+                Zum Trocknen nutzen Sie bitte den Trockner oder die fest verbauten Wäscheleinen.
+            </p>
+        </div>
+
+        <!-- Ausstattung -->
+        <div class="rules">
+            <h3>📦 Ausstattung</h3>
+            <ul>
+                <li>Waschmaschine</li>
+                <li>Trockner (für Wäschetrocknung nutzen!)</li>
+                <li>Waschtisch</li>
+                <li>Wäscheleinen (fest verbaut)</li>
+            </ul>
+        </div>
+
+        <!-- Regeln -->
+        <div class="rules">
+            <h3>📋 Wichtige Regeln</h3>
+            <ul>
+                <li>Fenster geschlossen halten</li>
+                <li>Trockner für Wäschetrocknung nutzen</li>
+                <li>Reservation erforderlich (in Liste eintragen)</li>
+                <li>Waschküche nach Gebrauch reinigen</li>
+                <li>Waschtisch sauber hinterlassen</li>
+                <li>Ruhezeiten beachten (Sonntags und 22:00-07:00 Uhr)</li>
+            </ul>
+        </div>
+
+        <!-- QR Code -->
+        <div class="qr-section">
+            <h3>📱 Mehr Informationen</h3>
+            <div class="qr-code">
+                <!-- QR Code wird hier angezeigt -->
+                <img src="{{QR:regeln}}" alt="QR Code">
+            </div>
+            <p class="qr-text">Scannen Sie den QR-Code für Details</p>
+            <p class="url">QR-Code mit dem Handy scannen</p>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p><strong>{{ORT}}</strong>, 4303 Kaiseraugst</p>
+            <p>Teil der STWEG-Kooperation Rosenweg</p>
+        </div>
+    </div>
+
+    <script>
+        // Automatischer Druck beim Laden (optional - kann entfernt werden)
+        // window.onload = function() {
+        //     window.print();
+        // }
+    </script>
+</body>
+</html>

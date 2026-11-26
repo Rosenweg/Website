@@ -33,7 +33,7 @@ WAN :80/:443/:465/:587/:993/:25/:8883 ─DNAT─▶ 100.64.2.40
 | `crowdsec.yml` | `/etc/traefik/dynamic/crowdsec.yml` | CrowdSec-Bouncer-Middleware (Plugin), hängt über `traefik.yml` an `websecure` |
 | `crowdsec/acquis-traefik.yaml` | `/etc/crowdsec/acquis.d/traefik.yaml` | CrowdSec liest das Zugriffsprotokoll |
 | `crowdsec/rosenweg-cf-echte-ip.yaml` | `/etc/crowdsec/parsers/s02-enrich/` | echte Client-IP aus `Cf-Connecting-Ip`, nur bei Cloudflare-Verbindungen |
-| `crowdsec/rosenweg-intern.yaml` | `/etc/crowdsec/postoverflows/s01-whitelist/` | eigene Netze nie sperren |
+| `crowdsec/rosenweg-intern-whitelist.yaml` | `/etc/crowdsec/parsers/s02-enrich/` | eigene Netze nie sperren (siehe unten; auch auf jedem Melder) |
 | `echteip.yml` | `/etc/traefik/dynamic/echteip.yml` | Middleware `echteip`: echte Client-IP in `X-Forwarded-For`/`X-Real-Ip` |
 | `plugins/echteip/` | `/plugins-local/src/github.com/rosenweg/echteip/` | eigenes Traefik-Plugin dazu (Go, von Traefik interpretiert) |
 | `crowdsec/rosenweg-bf.yaml` | `/etc/crowdsec/scenarios/` | Szenarien: Einmal-Codes raten, Code-Drossel fluten, ActiveSync-Passwort-Raten |
@@ -41,7 +41,10 @@ WAN :80/:443/:465/:587/:993/:25/:8883 ─DNAT─▶ 100.64.2.40
 | `crowdsec/rosenweg-authentik-*.yaml` | `/etc/crowdsec/parsers/s01-parse/`, `/etc/crowdsec/scenarios/` | Authentik-Fehlanmeldungen (vom Melder auf dem Authentik-CT) |
 | `crowdsec/rosenweg-mail-*.yaml` | `/etc/crowdsec/parsers/s01-parse/`, `/etc/crowdsec/scenarios/` | Mailcow-Fehlanmeldungen (vom Melder auf Mailcow) |
 | `rw-crowdsec-syslog.nft`, `.service` | `/etc/rosenweg/`, `/etc/systemd/system/` | Syslog-Eingang nur für freigegebene Hosts (Authentik .37, Mailcow .33, PMG .31) |
-| `rw-crowdsec-lapi.nft`, `.service` | `/etc/rosenweg/`, `/etc/systemd/system/` | CrowdSec-API 8080 nur für localhost und PMG |
+| `crowdsec/rw-crowdsec-lapi.nft`, `rw-crowdsec-lapi.service` | `/etc/rosenweg/`, `/etc/systemd/system/` | CrowdSec-API 8080 nur für localhost, PMG (.31) und Melder (CT 220 .55) |
+| `crowdsec/rosenweg-anmeldung-bf.yaml` | `/etc/crowdsec/scenarios/` | 8 gescheiterte Anmeldungen (401) an der Anlage |
+| `crowdsec/profil-rosenweg-anmeldung-24h.yaml` | Anfang von `/etc/crowdsec/profiles.yaml` | 24 h Sperre für Anmelde-Szenarien |
+| `crowdsec/melder/` | auf den meldenden Systemen | CrowdSec-Melder (z. B. CT 220 Anlage), Anleitung dort |
 | `logrotate-stuendlich.conf` | `/etc/systemd/system/logrotate.timer.d/stuendlich.conf` | logrotate stündlich, damit `maxsize 100M` greift |
 | `deploy.sh` | läuft vom Arbeitsplatz | kopiert alles ausser `extra-routes.yml` und startet die Dienste |
 
@@ -179,8 +182,11 @@ Sperren, zweistufig:
   antwortet gesperrten Clients hinter Cloudflare mit 403. Fällt CrowdSec aus,
   lässt es alles durch (`updateMaxFailure: -1`).
 
-Nie gesperrt: 100.64.0.0/10, private Netze, `2a02:16a:1400::/48`,
-37.17.232.133 und .136.
+Nie gesperrt (`crowdsec/rosenweg-intern-whitelist.yaml`, Stand 25.11.2026, laut
+UniFi): 100.64.0.0/10, WAN 37.17.232.133, `2a02:16a:1400::/48`. Das Juronetz
+bewusst nicht, ebenso 37.17.232.136 (seit 25.11.2026 entfernt). Private Netze
+deckt CrowdSecs eigene Whitelist ab; Traefik-Bouncer (`clientTrustedIPs`) und
+Melder (`EIGENE`) führen dieselbe Liste plus private Netze.
 
 Bedienen:
 
@@ -239,7 +245,8 @@ Kopf nur an). Cloudflare-Netze in `echteip.yml` und `crowdsec.yml` gleich halten
 - PMG meldet SASL-Fehlanmeldungen (587, 465) ebenfalls an CrowdSec und hat
   einen eigenen Bouncer (`pmg-bouncer`), weil Submission 587 direkt vom UDM zum
   PMG geht. Dafür lauscht die CrowdSec-API auf `0.0.0.0:8080`, per
-  `rw-crowdsec-lapi.nft` nur für localhost und PMG offen.
+  `crowdsec/rw-crowdsec-lapi.nft` nur für localhost, PMG und die Melder
+  (`crowdsec/melder/`) offen.
 - Offen: Webmail/Mailcow-Oberfläche (443, SNI-Durchleitung aus der Datenbank)
   sieht weiter nur die Edge-IP.
 
@@ -258,6 +265,25 @@ Sperrsystem würde nur doppelt zählen.
 - `/var/log/crowdsec.log` — CrowdSec
 - `journalctl -u traefik -f`, `journalctl -u traefik-sync`
 
+## CrowdSec: Anmelde-Sperren (Stand 25.11.2026)
+
+Ergänzt den Abschnitt CrowdSec oben. Weitere Rosenweg-eigene Dateien in `crowdsec/`:
+
+| Datei | Ziel in CT 245 | Zweck |
+|---|---|---|
+| `rosenweg-anmeldung-bf.yaml` | `/etc/crowdsec/scenarios/` | 8 gescheiterte Anmeldungen (401) an der Anlage (`/api/telefon/`, `/api/pbx/`) |
+| `profil-rosenweg-anmeldung-24h.yaml` | Anfang von `/etc/crowdsec/profiles.yaml` | 24 h Sperre fuer `rosenweg/anmeldung-bf`, `rosenweg/authentik-bf`, `rosenweg/sip-bf` und die Asterisk-Szenarien |
+| `rosenweg-intern-whitelist.yaml` | `/etc/crowdsec/parsers/s02-enrich/` | eigene Netze nie sperren: 100.64.0.0/10, WAN 37.17.232.133, IPv6 2a02:16a:1400::/48 (laut UniFi; Juronetz bewusst nicht) |
+
+`rosenweg/authentik-bf` steht seit dem 25.11.2026 auf `capacity: 7` (Sperre ab dem 8. Fehlversuch).
+Stefan: "nach 8 Versuchen fehlgeschlagen 24 h sperren". Gezaehlt wird nur 401, nicht 403
+(angemeldet, aber nicht berechtigt). Seiten, die regelmaessig abfragen (smartphones.html,
+pbx-admin.html), hoeren nach einem 401 damit auf.
+
 ## Offen
 
-- `deploy.sh` verweist auf pve1 statt pve3 (siehe oben).
+- `deploy.sh` kopiert nur die Traefik-Grunddateien (`traefik.yml`, `dynamic-static.yml`,
+  Sync). `crowdsec.yml`, `echteip.yml`, `plugins/echteip/`, `crowdsec/*` und die
+  `rw-crowdsec-*`-Dateien gehen noch von Hand nach der Tabelle oben. Wer `deploy.sh`
+  ausführt, rollt `traefik.yml` mit den Middlewares `echteip@file` und `crowdsec@file`
+  aus: beide Dateien und Plugins müssen dann schon in CT 245 liegen.

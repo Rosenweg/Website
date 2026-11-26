@@ -46,8 +46,10 @@ const SERVICES_GROUPS = [
     items: [
       { label: 'WhatsApp-Gateway', href: 'https://whatsapp.rosenweg4303.ch/', activeKey: 'whatsapp-bot', permAny: 'technik,praesident' },
       { label: 'PBX (Telefonanlage)', href: 'https://pbx.rosenweg4303.ch', activeKey: 'pbx-admin', perm: 'pbx-admin' },
+      { label: 'Smartphones', href: 'smartphones.html', activeKey: 'smartphones', permAny: 'technik,praesident,bewohner' },
       { label: 'Reklamationen', href: 'reklamationen.html', activeKey: 'reklamationen', perm: 'reklamationen' },
       { label: 'Melde-Orte (QR-Codes)', href: 'melde-orte.html', activeKey: 'melde-orte', perm: 'reklamationen' },
+      { label: 'Türschilder & Aushänge (QR)', href: 'tuerschilder.html', activeKey: 'tuerschilder', perm: 'reklamationen' },
       { label: 'Reklamationen (meine STWEG)', href: 'pages/reklamationen.html', activeKey: 'reklamationen', permAny: 'bewohner,eigentuemer,ausschuss,technik,praesident,verwaltung', stwegOnly: true },
     ],
   },
@@ -314,6 +316,7 @@ const RosenwegNav = {
       { href: 'projekte.html', label: 'Projekte', group: 'Vorgänge', perm: 'projekte' },
       { href: 'reklamationen.html', label: 'Reklamationen', group: 'Vorgänge', perm: 'reklamationen' },
       { href: 'melde-orte.html', label: 'Melde-Orte (QR)', group: 'Vorgänge', perm: 'reklamationen' },
+      { href: 'tuerschilder.html', label: 'Türschilder & Aushänge (QR)', group: 'Vorgänge', perm: 'reklamationen' },
       { href: 'loeschungen.html', label: 'Löschungen', group: 'Vorgänge', perm: 'loeschungen' },
       { href: 'echtheitspruefung.html', label: 'Echtheitsprüfung', group: 'Vorgänge', perm: 'echtheitspruefung' },
       { href: 'brief-tracking.html', label: 'Brief-Tracking', group: 'Vorgänge', perm: 'brief-tracking' },

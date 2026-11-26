@@ -1,7 +1,8 @@
 FROM node:22-alpine
 
 # poppler-utils -> pdftotext, fuer ZEV-Rechnungs-Parsing (Textlayer auslesen)
-RUN apk add --no-cache poppler-utils
+# openssl -> Client-Zertifikate fuers Stationsjournal signieren (routes/stations.js)
+RUN apk add --no-cache poppler-utils openssl
 
 WORKDIR /app
 
@@ -13,6 +14,10 @@ COPY api/server.js ./
 COPY api/lib/ ./lib/
 COPY api/middleware/ ./middleware/
 COPY api/routes/ ./routes/
+# Druckvorlagen (Tuerschilder, Poster) – nur ueber /api/raum-qr/druck, nicht oeffentlich
+COPY api/vorlagen/ ./vorlagen/
+# Beispielmappe fuer die Verwaltung -> beim Start nach «Dokumente» (lib/ablage.js)
+COPY docs/beispielmappe/Beispielmappe-Rosenweg.pdf ./ablage/
 # MCP-Server fuer Agenten (mcp.rosenweg4303.ch), siehe docs/mcp.md
 COPY api/mcp/ ./mcp/
 # Dokumentation als MCP-Ressourcen (api/mcp/erweiterungen.js) – nur die

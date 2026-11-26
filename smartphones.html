@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smartphones - Rosenweg</title>
+    <link rel="icon" href="/logo-rosenweg.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=5"></script>
+    <script src="/js/nav.js?v=3"></script>
+    <style>
+        .qr { background:#fff; border-radius:14px; padding:12px; width:min(100%, 300px); aspect-ratio:1; margin:0 auto; }
+        .qr svg { width:100%; height:100%; display:block; }
+        .qr.alt { opacity:.25; }
+        .knopf { padding:.35rem .7rem; border-radius:.5rem; font-size:.85rem; background:#e2e8f0; white-space:nowrap; }
+        .knopf:hover { background:#cbd5e1; }
+        .knopf.rot { background:#fee2e2; color:#991b1b; }
+        .feld { display:block; width:100%; margin-top:.2rem; padding:.4rem .5rem; border:1px solid #cbd5e1; border-radius:.5rem; background:#fff; }
+        .punkt { display:inline-block; width:.6rem; height:.6rem; border-radius:50%; }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800">
+<nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+<script>RosenwegNav.init({ active: 'smartphones' });</script>
+
+<main class="max-w-5xl mx-auto px-4 py-6 space-y-5">
+    <div class="flex items-center gap-3">
+        <img src="/logo-rosenweg.png" alt="" class="w-12 h-12">
+        <div>
+            <h1 class="text-2xl font-bold">Smartphones</h1>
+            <div class="text-sm text-slate-500">Geteilte Rosenweg-Telefone und Rosenweg Telefon auf eigenen Handys</div>
+        </div>
+    </div>
+
+    <div id="meldung" class="hidden rounded-lg px-4 py-3 text-sm"></div>
+
+    <div id="gate" class="hidden bg-white rounded-xl shadow p-5">
+        <p class="mb-3">Bitte zuerst mit dem Rosenweg-Konto anmelden.</p>
+        <button onclick="AuthentikAuth.login(location.pathname)" class="px-4 py-2 rounded-lg bg-blue-600 text-white">Mit Rosenweg-Konto anmelden</button>
+    </div>
+
+    <div id="inhalt" class="hidden space-y-5">
+        <div class="grid md:grid-cols-2 gap-5">
+            <section class="bg-white rounded-xl shadow p-5">
+                <h2 class="font-semibold mb-1">Dein Anmelde-QR</h2>
+                <p class="text-sm text-slate-500 mb-3">Vor die Kamera eines gesperrten Telefons halten („QR-Code scannen“). Gilt einmal und nur kurz, die Seite holt von selbst einen neuen. Einfacher: Rosenweg-Karte hinten ans Telefon halten.</p>
+                <div class="qr" id="qr"></div>
+                <div class="text-center text-sm text-slate-500 mt-2" id="frist"></div>
+            </section>
+            <section class="bg-white rounded-xl shadow p-5">
+                <h2 class="font-semibold mb-2">Hier bist du angemeldet</h2>
+                <ul id="meine" class="divide-y text-sm"><li class="py-2 text-slate-500">An keinem Telefon.</li></ul>
+                <h2 class="font-semibold mt-5 mb-1">Rosenweg Telefon auf dem eigenen Handy</h2>
+                <p class="text-sm text-slate-600">App von der <a href="/apps" class="text-red-700 underline">Apps-Seite</a> laden,
+                    im Menü „Mit Rosenweg anmelden“. Deine Nummer klingelt dann auch dort.</p>
+            </section>
+        </div>
+
+        <div id="technik" class="hidden space-y-5">
+            <section class="bg-white rounded-xl shadow p-5">
+                <div class="flex items-center gap-3 mb-3">
+                    <h2 class="font-semibold flex-1">Geteilte Telefone</h2>
+                    <button class="knopf" onclick="lade()">Neu laden</button>
+                </div>
+                <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="text-left text-slate-500"><tr>
+                        <th class="py-1 pr-2">Nebenstelle</th><th class="pr-2">Gerät</th><th class="pr-2">Anlage</th>
+                        <th class="pr-2">Angemeldet</th><th class="pr-2">WLAN-Debugging</th><th></th></tr></thead>
+                    <tbody id="telefone" class="divide-y"></tbody>
+                </table>
+                </div>
+                <p class="text-xs text-slate-500 mt-3">Wartung per adb: das Telefon wird kurz von 2098 „Wartung“ angerufen und schaltet adb ein,
+                    erreichbar über das Netz mit <code>adb connect &lt;IP&gt;:5555</code> (steht in der Zeile, sobald das Telefon den Port meldet).
+                    Nach einem Neustart stellt Rosenweg Gerät Port 5555 selbst wieder her.</p>
+            </section>
+
+            <section class="bg-white rounded-xl shadow p-5">
+                <h2 class="font-semibold mb-3">Eigene Handys mit Rosenweg Telefon</h2>
+                <table class="w-full text-sm">
+                    <thead class="text-left text-slate-500"><tr><th class="py-1 pr-2">Zugang</th><th class="pr-2">Handy</th><th class="pr-2">Anlage</th><th class="pr-2">Seit</th><th></th></tr></thead>
+                    <tbody id="privat" class="divide-y"></tbody>
+                </table>
+            </section>
+
+            <section class="bg-white rounded-xl shadow p-5">
+                <div class="flex items-center gap-3 mb-1">
+                    <h2 class="font-semibold flex-1">App-Katalog</h2>
+                    <button class="knopf" onclick="ladeKatalog()">Neu laden</button>
+                </div>
+                <p class="text-xs text-slate-500 mb-3">Geteilte Telefone installieren die APKs still; eigene Handys bekommen sie über die
+                    <a href="/apps" class="text-red-700 underline">Apps-Seite</a> und den Rosenweg Updater. Web-Apps (Paket <code>web.&lt;name&gt;</code>)
+                    erscheinen als Kachel. Gruppen leer = alle. Einstellungen als JSON, Platzhalter <code>{email} {name} {benutzer}</code>.</p>
+                <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="text-left text-slate-500"><tr>
+                        <th class="py-1 pr-2">App</th><th class="pr-2">Version</th><th class="pr-2">Für</th><th class="pr-2">Aktiv</th><th></th></tr></thead>
+                    <tbody id="katalog" class="divide-y"></tbody>
+                </table>
+                </div>
+                <details id="katalogForm" class="mt-4 border-t pt-3">
+                    <summary class="cursor-pointer text-sm font-medium">App hinzufügen oder bearbeiten</summary>
+                    <div class="grid sm:grid-cols-2 gap-3 mt-3 text-sm">
+                        <label class="block">Paket<input id="a_paket" class="feld" placeholder="web.portal / ch.rosenweg4303.app"></label>
+                        <label class="block">Name<input id="a_name" class="feld"></label>
+                        <label class="block">URL (nur Web-Apps)<input id="a_url" class="feld" placeholder="https://…rosenweg4303.ch/"></label>
+                        <label class="block">Gruppen<input id="a_gruppen" class="feld" placeholder="leer = alle"></label>
+                        <label class="block">Reihenfolge<input id="a_reihe" class="feld" type="number" value="100"></label>
+                        <label class="block">Einstellungen (JSON)<input id="a_konfig" class="feld" value="{}"></label>
+                        <label class="block">Persönlich<select id="a_pers" class="feld"><option value="1">ja – beim Abmelden löschen</option><option value="0">nein</option></select></label>
+                        <label class="block">Immer verfügbar<select id="a_immer" class="feld"><option value="0">nein – nur angemeldet</option><option value="1">ja – Werkzeug (Tastatur, Browser)</option></select></label>
+                        <label class="block">Aktiv<select id="a_aktiv" class="feld"><option value="1">ja</option><option value="0">nein</option></select></label>
+                    </div>
+                    <button class="knopf mt-3" style="background:#1e3a8a;color:#fff" onclick="speichereApp()">Speichern</button>
+                </details>
+                <input type="file" id="a_datei" accept=".apk" class="hidden" onchange="apkHoch(this)">
+            </section>
+
+            <section class="bg-white rounded-xl shadow p-5">
+                <h2 class="font-semibold mb-1">Verlauf</h2>
+                <p class="text-xs text-slate-500 mb-2">Erlaubte Gruppen für geteilte Telefone: <span id="gruppen"></span> · ändern in der
+                    <a href="https://pbx.rosenweg4303.ch" class="text-red-700 underline">PBX-Verwaltung</a> (dort auch die Nebenstellen).</p>
+                <ul id="log" class="divide-y text-sm"></ul>
+            </section>
+        </div>
+    </div>
+</main>
+
+<script>
+const PBX = 'https://pbx.rosenweg4303.ch';
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const zeit = t => t ? new Date(String(t).replace(' ', 'T') + (/[zZ+]/.test(String(t).slice(10)) ? '' : 'Z'))
+                       .toLocaleString('de-CH', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) : '';
+let bisMs = 0, holt = false, abgelaufen = false;
+
+function melde(text, fehler) {
+    const m = $('meldung');
+    m.textContent = text;
+    m.className = 'rounded-lg px-4 py-3 text-sm ' + (fehler ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800');
+}
+async function api(pfad, opts) {
+    const r = await AuthentikAuth.apiFetch(PBX + pfad, opts);
+    if (r.status === 401) { abgelaufen = true; zeigeGate(); throw new Error('auth'); }
+    return r;
+}
+async function json(r) { return r.json().catch(() => ({})); }
+
+// ── Anmelde-QR und eigene Sitzungen (frueher pbx.rosenweg4303.ch/telefon) ──
+async function holeQr() {
+    if (holt) return; holt = true;
+    try {
+        const r = await api('/api/telefon/ausweis', {method: 'POST'});
+        const d = await json(r);
+        if (!r.ok) { $('qr').innerHTML = ''; $('frist').textContent = d.error || 'Kein Anmelde-QR.'; bisMs = 0; return; }
+        $('qr').innerHTML = d.qr_svg;   // vom Server erzeugtes SVG
+        $('qr').classList.remove('alt');
+        bisMs = Date.now() + (d.ttl_seconds || 90) * 1000;
+    } catch (e) { if (e.message !== 'auth') $('frist').textContent = 'Keine Verbindung zur Telefonanlage.'; }
+    finally { holt = false; }
+}
+function tick() {
+    if (document.hidden) return;
+    const s = Math.round((bisMs - Date.now()) / 1000);
+    if (bisMs && s > 0) $('frist').textContent = 'gültig noch ' + s + ' s';
+    else { $('frist').textContent = 'wird erneuert …'; $('qr').classList.add('alt'); }
+    if (s <= 10) holeQr();
+}
+async function ladeMeine() {
+    const d = await json(await api('/api/telefon/meine'));
+    if (d.darf === false) { $('qr').innerHTML = ''; $('frist').textContent = 'Dein Konto ist für geteilte Telefone nicht freigeschaltet.'; bisMs = 0; }
+    const xs = d.sitzungen || [], ps = d.privat || [];
+    const punkt = ok => `<span class="punkt" style="background:${ok ? '#16a34a' : '#cbd5e1'}"></span>`;
+    $('meine').innerHTML = (xs.map(s => `<li class="py-2 flex items-center gap-2">
+        <div class="flex-1"><b>${esc(s.geraet)}</b><div class="text-xs text-slate-500">Geteiltes Telefon · Nebenstelle ${esc(s.ext)} · seit ${esc(zeit(s.seit))}</div></div>
+        <button class="knopf" onclick="klingeln('${esc(s.ext)}')">🔔 Klingeln</button>
+        <button class="knopf" onclick="abmelden('${esc(s.ext)}')">Abmelden</button></li>`).join('')
+      + ps.map(p => `<li class="py-2 flex items-center gap-2">
+        <div class="flex-1"><b>${esc(p.geraet || 'Eigenes Handy')}</b><div class="text-xs text-slate-500">${punkt(p.registriert)} Rosenweg Telefon · ${esc(p.kennung)} · seit ${esc(zeit(p.seit))}</div></div>
+        <button class="knopf" onclick="handyAbmelden(${Number(p.id)}, '${esc(p.geraet || p.kennung)}')">Abmelden</button></li>`).join(''))
+        || '<li class="py-2 text-slate-500">An keinem Telefon.</li>';
+}
+
+// ── Aktionen ──
+async function klingeln(ext) {
+    const r = await api('/api/telefon/' + encodeURIComponent(ext) + '/suchen', {method: 'POST'});
+    if (!r.ok) { melde((await json(r)).error || 'Klingeln fehlgeschlagen.', true); return; }
+    melde('Telefon ' + ext + ' klingelt jetzt bis zu 45 Sekunden.');
+    for (let i = 0; i < 20; i++) {
+        await new Promise(res => setTimeout(res, 3000));
+        const s = await api('/api/telefon/' + encodeURIComponent(ext) + '/suchen').catch(() => null);
+        const d = s && s.ok ? await json(s) : {};
+        if (d.gefunden) { melde('Telefon ' + ext + ' gefunden um ' + zeit(d.gefunden) + (d.gefunden_von ? ' (' + d.gefunden_von + ')' : '') + '.'); lade(); return; }
+    }
+}
+async function abmelden(ext) {
+    if (!confirm('Anmeldung an ' + ext + ' beenden?')) return;
+    const r = await api('/api/telefon/' + encodeURIComponent(ext) + '/abmelden', {method: 'POST'});
+    melde(r.ok ? 'Abgemeldet.' : ((await json(r)).error || 'Abmelden fehlgeschlagen.'), !r.ok);
+    ladeMeine().catch(() => {}); lade();
+}
+async function wlanDebug(ext, minuten) {
+    const r = await api('/api/telefon/' + encodeURIComponent(ext) + '/wlan-debug', {method: 'POST', body: {minuten}});
+    const d = await json(r);
+    if (!r.ok) { melde(d.error || 'Fehler', true); return; }
+    melde(minuten ? 'WLAN-Debugging an ' + ext + ' bis ' + new Date(d.wlan_debug_bis * 1000).toLocaleTimeString('de-CH', {hour:'2-digit', minute:'2-digit'})
+                    + (d.geweckt ? ' – das Telefon wird kurz angerufen.' : ' – Telefon nicht erreicht, es übernimmt den Stand beim nächsten Kontakt.')
+                  : 'WLAN-Debugging an ' + ext + ' wird ausgeschaltet.');
+    lade();
+}
+async function handyAbmelden(id, name) {
+    if (!confirm(name + ' abmelden? Deine Nummer klingelt dort dann nicht mehr; in der App wieder „Mit Rosenweg anmelden“.')) return;
+    const r = await api('/api/telefon/privat/' + id, {method: 'DELETE'});
+    melde(r.ok ? name + ' abgemeldet.' : ((await json(r)).error || 'Fehler'), !r.ok);
+    ladeMeine().catch(() => {}); lade().catch(() => {});
+}
+async function privatSperren(id, kennung) {
+    if (!confirm('Zugang ' + kennung + ' sperren? Das Handy telefoniert danach nicht mehr über die Anlage.')) return;
+    const r = await api('/api/pbx/sip-privat/' + id, {method: 'DELETE'});
+    melde(r.ok ? 'Zugang ' + kennung + ' gesperrt.' : ((await json(r)).error || 'Fehler'), !r.ok);
+    lade();
+}
+
+// ── Technik-Übersicht ──
+// ── App-Katalog (frueher in der PBX-Verwaltung, Stefan 25.11.2026: gehoert hierher) ──
+let katalog = [], apkZiel = null;
+async function ladeKatalog() {
+    const r = await api('/api/pbx/telefon-apps');
+    if (!r.ok) return;
+    katalog = (await json(r)).apps || [];
+    const mb = b => Math.round((b || 0) / 1048576) + ' MB';
+    $('katalog').innerHTML = katalog.map((a, i) => `<tr>
+        <td class="py-2 pr-2"><div class="font-medium">${esc(a.name)}</div><div class="text-xs text-slate-500 font-mono">${esc(a.paket)}</div></td>
+        <td class="pr-2 text-xs">${a.art === 'web' ? 'Web-App' : (a.sha256 ? esc(a.version_name || '') + '<div class="text-slate-500 font-mono">' + esc(a.sha256.slice(0, 10)) + '… · ' + mb(a.groesse) + '</div>' : '<span class="text-slate-400">keine APK</span>')}</td>
+        <td class="pr-2 text-xs">${a.immer ? 'immer' : esc(a.gruppen || 'alle')}${a.persoenlich ? '<div class="text-slate-500">persönlich</div>' : ''}</td>
+        <td class="pr-2">${a.aktiv ? '✅' : '<span class="text-slate-400">aus</span>'}</td>
+        <td class="text-right"><div class="flex flex-wrap gap-1 justify-end">
+            <button class="knopf" onclick="bearbeiteApp(${i})">Bearbeiten</button>
+            ${a.art === 'apk' ? `<button class="knopf" onclick="apkWaehlen('${esc(a.paket)}')">APK</button>` : ''}
+            <button class="knopf rot" onclick="loescheApp('${esc(a.paket)}')">Löschen</button></div></td></tr>`).join('')
+        || '<tr><td colspan="5" class="py-2 text-slate-500">Noch keine Apps.</td></tr>';
+}
+function bearbeiteApp(i) {
+    const a = katalog[i];
+    $('a_paket').value = a.paket; $('a_name').value = a.name; $('a_url').value = a.url || '';
+    $('a_gruppen').value = a.gruppen || ''; $('a_reihe').value = a.reihenfolge; $('a_konfig').value = a.konfig || '{}';
+    $('a_pers').value = a.persoenlich ? '1' : '0'; $('a_aktiv').value = a.aktiv ? '1' : '0'; $('a_immer').value = a.immer ? '1' : '0';
+    $('katalogForm').open = true;
+    $('a_paket').scrollIntoView({behavior: 'smooth', block: 'center'});
+}
+async function speichereApp() {
+    const paket = $('a_paket').value.trim();
+    if (!paket) { melde('Paket fehlt.', true); return; }
+    let konfig; try { konfig = JSON.parse($('a_konfig').value || '{}'); } catch (e) { melde('Einstellungen sind kein gültiges JSON.', true); return; }
+    const body = {name: $('a_name').value.trim(), url: $('a_url').value.trim(), gruppen: $('a_gruppen').value.trim(),
+        reihenfolge: Number($('a_reihe').value || 100), konfig, persoenlich: $('a_pers').value === '1',
+        aktiv: $('a_aktiv').value === '1', immer: $('a_immer').value === '1'};
+    const r = await api('/api/pbx/telefon-apps/' + encodeURIComponent(paket),
+        {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    if (!r.ok) { melde((await json(r)).error || 'Speichern fehlgeschlagen.', true); return; }
+    ['a_paket', 'a_name', 'a_url', 'a_gruppen'].forEach(id => $(id).value = ''); $('a_konfig').value = '{}';
+    melde(paket + ' gespeichert.');
+    ladeKatalog();
+}
+function apkWaehlen(paket) { apkZiel = paket; $('a_datei').value = ''; $('a_datei').click(); }
+async function apkHoch(inp) {
+    const f = inp.files[0]; if (!f || !apkZiel) return;
+    melde('Lade ' + f.name + ' hoch …');
+    const r = await api('/api/pbx/telefon-apps/' + encodeURIComponent(apkZiel) + '/apk',
+        {method: 'POST', headers: {'Content-Type': 'application/vnd.android.package-archive'}, body: f});
+    if (!r.ok) { melde((await json(r)).error || 'Hochladen fehlgeschlagen.', true); return; }
+    melde('APK hochgeladen – die Telefone holen sie beim nächsten Abgleich, eigene Handys über den Updater.');
+    ladeKatalog();
+}
+async function loescheApp(paket) {
+    if (!confirm('App ' + paket + ' aus dem Katalog löschen?\nDie geteilten Telefone deinstallieren sie beim nächsten Abgleich.')) return;
+    const r = await api('/api/pbx/telefon-apps/' + encodeURIComponent(paket), {method: 'DELETE'});
+    if (!r.ok) melde((await json(r)).error || 'Löschen fehlgeschlagen.', true);
+    ladeKatalog();
+}
+
+async function lade() {
+    const r = await api('/api/pbx/smartphones');
+    if (r.status === 403) { $('technik').classList.add('hidden'); return; }
+    const d = await json(r);
+    if (!r.ok) { melde(d.error || 'Übersicht nicht verfügbar.', true); return; }
+    $('technik').classList.remove('hidden');
+    ladeKatalog();
+    const punkt = ok => `<span class="punkt" style="background:${ok ? '#16a34a' : '#cbd5e1'}"></span>`;
+    $('telefone').innerHTML = (d.telefone || []).map(t => `<tr>
+        <td class="py-2 pr-2 font-mono">${esc(t.ext)}</td>
+        <td class="pr-2">${esc(t.name)}</td>
+        <td class="pr-2">${punkt(t.registriert)} ${t.registriert ? 'erreichbar' : 'nicht erreichbar'}</td>
+        <td class="pr-2">${t.angemeldet ? esc(t.angemeldet) + '<div class="text-xs text-slate-500">seit ' + esc(zeit(t.seit)) + '</div>' : '<span class="text-slate-400">niemand</span>'}</td>
+        <td class="pr-2">${t.wlan_debug_bis ? 'an bis ' + new Date(t.wlan_debug_bis * 1000).toLocaleTimeString('de-CH', {hour:'2-digit', minute:'2-digit'})
+                         + ` <button class="knopf" onclick="wlanDebug('${esc(t.ext)}', 0)">aus</button>`
+                         + (t.adb ? `<div class="text-xs font-mono select-all mt-1" title="Port meldet Rosenweg Gerät">adb connect ${esc(t.adb)}</div>`
+                                  : '<div class="text-xs text-slate-500 mt-1">Port noch nicht gemeldet</div>')
+                         : `<button class="knopf" onclick="wlanDebug('${esc(t.ext)}', 60)">🛠 1 Std.</button>`}</td>
+        <td class="text-right space-x-1 whitespace-nowrap">
+            <button class="knopf" onclick="klingeln('${esc(t.ext)}')">🔔 Klingeln</button>
+            ${t.angemeldet ? `<button class="knopf" onclick="abmelden('${esc(t.ext)}')">Abmelden</button>` : ''}</td></tr>`).join('')
+        || '<tr><td class="py-2 text-slate-500" colspan="6">Keine geteilten Telefone.</td></tr>';
+    $('privat').innerHTML = (d.privat || []).map(p => `<tr>
+        <td class="py-2 pr-2 font-mono">${esc(p.kennung)}</td><td class="pr-2">${esc(p.geraet || '–')}</td>
+        <td class="pr-2">${punkt(p.registriert)} ${p.registriert ? 'erreichbar' : 'nicht erreichbar'}</td>
+        <td class="pr-2">${esc(zeit(p.seit))}</td>
+        <td class="text-right"><button class="knopf rot" onclick="privatSperren(${Number(p.id)}, '${esc(p.kennung)}')">Sperren</button></td></tr>`).join('')
+        || '<tr><td class="py-2 text-slate-500" colspan="5">Noch keine.</td></tr>';
+    $('gruppen').textContent = (d.gruppen || []).join(', ') || '–';
+    $('log').innerHTML = (d.log || []).map(l => `<li class="py-1 flex gap-3"><span class="text-slate-500 w-24 shrink-0">${esc(zeit(l.zeit))}</span>
+        <span class="font-mono w-12 shrink-0">${esc(l.ext)}</span><span class="flex-1">${esc(l.ereignis)}${l.name ? ' · ' + esc(l.name) : ''}</span>
+        <span class="text-slate-500">${esc(l.durch || '')}</span></li>`).join('');
+}
+
+function zeigeGate() { $('inhalt').classList.add('hidden'); $('gate').classList.remove('hidden'); }
+
+(async () => {
+    AuthentikAuth.handleCallback();
+    if (AuthentikAuth.ready) await AuthentikAuth.ready;
+    if (!AuthentikAuth.isLoggedIn()) { zeigeGate(); return; }
+    $('inhalt').classList.remove('hidden');
+    try { await ladeMeine(); } catch (e) {}
+    await holeQr();
+    // Nach einem 401 (Login abgelaufen) nicht weiter abfragen: jede Abfrage waere ein
+    // gescheiterter Versuch, und nach 8 sperrt CrowdSec 24 h (rosenweg/anmeldung-bf).
+    setInterval(() => { if (!abgelaufen) tick(); }, 1000);
+    lade().catch(() => {});
+    setInterval(() => { if (!document.hidden && !abgelaufen) { ladeMeine().catch(() => {}); lade().catch(() => {}); } }, 10000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && !abgelaufen) holeQr(); });
+})();
+</script>
+</body>
+</html>

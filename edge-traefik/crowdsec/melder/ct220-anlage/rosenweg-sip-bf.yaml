@@ -1,0 +1,18 @@
+# Rosenweg (Stefan 25.11.2026): 8 gescheiterte SIP-Anmeldungen -> 24 h (Profil auf dem Edge)
+type: leaky
+name: rosenweg/sip-bf
+description: "8 gescheiterte SIP-Anmeldungen an der Telefonanlage"
+filter: "evt.Meta.log_type == 'asterisk_failed_auth'"
+groupby: evt.Meta.source_ip
+capacity: 7
+leakspeed: 10m
+blackhole: 1m
+labels:
+  service: asterisk
+  confidence: 3
+  spoofable: 0
+  classification:
+    - attack.T1110
+  label: "SIP-Anmeldung erraten"
+  behavior: "sip:bruteforce"
+  remediation: true

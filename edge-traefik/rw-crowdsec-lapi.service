@@ -1,5 +1,5 @@
 [Unit]
-Description=nft: CrowdSec-API nur fuer lokale Bouncer und PMG
+Description=nft: CrowdSec-API nur fuer lokale Bouncer, PMG und Melder
 Before=crowdsec.service
 After=network-pre.target
 

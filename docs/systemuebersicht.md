@@ -16,7 +16,7 @@
 | Benutzerprofil (Passwort, Avatar, Daten) | Implementiert | `profil.html`, `/api/auth/me`, `/api/change-password` |
 | Authentik OAuth2 SSO Login/Logout | Implementiert | `/api/auth/login`, `/api/auth/callback` |
 | Bewohner-Navigation (8 STWEGs) | Implementiert | `js/nav.js`, `stweg1-8/` |
-| Kiosk-Anzeige (Tuerschilder) | Implementiert | `door-signs/`, `kiosk/` |
+| Kiosk-Anzeige / Tuerschilder | Implementiert | `kiosk/`, `api/vorlagen/aushaenge/` (Token-QR, `tuerschilder.html`) |
 | Avatar-Upload | Implementiert | `/api/auth/avatar` |
 
 ## Verwaltung & Administration
@@ -100,7 +100,7 @@
 | Tuerzugang (RFID-Freischaltung) | Implementiert | `/api/wasch/admin/doors` |
 | Kostenverfolgung pro Benutzer | Implementiert | `/api/wasch/my/costs` |
 | Monatliche Abrechnung (Cron am 1.) | Implementiert | `/api/wasch/admin/billing/run` |
-| Waschkuechen-Poster (A4/Kiosk) | Implementiert | `waschkueche-poster.html` |
+| Waschkuechen-Poster (A4/Kiosk) | Implementiert | `api/vorlagen/aushaenge/waschkueche-poster*.html` |
 | Admin-Dashboard | Implementiert | `waschkueche-admin.html` |
 
 ## Dokumente & Fileserver

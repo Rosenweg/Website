@@ -328,6 +328,7 @@ haben keine eigene JSON-Sperre (dort liegen keine Datendateien). `/.well-known/`
 | Mailbox-Antrag | 10 / Std., höchstens 3 automatisch angelegte Postfächer |
 | VPN-Konto anlegen | 10 / Std., höchstens 10 Konten |
 | Stations-Tunnel | 10 / Std., höchstens 20 je Konto |
+| App-Tunnel zum vm-gateway (`POST /api/apps/tunnel`, Rosenweg-Konto) | 30 / Std. je Gerät, 60 / Std. je Konto; höchstens 5 Geräte gleichzeitig je Person (prüft der Gateway) |
 | DNS-Prüfung (ISP) | 30 / 10 Min |
 | Push-Test | 5 / 10 Min |
 | Voicemail-Reklamation | 3 / Tag je Nummer, 20 / Tag gesamt |
@@ -378,6 +379,7 @@ nie im Repo.**
 | WhatsApp-Gateway (CT 116) | `GW_SMTP_STRENG_IPS` (Standard PMG `100.64.2.31`), `GW_NOTIFY_TLS_VERIFY` |
 | Syslog-Collector | `SYSLOG_ALLOWED_SOURCES`, `SYSLOG_TCP_IDLE_TIMEOUT` (600 s), `SYSLOG_MAX_TCP_CLIENTS` (20) |
 | wg-control (CT 113) | `WG_CONTROL_BIND`, `WG_CONTROL_TOKEN` |
+| vm-gateway (eigener CT, Repo rosenweg-vm/gateway) | `GW_STEUER_BIND`, `GW_STEUER_TOKEN`, `PVE_TOKEN`; Haupt-API: `VM_GATEWAY_URL`, `VM_GATEWAY_TOKEN` |
 | Z-Push (CT 115) | `RW_LDAP_URI` (für LDAPS) |
 | Avatar-Sync (CT 108) | `AUTHENTIK_URL`, `AUTHENTIK_API_TOKEN`, `AVATAR_HOSTS` |
 
@@ -417,7 +419,7 @@ ins Repo:
 - ~~Zertifikat `contacts.rosenweg4303.ch` abgelaufen~~ — seit 18.11.2026 endet TLS am Edge, das Zertifikat erneuert sich dort automatisch (`zpush/README.md`).
 - `PRINT_AR_AUTHSERV_ID` an einer echten Mail prüfen (oberster
   `Authentication-Results`-Kopf).
-- ~~CrowdSec/fail2ban auf dem Edge-Proxy fehlen~~ — seit 18.11.2026 CrowdSec mit nftables- und Traefik-Bouncer, siehe `edge-traefik/README.md`.
+- ~~CrowdSec/fail2ban auf dem Edge-Proxy fehlen~~ — seit 18.11.2026 CrowdSec auf dem Edge (CT 245) mit nftables- und Traefik-Bouncer, PMG als weiterem Bouncer; Details und Rosenweg-Regeln in `edge-traefik/README.md`. Offen: MQTT und Nextcloud melden gescheiterte Anmeldungen noch nicht an CrowdSec.
 - ioBroker läuft mit `auth=false` (nur noch hinter Authentik erreichbar).
 - Kiosk: Änderungen wirken erst nach erneutem `setup-kiosk.sh`; `root_password`
   in der Kiosk-Konfiguration setzen.

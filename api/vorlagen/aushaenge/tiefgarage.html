@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tiefgarage Zugang - Türschild</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@600;700;800&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        @page {
+            size: A4;
+            margin: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: white;
+            margin: 0;
+            padding: 0;
+        }
+
+        .page {
+            width: 210mm;
+            height: 297mm;
+            padding: 10mm;
+            background: linear-gradient(135deg, #faf5ff 0%, #e9d5ff 100%);
+            display: grid;
+            grid-template-rows: auto auto 1fr auto;
+            gap: 4mm;
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, #9333ea 0%, #7c3aed 100%);
+            color: white;
+            padding: 8mm;
+            border-radius: 6mm;
+            text-align: center;
+            box-shadow: 0 2mm 6mm rgba(147, 51, 234, 0.3);
+        }
+
+        .header h1 {
+            font-size: 24pt;
+            font-weight: 800;
+            margin-bottom: 1.5mm;
+            text-transform: uppercase;
+            letter-spacing: 1pt;
+        }
+
+        .header p {
+            font-size: 12pt;
+            opacity: 0.95;
+        }
+
+        /* Warning */
+        .warning {
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            border: 2mm solid #f59e0b;
+            border-radius: 5mm;
+            padding: 6mm;
+            box-shadow: 0 2mm 5mm rgba(245, 158, 11, 0.2);
+        }
+
+        .warning h2 {
+            color: #92400e;
+            font-size: 15pt;
+            font-weight: 800;
+            margin-bottom: 3mm;
+            display: flex;
+            align-items: center;
+            gap: 2.5mm;
+        }
+
+        .warning-icon {
+            background: #f59e0b;
+            color: white;
+            width: 26pt;
+            height: 26pt;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16pt;
+            flex-shrink: 0;
+        }
+
+        .warning p {
+            color: #78350f;
+            font-size: 11pt;
+            line-height: 1.25;
+            font-weight: 600;
+        }
+
+        /* Content */
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4mm;
+        }
+
+        .box {
+            background: white;
+            border-radius: 5mm;
+            padding: 5mm;
+            box-shadow: 0 1.5mm 4mm rgba(0, 0, 0, 0.1);
+        }
+
+        .box.full {
+            grid-column: 1 / -1;
+        }
+
+        .box h3 {
+            color: #7c3aed;
+            font-size: 13pt;
+            margin-bottom: 3mm;
+            font-weight: 700;
+        }
+
+        .box ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .box li {
+            font-size: 10pt;
+            margin-bottom: 2mm;
+            padding-left: 5mm;
+            position: relative;
+            color: #1f2937;
+            line-height: 1.15;
+        }
+
+        .box li:before {
+            content: "•";
+            position: absolute;
+            left: 0;
+            color: #9333ea;
+            font-weight: bold;
+            font-size: 12pt;
+        }
+
+        /* QR Codes Section */
+        .qr-grid {
+            grid-column: 1 / -1;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 3mm;
+            background: white;
+            border-radius: 5mm;
+            padding: 5mm;
+            box-shadow: 0 1.5mm 4mm rgba(0, 0, 0, 0.1);
+        }
+
+        .qr-item {
+            text-align: center;
+        }
+
+        .qr-item h4 {
+            color: #7c3aed;
+            font-size: 10pt;
+            margin-bottom: 2mm;
+            font-weight: 700;
+        }
+
+        .qr-code {
+            width: 100%;
+            aspect-ratio: 1;
+            margin: 0 auto 1.5mm;
+            background: white;
+            padding: 1.5mm;
+            border: 1mm solid #9333ea;
+            border-radius: 3mm;
+        }
+
+        .qr-code img {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .qr-label {
+            font-size: 7.5pt;
+            color: #6b7280;
+            line-height: 1.1;
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            color: #6b7280;
+            font-size: 8pt;
+            padding-top: 3mm;
+            border-top: 0.8mm solid #d1d5db;
+        }
+
+        .footer p {
+            margin: 1mm 0;
+        }
+
+        /* Print Optimization */
+        @media print {
+            body {
+                margin: 0;
+                padding: 0;
+            }
+
+            .page {
+                margin: 0;
+                box-shadow: none;
+            }
+
+            * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+                color-adjust: exact !important;
+            }
+        }
+    
+        /* Kopf im Rosenweg-Design (wie Deckblatt Druckauftrag und Aushang) */
+        .header.rw {
+            background: white;
+            color: #000;
+            text-align: left;
+            padding: 4.5mm 7mm 4mm;
+            box-shadow: 0 2mm 6mm rgba(0, 0, 0, 0.1);
+        }
+        .header.rw .rw-kopf {
+            display: flex;
+            align-items: center;
+            gap: 5mm;
+            border-bottom: 1mm solid #c41e1e;
+            padding-bottom: 3.5mm;
+            margin-bottom: 3mm;
+        }
+        .header.rw .rw-kopf img { width: 16mm; height: 16mm; }
+        .header.rw .rw-name { font-family: Arial, Helvetica, sans-serif; font-size: 18pt; font-weight: 700; color: #000; }
+        .header.rw .rw-ort { font-size: 11pt; color: #555; margin-top: 1mm; }
+        .header.rw h1 {
+            color: #c41e1e;
+            font-size: 26pt;
+            font-weight: 800;
+            margin: 0;
+            text-transform: none;
+            letter-spacing: -0.3pt;
+            line-height: 1.1;
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <!-- Header -->
+        <div class="header rw">
+            <div class="rw-kopf">
+                <img src="https://www.rosenweg4303.ch/logo-rosenweg.png" alt="Rosenweg">
+                <div>
+                    <div class="rw-name" data-feld="kopf-name">MEG Rosenweg</div>
+                    <div class="rw-ort" data-feld="kopf-ort">{{ORT}} · 4303 Kaiseraugst</div>
+                </div>
+            </div>
+            <h1 data-feld="titel">🚗 Tiefgarage</h1>
+        </div>
+
+        <!-- Warning -->
+        <div class="warning">
+            <h2>
+                <span class="warning-icon">⚠</span>
+                <span data-feld="warn-titel">Brandschutz in der Einstellhalle!</span>
+            </h2>
+            <p data-feld="warn-text">
+                <strong>Lagerverbot:</strong> Kein Brenn- oder Treibstoff, kein Hausrat, kein Altpapier.
+                Notausgänge und Löscheinrichtungen immer frei halten.
+            </p>
+        </div>
+
+        <!-- Content -->
+        <div class="content">
+            <!-- Nutzung -->
+            <div class="box">
+                <h3 data-feld="box1-titel">✓ Je Abstellplatz erlaubt</h3>
+                <ul data-feld="box1-liste">
+                    <li>1 Schrank: 1 m³ nicht brennbar oder 0,5 m³ brennbar</li>
+                    <li>1 Satz Reifen</li>
+                    <li>Sperrige Gegenstände wie Sportgeräte, Dachboxen, Leitern</li>
+                </ul>
+            </div>
+
+            <!-- Verboten -->
+            <div class="box">
+                <h3 data-feld="box2-titel">✗ Verboten</h3>
+                <ul data-feld="box2-liste">
+                    <li>Brenn- und Treibstoffe (Kanister, Gasflaschen)</li>
+                    <li>Hausrat, Möbel, Altpapier, Karton</li>
+                    <li>Werkstattbetrieb</li>
+                </ul>
+            </div>
+
+            <!-- Sicherheit -->
+            <div class="box full">
+                <h3 data-feld="box3-titel">🔒 Sicherheit (BFB/VKF)</h3>
+                <ul data-feld="box3-liste">
+                    <li>Alle Notausgänge frei halten</li>
+                    <li>Löscheinrichtungen zugänglich und einsatzbereit halten</li>
+                    <li>Bei Brand: Halle verlassen, Feuerwehr 118</li>
+                </ul>
+            </div>
+
+            <!-- QR Codes -->
+            <div class="qr-grid">
+                <div class="qr-item">
+                    <h4 data-feld="qr1-titel">👤 Ansprech&shy;partner</h4>
+                    <div class="qr-code">
+                        <img src="{{QR:ansprechpartner}}" alt="QR Code Ansprechpartner">
+                    </div>
+                    <p class="qr-label" data-feld="qr1-text">Hauswart & Verwaltung</p>
+                </div>
+
+                <div class="qr-item">
+                    <h4 data-feld="qr2-titel">📋 Regeln &amp; Brandschutz</h4>
+                    <div class="qr-code">
+                        <img src="{{QR:hausordnung}}" alt="QR Code Hausordnung">
+                    </div>
+                    <p class="qr-label" data-feld="qr2-text">Regeln & Vorschriften</p>
+                </div>
+
+                <div class="qr-item">
+                    <h4 data-feld="qr3-titel">🚨 Notfall</h4>
+                    <div class="qr-code">
+                        <img src="{{QR:notfall}}" alt="QR Code Notfall">
+                    </div>
+                    <p class="qr-label" data-feld="qr3-text">Feuerwehr 118 · Polizei 117</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p data-feld="fuss1"><strong>MEG</strong> - Rosenweg, 4303 Kaiseraugst</p>
+            <p data-feld="fuss2">Brandschutz nach BFB/VKF · Bei Brand: Feuerwehr 118</p>
+        </div>
+    </div>
+
+    <script>
+        // Optional: Auto-print beim Laden
+        // window.onload = function() { window.print(); }
+    </script>
+</body>
+</html>

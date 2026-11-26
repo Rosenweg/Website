@@ -57,9 +57,12 @@ def log(msg):
     sys.stdin.readline()
 
 def dial_target(m):
-    """kind=sip -> direkt registriertes Endpoint; sonst ueber peoplefone-Trunk."""
+    """kind=sip -> direkt registriertes Endpoint; person -> persoenliche Nummer ueber
+    [ring-person] (alle Geraete der Person, ohne ihre Voicemail); sonst peoplefone-Trunk."""
     if m.get('kind') == 'sip':
         return f"PJSIP/{m['phone']}"
+    if m.get('kind') == 'person':
+        return f"Local/{m['phone']}@ring-person/n"
     return f"PJSIP/{m['phone']}@peoplefone"
 
 

@@ -1,0 +1,9 @@
+[Unit]
+Description=Windows-Rechner alle 10 Minuten einsortieren
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=10min
+
+[Install]
+WantedBy=timers.target

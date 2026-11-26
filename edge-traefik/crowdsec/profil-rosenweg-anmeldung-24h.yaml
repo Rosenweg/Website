@@ -1,0 +1,10 @@
+name: rosenweg_anmeldung_24h
+# Rosenweg (Stefan 25.11.2026): nach 8 gescheiterten Anmeldungen 24 h sperren
+filters:
+ - Alert.Remediation == true && Alert.GetScope() == "Ip" && Alert.GetScenario() in ["rosenweg/anmeldung-bf", "rosenweg/authentik-bf", "rosenweg/sip-bf", "crowdsecurity/asterisk_bf", "crowdsecurity/asterisk_user_enum"]
+decisions:
+ - type: ban
+   duration: 24h
+on_success: break
+---
+name: default_ip_remediation

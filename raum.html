@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Raum-Info - STWEG-Kooperation Rosenweg</title>
+    <link rel="icon" href="/logo-rosenweg.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=5"></script>
+    <script src="/js/site-config.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .karte { scroll-margin-top: 90px; }
+        .karte.ziel { box-shadow: 0 0 0 3px #c41e1e; }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- Ziel der Token-QR-Codes auf Tuerschildern und Aushaengen: /raum.html?t=<token>.
+         Inhalt nur mit gueltigem Token von /api/raum-qr/info (api/routes/raum-qr.js);
+         Kontakte aus site-config.json und den oeffentlichen APIs. Druck: tuerschilder.html. -->
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js?v=3"></script>
+    <script>RosenwegNav.init({ active: '' });</script>
+
+    <!-- Kopf im Rosenweg-Design wie Tuerschilder und Deckblatt -->
+    <section class="bg-white border-b-4" style="border-color:#c41e1e">
+        <div class="max-w-4xl mx-auto px-4 py-6 flex items-center gap-4">
+            <img src="/logo-rosenweg.png" alt="Rosenweg" class="w-16 h-16">
+            <div>
+                <p class="text-lg font-bold text-black" id="kopf-org">STWEG-Kooperation Rosenweg</p>
+                <p class="text-sm text-gray-600">4303 Kaiseraugst · Raum-Info</p>
+            </div>
+        </div>
+        <div class="max-w-4xl mx-auto px-4 pb-6">
+            <h1 class="text-3xl md:text-4xl font-extrabold" style="color:#c41e1e" id="raum-titel">Raum-Info</h1>
+            <p class="text-gray-600 mt-1" id="raum-sub"></p>
+        </div>
+    </section>
+
+    <main class="max-w-4xl mx-auto px-4 py-8 space-y-6" id="inhalt"></main>
+
+
+<script>
+const ESC = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const tel = n => n ? `<a href="tel:${ESC(n.replace(/[^+\d]/g, ''))}" class="font-semibold text-blue-700 hover:underline">${ESC(n)}</a>` : '';
+const mail = m => m ? `<a href="mailto:${ESC(m)}" class="font-semibold text-blue-700 hover:underline">${ESC(m)}</a>` : '';
+const liste = arr => `<ul class="list-disc pl-5 space-y-1 text-gray-700">${arr.map(x => `<li>${x}</li>`).join('')}</ul>`;
+
+// Bausteine; die Inhalte je Raum kommen nur mit gueltigem Token von der API.
+const B = {
+    async technik() {
+        const t = SiteConfig.getTechnik() || {};
+        let namen = '';
+        try {
+            const r = await fetch('/api/public/technik');
+            if (r.ok) {
+                const d = await r.json();
+                if (d.mitglieder?.length) namen = `<p class="text-sm text-gray-600 mt-2">Im Team: ${d.mitglieder.map(m => ESC(m.name)).join(', ')}</p>`;
+            }
+        } catch {}
+        return `<div class="rounded-lg border p-4">
+            <p class="font-bold text-gray-900">Technischer Dienst</p>
+            <p class="text-sm text-gray-600">Hauswartung, Störungen, Schlüssel und Zutritt</p>
+            <p class="mt-2">Telefon: ${tel(t.telefon)}</p>
+            <p>E-Mail: ${mail(t.email)}</p>${namen}
+            <p class="text-xs text-gray-500 mt-2">Anfragen über die zentrale Adresse werden im Team verteilt.</p>
+        </div>`;
+    },
+    async verwaltung() {
+        const v = await SiteConfig.getVerwaltungForStweg(null);
+        if (!v) return '';
+        return `<div class="rounded-lg border p-4">
+            <p class="font-bold text-gray-900">Liegenschaftsverwaltung</p>
+            <p class="text-sm text-gray-600">${ESC(v.firma)}</p>
+            ${v.adresse ? `<p class="text-sm text-gray-600">${ESC(v.adresse)}</p>` : ''}
+            ${v.telefon ? `<p class="mt-2">Telefon: ${tel(v.telefon)}</p>` : ''}
+            ${v.email ? `<p>E-Mail: ${mail(v.email)}</p>` : ''}
+            ${v.oeffnungszeiten ? `<p class="text-xs text-gray-500 mt-1">${ESC(v.oeffnungszeiten)}</p>` : ''}
+        </div>`;
+    },
+    async meg() {
+        let namen = '';
+        try {
+            const r = await fetch('/api/public/ausschuss');
+            if (r.ok) {
+                const d = await r.json();
+                const m = (d.vertreter || []).find(x => x.stweg_nummer === 8);
+                if (m?.vertreter?.length) namen = `<p class="text-sm text-gray-600 mt-2">Vertretung im Ausschuss: ${m.vertreter.map(x => ESC(x.name)).join(', ')}</p>`;
+            }
+        } catch {}
+        return `<div class="rounded-lg border p-4">
+            <p class="font-bold text-gray-900">MEG Tiefgarage</p>
+            <p>E-Mail: ${mail('meg@rosenweg4303.ch')}</p>${namen}
+        </div>`;
+    },
+    notruf() {
+        const n = SiteConfig.getNotfall() || {};
+        const k = (l, nr) => `<a href="tel:${ESC(nr)}" class="block rounded-lg bg-red-50 border border-red-200 p-4 text-center">
+            <span class="block text-sm text-red-800 font-semibold">${l}</span>
+            <span class="block text-3xl font-extrabold text-red-600">${ESC(nr)}</span></a>`;
+        return `<div class="grid grid-cols-3 gap-3">${k('Polizei', n.polizei || '117')}${k('Feuerwehr', n.feuerwehr || '118')}${k('Sanität', n.sanitaet || '144')}</div>`;
+    },
+    defekt() {
+        return `<div><a href="/defekt-melden" class="inline-flex items-center gap-2 rounded-lg px-4 py-3 font-semibold text-white" style="background:#c41e1e">
+            🔧 Defekt online melden</a>
+            <p class="text-sm text-gray-600 mt-2">Mit Fotos; die Meldung geht automatisch an Technik bzw. Verwaltung.</p></div>`;
+    },
+};
+
+// Ein Baustein aus der API -> HTML. text-HTML stammt aus api/routes/raum-qr.js (von uns geschrieben).
+async function block(b) {
+    switch (b.t) {
+        case 'text': return `<div class="text-gray-700 space-y-2">${b.html}</div>`;
+        case 'liste': return liste((b.items || []).map(ESC));
+        case 'kontakt': return B[b.wer] ? await B[b.wer]() : '';
+        case 'notruf': return B.notruf();
+        case 'defekt': return B.defekt();
+        case 'personen': {
+            if (!b.personen?.length) return `<div class="rounded-lg border p-4"><p class="font-bold text-gray-900">${ESC(b.titel)}</p>
+                <p class="text-sm text-gray-600">Schlüssel erhalten Sie über den Technischen Dienst.</p></div>`;
+            return `<div class="rounded-lg border p-4"><p class="font-bold text-gray-900 mb-2">${ESC(b.titel)}</p>
+                ${b.personen.map(x => `<p>${ESC(x.name)}${x.telefon ? ` · ${tel(x.telefon)}` : ''}</p>`).join('')}</div>`;
+        }
+        case 'link': return `<a href="${ESC(b.href)}" class="inline-block rounded-lg px-4 py-3 font-semibold text-white bg-green-700">${ESC(b.text)}</a>`;
+        default: return '';
+    }
+}
+
+function ohneToken() {
+    document.getElementById('raum-titel').textContent = 'Bitte QR-Code scannen';
+    document.getElementById('inhalt').innerHTML = `<div class="bg-white rounded-xl shadow p-6 text-gray-700">
+        <p>Diese Seite zeigt Informationen zu einem Raum am Rosenweg. Sie öffnet sich nur über den
+        <strong>QR-Code auf dem Türschild oder Aushang</strong> vor Ort.</p>
+        <p class="mt-3">Fragen? <a href="/" class="text-blue-700 hover:underline">Zur Startseite</a></p></div>`;
+}
+
+(async () => {
+    await SiteConfig.load();
+    const token = (new URLSearchParams(location.search).get('t') || '').toLowerCase();
+    if (!/^[a-z0-9]{16}$/.test(token)) return ohneToken();
+    let raum;
+    try {
+        const r = await fetch('/api/raum-qr/info/' + encodeURIComponent(token));
+        if (!r.ok) return ohneToken();
+        raum = await r.json();
+    } catch { return ohneToken(); }
+    document.title = raum.titel.replace(/^\S+\s/, '') + ' - STWEG-Kooperation Rosenweg';
+    document.getElementById('raum-titel').textContent = raum.titel;
+    document.getElementById('raum-sub').textContent = raum.sub || '';
+    if (raum.org) document.getElementById('kopf-org').textContent = raum.org;
+    // Gescannter Abschnitt zuerst, die anderen darunter.
+    const teile = [...raum.teile].sort((a, b) => (b.id === raum.thema) - (a.id === raum.thema));
+    const main = document.getElementById('inhalt');
+    main.innerHTML = teile.map(t =>
+        `<section id="${ESC(t.id)}" class="karte bg-white rounded-xl shadow p-6${t.id === raum.thema ? ' ziel' : ''}">
+            <h2 class="text-xl font-bold mb-4" style="color:#c41e1e">${ESC(t.titel)}</h2>
+            <div class="space-y-3" data-teil="${ESC(t.id)}"><p class="text-gray-400">Lädt …</p></div>
+        </section>`).join('');
+    await Promise.all(teile.map(async t => {
+        const el = main.querySelector(`[data-teil="${t.id}"]`);
+        try { el.innerHTML = (await Promise.all(t.bloecke.map(block))).join(''); }
+        catch { el.innerHTML = '<p class="text-gray-600">Bitte den Technischen Dienst kontaktieren.</p>'; }
+    }));
+})();
+</script>
+</body>
+</html>

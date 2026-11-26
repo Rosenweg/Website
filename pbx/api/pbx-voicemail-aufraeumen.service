@@ -1,0 +1,7 @@
+[Unit]
+Description=Rosenweg PBX: Voicemails nach der Loeschfrist entfernen (voicemail_aufraeumen.py)
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/pbx-api
+ExecStart=/opt/pbx-api/venv/bin/python3 /opt/pbx-api/voicemail_aufraeumen.py

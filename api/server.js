@@ -656,13 +656,14 @@ function isDocPathAllowed(filePath, groups) {
 }
 
 // Unterordner, die eigene Routen schreiben und ausliefern (Auslagen-Belege,
-// Reklamationsfotos, Unterschriftenlisten-PDFs, Anzeigen): lesen/schreiben
+// Reklamationsfotos, Unterschriftenlisten-PDFs, Anzeigen, Deckblaetter der
+// Druckauftraege mit Namen/Adressen): lesen/schreiben
 // ueber die Dokumenten-API nur Technik/Praesident – sonst lesbar fuer alle
 // bzw. faelschbar. Brief-Fotos (Empfaengeradressen) lesen nur Ausschuss.
 // Grundbuch-Auszuege (allgemein/grundbuch-bilder, Namen+Adressen) nur ueber
 // /api/grundbuch/.../bild mit dessen Rechtepruefung.
 // Pruefung segmentweise, case-insensitiv, leere/'.'-Segmente uebersprungen.
-const DOC_SPERR_ORDNER = new Set(['auslagen', 'anzeigen', 'reklamationen', 'unterschriftenlisten', 'grundbuch-bilder']);
+const DOC_SPERR_ORDNER = new Set(['auslagen', 'anzeigen', 'reklamationen', 'unterschriftenlisten', 'grundbuch-bilder', 'druckauftraege']);
 const DOC_AUSSCHUSS_ORDNER = new Set(['fotos_von_versendeten_briefen']);
 function docSperrOrdner(filePath) {
   const seg = String(filePath).toLowerCase().split('/').filter(x => x && x !== '.');
@@ -2523,13 +2524,30 @@ app.get('/api/users', authMiddleware, adminOnly, async (req, res) => {
   }
 });
 
+// Dienst-Zugang des message-store (CT 131) fuer Personen, die am geteilten Telefon ueber die
+// Anlage angemeldet sind (kein Website-Login auf dem Geraet): Kopf X-Messenger-Service mit
+// MESSENGER_SERVICE_SECRET und X-Messenger-User = users.id. Gilt NUR fuer die zwei
+// /api/messenger/*-Lesezugriffe unten (docs: rosenweg-messenger docs/android-app.md, 24.11.2026).
+const MESSENGER_SERVICE_SECRET = process.env.MESSENGER_SERVICE_SECRET || '';
+function messengerAuth(req, res, next) {
+  const s = req.headers['x-messenger-service'];
+  if (MESSENGER_SERVICE_SECRET && typeof s === 'string' && s.length === MESSENGER_SERVICE_SECRET.length &&
+      crypto.timingSafeEqual(Buffer.from(s), Buffer.from(MESSENGER_SERVICE_SECRET))) {
+    const uid = parseInt(String(req.headers['x-messenger-user'] || ''), 10);
+    if (!Number.isInteger(uid) || uid <= 0) return res.status(400).json({ error: 'X-Messenger-User fehlt' });
+    req.user = { id: uid, user_id: uid, messengerDienst: true };
+    return next();
+  }
+  return authMiddleware(req, res, next);
+}
+
 // GET /api/messenger/directory — schlanke Personenliste für den Personen-Picker
 // der Messenger-PWA (chat.rosenweg4303.ch). Jeder EINGELOGGTE User darf die
 // Siedlungs-Mitglieder als Verzeichnis sehen (wie WhatsApp-Kontakte innerhalb der
 // Genossenschaft); nur unkritische Felder (id/name/stweg, KEINE Rolle/Balance).
 // Die id ist users.id — derselbe Namespace wie /api/auth/me → passt zu
 // conversation_members.user_id im message-store.
-app.get('/api/messenger/directory', authMiddleware, async (req, res) => {
+app.get('/api/messenger/directory', messengerAuth, async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT id, name, stweg, avatar_url FROM users
@@ -2549,7 +2567,7 @@ app.get('/api/messenger/directory', authMiddleware, async (req, res) => {
 // das Haus kodiert (18.2OG.1→18, RW17-01→17, 1305→13). Best-effort: was nicht
 // eindeutig zu einer bekannten Hausnummer der STWEG passt, wird verworfen (kein
 // Fehl-Join). STWEG→Häuser aus site-config.json (Wohngebäude 1–7).
-app.get('/api/messenger/house-membership', authMiddleware, async (req, res) => {
+app.get('/api/messenger/house-membership', messengerAuth, async (req, res) => {
   const STWEG_HOUSES = { 1: ['17', '18'], 2: ['13', '14', '16'], 3: ['9'], 4: ['10', '12'], 5: ['5', '6', '8'], 6: ['1'], 7: ['2', '4'] };
   const parseHouse = (bez, stweg) => {
     if (!bez) return null;
@@ -3701,7 +3719,7 @@ app.post('/api/access/users/:id/nfc', authMiddleware, adminOnly, async (req, res
   res.status(accessOk(r) ? 200 : r.status).json(r.body || {});
 });
 app.delete('/api/access/users/:id/nfc/:token', authMiddleware, adminOnly, async (req, res) => {
-  const r = await unifiAccessRaw('DELETE', `/users/${encodeURIComponent(req.params.id)}/nfc_cards/${encodeURIComponent(req.params.token)}`);
+  const r = await unifiAccessRaw('PUT', `/users/${encodeURIComponent(req.params.id)}/nfc_cards/delete`, { token: req.params.token });
   if (!accessGuard(res, r)) return;
   res.status(accessOk(r) ? 200 : r.status).json(r.body || {});
 });
@@ -3877,10 +3895,29 @@ app.post('/api/access/sync', authMiddleware, adminOnly, async (req, res) => {
 
 // ── Self-Service (Bewohner via PWA): eigene NFC-Karten + erlaubte Türen öffnen ──
 // STRENG auf den eingeloggten User begrenzt (UniFi-User via E-Mail-Match; nie fremde).
+// Weitere Adressen einer Person (person_email_alias): Zusatzadresse -> Hauptadresse.
+async function hauptEmail(email) {
+  const e = String(email || '').toLowerCase().trim(); if (!e) return e;
+  try {
+    const r = await pool.query('SELECT haupt_email FROM person_email_alias WHERE LOWER(alias_email) = $1', [e]);
+    return r.rows[0] ? String(r.rows[0].haupt_email).toLowerCase().trim() : e;
+  } catch { return e; }
+}
+async function alleEmails(email) {
+  const e = String(email || '').toLowerCase().trim(); if (!e) return [];
+  try {
+    const r = await pool.query('SELECT LOWER(alias_email) AS a FROM person_email_alias WHERE LOWER(haupt_email) = $1', [e]);
+    return [e, ...r.rows.map(x => x.a)];
+  } catch { return [e]; }
+}
 async function unifiUserByEmail(email) {
-  const e = (email || '').toLowerCase().trim(); if (!e) return null;
+  const kandidaten = await alleEmails(email); if (!kandidaten.length) return null;
   const users = (await unifiAccessRaw('GET', '/users')).body?.data || [];
-  return users.find(u => (u.email || u.user_email || '').toLowerCase().trim() === e) || null;
+  for (const e of kandidaten) {
+    const u = users.find(u => (u.email || u.user_email || '').toLowerCase().trim() === e);
+    if (u) return u;
+  }
+  return null;
 }
 // Türen, die der eingeloggte User öffnen darf (nach unserem Grant-Modell + seinen Authentik-Gruppen).
 async function meAllowedDoorIds(email) {
@@ -3893,6 +3930,34 @@ async function meAllowedDoorIds(email) {
   }
   return allowed;
 }
+// ── Weitere E-Mail-Adressen einer Person (nur Technik/Praesident) ──────────
+app.get('/api/admin/email-alias', authMiddleware, adminOnly, async (_req, res) => {
+  const r = await pool.query('SELECT alias_email, haupt_email, notiz, erstellt_von, erstellt_am FROM person_email_alias ORDER BY haupt_email, alias_email');
+  res.json({ aliase: r.rows });
+});
+app.post('/api/admin/email-alias', authMiddleware, adminOnly, async (req, res) => {
+  const a = String(req.body?.alias_email || '').toLowerCase().trim();
+  const h = String(req.body?.haupt_email || '').toLowerCase().trim();
+  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!re.test(a) || !re.test(h)) return res.status(400).json({ error: 'Zwei gueltige E-Mail-Adressen noetig' });
+  if (a === h) return res.status(400).json({ error: 'Zusatz- und Hauptadresse sind gleich' });
+  const kette = await pool.query('SELECT 1 FROM person_email_alias WHERE LOWER(alias_email) = $1', [h]);
+  if (kette.rowCount) return res.status(400).json({ error: 'Die Hauptadresse ist selbst eine Zusatzadresse' });
+  await pool.query(
+    `INSERT INTO person_email_alias (alias_email, haupt_email, notiz, erstellt_von) VALUES ($1,$2,$3,$4)
+     ON CONFLICT (alias_email) DO UPDATE SET haupt_email = EXCLUDED.haupt_email, notiz = EXCLUDED.notiz,
+       erstellt_von = EXCLUDED.erstellt_von, erstellt_am = NOW()`,
+    [a, h, String(req.body?.notiz || '').slice(0, 200) || null, req.user?.email || null]);
+  console.log(`[email-alias] ${a} -> ${h} durch ${req.user?.email || '?'}`);
+  res.json({ ok: true });
+});
+app.delete('/api/admin/email-alias/:alias', authMiddleware, adminOnly, async (req, res) => {
+  const a = String(req.params.alias || '').toLowerCase().trim();
+  const r = await pool.query('DELETE FROM person_email_alias WHERE LOWER(alias_email) = $1', [a]);
+  console.log(`[email-alias] ${a} entfernt durch ${req.user?.email || '?'}`);
+  res.json({ ok: true, geloescht: r.rowCount });
+});
+
 app.get('/api/access/me', authMiddleware, async (req, res) => {
   const u = await unifiUserByEmail(req.user?.email);
   if (!u) return res.json({ found: false });
@@ -4013,7 +4078,7 @@ app.post('/api/access/me/nfc/assign', authMiddleware, async (req, res) => {
 app.delete('/api/access/me/nfc/:token', authMiddleware, async (req, res) => {
   const u = await unifiUserByEmail(req.user?.email);
   if (!u) return res.status(404).json({ error: 'Kein UniFi-Benutzer gefunden' });
-  const r = await unifiAccessRaw('DELETE', `/users/${encodeURIComponent(u.id)}/nfc_cards/${encodeURIComponent(req.params.token)}`);
+  const r = await unifiAccessRaw('PUT', `/users/${encodeURIComponent(u.id)}/nfc_cards/delete`, { token: req.params.token });
   if (accessOk(r)) return res.json({ success: true });
   res.status(r.status === 0 ? 502 : r.status).json({ error: 'Entfernen fehlgeschlagen' });
 });
@@ -5217,6 +5282,11 @@ async function pollGmailForVerteiler() {
             // Create print job with token for pickup confirmation
             const jobToken = crypto.randomBytes(16).toString('hex');
             const pickupUrl = `${SITE_URL}/abholung.html?token=${jobToken}`;
+            // QR-Code lokal erzeugen: frueher api.qrserver.com – damit ging der Abhol-Link
+            // samt Token an einen Fremddienst (Sicherheitspruefung 21.11.2026).
+            let pickupQr = '';
+            try { pickupQr = await require('qrcode').toDataURL(pickupUrl, { width: 150, margin: 1 }); }
+            catch (e) { console.error('[Print] QR-Code:', e.message); }
 
             console.log(`[IMAP] Print job for ${printer} from ${senderEmail} (UID ${uid})${recipientInfo ? ` → ${recipientInfo.name}` : ''}`);
             try {
@@ -5312,7 +5382,7 @@ async function pollGmailForVerteiler() {
       <tr>
         <td class="label">QR-Code scannen</td>
         <td class="value" style="text-align:center;padding:15px">
-          <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(pickupUrl)}" width="150" height="150" alt="QR">
+          ${pickupQr ? `<img src="${pickupQr}" width="150" height="150" alt="QR">` : ''}
           <br><span style="font-size:10px;color:#888">${esc(pickupUrl)}</span>
         </td>
       </tr>
@@ -5349,6 +5419,17 @@ async function pollGmailForVerteiler() {
 
                 if (pdfResp.ok) {
                   const pdfBuf = Buffer.from(await pdfResp.arrayBuffer());
+                  // Deckblatt zusaetzlich in «Dokumente» ablegen (allgemein/druckauftraege/<Jahr>/).
+                  // Enthaelt Namen und Adressen -> Ordner ist gesperrt (nur Technik/Praesident, DOC_SPERR_ORDNER).
+                  try {
+                    const jetzt = new Date();
+                    const tag = jetzt.toLocaleString('sv-SE', { timeZone: 'Europe/Zurich' }).slice(0, 16).replace(' ', '_').replace(':', '');
+                    const wer = String(recipientInfo?.name || recipientTag || 'allgemein').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+                      .replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'allgemein';
+                    const dir = pathModule.join(DOCS_PATH, 'allgemein', 'druckauftraege', String(jetzt.getFullYear()));
+                    await fs.mkdir(dir, { recursive: true });
+                    await fs.writeFile(pathModule.join(dir, `${tag}_${wer}_${jobToken.slice(0, 8)}.pdf`), pdfBuf);
+                  } catch (e) { console.error(`[Print] Deckblatt-Ablage fehlgeschlagen: ${e.message}`); }
                   const coverResp = await fetch(`${PRINT_API}/print/${printer}`, {
                     method: 'POST',
                     body: pdfBuf,
@@ -9069,6 +9150,9 @@ app.get('/api/unterschriftenliste/verify-json', async (req, res) => {
       generated_at: s.generated_at,
       generated_at_local: new Date(s.generated_at).toLocaleString('de-CH', { timeZone: 'Europe/Zurich' }),
       download_count: (s.download_count || 0) + 1,
+      // Bewusst vollstaendig (Stefan 21.11.2026): die Pruefseite zeigt alles wie das
+      // Original, damit Dritte den Ausdruck Zeile fuer Zeile abgleichen koennen – so
+      // entspricht es den Anforderungen nach CH-Recht. Nicht einschraenken.
       snapshot: s.snapshot_data
     });
   } catch (err) {
@@ -11157,6 +11241,9 @@ require('./mcp').mountMcp(app);
 
 // GRUNDBUCH-CROWDSOURCING -> routes/grundbuch.js (Router-Split, PoC-Domäne)
 app.use('/api/grundbuch', require('./routes/grundbuch'));
+
+// RAUM-QR: Tuerschilder/Aushaenge mit Token-QR -> routes/raum-qr.js
+app.use('/api/raum-qr', require('./routes/raum-qr'));
 
 // STATIONEN (Rosenweg/os-stationen) -> routes/stations.js
 // Bewusst ohne authMiddleware: der Installer läuft auf einem Gerät ohne
@@ -16270,11 +16357,56 @@ function msgTopicAllowed(prefixes, topic) {
   return prefixes.some((p) => p === '#' || t === p || t === p + '/msg' || t.startsWith(p + '/'));
 }
 
+// Messenger-Sitzungen (Stefan 25.11.2026): Clients melden sich mit dem JWT als PASSWORT und
+// dem neutralen Benutzernamen "msg-<sub>" an - Mosquitto loggt Benutzernamen (fuer CrowdSec
+// noetig), Passwoerter nie. go-auth schickt bei superuser/aclcheck nur den Benutzernamen, darum
+// merken wir uns die Claims bis zum Ablauf des JWT unter diesem Namen.
+let msgSitzungTabelle = null;
+function msgSitzungBereit() {
+  if (!msgSitzungTabelle) {
+    msgSitzungTabelle = pool.query(`CREATE TABLE IF NOT EXISTS mqtt_msg_sitzungen (
+      username TEXT PRIMARY KEY, claims_json TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL)`)
+      .catch(e => { msgSitzungTabelle = null; throw e; });
+  }
+  return msgSitzungTabelle;
+}
+async function msgSitzungMerken(username, claims) {
+  await msgSitzungBereit();
+  const bis = claims.exp ? new Date(claims.exp * 1000) : new Date(Date.now() + 24 * 3600 * 1000);
+  await pool.query(
+    `INSERT INTO mqtt_msg_sitzungen (username, claims_json, expires_at) VALUES ($1, $2, $3)
+     ON CONFLICT (username) DO UPDATE SET claims_json = EXCLUDED.claims_json, expires_at = EXCLUDED.expires_at`,
+    [username, JSON.stringify(claims), bis]);
+}
+async function msgSitzungClaims(username) {
+  const u = String(username || '');
+  if (!u.startsWith('msg-')) return null;
+  try {
+    await msgSitzungBereit();
+    const r = await pool.query(`SELECT claims_json FROM mqtt_msg_sitzungen WHERE username = $1 AND expires_at > NOW()`, [u]);
+    return r.rows[0] ? JSON.parse(r.rows[0].claims_json) : null;
+  } catch { return null; }
+}
+let msgAltAnmeldungen = 0;   // Clients, die das JWT noch als Benutzernamen schicken (Uebergang)
+
 app.post('/api/mqtt/getuser', mqttBrokerGuard, async (req, res) => {
   try {
     const { username, password } = req.body || {};
-    // Messenger-JWT (chat.) → gültige Signatur genügt.
-    if (messengerJwtClaims(username) || messengerJwtClaims(password)) return res.status(200).end();
+    // Messenger neu: Benutzername "msg-<sub>", JWT als Passwort. Der Name muss zum JWT passen,
+    // sonst koennte jemand Claims unter fremdem Namen hinterlegen.
+    const pwClaims = messengerJwtClaims(password);
+    if (pwClaims && String(username || '') === 'msg-' + String(pwClaims.sub || '')) {
+      await msgSitzungMerken(String(username), pwClaims);
+      return res.status(200).end();
+    }
+    // Messenger alt: JWT als Benutzername. Seit 25.11.2026 abgewiesen (Stefan: Umstellung ja; seit
+    // dem Start der neuen API keine solche Anmeldung mehr). So steht nie ein JWT im Mosquitto-
+    // Protokoll: abgewiesene Clients erscheinen dort nur als "not authorised", ohne Benutzernamen.
+    if (messengerJwtClaims(username)) {
+      if (++msgAltAnmeldungen % 20 === 1) console.log(`[mqtt] Messenger mit JWT als Benutzername abgewiesen (${msgAltAnmeldungen} seit Start) - App/PWA zu alt`);
+      return res.status(403).end();
+    }
+    if (pwClaims) return res.status(403).end();   // JWT als Passwort, aber falscher Name
     if (!password) return res.status(403).end();
     const hash = crypto.createHash('sha256').update(password).digest('hex');
     const r = await pool.query(
@@ -16319,7 +16451,7 @@ app.post('/api/mqtt/superuser', mqttBrokerGuard, async (req, res) => {
   try {
     const { username, password } = req.body || {};
     // Messenger: nur das Backend-Token (backend:true) ist Superuser; per-User nein.
-    const mj = messengerJwtClaims(username) || messengerJwtClaims(password);
+    const mj = messengerJwtClaims(username) || messengerJwtClaims(password) || await msgSitzungClaims(username);
     if (mj) return res.status(mj.backend === true ? 200 : 403).end();
     const u = await mqttUserByUsername(username);
     return res.status(u && u.is_technik ? 200 : 403).end();
@@ -16343,7 +16475,7 @@ app.post('/api/mqtt/aclcheck', mqttBrokerGuard, async (req, res) => {
     }
     // Messenger-JWT → Topic gegen sub_topics/pub_topics-Claims (acc 1/4=read/sub,
     // 2=write, 3=readwrite). Backend-Token darf alles.
-    const mj = messengerJwtClaims(username) || messengerJwtClaims(password);
+    const mj = messengerJwtClaims(username) || messengerJwtClaims(password) || await msgSitzungClaims(username);
     if (mj) {
       if (mj.backend === true) return res.status(200).end();
       const a = Number(acc);
@@ -18293,6 +18425,281 @@ function cnamSauber(name) {
   const s = String(name || '').replace(/[\u0000-\u001F\u007F"'`\\]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
   return s || null;
 }
+
+// Personen fuer die persoenlichen Nummern der Anlage (3HHWWP, docs/plans/telefon-nummernplan.md).
+// Die pbx-api holt das regelmaessig und vergibt fehlenden Personen eine Nummer;
+// vergebene Nummern aendert sie nie. Gleiche Abfragen wie beim ersten Nummernplan (24.11.2026).
+app.get('/api/pbx/personen', requirePbxSecret, async (_req, res) => {
+  try {
+    const wohnungen = await pool.query(
+      `SELECT id, stweg, bezeichnung AS bez, COALESCE(stockwerk,'') AS stock, COALESCE(bewohnt_von,'') AS bewohnt
+         FROM wohnungen WHERE deleted_at IS NULL AND typ = 'Wohnung' ORDER BY bezeichnung`);
+    const kontakte = await pool.query(
+      `SELECT w.id AS wid, k.id AS kid, k.rolle, COALESCE(k.name,'') AS name, LOWER(COALESCE(k.email,'')) AS email,
+              COALESCE(k.sort_order,0) AS sort, k.created_at AS created
+         FROM wohnungen w JOIN wohnungen_kontakte k ON k.wohnung_id = w.id
+        WHERE w.deleted_at IS NULL AND w.typ = 'Wohnung' AND k.deleted_at IS NULL AND k.archiviert_am IS NULL
+        ORDER BY w.bezeichnung, k.sort_order, k.created_at`);
+    const meg = await pool.query(
+      `WITH aktiv AS (
+         SELECT k.*, w.typ, w.bezeichnung FROM wohnungen_kontakte k JOIN wohnungen w ON w.id = k.wohnung_id
+          WHERE k.deleted_at IS NULL AND k.archiviert_am IS NULL AND w.deleted_at IS NULL
+            AND COALESCE(k.email,'') <> '' AND k.rolle <> 'verwalter'),
+       mit_wohnung AS (SELECT DISTINCT LOWER(email) e FROM aktiv WHERE typ = 'Wohnung')
+       SELECT LOWER(a.email) AS email, MIN(a.name) AS name, STRING_AGG(DISTINCT a.bezeichnung, ', ') AS einheiten,
+              MIN(a.created_at) AS created
+         FROM aktiv a WHERE LOWER(a.email) NOT IN (SELECT e FROM mit_wohnung)
+        GROUP BY LOWER(a.email) ORDER BY MIN(a.created_at)`);
+    res.json({ wohnungen: wohnungen.rows, kontakte: kontakte.rows, meg: meg.rows });
+  } catch (e) {
+    console.error('[pbx-personen]', e.message);
+    res.status(500).json({ error: 'Abfrage fehlgeschlagen' });
+  }
+});
+
+// ═══ NFC-Karten fuer die geteilten Telefone (Anmeldung per UniFi-Access-Karte) ═══
+// Die pbx-api fragt hier, wem eine Karte gehoert (Anmeldung am geteilten Telefon) und
+// verwaltet Karten fuer Technik/Praesident (Kartenverwaltung auf dem Telefon).
+// UniFi Access ist die einzige Quelle: zugewiesen = darf, entzogen/unbekannt = darf nicht.
+// Karten-UID = Tag.getId() des Telefons als Hex = nfc_id in Access (z.B. 04D4C227C22A81).
+const normNfcId = (s) => String(s || '').replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+const nfcIdGueltig = (s) => /^[0-9A-F]{8,20}$/.test(s) && s.length % 2 === 0;
+
+// Kartenliste kurz zwischenspeichern (nur um das Token zur UID zu finden; Status und
+// Besitzer werden bei jeder Anfrage live ueber /tokens/{token} gelesen).
+let accessKartenCache = { zeit: 0, karten: null };
+const ACCESS_KARTEN_TTL_MS = 30 * 1000;
+async function accessKartenListe(frisch = false) {
+  if (!frisch && accessKartenCache.karten && Date.now() - accessKartenCache.zeit < ACCESS_KARTEN_TTL_MS) {
+    return accessKartenCache.karten;
+  }
+  const alle = [];
+  const GROESSE = 500;
+  for (let seite = 1; seite <= 40; seite++) {
+    const r = await unifiAccessRaw('GET', `/credentials/nfc_cards/tokens?page_num=${seite}&page_size=${GROESSE}`);
+    if (r.error === 'not_configured') throw Object.assign(new Error('UniFi Access nicht konfiguriert'), { http: 503 });
+    if (r.status === 0) throw Object.assign(new Error('UniFi Access nicht erreichbar'), { http: 502 });
+    if (!accessOk(r)) throw Object.assign(new Error(`UniFi Access: HTTP ${r.status}`), { http: 502 });
+    const d = Array.isArray(r.body?.data) ? r.body.data : [];
+    alle.push(...d);
+    const total = Number(r.body?.pagination?.total);
+    if (d.length < GROESSE || (Number.isFinite(total) && alle.length >= total)) break;
+  }
+  accessKartenCache = { zeit: Date.now(), karten: alle };
+  return alle;
+}
+function accessKartenCacheLeeren() { accessKartenCache = { zeit: 0, karten: null }; }
+
+async function accessKarteZurUid(nfcId, frisch = false) {
+  const finde = (liste) => liste.find(k => normNfcId(k.nfc_id) === nfcId) || null;
+  let k = finde(await accessKartenListe(frisch));
+  // Nicht im Zwischenspeicher: vielleicht gerade erst angelegt -> einmal frisch nachsehen
+  if (!k && !frisch) k = finde(await accessKartenListe(true));
+  if (!k) return null;
+  // Live-Stand der einen Karte (Status/Besitzer koennen sich seit dem Listenabruf geaendert haben)
+  const r = await unifiAccessRaw('GET', `/credentials/nfc_cards/tokens/${encodeURIComponent(k.token)}`);
+  if (r.status === 0) throw Object.assign(new Error('UniFi Access nicht erreichbar'), { http: 502 });
+  if (r.status === 404) { accessKartenCacheLeeren(); return null; }   // inzwischen geloescht
+  if (!accessOk(r) || !r.body?.data) throw Object.assign(new Error(`UniFi Access: HTTP ${r.status}`), { http: 502 });
+  return r.body.data;
+}
+
+function accessKartenBesitzerId(k) {
+  return k?.user_id || k?.user?.id || null;
+}
+function accessKartenBesitzerName(k) {
+  const u = k?.user || {};
+  return u.name || `${u.first_name || ''} ${u.last_name || ''}`.trim() || null;
+}
+
+// Access-Benutzer -> E-Mail -> Website-Person (id, Name, Gruppen). Gruppen live aus Authentik,
+// sonst wie /api/auth/me aus users.groups_json.
+async function kartenPerson(accessUserId) {
+  const r = await unifiAccessRaw('GET', `/users/${encodeURIComponent(accessUserId)}`);
+  if (r.status === 0) throw Object.assign(new Error('UniFi Access nicht erreichbar'), { http: 502 });
+  const au = r.body?.data;
+  const accessEmail = String(au?.email || au?.user_email || '').toLowerCase().trim();
+  if (!accessEmail) return null;
+  // In Access kann eine Zusatzadresse stehen (z.B. Gmail des UI-Kontos): mit der Hauptadresse weiter.
+  const email = await hauptEmail(accessEmail);
+  let zeile = null;
+  try {
+    zeile = (await pool.query(
+      'SELECT id, email, name, groups_json FROM users WHERE LOWER(email) = $1 ORDER BY id LIMIT 1', [email])).rows[0] || null;
+  } catch (e) { console.error('[pbx-karte] users:', e.message); }
+  let gruppen = null, name = zeile?.name || null;
+  try {
+    const ak = await authentikUserByEmail(email);
+    if (ak) { gruppen = ak.groups || []; name = name || ak.name; }
+  } catch (e) { console.warn('[pbx-karte] Authentik:', e.message); }
+  if (!gruppen) { try { gruppen = JSON.parse(zeile?.groups_json || '[]'); } catch { gruppen = []; } }
+  if (!zeile && !gruppen.length) return { user_id: null, email, name: name || au.full_name || null, groups: [] };
+  return {
+    user_id: zeile ? String(zeile.id) : null,
+    email,
+    name: name || au.full_name || `${au.first_name || ''} ${au.last_name || ''}`.trim() || email,
+    groups: gruppen.map(g => String(g)),
+  };
+}
+
+// Jede Aenderung protokollieren: Access sieht nur das API-Token, nicht wer am Telefon stand.
+let kartenProtokollBereit = null;
+async function kartenProtokollieren(aktion, { nfcId, displayId, email, name, durch, erfolg, detail }) {
+  try {
+    if (!kartenProtokollBereit) {
+      kartenProtokollBereit = pool.query(`CREATE TABLE IF NOT EXISTS access_karten_protokoll (
+        id SERIAL PRIMARY KEY, aktion TEXT NOT NULL, nfc_id TEXT, display_id TEXT,
+        ziel_email TEXT, ziel_name TEXT, durch TEXT, erfolg BOOLEAN, detail TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW())`);
+    }
+    await kartenProtokollBereit;
+    await pool.query(`INSERT INTO access_karten_protokoll (aktion, nfc_id, display_id, ziel_email, ziel_name, durch, erfolg, detail)
+                      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [aktion, nfcId || null, displayId || null, email || null, name || null,
+       String(durch || '').slice(0, 200) || null, !!erfolg, detail ? String(detail).slice(0, 500) : null]);
+  } catch (e) {
+    kartenProtokollBereit = null;
+    console.error('[pbx-karte] nicht protokolliert:', e.message);
+  }
+  console.log(`[pbx-karte] ${aktion} ${erfolg ? 'ok' : 'fehlgeschlagen'}: Karte ${displayId || nfcId} ${email ? '-> ' + email + ' ' : ''}durch ${durch || '?'}${detail ? ' (' + detail + ')' : ''}`);
+}
+
+// Fremdkarte in die Access-Karteninventur importieren.
+// Dokumentiert (Access-API, "Import Third-Party NFC Cards"): POST multipart/form-data, Feld "file"
+// = CSV; Antwort data:[{alias, nfc_id, token}]. Die CSV-Spalten selbst sind nirgends oeffentlich
+// beschrieben: wir senden "nfc_id,alias" mit Kopfzeile und versuchen bei Fehler einmal ohne.
+// Danach wird immer ueber die Kartenliste geprueft, ob die Karte wirklich da ist.
+async function accessKarteImportieren(nfcId, alias) {
+  const host = await getAccessSetting('host', '');
+  const token = await getAccessSetting('token', '');
+  if (!host || !token) throw Object.assign(new Error('UniFi Access nicht konfiguriert'), { http: 503 });
+  const aliasSauber = String(alias || '').replace(/[",\r\n]/g, ' ').trim().slice(0, 60);
+  const varianten = [`nfc_id,alias\r\n${nfcId},${aliasSauber}\r\n`, `${nfcId},${aliasSauber}\r\n`];
+  let letzter = '';
+  for (const csv of varianten) {
+    const form = new FormData();
+    form.append('file', new Blob([csv], { type: 'text/csv' }), 'karte.csv');
+    let status = 0, body = null;
+    try {
+      const r = await fetch(`https://${host}/api/v1/developer/credentials/nfc_cards/import`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form, signal: AbortSignal.timeout(15000),
+      });
+      status = r.status;
+      try { body = await r.json(); } catch {}
+    } catch (e) {
+      throw Object.assign(new Error('UniFi Access nicht erreichbar'), { http: 502 });
+    }
+    letzter = `HTTP ${status} ${body?.code || ''} ${body?.msg || ''}`.trim();
+    if (status >= 200 && status < 300 && (!body?.code || body.code === 'SUCCESS')) {
+      accessKartenCacheLeeren();
+      const k = await accessKarteZurUid(nfcId, true);
+      if (k) return k;
+      letzter = 'Import gemeldet, Karte aber nicht in der Liste';
+    }
+  }
+  throw Object.assign(new Error(`Karte konnte nicht in UniFi Access angelegt werden (${letzter})`), { http: 502 });
+}
+
+function kartenFehler(res, e) {
+  console.error('[pbx-karte]', e.message);
+  res.status(e.http || 500).json({ error: e.http ? e.message : 'Kartenabfrage fehlgeschlagen' });
+}
+
+// Wem gehoert diese Karte? -> {found, assigned, status, display_id, access_name, person:{user_id,email,name,groups}|null}
+app.get('/api/pbx/karte/:nfcId', requirePbxSecret, async (req, res) => {
+  const nfcId = normNfcId(req.params.nfcId);
+  if (!nfcIdGueltig(nfcId)) return res.status(400).json({ error: 'Ungueltige Karten-UID' });
+  try {
+    const k = await accessKarteZurUid(nfcId);
+    if (!k) return res.json({ found: false });
+    const besitzer = accessKartenBesitzerId(k);
+    const assigned = !!besitzer && String(k.status || '').toLowerCase() === 'assigned';
+    const person = besitzer ? await kartenPerson(besitzer) : null;
+    res.json({ found: true, assigned, status: k.status || null, display_id: k.display_id || null,
+      access_name: accessKartenBesitzerName(k), person });
+  } catch (e) { kartenFehler(res, e); }
+});
+
+// Karte einer Person zuordnen (Import, falls Access sie noch nicht kennt). {nfc_id, email, durch}
+app.post('/api/pbx/karte/zuordnen', requirePbxSecret, async (req, res) => {
+  const nfcId = normNfcId(req.body?.nfc_id);
+  const email = String(req.body?.email || '').toLowerCase().trim();
+  const durch = String(req.body?.durch || 'pbx').slice(0, 200);
+  if (!nfcIdGueltig(nfcId)) return res.status(400).json({ error: 'Ungueltige Karten-UID' });
+  if (!/^[^\s@]+@[^\s@]+$/.test(email)) return res.status(400).json({ error: 'E-Mail fehlt' });
+  const log = { nfcId, email, durch };
+  try {
+    const au = await unifiUserByEmail(email);
+    if (!au) {
+      await kartenProtokollieren('zuordnen', { ...log, erfolg: false, detail: 'kein Access-Benutzer' });
+      return res.status(404).json({ error: 'Diese Person hat keinen Benutzer in UniFi Access — bitte zuerst dort anlegen.' });
+    }
+    const auName = au.full_name || `${au.first_name || ''} ${au.last_name || ''}`.trim() || email;
+    let k = await accessKarteZurUid(nfcId, true);
+    let importiert = false;
+    if (!k) { k = await accessKarteImportieren(nfcId, `Rosenweg ${email}`); importiert = true; }
+    const besitzer = accessKartenBesitzerId(k);
+    if (besitzer && String(besitzer) !== String(au.id)) {
+      const wer = accessKartenBesitzerName(k) || 'jemand anderem';
+      await kartenProtokollieren('zuordnen', { ...log, displayId: k.display_id, name: auName, erfolg: false, detail: `gehoert ${wer}` });
+      return res.status(409).json({ error: `Die Karte gehört bereits ${wer}. Zuerst entziehen.`, besitzer: { name: wer } });
+    }
+    if (besitzer && String(besitzer) === String(au.id)) {
+      return res.json({ ok: true, schon: true, display_id: k.display_id || null, name: auName });
+    }
+    const r = await unifiAccessRaw('PUT', `/users/${encodeURIComponent(au.id)}/nfc_cards`, { token: k.token });
+    accessKartenCacheLeeren();
+    if (r.status === 0) throw Object.assign(new Error('UniFi Access nicht erreichbar'), { http: 502 });
+    const ok = accessOk(r) && (!r.body?.code || r.body.code === 'SUCCESS');
+    await kartenProtokollieren('zuordnen', { ...log, displayId: k.display_id, name: auName, erfolg: ok,
+      detail: (importiert ? 'importiert; ' : '') + (ok ? '' : `${r.status} ${r.body?.msg || ''}`) });
+    if (!ok) return res.status(502).json({ error: r.body?.msg || 'Zuordnen in UniFi Access fehlgeschlagen' });
+    res.json({ ok: true, importiert, display_id: k.display_id || null, name: auName });
+  } catch (e) { kartenFehler(res, e); }
+});
+
+// Karte entziehen (Zuordnung loesen; die Karte bleibt in der Access-Inventur). {nfc_id, durch}
+app.post('/api/pbx/karte/entziehen', requirePbxSecret, async (req, res) => {
+  const nfcId = normNfcId(req.body?.nfc_id);
+  const durch = String(req.body?.durch || 'pbx').slice(0, 200);
+  if (!nfcIdGueltig(nfcId)) return res.status(400).json({ error: 'Ungueltige Karten-UID' });
+  try {
+    const k = await accessKarteZurUid(nfcId, true);
+    if (!k) return res.status(404).json({ error: 'Karte nicht bekannt' });
+    const besitzer = accessKartenBesitzerId(k);
+    if (!besitzer) return res.json({ ok: true, schon: true, display_id: k.display_id || null });
+    const wer = accessKartenBesitzerName(k);
+    const r = await unifiAccessRaw('PUT', `/users/${encodeURIComponent(besitzer)}/nfc_cards/delete`, { token: k.token });
+    accessKartenCacheLeeren();
+    if (r.status === 0) throw Object.assign(new Error('UniFi Access nicht erreichbar'), { http: 502 });
+    const ok = accessOk(r) && (!r.body?.code || r.body.code === 'SUCCESS');
+    await kartenProtokollieren('entziehen', { nfcId, displayId: k.display_id, name: wer, durch, erfolg: ok,
+      detail: ok ? '' : `${r.status} ${r.body?.msg || ''}` });
+    if (!ok) return res.status(502).json({ error: r.body?.msg || 'Entziehen in UniFi Access fehlgeschlagen' });
+    res.json({ ok: true, display_id: k.display_id || null, name: wer });
+  } catch (e) { kartenFehler(res, e); }
+});
+
+// Karte aus dem Bestand von UniFi Access loeschen (defekt/verloren). Nur entzogene Karten
+// (ohne Inhaber); zugeordnete zuerst entziehen. {nfc_id, durch}
+app.post('/api/pbx/karte/loeschen', requirePbxSecret, async (req, res) => {
+  const nfcId = normNfcId(req.body?.nfc_id);
+  const durch = String(req.body?.durch || 'pbx').slice(0, 200);
+  if (!nfcIdGueltig(nfcId)) return res.status(400).json({ error: 'Ungueltige Karten-UID' });
+  try {
+    const k = await accessKarteZurUid(nfcId, true);
+    if (!k) return res.status(404).json({ error: 'Karte nicht bekannt' });
+    if (accessKartenBesitzerId(k)) return res.status(409).json({ error: 'Karte ist noch zugeordnet - zuerst entziehen' });
+    const r = await unifiAccessRaw('DELETE', `/credentials/nfc_cards/tokens/${encodeURIComponent(k.token)}`);
+    accessKartenCacheLeeren();
+    if (r.status === 0) throw Object.assign(new Error('UniFi Access nicht erreichbar'), { http: 502 });
+    const ok = accessOk(r) && (!r.body?.code || r.body.code === 'SUCCESS');
+    await kartenProtokollieren('loeschen', { nfcId, displayId: k.display_id, name: '', durch, erfolg: ok,
+      detail: ok ? '' : `${r.status} ${r.body?.msg || ''}` });
+    if (!ok) return res.status(502).json({ error: r.body?.msg || 'Loeschen in UniFi Access fehlgeschlagen' });
+    res.json({ ok: true, display_id: k.display_id || null });
+  } catch (e) { kartenFehler(res, e); }
+});
 
 app.get('/api/pbx/cnam/:number', requirePbxSecret, async (req, res) => {
   try {
@@ -22453,6 +22860,11 @@ app.delete('/api/stations/:id/tunnel', stationsRouter.stationAuth, async (req, r
     res.status(err.status || 500).json({ error: err.message });
   }
 });
+
+// Tunnel der App "Rosenweg Virtuelle Computer" zum vm-gateway (eigener CT,
+// nicht wg-control), angemeldet mit dem Rosenweg-Konto (Authentik
+// rosenweg-apps). Begruendung und Grenzen in routes/app-tunnel.js.
+require('./routes/app-tunnel').appTunnelRoutes(app, { pool, rateLimitGuard });
 
 app.post('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
   try {
@@ -27496,6 +27908,17 @@ async function initDB() {
         updated_at TIMESTAMP DEFAULT NOW()
       );
 
+      -- Weitere E-Mail-Adressen einer Person (z.B. Gmail des UI-Kontos in UniFi Access)
+      -- -> Hauptadresse = Rosenweg-Konto (Authentik). Pflege nur Technik/Praesident.
+      CREATE TABLE IF NOT EXISTS person_email_alias (
+        alias_email TEXT PRIMARY KEY,
+        haupt_email TEXT NOT NULL,
+        notiz TEXT,
+        erstellt_von TEXT,
+        erstellt_am TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_person_email_alias_haupt ON person_email_alias (LOWER(haupt_email));
+
       -- Access-Subsystem (UniFi Access) — primär; Waschküche konsumiert dies.
       CREATE TABLE IF NOT EXISTS access_settings (
         key VARCHAR(100) PRIMARY KEY,
@@ -29966,6 +30389,8 @@ initDB()
       startConnectionPolling();
       // SSH: GitHub-Schluessel periodisch abgleichen
       startSshGithubAbgleich();
+      // Mitgelieferte Dokumente (Beispielmappe) in die Ablage, siehe lib/ablage.js
+      setTimeout(() => require('./lib/ablage').ablageAbgleichen(), 20 * 1000);
       // Cleanup expired sessions every hour
       activeIntervals.push(setInterval(cleanupExpiredSessions, 60 * 60 * 1000));
       setTimeout(cleanupExpiredSessions, 30 * 1000); // first cleanup after 30s

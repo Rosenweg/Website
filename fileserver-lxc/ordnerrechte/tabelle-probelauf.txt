@@ -1,0 +1,11 @@
+# Probelauf auf /mnt/cephfs-stage/_acltest - gleiche Regeln im Kleinen.
+#   alle      wie 'allgemein'
+#   stweg5    wie 'stweg5'
+#   gesperrt  wie ein Sperrordner (nur ADMIN)
+
+ADMIN | g:technik,g:präsident,u:api-svc
+
+/        | g:rosenweg | -
+alle     | g:rosenweg | stweg1-ausschuss,stweg2-ausschuss,stweg3-ausschuss,stweg4-ausschuss,stweg5-ausschuss,stweg6-ausschuss,stweg7-ausschuss,meg-ausschuss,stweg8-ausschuss
+stweg5   | stweg5-bewohner,stweg5-eigentuemer | stweg5-ausschuss
+~gesperrt | - | -
