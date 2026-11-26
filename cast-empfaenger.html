@@ -47,7 +47,10 @@
     var NS = 'urn:x-cast:ch.rosenweg4303.anzeige';
     // Wie roles.display.allowed_domains (api/lib/stationconfig.js). Ein anderes
     // Gerät im WLAN könnte uns Nachrichten schicken — gezeigt wird nur die Anzeige.
-    var ERLAUBT = ['display.rosenweg4303.ch'];
+    // Dazu www.rosenweg4303.ch: dorthin schickt der Cast-Wächter Chromecasts
+    // (display.* ist nur intern auflösbar, api/lib/castwaechter.js CAST_HOSTS).
+    // Geladen wird ohnehin auf dieser Herkunft, der Host zählt nur zur Prüfung.
+    var ERLAUBT = ['display.rosenweg4303.ch', 'www.rosenweg4303.ch'];
 
     var rahmen = document.getElementById('anzeige');
     var warten = document.getElementById('warten');
