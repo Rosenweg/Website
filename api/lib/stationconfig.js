@@ -166,7 +166,9 @@ const ROLE_DEFAULTS = {
   desktop: {
     environment: 'auto',
     web_url: 'https://www.rosenweg4303.ch',
-    screen_lock_seconds: 300,
+    // 15 Minuten (Entscheid Stefan, 26.11.2026): die Leerlaufanzeige kommt nach
+    // 10 Minuten und muss vor der Sperre liegen (70-leerlauf.sh zieht sie sonst vor).
+    screen_lock_seconds: 900,
     inactivity_timeout_seconds: 900,
     // Spaetestens nach einem Tag ohne jede Eingabe wird abgemeldet — auch am
     // Sperrbildschirm. Sonst bleibt eine Sitzung uebers Wochenende stehen:
@@ -186,7 +188,7 @@ const ROLE_DEFAULTS = {
     // auch am Anmeldebildschirm greift — also die meiste Zeit.
     //
     // Sie ersetzt die Sperre nicht, sondern kommt davor; deshalb muss
-    // nach_sekunden kleiner sein als screen_lock_seconds (300), sonst zieht
+    // nach_sekunden kleiner sein als screen_lock_seconds (900), sonst zieht
     // die Station die Sperre vor und die Anzeige käme nie.
     // Stationsangaben im Hintergrundbild, oben rechts — wie BGInfo unter
     // Windows. Kein Fenster, sondern Text IM Bild: der Hintergrund ist per
@@ -212,11 +214,11 @@ const ROLE_DEFAULTS = {
     leerlauf_anzeige: {
       enabled: true,
       url: 'https://display.rosenweg4303.ch',
-      // Eine Minute (Entscheid vom 6. August 2026, vorher zwei). Der Schirm
-      // wird ohnehin nie mehr schwarz — es geht also nicht darum, etwas zu
-      // sparen, sondern darum, wie schnell aus einem verlassenen Arbeitsplatz
-      // wieder eine Aushangtafel wird.
-      nach_sekunden: 60,
+      // Zehn Minuten (Entscheid Stefan, 26.11.2026; vorher eine Minute seit
+      // 6. August). Eine Minute war an Arbeitsplaetzen zu kurz: wer liest,
+      // telefoniert oder beim Anmelden zuschaut, hatte sofort die Anzeige vor
+      // sich. Muss unter screen_lock_seconds liegen.
+      nach_sekunden: 600,
     },
     // Programme. Die Positivliste selbst (apps.lokal, apps.schreibtisch,
     // apps.favoriten) steht bewusst NICHT hier, sondern in der Station:
