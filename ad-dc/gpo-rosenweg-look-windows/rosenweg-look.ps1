@@ -193,79 +193,47 @@ if (-not $aufgabe -or $aufgabe.Actions[0].Arguments -ne $befehl) {
 }
 
 # --- Programm-Whitelist (AppLocker) -----------------------------------------
-# Laufen darf, was unter C:\Windows oder den Programme-Ordnern liegt (dorthin
-# schreiben nur Admins - was ein Admin installiert, ist damit automatisch
-# freigegeben), signierte Store-Apps und OneDrive. Alles andere, vor allem
-# Heruntergeladenes in Downloads oder AppData, wird blockiert.
+# Die Regeln baut programme.ps1 (Begruendung dort und im README): durchgesetzt
+# ist der Grundschutz - alles unter C:\Windows und den Programme-Ordnern,
+# signierte Store-Apps, OneDrive, die Defender-Plattform -, die Positivliste
+# von /stationen laeuft in Ueberwachung, bis dort jemand "Durchsetzen" waehlt.
 #
 # Wer ALLES darf: die AD-Gruppe Windows-Programme-frei (enthaelt Domain
 # Admins). Nicht die lokale Gruppe Administratoren: mit UAC traegt das Token
 # eines Admins diese Gruppe nur "deny-only", und AppLocker liesse ihn dann so
 # wenig zu wie alle anderen. Eine gewoehnliche Gruppe filtert UAC nicht.
 #
-# Weitere Freigaben: programme-freigaben.txt neben diesem Skript.
-# Skripte aus SYSVOL/NETLOGON bleiben erlaubt, sonst sperrte sich diese
-# Richtlinie beim naechsten Start selbst aus.
-try {
-    $frei = (New-Object System.Security.Principal.NTAccount('ROSENWEG', 'Windows-Programme-frei')).Translate([System.Security.Principal.SecurityIdentifier]).Value
-} catch { $frei = $null; Log "Gruppe Windows-Programme-frei nicht aufloesbar - Whitelist NICHT gesetzt" }
-if ($frei) {
-    $jeder = 'S-1-1-0'; $admins = 'S-1-5-32-544'
-    $n = 0
-    function Regel([string]$sid, [string]$pfad, [string]$name) {
-        $script:n++
-        $id = [guid]::NewGuid().ToString()
-        $pfadX = [System.Security.SecurityElement]::Escape($pfad)
-        "<FilePathRule Id=""$id"" Name=""$name"" Description="""" UserOrGroupSid=""$sid"" Action=""Allow""><Conditions><FilePathCondition Path=""$pfadX"" /></Conditions></FilePathRule>"
+# Das Skript liegt unter Programme (nur Admins schreiben dort) und laeuft
+# jetzt einmal und danach alle 30 Minuten als SYSTEM: so kommt eine Aenderung
+# auf /stationen ohne Neustart an, und die Auswertung liest das Protokoll
+# nach, bevor es (1 MB ab Werk) ueberlaeuft. programme-freigaben.txt kommt
+# mit, die Aufgabe liest sie dort.
+$prog = Join-Path $env:ProgramFiles 'Rosenweg'
+New-Item -ItemType Directory -Force -Path $prog | Out-Null
+foreach ($datei in 'programme.ps1', 'programme-freigaben.txt') {
+    $von = Join-Path $Quelle $datei; $nach = Join-Path $prog $datei
+    if ((Test-Path $von) -and (-not (Test-Path $nach) -or (Get-FileHash $von).Hash -ne (Get-FileHash $nach).Hash)) {
+        Copy-Item $von $nach -Force
+        Log "$datei aktualisiert"
     }
-    $extra = @()
-    $liste = Join-Path $Quelle 'programme-freigaben.txt'
-    if (Test-Path $liste) {
-        $extra = Get-Content $liste | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith('#') }
-    }
-    $exe = @(
-        (Regel $jeder '%WINDIR%\*' 'Windows'),
-        (Regel $jeder '%PROGRAMFILES%\*' 'Programme'),
-        (Regel $frei '*' 'Windows-Programme-frei: alles'),
-        (Regel $admins '*' 'Administratoren (mit Admin-Token): alles')
-    ) + ($extra | ForEach-Object { Regel $jeder $_ "Freigabe: $_" })
-    $onedrive = '<FilePublisherRule Id="' + [guid]::NewGuid() + '" Name="OneDrive" Description="" UserOrGroupSid="S-1-1-0" Action="Allow"><Conditions><FilePublisherCondition PublisherName="O=MICROSOFT CORPORATION, L=REDMOND, S=WASHINGTON, C=US" ProductName="MICROSOFT ONEDRIVE" BinaryName="*"><BinaryVersionRange LowSection="*" HighSection="*" /></FilePublisherCondition></Conditions></FilePublisherRule>'
-    $skript = @(
-        (Regel $jeder '%WINDIR%\*' 'Windows'),
-        (Regel $jeder '%PROGRAMFILES%\*' 'Programme'),
-        (Regel $jeder '\\ad.rosenweg4303.ch\SysVol\*' 'Gruppenrichtlinien (SYSVOL)'),
-        (Regel $jeder '\\ad.rosenweg4303.ch\NETLOGON\*' 'Anmeldeskripte (NETLOGON)'),
-        (Regel $frei '*' 'Windows-Programme-frei: alles'),
-        (Regel $admins '*' 'Administratoren: alles')
-    )
-    $msi = @(
-        (Regel $jeder '%WINDIR%\Installer\*' 'Windows Installer'),
-        (Regel $frei '*.*' 'Windows-Programme-frei: alles'),
-        (Regel $admins '*.*' 'Administratoren: alles')
-    )
-    $appx = '<FilePublisherRule Id="a9e18c21-ff8f-43cf-b9fc-db40eed693ba" Name="Signierte Store-Apps" Description="" UserOrGroupSid="S-1-1-0" Action="Allow"><Conditions><FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="*"><BinaryVersionRange LowSection="0.0.0.0" HighSection="*" /></FilePublisherCondition></Conditions></FilePublisherRule>'
-    $xml = "<AppLockerPolicy Version=""1"">" +
-        "<RuleCollection Type=""Exe"" EnforcementMode=""Enabled"">$($exe -join '')$onedrive</RuleCollection>" +
-        "<RuleCollection Type=""Msi"" EnforcementMode=""Enabled"">$($msi -join '')</RuleCollection>" +
-        "<RuleCollection Type=""Script"" EnforcementMode=""Enabled"">$($skript -join '')</RuleCollection>" +
-        "<RuleCollection Type=""Appx"" EnforcementMode=""Enabled"">$appx</RuleCollection>" +
-        "</AppLockerPolicy>"
-    # Nur neu setzen, wenn sich die Regeln (ohne die zufaelligen IDs) geaendert haben
-    $kern = ($xml -replace 'Id="[0-9a-f-]+"', '')
-    $stand = Join-Path $Ziel 'applocker.stand'
-    if (-not (Test-Path $stand) -or (Get-Content $stand -Raw) -ne $kern) {
-        $datei = Join-Path $Ziel 'applocker.xml'
-        Set-Content -Path $datei -Value $xml -Encoding UTF8
-        try {
-            Set-AppLockerPolicy -XmlPolicy $datei -ErrorAction Stop
-            Set-Content -Path $stand -Value $kern -NoNewline
-            Log "AppLocker-Regeln gesetzt ($($extra.Count) Zusatzfreigaben)"
-        } catch { Log "AppLocker FEHLER: $($_.Exception.Message)" }
-    }
-    # Ohne den Dienst AppIDSvc setzt Windows keine Regel durch.
-    Setze 'HKLM:\SYSTEM\CurrentControlSet\Services\AppIDSvc' 'Start' 2 'DWord'
-    Start-Service AppIDSvc -ErrorAction SilentlyContinue
 }
+$alteStand = Join-Path $Ziel 'applocker.stand'   # bis 26.11.2026, ersetzt durch programme\aktiv.xml
+if (Test-Path $alteStand) { Remove-Item $alteStand, (Join-Path $Ziel 'applocker.xml') -Force -ErrorAction SilentlyContinue }
+$prSkript = Join-Path $prog 'programme.ps1'
+if (Test-Path $prSkript) {
+    & $prSkript
+    Log "Programme (AppLocker): siehe $prog\programme\programme.log"
+    $prArg = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$prSkript`""
+    $prAufgabe = Get-ScheduledTask -TaskName 'Rosenweg Programme' -ErrorAction SilentlyContinue
+    if (-not $prAufgabe -or $prAufgabe.Actions[0].Arguments -ne $prArg) {
+        $a = New-ScheduledTaskAction -Execute "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -Argument $prArg
+        $t = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddMinutes(5) -RepetitionInterval (New-TimeSpan -Minutes 30)
+        $p = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -LogonType ServiceAccount -RunLevel Highest
+        $o = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+        Register-ScheduledTask -TaskName 'Rosenweg Programme' -Action $a -Trigger $t -Principal $p -Settings $o -Force | Out-Null
+        Log "Aufgabe 'Rosenweg Programme' eingerichtet"
+    }
+} else { Log "programme.ps1 fehlt in der Richtlinie - AppLocker-Regeln bleiben, wie sie sind" }
 
 # --- BGInfo -----------------------------------------------------------------
 # Rechner, Adressen, Person, Windows-Stand und letztes Update unten rechts auf

@@ -18,6 +18,8 @@
 //
 //   Rechner im Haus (ohne Anmeldung, nur aus dem internen Netz)
 //     GET    /api/stations/drucker/:rechner   Standarddrucker dieses Rechners
+//     GET    /api/stations/programme/:rechner erlaubte Programme (AppLocker)
+//     POST   /api/stations/programme/:rechner/probe  was die Liste blockiert hätte
 //
 //   Station selbst (Stationstoken)
 //     GET    /api/stations/:id/config     Konfiguration abholen
@@ -30,6 +32,7 @@
 //     GET    /api/stations/admin/list     alle Stationen mit Zustand
 //     POST   /api/stations/admin/windows  Windows-Rechner von Hand eintragen
 //     POST   /api/stations/admin/ad-abgleich  Windows-Rechner jetzt aus dem AD lesen
+//     GET/PUT /api/stations/admin/windows-programme  erlaubte Programme für alle Windows-Rechner
 //     PATCH  /api/stations/admin/:id      Haus, Standort, Notiz, overrides
 //     GET    /api/stations/admin/:id/logs      eingesandte Logs, ohne Inhalt
 //     GET    /api/stations/admin/:id/logs/:logId   ein Log im Klartext
@@ -58,6 +61,7 @@ const { HAEUSER } = require('../lib/haeuser');
 const { wlanAufloesen, netznamen } = require('../lib/stationwlan');
 const { stationApps, gruppenJeApp } = require('../lib/stationapps');
 const { telefonbuch } = require('../lib/telefonbuch');
+const winprog = require('../lib/windowsprogramme');
 const stationos = require('../lib/stationos');
 const { schluesselPruefen, alsZeile } = require('../lib/sshkeys');
 
@@ -266,6 +270,19 @@ async function ensureSchema() {
       erstellt_von TEXT,
       erstellt_am TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    -- Vorgaben, die fuer alle Rechner einer Art gelten (26.11.2026: die
+    -- erlaubten Programme der Windows-Rechner, Schluessel 'windows_programme').
+    -- Je Rechner steht der Rest wie gehabt in stations.overrides.
+    CREATE TABLE IF NOT EXISTS station_vorgaben (
+      schluessel    TEXT PRIMARY KEY,
+      wert          JSONB NOT NULL,
+      geaendert_von TEXT,
+      geaendert_am  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    -- Was die Positivliste auf einem Windows-Rechner blockiert hat oder
+    -- blockiert haette (programme.ps1, POST /programme/:rechner/probe).
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS programme_probe JSONB;
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS programme_probe_am TIMESTAMPTZ;
   `).catch((e) => { schemaReady = null; throw e; });
   return schemaReady;
 }
@@ -558,6 +575,106 @@ router.get('/drucker/:rechner', a(async (req, res) => {
   res.json({ rechner, bekannt: true, standard: standardDrucker(r.rows[0]) });
 }));
 
+// ─── Erlaubte Programme je Windows-Rechner (AppLocker) ──────────────
+//
+// GET /api/stations/programme/:rechner
+//
+// Für programme.ps1 der GPO „Rosenweg-Look Windows": welche Programme hier
+// laufen dürfen und ob die Liste nur geprüft ('probe') oder durchgesetzt
+// wird. Katalog und Begründung: api/lib/windowsprogramme.js.
+//
+// Ohne Anmeldung und nur von innen — aus demselben Grund wie beim Drucker:
+// das Skript hat nichts, womit es sich ausweisen könnte, und die Antwort ist
+// nicht geheim (Programmnamen). Was sie bewirken kann, ist begrenzt: sie
+// kann nur ERLAUBEN, und nur unter den Programme-Ordnern; den Grundschutz
+// und die Ausnahme für Technik setzt der Rechner selbst.
+//
+// Ein unbekannter (oder gesperrter) Rechner bekommt die Vorgabe für alle im
+// Modus 'probe' — durchgesetzt wird nie etwas, das niemand eingestellt hat.
+//
+// Format 1 (mit programme.ps1 vereinbart):
+//   {"format":1,"rechner":"WIN11-1","bekannt":true,"modus":"probe",
+//    "programme":[{"id":"edge","name":"Microsoft Edge","regeln":[{"art":"pfad","pfad":"%PROGRAMFILES%\\…\\*"}]}],
+//    "freigaben":[{"art":"paket","herausgeber":"*","paket":"…"}],
+//    "stand":"<sha256 der Regeln>"}
+async function windowsVorgabe() {
+  const r = await pool.query("SELECT wert, geaendert_von, geaendert_am FROM station_vorgaben WHERE schluessel = 'windows_programme'");
+  return {
+    vorgabe: winprog.vorgabeNormal(r.rows[0]?.wert),
+    geaendert_von: r.rows[0]?.geaendert_von || null,
+    geaendert_am: r.rows[0]?.geaendert_am || null,
+  };
+}
+
+async function windowsStation(rechner) {
+  const r = await pool.query(
+    `SELECT id, role, overrides FROM stations
+      WHERE LOWER(COALESCE(hostname, id)) = LOWER($1)
+        AND revoked_at IS NULL AND status = 'aktiv'
+      ORDER BY last_seen_at DESC NULLS LAST, registered_at DESC
+      LIMIT 1`,
+    [rechner],
+  );
+  return r.rows[0] || null;
+}
+
+router.get('/programme/:rechner', a(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!nurAusDemHausnetz(req)) return res.status(403).json({ error: 'Nur aus dem internen Netz' });
+  const rechner = String(req.params.rechner || '');
+  if (!RECHNER_MUSTER.test(rechner)) return res.status(400).json({ error: 'Ungültiger Rechnername' });
+  await ensureSchema();
+  const station = await windowsStation(rechner);
+  const { vorgabe } = await windowsVorgabe();
+  const eigen = station ? station.overrides?.roles?.[station.role]?.programme : null;
+  const liste = winprog.fuerRechner(vorgabe, eigen);
+  if (!station) liste.modus = 'probe';
+  const stand = sha256(JSON.stringify([liste.modus, liste.programme, liste.freigaben]));
+  res.json({ format: 1, rechner, bekannt: !!station, ...liste, stand });
+}));
+
+// POST /api/stations/programme/:rechner/probe
+//   {"format":1,"modus":"probe","stand":"…","eintraege":[{"art":"exe","ziel":"%OSDRIVE%\\…\\X.EXE",
+//     "herausgeber":"O=…","person":"ROSENWEG\\anna","anzahl":3,"zuletzt":"2026-11-26T15:41:42"}]}
+//
+// Der Rechner meldet, was die Liste blockiert hat ('durchsetzen') oder
+// blockiert hätte ('probe') — gesammelt über die letzten 30 Tage, jedes Mal
+// der ganze Stand (kein Anhängen). Ohne Anmeldung wie oben; das Schlimmste,
+// was ein Fremder im Haus damit tun kann, ist eine falsche Anzeige auf
+// /stationen. Die Regeln selbst ändert diese Meldung nicht.
+const PROBE_MAX = 300;
+router.post('/programme/:rechner/probe', a(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!nurAusDemHausnetz(req)) return res.status(403).json({ error: 'Nur aus dem internen Netz' });
+  const rechner = String(req.params.rechner || '');
+  if (!RECHNER_MUSTER.test(rechner)) return res.status(400).json({ error: 'Ungültiger Rechnername' });
+  await ensureSchema();
+  const station = await windowsStation(rechner);
+  if (!station || station.role !== 'windows') return res.status(404).json({ error: 'Rechner nicht eingetragen' });
+  const b = req.body || {};
+  const text = (v, n) => (v === undefined || v === null ? null : String(v).slice(0, n));
+  const eintraege = (Array.isArray(b.eintraege) ? b.eintraege : []).slice(0, PROBE_MAX).map((e) => ({
+    art: ['exe', 'appx', 'skript', 'msi'].includes(e?.art) ? e.art : 'exe',
+    ziel: text(e?.ziel, 400) || '?',
+    herausgeber: text(e?.herausgeber, 300),
+    person: text(e?.person, 120),
+    anzahl: Math.max(1, Math.min(1e6, Number.parseInt(e?.anzahl, 10) || 1)),
+    zuletzt: text(e?.zuletzt, 40),
+  }));
+  const probe = {
+    modus: winprog.MODI.includes(b.modus) ? b.modus : 'probe',
+    stand: text(b.stand, 80),
+    seit: text(b.seit, 40),
+    eintraege,
+    abgeschnitten: Array.isArray(b.eintraege) && b.eintraege.length > PROBE_MAX,
+  };
+  await pool.query(
+    'UPDATE stations SET programme_probe = $2::jsonb, programme_probe_am = NOW() WHERE id = $1',
+    [station.id, JSON.stringify(probe)],
+  );
+  res.json({ ok: true, eintraege: eintraege.length });
+}));
+
 // ─── Versionen des Stations-Betriebssystems ─────────────────────────
 // MUSS vor den /:id-Routen stehen.
 
@@ -617,7 +734,7 @@ router.get('/admin/list', authMiddleware, nurTechnik, a(async (req, res) => {
            gesperrt_am, hardware, registered_by, registered_at,
            last_seen_at, last_seen_ip, last_state, revoked_at,
            update_angefordert, update_angefordert_von, overrides,
-           programme, programme_gemeldet_am, haus,
+           programme, programme_gemeldet_am, haus, programme_probe, programme_probe_am,
            ad_guid IS NOT NULL AS aus_ad, ad_dn, ad_zustand, ad_betriebssystem,
            ad_gesehen_am, ad_aufgenommen_am, ad_standort_regel,
            w.bis AS ssh_wartung_bis, w.erteilt_von AS ssh_wartung_von
@@ -643,6 +760,9 @@ router.get('/admin/list', authMiddleware, nurTechnik, a(async (req, res) => {
     types: [...STATION_TYPES, ...VERWALTUNGS_TYPEN],
     // Die Auswahl für den Standarddrucker, mit Klartextnamen.
     drucker: DRUCKER,
+    // Erlaubte Programme der Windows-Rechner: Katalog und Vorgabe für alle,
+    // damit „Einstellen …" eines Rechners zeigt, was ohnehin gilt.
+    windows_programme: { katalog: winprog.KATALOG, ...(await windowsVorgabe()) },
     // Die Hausvorgabe zum WLAN. Ohne sie sähe die Verwaltung nur die
     // stationseigene Ebene — also ein leeres Feld — und jemand trüge das Netz
     // ein zweites Mal ein, obwohl es längst für alle gilt.
@@ -921,6 +1041,35 @@ async function adAbgleichSchreiben(imAd, wer) {
 }
 
 // POST /api/stations/admin/ad-abgleich — „Jetzt abgleichen"
+// GET/PUT /api/stations/admin/windows-programme
+//   { programme: ['edge', …], freigaben: 'Zeilen', modus: 'probe'|'durchsetzen' }
+// Die Vorgabe für alle Windows-Rechner. Je Rechner kommt unter „Einstellen …"
+// dazu, was nur dort gilt (overrides.roles.windows.programme).
+router.get('/admin/windows-programme', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  res.json({ katalog: winprog.KATALOG, ...(await windowsVorgabe()) });
+}));
+
+router.put('/admin/windows-programme', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  const wer = req.user?.email || req.user?.name || 'unbekannt';
+  const { wert, fehler } = winprog.vorgabePruefen(req.body);
+  if (fehler) return res.status(400).json({ error: fehler });
+  const vorher = (await windowsVorgabe()).vorgabe;
+  await pool.query(
+    `INSERT INTO station_vorgaben (schluessel, wert, geaendert_von, geaendert_am)
+     VALUES ('windows_programme', $1::jsonb, $2, NOW())
+     ON CONFLICT (schluessel) DO UPDATE SET wert = EXCLUDED.wert,
+       geaendert_von = EXCLUDED.geaendert_von, geaendert_am = EXCLUDED.geaendert_am`,
+    [JSON.stringify(wert), wer],
+  );
+  const dazu = wert.programme.filter((id) => !vorher.programme.includes(id));
+  const weg = vorher.programme.filter((id) => !wert.programme.includes(id));
+  console.log(`[stations] Windows-Programme für alle geändert von ${wer}: Modus ${wert.modus}`
+    + `${dazu.length ? `, dazu ${dazu.join(' ')}` : ''}${weg.length ? `, weg ${weg.join(' ')}` : ''}`);
+  res.json({ katalog: winprog.KATALOG, ...(await windowsVorgabe()) });
+}));
+
 router.post('/admin/ad-abgleich', authMiddleware, nurTechnik, a(async (req, res) => {
   if (!adLesbar()) {
     return res.status(503).json({ error: 'Kein Konto zum Lesen des AD (STATION_AD_JOIN_USER/-PASSWORD fehlen)' });
@@ -1109,6 +1258,10 @@ router.patch('/admin/:id', authMiddleware, nurTechnik, a(async (req, res) => {
         return res.status(400).json({ error: `Unbekannter Standarddrucker '${wahl}' (roles.${rolle})` });
       }
     }
+    // Erlaubte Programme (nur Windows): Katalog-Kennungen, Freigaben unter
+    // den Programme-Ordnern, Modus — dieselbe Prüfung wie für die Vorgabe.
+    const prog = winprog.rechnerPruefen(eingang.roles?.windows?.programme);
+    if (prog.fehler) return res.status(400).json({ error: prog.fehler });
     const zusammen = tiefZusammenfuehren(vorher.rows[0].overrides || {}, eingang);
     werte.push(JSON.stringify(zusammen));
     felder.push(`overrides = $${werte.length}::jsonb`);

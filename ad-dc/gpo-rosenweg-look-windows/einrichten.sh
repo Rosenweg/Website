@@ -34,6 +34,7 @@ SAM="/var/lib/samba/private/sam.ldb"
 HIER="$(cd "$(dirname "$0")" && pwd)"
 
 [ -f "$HIER/rosenweg-look.ps1" ] || { echo "rosenweg-look.ps1 fehlt neben $0" >&2; exit 1; }
+[ -f "$HIER/programme.ps1" ] || { echo "programme.ps1 fehlt neben $0" >&2; exit 1; }
 for b in hintergrund.png sperrbild.png logo.png startknopf.png; do
     [ -f "$HIER/bilder/$b" ] || { echo "bilder/$b fehlt" >&2; exit 1; }
 done
@@ -125,6 +126,7 @@ install -m 0644 "$HIER"/bilder/*.png "$start_dir/"
 install -m 0644 "$HIER/programme-freigaben.txt" "$start_dir/programme-freigaben.txt"
 install -m 0644 "$HIER/bginfo.ps1" "$start_dir/bginfo.ps1"
 install -m 0644 "$HIER/drucker.ps1" "$start_dir/drucker.ps1"
+install -m 0644 "$HIER/programme.ps1" "$start_dir/programme.ps1"
 install -m 0644 "$HIER/programme/$OPENSHELL_DATEI" "$start_dir/$OPENSHELL_DATEI"
 
 # scripts.ini statt psscripts.ini: so startet die Richtlinie powershell.exe

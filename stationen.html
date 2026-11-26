@@ -128,6 +128,50 @@
 
             <p id="status" class="hidden text-sm"></p>
 
+            <!-- Erlaubte Programme der Windows-Rechner (AppLocker, 26.11.2026).
+                 Das Gegenstück zur Programmliste der Linux-Stationen: was hier
+                 angehakt ist, darf auf jedem Windows-Rechner laufen; je Rechner
+                 kommt unter „Einstellen …" dazu, was nur dort gilt. -->
+            <details id="winprog-box" class="bg-white rounded-lg shadow mt-8">
+                <summary class="p-6 cursor-pointer">
+                    <span class="text-lg font-semibold text-gray-800">Windows-Programme</span>
+                    <span id="winprog-zahl" class="text-sm text-gray-500 ml-2"></span>
+                </summary>
+                <div class="px-6 pb-6 space-y-4 text-sm">
+                    <p class="text-gray-600">Was auf den Windows-Rechnern laufen darf — für alle. Ausnahmen je Rechner:
+                        in der Zeile des Rechners „Aktionen ▾" → „Einstellen …". Immer erlaubt sind Windows selbst,
+                        Defender und die Gruppe <span class="font-mono">Windows-Programme-frei</span> (Technik, Admins).
+                        Der Rechner übernimmt Änderungen innerhalb von 30 Minuten.</p>
+
+                    <fieldset class="space-y-1">
+                        <legend class="font-medium text-gray-700 mb-1">Modus</legend>
+                        <label class="flex items-start gap-2"><input type="radio" name="winprog-modus" value="probe" class="mt-1">
+                            <span><b>Überwachen</b> — nichts wird zusätzlich blockiert. Die Rechner melden, was die Liste
+                            blockiert <i>hätte</i> (unten). Es gilt weiter der Grundschutz: nur Programme aus Windows und
+                            den Programme-Ordnern, nichts aus Downloads.</span></label>
+                        <label class="flex items-start gap-2"><input type="radio" name="winprog-modus" value="durchsetzen" class="mt-1">
+                            <span><b>Durchsetzen</b> — was nicht angehakt ist, startet nicht mehr.</span></label>
+                    </fieldset>
+
+                    <div id="winprog-liste" class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3"></div>
+
+                    <label class="block"><span class="font-medium text-gray-700">Weitere Freigaben für alle</span>
+                        <textarea id="winprog-freigaben" rows="3" class="mt-1 w-full border rounded-lg px-3 py-2 font-mono text-xs"
+                                  placeholder="C:\Program Files\Hersteller\Programm\*&#10;Microsoft.BingWeather"></textarea>
+                        <span class="text-xs text-gray-500">Eine Zeile je Ordner oder Datei unter C:\Program Files, oder der Paketname
+                            einer Store-App. Was ausserhalb von Programme liegt, gehört in
+                            <span class="font-mono">programme-freigaben.txt</span> (Git) — dort schreiben sonst womöglich normale Benutzer.</span></label>
+
+                    <div id="winprog-probe"></div>
+
+                    <div class="flex flex-wrap items-center gap-3">
+                        <button onclick="winProgSpeichern()" class="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Speichern</button>
+                        <span id="winprog-meldung" class="text-sm"></span>
+                        <span id="winprog-stand" class="text-xs text-gray-400 ml-auto"></span>
+                    </div>
+                </div>
+            </details>
+
             <!-- SSH-Wartungsschlüssel -->
             <details id="wartung-box" class="bg-white rounded-lg shadow mt-8">
                 <summary class="p-6 cursor-pointer">
@@ -337,6 +381,20 @@
                         <span class="block text-xs text-gray-500" id="cfg-drucker-linux">Linux-Stationen nehmen als Standard nur einen Drucker, der A4 ausgibt. DruckerR13 steht auf A3 und wird dort übergangen — die Station wählt dann selbst.</span></label>
                 </div>
 
+                <div class="border-t pt-4 hidden" id="cfg-winprog-block">
+                    <h4 class="font-medium text-gray-800">Programme</h4>
+                    <p class="text-sm text-gray-500 mb-3">Was für alle Windows-Rechner gilt, steht unter „Windows-Programme" unten auf der Seite.
+                        Hier nur, was auf <b>diesem</b> Rechner zusätzlich laufen darf.</p>
+                    <label class="block"><span class="text-sm font-medium text-gray-700">Modus</span>
+                        <select id="cfg-winprog-modus" class="mt-1 w-full border rounded-lg px-3 py-2"></select></label>
+                    <div id="cfg-winprog-liste" class="mt-3 max-h-56 overflow-y-auto border rounded-lg p-2 space-y-3"></div>
+                    <label class="block mt-3"><span class="text-sm font-medium text-gray-700">Weitere Freigaben nur hier</span>
+                        <textarea id="cfg-winprog-freigaben" rows="3" class="mt-1 w-full border rounded-lg px-3 py-2 font-mono text-xs"
+                                  placeholder="C:\Program Files\Hersteller\Programm\*&#10;Microsoft.BingWeather"></textarea>
+                        <span class="text-xs text-gray-500">Ordner oder Datei unter C:\Program Files, oder Paketname einer Store-App — eine je Zeile.</span></label>
+                    <div id="cfg-winprog-probe" class="mt-3"></div>
+                </div>
+
                 <div class="border-t pt-4" id="cfg-wlan-block">
                     <h4 class="font-medium text-gray-800">WLAN</h4>
                     <p class="text-sm text-gray-500 mb-3">Im Haus gibt es ein Funknetz mit eigenen Schlüsseln je Bereich — der Schlüssel bestimmt, in welchem Netz die Station landet. Er kommt aus UniFi und muss hier nicht eingetippt werden.</p>
@@ -425,6 +483,7 @@
         let typen = [];
         let drucker = [];   // [{name, label}] — die Auswahl für den Standarddrucker
         let adStand = null; // Stand des AD-Abgleichs (api: ad_abgleich)
+        let winProg = null; // {katalog, vorgabe, geaendert_von, geaendert_am} — erlaubte Windows-Programme
 
         window.addEventListener('DOMContentLoaded', async () => {
             const user = await AuthentikAuth.init({ requireAuth: false });
@@ -473,6 +532,8 @@
                 drucker = daten.drucker || [];
                 adStand = daten.ad_abgleich || null;
                 adStandZeichnen();
+                winProg = daten.windows_programme || null;
+                winProgZeichnen();
                 wartungsschluessel = daten.wartungsschluessel || 0;
                 zeichne();
                 ladeWartungsschluessel();
@@ -650,6 +711,7 @@
                 const druckerZeile = std ? `<div class="text-xs text-gray-400">🖨 ${escape(std)}</div>`
                     : (ohneAgent(s) ? '<div class="text-xs text-gray-400" title="drucker.ps1 lässt den bisherigen Standard stehen; gibt es den nicht, nimmt es DruckerR9">🖨 keiner gewählt (sonst DruckerR9)</div>' : '');
                 const st = s.last_state || {};
+                const progZ = ohneAgent(s) ? progZeile(s) : '';
                 const version = st.os_version ? `<div class="text-xs text-gray-400">OS ${escape(st.os_version)}</div>` : '';
                 // Ein Menue je Zeile statt sieben Links nebeneinander (Stefan 25.11.2026)
                 const aktionen = s.revoked_at ? '<span class="text-gray-400 text-xs">—</span>'
@@ -657,7 +719,7 @@
 
                 return `<tr class="border-b hover:bg-gray-50">
                     <td class="py-3 px-6 font-mono font-medium">${escape(s.id)}${version}</td>
-                    <td class="py-3 px-3">${escape(typLabel(s.role))}${druckerZeile}</td>
+                    <td class="py-3 px-3">${escape(typLabel(s.role))}${druckerZeile}${progZ}</td>
                     <td class="py-3 px-3">${standortZelle(s)}</td>
                     <td class="py-3 px-3 text-gray-600">${ohneAgent(s) ? `AD-Name <span class="font-mono">${escape(s.hostname || s.id)}</span>${s.ad_betriebssystem ? `<div class="text-xs text-gray-400">${escape(s.ad_betriebssystem)}</div>` : ''}` : escape(geraet(s))}</td>
                     <td class="py-3 px-3 text-gray-600">${escape(s.registered_by || '—')}</td>
@@ -720,6 +782,7 @@
             document.getElementById('cfg-wlan-psk').value = '';
             cfgWlanUmschalten();
             cfgProgAufbauen(s, ov);
+            cfgWinProgAufbauen(s, ov);
 
             // Drucken gibt es auf Arbeitsplatz, Laptop und Windows, nicht auf
             // einer Anzeige. WLAN und Kanal gibt es bei Windows nicht: dort
@@ -1353,6 +1416,21 @@
                 overrides.network = null;
             }
 
+            // Windows-Programme. Leere Felder gehen als null hinaus: die API
+            // führt zusammen, ein weggelassener Schlüssel bliebe stehen.
+            if (win && winProg) {
+                const zusatz = [...document.querySelectorAll('#cfg-winprog-liste input[data-zusatz]:checked')].map(el => el.value);
+                const freigaben = document.getElementById('cfg-winprog-freigaben').value.trim();
+                const modus = document.getElementById('cfg-winprog-modus').value || null;
+                if (modus === 'durchsetzen' && winModus(station) !== 'durchsetzen'
+                    && !confirm(`Auf ${station.hostname || station.id} startet danach nur noch, was auf der Liste steht. Durchsetzen?`)) {
+                    return melden('Nicht gespeichert.', false);
+                }
+                overrides.roles = { ...(overrides.roles || {}) };
+                overrides.roles.windows = { ...(overrides.roles.windows || {}) };
+                overrides.roles.windows.programme = { zusatz, freigaben: freigaben || null, modus };
+            }
+
             // Programme. null heisst „weg damit" — die API führt zusammen, ein
             // weggelassener Schlüssel bliebe also stehen.
             if (cfgRolle === 'desktop' && cfgProgramme.length) {
@@ -1401,6 +1479,185 @@
             } catch (err) {
                 melden(err.message, false);
             }
+        }
+
+        // ─── Erlaubte Programme der Windows-Rechner (AppLocker) ────────
+        // Katalog und Regeln: api/lib/windowsprogramme.js. Der Rechner holt
+        // die Liste selbst (programme.ps1) und meldet zurück, was sie blockiert
+        // hat oder — beim Überwachen — blockiert hätte (programme_probe).
+
+        const MODUS_TEXT = { probe: 'Überwachen', durchsetzen: 'Durchsetzen' };
+        const winVorgabe = () => winProg?.vorgabe || { programme: [], freigaben: '', modus: 'probe' };
+        const winEigen = (s) => s?.overrides?.roles?.windows?.programme || {};
+        const winModus = (s) => winEigen(s).modus || winVorgabe().modus;
+
+        function winGruppen() {
+            const gruppen = [];
+            for (const p of winProg?.katalog || []) {
+                let g = gruppen.find(x => x.name === p.gruppe);
+                if (!g) gruppen.push(g = { name: p.gruppe, programme: [] });
+                g.programme.push(p);
+            }
+            return gruppen;
+        }
+
+        // Ein Kästchen je Programm. fuerAlle: Kennungen, die schon für alle
+        // gelten (im Rechner-Dialog angehakt und gesperrt); eigen: angehakt.
+        function winKaestchen({ fuerAlle, eigen, attr }) {
+            return winGruppen().map(g => `
+                <div>
+                    <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">${escape(g.name)}</div>
+                    ${g.programme.map(p => {
+                        const fest = p.pflicht || fuerAlle.has(p.id);
+                        const an = fest || eigen.has(p.id);
+                        const zusatz = p.pflicht ? 'immer' : (fuerAlle.has(p.id) ? 'für alle' : '');
+                        return `<label class="flex items-start gap-2 py-0.5" title="${escape((p.hinweis ? p.hinweis + ' — ' : '') + p.regeln.map(r => r.pfad || r.paket || r.produkt).join(', '))}">
+                            <input type="checkbox" value="${escape(p.id)}" ${attr}${an ? ' checked' : ''}${fest ? ' disabled' : ''} class="mt-0.5">
+                            <span>${escape(p.name)}${zusatz ? ` <span class="text-xs text-gray-400">${zusatz}</span>` : ''}</span>
+                        </label>`;
+                    }).join('')}
+                </div>`).join('');
+        }
+
+        // Zu einer Meldung: das Programm im Katalog, das sie abdeckt — oder
+        // die Zeile, die man als Freigabe eintragen könnte.
+        function winTreffer(e) {
+            const ziel = String(e.ziel || '').toLowerCase();
+            for (const p of winProg?.katalog || []) {
+                for (const r of p.regeln) {
+                    if (e.art === 'appx' && r.art === 'paket' && r.paket !== '*' && r.paket.toLowerCase() === ziel) return p;
+                    if (e.art === 'exe' && r.art === 'pfad') {
+                        const rest = r.pfad.replace(/^%PROGRAMFILES%\\/i, '').replace(/\*$/, '').toLowerCase();
+                        if (['c:\\program files\\', 'c:\\program files (x86)\\'].some(w => ziel.startsWith(w + rest))) return p;
+                    }
+                }
+            }
+            return null;
+        }
+        function winVorschlag(e) {
+            if (e.art === 'appx') return e.ziel;
+            const m = /^(c:\\program files(?: \(x86\))?)\\(.+)\\[^\\]+$/i.exec(e.ziel || '');
+            if (!m) return null;
+            return `${m[1]}\\${m[2].split('\\').slice(0, 2).join('\\')}\\*`;
+        }
+
+        function winProbeTabelle(s, mitKnoepfen) {
+            const probe = s.programme_probe;
+            if (!probe) return '<p class="text-xs text-gray-400">Noch keine Auswertung von diesem Rechner (kommt nach dem nächsten Start, danach alle 30 Minuten).</p>';
+            const durch = probe.modus === 'durchsetzen';
+            const kopf = `<p class="text-sm font-medium text-gray-700">${durch ? 'Blockiert' : 'Wäre blockiert'} — letzte 30 Tage
+                <span class="text-xs font-normal text-gray-400">gemeldet ${escape(vorZeit(s.programme_probe_am).text)}</span></p>`;
+            if (!probe.eintraege?.length) return kopf + `<p class="text-xs text-green-700">Nichts — ${durch ? 'die Liste hat nichts blockiert' : 'mit der Liste wäre alles gelaufen, was hier lief'}.</p>`;
+            return kopf + `<table class="w-full text-xs mt-1"><tbody>${probe.eintraege.map((e, i) => {
+                const p = winTreffer(e);
+                const v = winVorschlag(e);
+                let knopf = '';
+                if (mitKnoepfen && p) knopf = `<button type="button" class="text-blue-600 hover:text-blue-800" onclick="winAnhaken('${escape(p.id)}')">„${escape(p.name)}" anhaken</button>`;
+                else if (mitKnoepfen && v) knopf = `<button type="button" class="text-blue-600 hover:text-blue-800" onclick="winFreigeben(${i})">hier erlauben</button>`;
+                else if (mitKnoepfen) knopf = '<span class="text-gray-400" title="Liegt nicht unter Programme. Nur über programme-freigaben.txt (Git) — und nur, wenn normale Benutzer dort nicht schreiben können.">ausserhalb Programme</span>';
+                return `<tr class="border-t align-top">
+                    <td class="py-1 pr-2 text-gray-500">${e.art === 'appx' ? 'App' : 'Programm'}</td>
+                    <td class="py-1 pr-2 font-mono break-all">${escape(e.ziel)}</td>
+                    <td class="py-1 pr-2 whitespace-nowrap">${escape(e.person || '')}</td>
+                    <td class="py-1 pr-2 whitespace-nowrap text-gray-500">${e.anzahl}× · ${escape(e.zuletzt ? new Date(e.zuletzt).toLocaleString('de-CH', { dateStyle: 'short', timeStyle: 'short' }) : '')}</td>
+                    <td class="py-1 whitespace-nowrap">${knopf}</td></tr>`;
+            }).join('')}</tbody></table>`;
+        }
+
+        function progZeile(s) {
+            if (!winProg) return '';
+            const m = winModus(s);
+            const n = s.programme_probe?.eintraege?.length || 0;
+            const was = s.programme_probe ? (n ? ` · ${n} ${m === 'durchsetzen' ? 'blockiert' : 'wären blockiert'}` : ' · nichts blockiert') : '';
+            return `<div class="text-xs ${n && m === 'durchsetzen' ? 'text-red-600' : (n ? 'text-amber-700' : 'text-gray-400')}" title="Erlaubte Programme (AppLocker) — Einstellen … → Programme">🛡 ${MODUS_TEXT[m]}${was}</div>`;
+        }
+
+        function winProgZeichnen() {
+            const box = document.getElementById('winprog-box');
+            box.classList.toggle('hidden', !winProg);
+            if (!winProg) return;
+            const v = winVorgabe();
+            document.getElementById('winprog-zahl').textContent =
+                `${v.programme.length} Programme für alle · ${MODUS_TEXT[v.modus]}`;
+            document.querySelectorAll('input[name="winprog-modus"]').forEach(el => { el.checked = el.value === v.modus; });
+            document.getElementById('winprog-liste').innerHTML =
+                winKaestchen({ fuerAlle: new Set(), eigen: new Set(v.programme), attr: 'data-alle' });
+            document.getElementById('winprog-freigaben').value = v.freigaben || '';
+            document.getElementById('winprog-stand').textContent = winProg.geaendert_am
+                ? `Zuletzt geändert ${new Date(winProg.geaendert_am).toLocaleString('de-CH')} von ${winProg.geaendert_von || '?'}`
+                : 'Noch nie geändert — es gilt die Vorgabe aus dem Katalog.';
+
+            const rechner = stationen.filter(s => s.role === 'windows' && !s.revoked_at);
+            document.getElementById('winprog-probe').innerHTML = rechner.length ? `
+                <p class="font-medium text-gray-700">Auswertung der Rechner</p>
+                <ul class="mt-1 space-y-0.5">${rechner.map(s => {
+                    const n = s.programme_probe?.eintraege?.length || 0;
+                    const m = winModus(s);
+                    const text = !s.programme_probe ? 'noch keine Auswertung'
+                        : (n ? `${n} ${m === 'durchsetzen' ? 'blockiert' : 'wären blockiert'}` : 'nichts blockiert');
+                    return `<li><span class="font-mono">${escape(s.hostname || s.id)}</span> — ${MODUS_TEXT[m]}${winEigen(s).modus ? ' (eigener Modus)' : ''}:
+                        <button type="button" class="${n ? 'text-amber-700' : 'text-gray-500'} hover:underline" onclick="cfgOeffnen('${escape(s.id)}')">${text}</button></li>`;
+                }).join('')}</ul>` : '';
+        }
+
+        async function winProgSpeichern() {
+            const melden = (text, gut) => {
+                const el = document.getElementById('winprog-meldung');
+                el.textContent = text;
+                el.className = 'text-sm ' + (gut ? 'text-green-700' : 'text-red-600');
+            };
+            const modus = document.querySelector('input[name="winprog-modus"]:checked')?.value || 'probe';
+            const programme = [...document.querySelectorAll('#winprog-liste input[data-alle]:checked:not(:disabled)')].map(el => el.value);
+            if (modus === 'durchsetzen' && winVorgabe().modus !== 'durchsetzen') {
+                const offen = stationen.filter(s => s.role === 'windows' && !s.revoked_at && !winEigen(s).modus
+                    && s.programme_probe?.eintraege?.length).map(s => s.hostname || s.id);
+                if (!confirm('Auf allen Windows-Rechnern ohne eigenen Modus startet danach nur noch, was auf der Liste steht.'
+                    + (offen.length ? `\n\nAchtung: auf ${offen.join(', ')} wäre laut Auswertung noch etwas blockiert.` : '')
+                    + '\n\nDurchsetzen?')) return melden('Nicht gespeichert.', false);
+            }
+            try {
+                winProg = await api('/api/stations/admin/windows-programme', {
+                    method: 'PUT',
+                    body: { modus, programme, freigaben: document.getElementById('winprog-freigaben').value },
+                });
+                winProgZeichnen();
+                zeichne();
+                melden('Gespeichert. Die Rechner übernehmen es innerhalb von 30 Minuten.', true);
+            } catch (err) { melden(err.message, false); }
+        }
+
+        function cfgWinProgAufbauen(s, ov) {
+            const block = document.getElementById('cfg-winprog-block');
+            const an = s.role === 'windows' && !!winProg;
+            block.classList.toggle('hidden', !an);
+            if (!an) return;
+            const eigen = ov.roles?.windows?.programme || {};
+            const v = winVorgabe();
+            const modusWahl = document.getElementById('cfg-winprog-modus');
+            modusWahl.innerHTML = `<option value="">Wie alle Windows-Rechner (${MODUS_TEXT[v.modus]})</option>`
+                + Object.entries(MODUS_TEXT).map(([k, t]) => `<option value="${k}">${t} — nur dieser Rechner</option>`).join('');
+            modusWahl.value = eigen.modus || '';
+            document.getElementById('cfg-winprog-liste').innerHTML = winKaestchen({
+                fuerAlle: new Set(v.programme), eigen: new Set(eigen.zusatz || []), attr: 'data-zusatz' });
+            document.getElementById('cfg-winprog-freigaben').value = eigen.freigaben || '';
+            document.getElementById('cfg-winprog-probe').innerHTML = winProbeTabelle(s, true);
+        }
+
+        // Knöpfe der Auswertung: nur ins Formular, gespeichert wird mit „Speichern".
+        function winAnhaken(id) {
+            const el = document.querySelector(`#cfg-winprog-liste input[value="${CSS.escape(id)}"]`);
+            if (el && !el.disabled) { el.checked = true; el.closest('label')?.scrollIntoView({ block: 'nearest' }); }
+        }
+        function winFreigeben(i) {
+            const s = (stationen || []).find(x => x.id === cfgStation);
+            const e = s?.programme_probe?.eintraege?.[i];
+            const v = e && winVorschlag(e);
+            if (!v) return;
+            const feld = document.getElementById('cfg-winprog-freigaben');
+            const zeilen = feld.value.split('\n').map(z => z.trim()).filter(Boolean);
+            if (!zeilen.some(z => z.toLowerCase() === v.toLowerCase())) zeilen.push(v);
+            feld.value = zeilen.join('\n');
+            feld.focus();
         }
 
         // ─── Windows-Rechner eintragen ─────────────────────────────────
