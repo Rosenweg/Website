@@ -682,7 +682,7 @@ def config_put():
         return deny
     b = request.get_json(silent=True) or {}
     allowed = {"hours_open_from", "hours_open_to", "ring_timeout", "weekdays", "telefon_gruppen",
-               "telefon_ausblenden", "telefon_unsichtbar"}
+               "telefon_ausblenden", "telefon_unsichtbar", "portal_pfade"}
     import re as _re
     hhmm = _re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
     for k, v in b.items():
@@ -696,6 +696,15 @@ def config_put():
             return jsonify({"error": "telefon_ausblenden: Paketnamen durch Komma getrennt"}), 400
         if k == "telefon_gruppen" and not _re.fullmatch(r"[\w äöüÄÖÜ,.-]{0,300}", str(v)):
             return jsonify({"error": "telefon_gruppen: Gruppennamen durch Komma getrennt"}), 400
+        if k == "portal_pfade":
+            try:
+                r = json.loads(str(v))
+            except ValueError:
+                return jsonify({"error": "portal_pfade ist kein gueltiges JSON"}), 400
+            if not isinstance(r, dict) or not all(
+                    isinstance(e, list) and all(isinstance(x, str) and "/api/" in x and len(x) < 200 for x in e)
+                    for e in r.values()):
+                return jsonify({"error": "portal_pfade: {paket: [\"/api/...\", \"GET /api/...\"]}"}), 400
     conn = db.connect()
     try:
         for k, v in b.items():
@@ -3289,6 +3298,152 @@ def telefon_messenger():
     sig = _b64url(hmac.new(MESSENGER_ANLAGE_SECRET.encode(), f"{kopf}.{inhalt}".encode(), hashlib.sha256).digest())
     return jsonify({"token": f"{kopf}.{inhalt}.{sig}", "gueltig_bis": jetzt + MESSENGER_TOKEN_STUNDEN * 3600,
                     "server": os.environ.get("MESSENGER_URL", "https://chat.rosenweg4303.ch")})
+
+
+# ─── Portal-Anfragen der Rosenweg-Apps auf geteilten Telefonen ───────────────
+# Auf einem geteilten Telefon meldet sich keine App selbst an (rosenweg-basis,
+# docs/geteilte-telefone.md). Die App ruft Rosenweg Geraet (AnlageProvider
+# "portal_anfrage"), Geraet ruft hier mit seinem Geraetezugang, und diese API stellt
+# die Anfrage an die Haupt-API — im Namen der Person, die gerade am Telefon
+# angemeldet ist. Dafuer stellt sie ein Token fuer GENAU diese eine Anfrage aus
+# (HS256, PORTAL_ANLAGE_SECRET, 60 s, einmal; Haupt-API: api/lib/anlagetoken.js).
+# Kein Token verlaesst CT 220: weder Geraet noch die App bekommt eines.
+#
+# Welche Pfade eine App so erreichen darf, steht in der Config "portal_pfade"
+# (JSON {paket: [eintrag, ...], "*": [...]} — "*" gilt fuer alle Apps). Eintrag:
+#   "/api/salz/"          alles darunter, alle Methoden
+#   "/api/auth/me"        genau dieser Pfad, alle Methoden
+#   "GET /api/me"         nur mit diesen Methoden (mehrere: "GET,PUT /api/me")
+# Fehlt die Config, gilt PORTAL_PFADE_STANDARD. Die Haupt-API sperrt zusaetzlich
+# alles, was einen Ausweis aendert (PAT_GESPERRT in api/middleware/auth.js).
+PORTAL_ANLAGE_SECRET = os.environ.get("PORTAL_ANLAGE_SECRET", "")
+PORTAL_TOKEN_S = 60
+PORTAL_KOERPER_MAX = 256 * 1024
+# Binder: die Antwort geht als Bundle an die App (Transaktionen bis ~1 MB)
+PORTAL_ANTWORT_MAX = 512 * 1024
+PORTAL_METHODEN = ("GET", "POST", "PUT", "DELETE")
+PORTAL_PFADE_STANDARD = {
+    "*": ["GET /api/auth/me", "GET /api/me"],
+    "ch.rosenweg4303.salz": ["/api/salz/"],
+}
+_PORTAL_PFAD = re.compile(r"/api/[A-Za-z0-9._~!$&'()*+,;=:@%/-]{1,1000}(\?[A-Za-z0-9._~!$&'()*+,;=:@%/?-]{0,1000})?")
+_PORTAL_KODIERT_VERBOTEN = re.compile(r"%(2e|2f|5c|00)", re.I)
+
+
+def _portal_pfad_ok(pfad):
+    """Nur /api/..., keine Punkt-Segmente, keine kodierten / . \\ oder NUL, kein //."""
+    if not isinstance(pfad, str) or not _PORTAL_PFAD.fullmatch(pfad):
+        return False
+    weg = pfad.split("?", 1)[0]
+    if "//" in weg or _PORTAL_KODIERT_VERBOTEN.search(pfad):
+        return False
+    return not any(teil in (".", "..") for teil in weg.split("/"))
+
+
+def _portal_regeln(conn):
+    roh = _cfg(conn).get("portal_pfade", "")
+    if roh:
+        try:
+            r = json.loads(roh)
+            if isinstance(r, dict):
+                return r
+        except ValueError:
+            app.logger.warning("portal_pfade ist kein JSON — Standard gilt")
+    return PORTAL_PFADE_STANDARD
+
+
+def _portal_erlaubt(regeln, paket, methode, pfad):
+    weg = pfad.split("?", 1)[0].lower()
+    for eintrag in list(regeln.get("*") or []) + list(regeln.get(paket) or []):
+        teile = str(eintrag).strip().split(None, 1)
+        methoden, muster = (teile[0].upper().split(","), teile[1]) if len(teile) == 2 else (None, teile[0])
+        muster = muster.lower()
+        if methoden and methode not in methoden:
+            continue
+        if (muster.endswith("/") and weg.startswith(muster)) or weg == muster:
+            return True
+    return False
+
+
+def _portal_pfad_normal(pfad):
+    """Wie authMiddleware der Haupt-API: ohne /api/, klein, ohne // und End-Schraegstriche."""
+    p = re.sub(r"/{2,}", "/", pfad.split("?", 1)[0].lower())
+    p = re.sub(r"^/api/", "", p)
+    return p.strip("/")
+
+
+def _portal_token(sitzung, ext, paket, methode, pfad, jetzt=None):
+    jetzt = int(jetzt if jetzt is not None else time.time())
+    kopf = _b64url(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
+    inhalt = _b64url(json.dumps({
+        "iss": "rosenweg-anlage", "aud": "rosenweg-portal", "sub": str(sitzung["user_id"] or ""),
+        "email": sitzung["email"], "ext": ext, "paket": paket, "methode": methode,
+        "pfad": _portal_pfad_normal(pfad), "iat": jetzt, "exp": jetzt + PORTAL_TOKEN_S,
+        "jti": pysecrets.token_hex(16),
+    }, separators=(",", ":"), ensure_ascii=False).encode())
+    sig = _b64url(hmac.new(PORTAL_ANLAGE_SECRET.encode(), f"{kopf}.{inhalt}".encode(), hashlib.sha256).digest())
+    return f"{kopf}.{inhalt}.{sig}"
+
+
+def _portal_sitzung_marke(ext, sitzung):
+    """Wechselt mit jeder An-/Abmeldung; die Apps laden neu, wenn sie sich aendert."""
+    return hashlib.sha256(f"{ext}|{sitzung['email']}|{sitzung['seit']}".encode()).hexdigest()[:16]
+
+
+@app.post("/api/telefon/portal")
+def telefon_portal():
+    """Rosenweg Geraet: {methode, pfad, koerper (JSON-Text|null), paket} -> {status, json, sitzung}.
+    409 nicht_angemeldet: niemand am Telefon. 403: Pfad fuer diese App nicht freigegeben."""
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    if not PORTAL_ANLAGE_SECRET:
+        return jsonify({"error": "Portal-Zugang der Telefone nicht eingerichtet"}), 503
+    b = request.get_json(silent=True) or {}
+    methode = str(b.get("methode") or "GET").upper()
+    pfad = b.get("pfad")
+    paket = str(b.get("paket") or "")
+    koerper = b.get("koerper")
+    if methode not in PORTAL_METHODEN:
+        return jsonify({"error": "Methode nicht erlaubt"}), 400
+    if not _portal_pfad_ok(pfad):
+        return jsonify({"error": "Pfad ungueltig"}), 400
+    if not _PAKET.fullmatch(paket) or paket.startswith("web."):
+        return jsonify({"error": "paket ungueltig"}), 400
+    if koerper is not None and (not isinstance(koerper, str) or len(koerper.encode()) > PORTAL_KOERPER_MAX):
+        return jsonify({"error": "Anfrage zu gross"}), 413
+    conn = db.connect()
+    try:
+        s = conn.execute("SELECT user_id, email, name, seit FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+        regeln = _portal_regeln(conn)
+    finally:
+        conn.close()
+    if not s or not s["email"]:
+        return jsonify({"error": "Niemand angemeldet", "nicht_angemeldet": True}), 409
+    if not _portal_erlaubt(regeln, paket, methode, pfad):
+        app.logger.info("portal %s %s %s %s: nicht freigegeben", ext, paket, methode, pfad.split("?", 1)[0])
+        return jsonify({"error": "Diese App darf das auf geteilten Telefonen nicht", "nicht_freigegeben": True}), 403
+    kopf = {"Authorization": f"Bearer {_portal_token(s, ext, paket, methode, pfad)}",
+            "Accept": "application/json", "X-Rosenweg-Telefon": ext}
+    if koerper is not None:
+        kopf["Content-Type"] = "application/json"
+    try:
+        r = requests.request(methode, f"{MAIN_API_BASE}{pfad}", headers=kopf,
+                             data=koerper.encode() if koerper is not None else None,
+                             timeout=20, allow_redirects=False, stream=True)
+        try:
+            roh = r.raw.read(PORTAL_ANTWORT_MAX + 1, decode_content=True)
+        finally:
+            r.close()
+    except requests.RequestException as e:
+        app.logger.warning("portal %s: Haupt-API nicht erreichbar (%s)", ext, type(e).__name__)
+        return jsonify({"error": "Keine Verbindung zum Portal"}), 502
+    if len(roh) > PORTAL_ANTWORT_MAX:
+        return jsonify({"error": "Antwort zu gross fuer das Telefon"}), 502
+    if methode != "GET" or r.status_code >= 400:
+        app.logger.info("portal %s %s %s %s -> %s", ext, paket, methode, pfad.split("?", 1)[0], r.status_code)
+    return jsonify({"status": r.status_code, "json": roh.decode("utf-8", "replace"),
+                    "sitzung": _portal_sitzung_marke(ext, s)})
 
 
 @app.get("/api/pbx/nummernplan")

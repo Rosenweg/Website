@@ -381,6 +381,31 @@ zurückziehen `DELETE /api/pbx/apps-versionen/<id>`.
 Neue App: Eintrag in `APPS_REGISTER` (oder `APPS_KATALOG_REPOS`), Logo nach `img/apps/<app>.png`
 (Turm + Weg + Rose), Release-Schritt im Repo.
 
+## Apps auf geteilten Telefonen: Portal-Anfragen (Stand 26.11.2026)
+
+Flutter-Apps (rosenweg-basis, z. B. Rosenweg Salz) melden sich auf geteilten
+Telefonen nicht selbst an. Der Weg einer Anfrage:
+
+```
+App ──ContentResolver.call("portal_anfrage")──▶ Rosenweg Gerät (AnlageProvider)
+     prüft: Signatur des Aufrufers, Methode, Pfad, Grösse
+Gerät ──POST /api/telefon/portal (Gerätezugang)──▶ PBX-API (CT 220)
+     prüft: Sitzung am Telefon, Freigabe paket→Pfad (Config portal_pfade)
+PBX-API ──Bearer <Anlage-Token für genau diese Anfrage>──▶ Haupt-API (CT 128)
+     prüft: Signatur, 60 s, einmal, Methode+Pfad, PAT_GESPERRT, Konto aktiv
+```
+
+Kein Token verlässt CT 220. Antwort an die App: `{status, json, sitzung}`;
+`sitzung` wechselt mit jeder An-/Abmeldung (die App lädt dann neu).
+
+- Einrichten: `PORTAL_ANLAGE_SECRET` mit demselben Wert in `/etc/default/pbx-api`
+  und `/opt/rosenweg-core/.env`.
+- Freigaben: Config `portal_pfade` (PUT `/api/pbx/config`), JSON
+  `{"*": ["GET /api/auth/me", "GET /api/me"], "ch.rosenweg4303.salz": ["/api/salz/"]}`.
+  Endet ein Eintrag auf `/`, gilt alles darunter; davor optional Methoden
+  (`GET,PUT /api/...`). Ohne Config gilt `PORTAL_PFADE_STANDARD` in `app.py`.
+- Grenzen: Anfrage 256 KiB, Antwort 512 KiB (Binder).
+
 ## Anpassung
 
 | Was | Wo |
