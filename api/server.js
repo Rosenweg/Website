@@ -22856,6 +22856,11 @@ app.delete('/api/stations/:id/tunnel', stationsRouter.stationAuth, async (req, r
   }
 });
 
+// Tunnel der App "Rosenweg Virtuelle Computer" zum vm-gateway (eigener CT,
+// nicht wg-control), angemeldet mit dem Rosenweg-Konto (Authentik
+// rosenweg-apps). Begruendung und Grenzen in routes/app-tunnel.js.
+require('./routes/app-tunnel').appTunnelRoutes(app, { pool, rateLimitGuard });
+
 app.post('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
   try {
     if (!WG_CONTROL_TOKEN) return res.status(503).json({ error: 'wg-control nicht konfiguriert (WG_CONTROL_TOKEN fehlt)' });
