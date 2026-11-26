@@ -120,7 +120,11 @@ Setze 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'UseDe
 
 Set-Content $Marke "$LogoNeu"
 
-# --- Taskleiste links, fuer jedes Profil ------------------------------------
+# --- Taskleiste zentriert, fuer jedes Profil --------------------------------
+# Bis 26.11.2026 links; Stefan will die Anordnung von Windows 11 (zentriert)
+# mit dem Rosenweg-Knopf an der Stelle des Windows-Knopfs - Open-Shell folgt
+# dem Windows-Knopf seit 4.4.190 dorthin. Gesetzt wird 1 statt den Wert nur zu
+# loeschen, weil frueher 0 in die Profile geschrieben wurde.
 # TaskbarAl ist eine Benutzereinstellung. Beim Start ist niemand angemeldet,
 # also jedes Profil (und die Vorlage fuer neue) kurz laden und setzen.
 $profile = @(@{ Name = 'Default'; Datei = 'C:\Users\Default\NTUSER.DAT' })
@@ -132,7 +136,7 @@ foreach ($p in $profile) {
     if ($p.Geladen) {
         # Angemeldet (Skript von Hand gestartet): direkt in den geladenen Zweig
         $k = "Registry::HKEY_USERS\$($p.Sid)\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
-        Setze $k 'TaskbarAl' 0 'DWord'
+        Setze $k 'TaskbarAl' 1 'DWord'
         Setze "Registry::HKEY_USERS\$($p.Sid)\Software\Microsoft\Windows\CurrentVersion\Policies\ActiveDesktop" 'NoChangingWallPaper' 1 'DWord'
         Setze "Registry::HKEY_USERS\$($p.Sid)\Software\Microsoft\Windows NT\CurrentVersion\Windows" 'LegacyDefaultPrinterMode' 1 'DWord'
         continue
@@ -140,7 +144,7 @@ foreach ($p in $profile) {
     & reg.exe load 'HKU\RosenwegLook' $p.Datei 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) { Log "Profil $($p.Name) nicht ladbar"; continue }
     try {
-        Setze 'Registry::HKEY_USERS\RosenwegLook\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' 'TaskbarAl' 0 'DWord'
+        Setze 'Registry::HKEY_USERS\RosenwegLook\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' 'TaskbarAl' 1 'DWord'
         # Hintergrund gehoert der Station (wie auf den Linux-Stationen)
         Setze 'Registry::HKEY_USERS\RosenwegLook\Software\Microsoft\Windows\CurrentVersion\Policies\ActiveDesktop' 'NoChangingWallPaper' 1 'DWord'
         # Standarddrucker gehoert der Station (siehe "Drucker im Profil" unten):
@@ -351,7 +355,8 @@ try {
 # Open-Shell: https://github.com/Open-Shell/Open-Shell-Menu (MIT).
 #
 # Nur Windows 11 (Build 22000 und hoeher): dort fehlt das alte Startmenue, und
-# der Knopf sitzt links, weil die Taskleiste links steht (oben). Windows 10
+# Open-Shell legt seinen Knopf genau auf den Start-Knopf von Windows (auch in
+# der zentrierten Taskleiste, oben). Windows 10
 # bliebe unberuehrt; wer es dort will, senkt $OpenShellAbBuild auf 10240.
 #
 # Installiert wird nur die Startmenue-Komponente (kein Explorer-Zusatz, kein
@@ -416,8 +421,13 @@ if ($OpenShellAn -and $build -ge $OpenShellAbBuild) {
     OsRegel 'StartButtonType'   2 'DWord'          # eigenes Bild
     OsRegel 'StartButtonPath'   (Join-Path $Ziel 'startknopf.png') 'String'
     # Breite bei 100 %, so hoch wie die Taskleiste; Open-Shell skaliert mit der
-    # Anzeige hoch, das Bild hat dafuer 144 px je Zustand.
+    # Anzeige hoch, das Bild hat dafuer 144 px je Zustand. Das Wappen sitzt im
+    # Bild genau ueber dem Windows-Symbol der ZENTRIERTEN Taskleiste, das
+    # Windows nicht ausblendet - Masse in startknopf-erzeugen.py.
     OsRegel 'StartButtonSize'   48 'DWord'
+    # Unten buendig mit der Taskleiste statt "mittig + 1 px" (Open-Shell
+    # schob den Knopf sonst 1 px unter den Bildschirmrand).
+    OsRegel 'StartButtonAlign'  1 'DWord'
     # "Immersive" folgt hell/dunkel und der Akzentfarbe (Mint-Blau, oben) -
     # sieht damit aus wie der Rest von Windows 11. Nur Vorgabe.
     OsRegel 'SkinW7'            'Immersive' 'String' 2
