@@ -1,79 +1,28 @@
-# STWEG-Kooperation Rosenweg - Website
+<p align="center"><img src="pwa/icons/icon-512.png" width="96" alt="Logo"></p>
+<h1 align="center">Rosenweg Website</h1>
+<p align="center">Website und Portal der STWEG-Kooperation Rosenweg in Kaiseraugst – für Bewohner, Ausschüsse und die Technik.</p>
+<p align="center"><a href="https://www.rosenweg4303.ch">Zur Website</a> · <a href="docs/README.md">Dokumentation</a> · <a href="docs/entwickeln.md">Für Entwickler</a></p>
 
-Website der STWEG-Kooperation Rosenweg in Kaiseraugst, Aargau.
+## Was drin ist
 
-## Über das Projekt
+- Die öffentliche Website und die Seiten der 8 STWEGs (7 Wohnhäuser und die Tiefgarage).
+- Das Portal für Bewohner: Anmeldung, Verteilerlisten, Waschküche, Energie-Monitor, Entsorgung, Salzvorrat.
+- Verwaltung für Ausschuss und Technik: Bewohner, Rechte, Türschilder und Aushänge.
+- Telefonanlage mit geteilten Smartphones und der Seite „Mein Telefon“.
+- Die Download-Seite für alle Rosenweg-Apps (`/apps`).
+- Betrieb der Stationen und Windows-Rechner (Active Directory, Gruppenrichtlinien).
 
-- **8 STWEGs** (7 Wohngebäude + 1 Tiefgarage) am Rosenweg
-- **Authentik SSO** für Authentifizierung
-- **API-Backend** für Verteilerlisten, Waschküche, Verwaltung
-- **Energie-Monitor** mit Solartarif/Netztarif-Tracking
-- **Telefonanlage** (Asterisk, `pbx/`) mit geteilten Smartphones (`/smartphones`), eigenen Handys und der Seite `/mein-telefon`
-- **Apps** auf `/apps`: Downloads der Rosenweg-Apps; neue Versionen schicken die App-Repos beim Release selbst (wiederverwendbarer Workflow `.github/workflows/apps-release.yml`, Anmeldung per GitHub-OIDC)
-- **Stationen**: Rosenweg OS und Windows-Rechner aus dem Active Directory; GPOs für Rosenweg-Look, Ordnerumleitung, Nextcloud als Laufwerk N: und die Programm-Positivliste (`ad-dc/`)
-- **Salzvorrat** der Enthärtungsanlagen (`salz.html`, App Rosenweg Salz)
+## Läuft auf
 
-## Architektur
+Im Browser, auf Handy und PC; der Server läuft auf dem Proxmox-Cluster im Rosenweg.
 
-| Komponente | Technologie |
-|---|---|
-| Frontend | HTML, Tailwind CSS, Vanilla JS |
-| Backend | Node.js API (`api/server.js`) |
-| Auth | Authentik SSO |
-| Hosting | Proxmox-Cluster, ein LXC je Dienst (Frontends: nginx; API: Docker Compose auf CT 128) |
-| E-Mail | Mailcow + Proxmox Mail Gateway; API-Versand über SMTP2GO |
-| Proxy | Traefik am Rand (CT 245), DNS bei Cloudflare |
+## Entwickeln
 
-## Struktur
+HTML mit Tailwind und Vanilla JS, dahinter eine Node.js-API; Anmeldung über Authentik.
+Architektur, Struktur und Ausrollen stehen in [docs/entwickeln.md](docs/entwickeln.md),
+alles Weitere in der [Dokumentation](docs/README.md).
+Das Repo ist öffentlich: keine Geheimnisse einchecken, siehe [docs/sicherheit.md](docs/sicherheit.md).
 
-```
-├── index.html              # Hauptseite
-├── verwaltung.html         # Bewohner-/Rechteverwaltung
-├── email-verteiler.html    # E-Mail-Verteilerlisten
-├── energie-monitor.html    # Energieverbrauch & Solar
-├── entsorgung.html         # Entsorgungskalender
-├── js/                     # Shared JavaScript
-│   ├── nav.js              # Navigation
-│   ├── authentik-auth.js   # SSO Integration
-│   └── site-config.js      # Konfiguration
-├── api/                    # Node.js API Backend
-├── pbx/                    # Telefonanlage: Asterisk-Konfiguration, PBX-API, App-Katalog und /apps
-├── ad-dc/                  # Samba AD: zweiter DC, SYSVOL-Abgleich, GPOs, Windows-OU
-├── apps.html, smartphones.html, salz.html, stationen.html  # Seiten zu den Abschnitten oben
-├── energy-collector/       # Energie-Datensammler
-├── stweg1..7/, meg/        # STWEG-/MEG-Seiten
-├── api/vorlagen/aushaenge/ # Türschilder + Poster (Druck mit Token-QR via tuerschilder.html)
-├── frontends-lxc/          # nginx-Konfiguration + deploy.sh der Frontend-LXCs
-├── backend-lxc/            # Compose-Dateien API (CT 128) und Energie (CT 129)
-├── edge-traefik/           # Reverse-Proxy (CT 245)
-├── scripts/                # Betriebsskripte (SSH-Zugang, Dienstwacht, Ausrollen …)
-├── docs/                   # Dokumentation, Einstieg docs/infrastruktur.md
-└── docker-stack.yml        # historisch (Swarm, abgebaut)
-```
+## Lizenz
 
-## Deployment
-
-Ein Push auf `main` lässt GitHub Actions die Images bauen (`ghcr.io/rosenweg/…`);
-**ausgerollt wird von Hand**:
-
-- API: auf CT 128 `docker compose pull api && docker compose up -d api` in `/opt/rosenweg-core`
-- Frontends: `frontends-lxc/deploy.sh` im jeweiligen Container bzw. `scripts/rw-web-ausrollen.sh` für einzelne Dateien
-
-Einzelheiten: [`docs/infrastruktur.md`](docs/infrastruktur.md) und
-[`docs/website.md`](docs/website.md); Telefonanlage und PBX-API:
-[`pbx/README.md`](pbx/README.md).
-
-App-Releases an `/apps`: Abschnitt „Seite /apps und App-Releases“ in
-[`pbx/README.md`](pbx/README.md).
-
-## Sicherheit
-
-Das Repository ist **öffentlich**. Nie Geheimnisse, Tokens, Passwörter oder
-Exporte mit Schlüsseln einchecken – Werte gehören in die `.env`-Dateien auf den
-Containern. Regeln, Grenzwerte und offene Punkte nach der Prüfung vom
-17.11.2026: [`docs/sicherheit.md`](docs/sicherheit.md).
-
-## Kontakt
-
-**Technischer Dienst Rosenweg**
-- Stefan Müller - stefan+rosenweg@juroct.ch
+Keine Lizenz hinterlegt – alle Rechte vorbehalten.
