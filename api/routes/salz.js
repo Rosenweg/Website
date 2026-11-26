@@ -13,8 +13,8 @@
 // Unterschreitung, Erinnerung nach `wiederholung_tage`. Ohne genug
 // Verbrauchsdaten zählt der Mindestbestand.
 //
-// Anmeldung: Token der Rosenweg-Apps (lib/appkonto.js) oder die normale
-// Portal-Anmeldung. Buchen darf Technik/Präsident und wer in einer Gruppe aus
+// Anmeldung: authMiddleware — nimmt die Portal-Anmeldung und die Tokens der
+// Rosenweg-Apps (Authentik rosenweg-apps, lib/auth.js validateAppToken). Buchen darf Technik/Präsident und wer in einer Gruppe aus
 // SALZ_GRUPPEN ist (z. B. Hauswart); Schwellen, Inventur und Sorten ändern
 // nur Technik/Präsident.
 
@@ -23,7 +23,6 @@ const { pool } = require('../lib/db');
 const { authMiddleware } = require('../middleware/auth');
 const { isTechnik, isPraesident } = require('../lib/groups');
 const { HAEUSER } = require('../lib/haeuser');
-const { appOderPortal } = require('../lib/appkonto');
 const { loggedSendMail, MAIL_FROM } = require('../lib/mail');
 const { FENSTER_TAGE, verbrauchProWoche, lagerStand, meldeEntscheid, meldungsText, wochenText } = require('../lib/salz');
 
@@ -231,7 +230,6 @@ function starteSalzCron(intervalle = []) {
 
 function salzRouter({ rateLimitGuard }) {
   const router = express.Router();
-  const anmeldung = appOderPortal(authMiddleware);
 
   // Grenzen je Konto. Eine Lieferung sind selten mehr als ein paar Buchungen;
   // die App fragt die Übersicht beim Öffnen und nach jeder Buchung.
@@ -253,7 +251,7 @@ function salzRouter({ rateLimitGuard }) {
     res.status(503).json({ error: 'Datenbank nicht bereit' });
   });
 
-  router.use(anmeldung, schema);
+  router.use(authMiddleware, schema);
 
   const fehler = (res, e, wo) => {
     console.error(`[salz] ${wo}:`, e.message);

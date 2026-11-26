@@ -6,8 +6,8 @@ Android zuerst); die Seite [`salz.html`](../salz.html) zeigt Bestand, Verlauf
 und Sorten und stellt die Schwellen ein.
 
 Code: `api/routes/salz.js` (Routen, Schema, Meldelauf), `api/lib/salz.js`
-(Rechnung, getestet mit `node --test api/test/`), `api/lib/appkonto.js`
-(Anmeldung der Rosenweg-Apps mit Gruppen).
+(Rechnung, getestet mit `node --test api/test/`). Die Anmeldung der App
+(Authentik `rosenweg-apps`) prüft `authMiddleware` selbst.
 
 ## Datenmodell
 
@@ -42,8 +42,8 @@ Geprüft wird nach jeder Buchung und stündlich (Erinnerungen nur 7–20 Uhr).
 
 ## API (`/api/salz`)
 
-Anmeldung: Token der Authentik-Anwendung `rosenweg-apps` (App) oder normale
-Portal-Anmeldung. Buchen: Technik/Präsident und Gruppen aus `SALZ_GRUPPEN`.
+Anmeldung: `authMiddleware` — Token der Authentik-Anwendung `rosenweg-apps`
+(App) oder normale Portal-Anmeldung. Buchen: Technik/Präsident und Gruppen aus `SALZ_GRUPPEN`.
 Einstellen, Inventur, Sorten ändern: nur Technik/Präsident.
 Grenzen je Konto: 600 Lese- und 120 Schreibanfragen pro Stunde (429 mit
 `Retry-After`).
