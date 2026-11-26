@@ -72,13 +72,17 @@
                 <table class="w-full text-sm">
                     <thead class="text-left text-slate-500"><tr>
                         <th class="py-1 pr-2">Nebenstelle</th><th class="pr-2">Gerät</th><th class="pr-2">Anlage</th>
-                        <th class="pr-2">Angemeldet</th><th class="pr-2">WLAN-Debugging</th><th></th></tr></thead>
+                        <th class="pr-2">Angemeldet</th><th class="pr-2">WLAN-Debugging</th><th class="pr-2">Apps</th><th></th></tr></thead>
                     <tbody id="telefone" class="divide-y"></tbody>
                 </table>
                 </div>
                 <p class="text-xs text-slate-500 mt-3">Wartung per adb: das Telefon wird kurz von 2098 „Wartung“ angerufen und schaltet adb ein,
                     erreichbar über das Netz mit <code>adb connect &lt;IP&gt;:5555</code> (steht in der Zeile, sobald das Telefon den Port meldet).
                     Nach einem Neustart stellt Rosenweg Gerät Port 5555 selbst wieder her.</p>
+                <p class="text-xs text-slate-500 mt-1">Apps: Neue Fassungen aus dem App-Katalog spielt die Anlage selbst per adb ein –
+                    nur wenn niemand angemeldet ist, nicht telefoniert wird und der Bildschirm aus ist; Rosenweg Gerät selbst nur nachts.
+                    Pro Telefon einmal „Updater zulassen“ (Telefon im WLAN „Rosenweg“, abgemeldet).
+                    <span id="updaterFp"></span></p>
             </section>
 
             <section class="bg-white rounded-xl shadow p-5">
@@ -256,6 +260,31 @@ async function wlanDebug(ext, minuten) {
                   : 'WLAN-Debugging an ' + ext + ' wird ausgeschaltet.');
     lade();
 }
+// ── adb-Updater (Stefan 26.11.2026: neue App-Versionen spielt die Anlage selbst ein) ──
+function updaterZelle(t) {
+    const u = t.updater || {};
+    const e = u.ergebnis ? `<div class="text-xs text-slate-500 mt-1">${esc(u.ergebnis)}</div>` : '';
+    if (!u.zugelassen) {
+        if (u.zulassen_bis) return 'wird zugelassen …' + e;
+        return `<button class="knopf" onclick="updater('${esc(t.ext)}', 'zulassen')">Updater zulassen</button>` + e;
+    }
+    const offen = u.ausstehend || [];
+    const liste = offen.map(a => `${a.name} ${a.ist} → ${a.soll}`).join('\n');
+    const stand = offen.length ? `<span title="${esc(liste)}">${offen.length} Update${offen.length > 1 ? 's' : ''} offen</span>`
+                               : (u.geprueft ? 'aktuell' : 'noch nicht geprüft');
+    const wann = u.geprueft ? `<div class="text-xs text-slate-500">geprüft ${esc(new Date(u.geprueft * 1000).toLocaleString('de-CH',
+                 {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}))}</div>` : '';
+    return stand + (u.sofort ? ' · läuft …' : ` <button class="knopf" onclick="updater('${esc(t.ext)}', 'jetzt')">⟳ Jetzt</button>`) + wann + e;
+}
+async function updater(ext, aktion) {
+    if (aktion === 'zulassen' && !confirm('Updater für ' + ext + ' zulassen?\nDas Telefon schaltet adb 15 Minuten ein und bestätigt die Rückfrage nur für den Schlüssel der Anlage.\nNur abgemeldet und im WLAN „Rosenweg“.')) return;
+    const r = await api('/api/telefon/' + encodeURIComponent(ext) + '/updater', {method: 'POST', body: {aktion}});
+    const d = await json(r);
+    if (!r.ok) { melde(d.error || 'Ging nicht.', true); return; }
+    melde(aktion === 'zulassen' ? 'Telefon ' + ext + ' wird zugelassen – Ergebnis in 1–3 Minuten hier.'
+                                : 'Updater für ' + ext + ' gestartet – Ergebnis in wenigen Minuten hier.');
+    lade();
+}
 async function handyAbmelden(id, name) {
     if (!confirm(name + ' abmelden? Deine Nummer klingelt dort dann nicht mehr; in der App wieder „Mit Rosenweg anmelden“.')) return;
     const r = await api('/api/telefon/privat/' + id, {method: 'DELETE'});
@@ -346,10 +375,13 @@ async function lade() {
                          + (t.adb ? `<div class="text-xs font-mono select-all mt-1" title="Port meldet Rosenweg Gerät">adb connect ${esc(t.adb)}</div>`
                                   : '<div class="text-xs text-slate-500 mt-1">Port noch nicht gemeldet</div>')
                          : `<button class="knopf" onclick="wlanDebug('${esc(t.ext)}', 60)">🛠 1 Std.</button>`}</td>
+        <td class="pr-2">${updaterZelle(t)}</td>
         <td class="text-right space-x-1 whitespace-nowrap">
             <button class="knopf" onclick="klingeln('${esc(t.ext)}')">🔔 Klingeln</button>
             ${t.angemeldet ? `<button class="knopf" onclick="abmelden('${esc(t.ext)}')">Abmelden</button>` : ''}</td></tr>`).join('')
-        || '<tr><td class="py-2 text-slate-500" colspan="6">Keine geteilten Telefone.</td></tr>';
+        || '<tr><td class="py-2 text-slate-500" colspan="7">Keine geteilten Telefone.</td></tr>';
+    $('updaterFp').textContent = d.updater_fingerabdruck ? 'Schlüssel des Updaters: ' + d.updater_fingerabdruck
+                                                          : 'Der Updater hat noch keinen adb-Schlüssel.';
     $('privat').innerHTML = (d.privat || []).map(p => `<tr>
         <td class="py-2 pr-2 font-mono">${esc(p.kennung)}</td><td class="pr-2">${esc(p.geraet || '–')}</td>
         <td class="pr-2">${punkt(p.registriert)} ${p.registriert ? 'erreichbar' : 'nicht erreichbar'}</td>

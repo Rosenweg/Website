@@ -1,0 +1,21 @@
+[Unit]
+Description=Rosenweg PBX: neue Katalog-Apps per adb auf die geteilten Telefone (adb_updater.py)
+After=network-online.target asterisk.service pbx-api.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/pbx-api
+EnvironmentFile=-/etc/default/pbx-adb-updater
+# PBX_ADB_HOME (Standard /var/lib/pbx-adb) enthaelt den adb-Schluessel: nur dieser Benutzer, 0700.
+# Gleicher Benutzer wie die PBX-API (Datenbank, AMI-Zugang aus manager.conf).
+User=asterisk
+Group=asterisk
+WorkingDirectory=/opt/pbx-api
+ExecStart=/opt/pbx-api/venv/bin/python3 /opt/pbx-api/adb_updater.py
+TimeoutStartSec=30min
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/pbx-api /var/lib/pbx-adb
+ProtectHome=yes

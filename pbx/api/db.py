@@ -253,6 +253,33 @@ CREATE TABLE IF NOT EXISTS telefon_adb (
     gemeldet  INTEGER NOT NULL DEFAULT 0        -- epoch Sekunden
 );
 
+-- adb-Updater (Stefan 26.11.2026: "das zentrale System spielt neue App-Versionen selbst ein"):
+-- adb_updater.py auf CT 220 verbindet sich mit eigenem adb-Schluessel ueber Port 5555 und
+-- installiert neuere Katalog-Fassungen, nur wenn niemand angemeldet ist und nicht telefoniert
+-- wird. seriennummer: beim ersten Kontakt gemerkt, danach muss sie passen (andere IP = anderes
+-- Geraet?). freigabe_bis: einmalige Zulassung des Updater-Schluessels laeuft (epoch s).
+-- wartung_von_uns: der Updater hat die Wartung selbst eingeschaltet und schaltet sie wieder aus.
+CREATE TABLE IF NOT EXISTS telefon_updater (
+    ext             TEXT PRIMARY KEY,
+    seriennummer    TEXT NOT NULL DEFAULT '',
+    zugelassen      INTEGER NOT NULL DEFAULT 0,  -- Updater-Schluessel auf dem Telefon zugelassen
+    freigabe_bis    INTEGER NOT NULL DEFAULT 0,
+    sofort          INTEGER NOT NULL DEFAULT 0,  -- "Jetzt aktualisieren" auf /smartphones
+    wartung_von_uns INTEGER NOT NULL DEFAULT 0,
+    versuch         INTEGER NOT NULL DEFAULT 0,  -- epoch s des letzten Versuchs
+    geprueft        INTEGER NOT NULL DEFAULT 0,  -- epoch s der letzten vollstaendigen Pruefung
+    ergebnis        TEXT NOT NULL DEFAULT ''     -- kurz, fuer /smartphones
+);
+
+-- Was der Updater zuletzt auf dem Telefon gesehen hat (versionCode je Paket).
+CREATE TABLE IF NOT EXISTS telefon_apps_ist (
+    ext           TEXT NOT NULL,
+    paket         TEXT NOT NULL,
+    version_code  INTEGER,
+    geprueft      INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (ext, paket)
+);
+
 -- WLAN der geteilten Telefone (Stefan 25.11.2026): SSID "Rosenweg" mit PPSK, das Passwort
 -- bestimmt das VLAN. Die Schluessel stehen NUR hier in der Datenbank (nie im Repo, nie im Log);
 -- Rosenweg Geraet holt seinen mit dem Geraete-Token und richtet das WLAN als Device Owner ein.
@@ -348,6 +375,19 @@ def connect():
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
+
+
+def wartung_setzen(conn, ext, minuten, durch):
+    """Wartung (adb) einer Nebenstelle zentral ein- (minuten > 0) oder ausschalten (0) und
+    protokollieren. Gemeinsam fuer /smartphones und den adb-Updater. Gibt wlan_debug_bis zurueck.
+    Wecken (Anruf 2098) macht der Aufrufer, danach - nicht in der Transaktion."""
+    bis = int(time.time()) + minuten * 60 if minuten else 0
+    conn.execute("INSERT INTO telefon_wartung (ext, wlan_debug_bis, durch, geaendert) VALUES (?,?,?,datetime('now')) "
+                 "ON CONFLICT(ext) DO UPDATE SET wlan_debug_bis = excluded.wlan_debug_bis, "
+                 "durch = excluded.durch, geaendert = excluded.geaendert", (ext, bis, durch))
+    conn.execute("INSERT INTO telefon_log (ext, ereignis, durch) VALUES (?,?,?)",
+                 (ext, f"wlan-debug {minuten} min" if minuten else "wlan-debug aus", durch))
+    return bis
 
 
 def next_ext(conn, table, col, start):
