@@ -180,11 +180,36 @@ Drucken → Standarddrucker**. Zur Wahl stehen die Drucker aus
 schon liest. Linux-Stationen nehmen nur einen Drucker mit A4-Vorgabe als
 Standard; DruckerR13 (A3) wird dort übergangen.
 
-Windows-Rechner richten sich nicht selbst ein. Damit ihr Drucker trotzdem hier
-steht: **„Windows-Rechner eintragen“** über der Liste, Rechnername genau wie im
-AD (z. B. `WIN11-1`), Haus, Drucker. Ein so eingetragener Rechner hat keinen
-Agenten und kein Token: er zeigt „eingetragen“ statt „neu“, zählt nie als
-„länger still“, und im Menü gibt es nur **Einstellen …** und **Entfernen …**.
+Windows-Rechner richten sich nicht selbst ein. Die Verwaltung liest sie deshalb
+aus dem AD (seit 26.11.2026, `api/lib/adrechner.js`): alle 15 Minuten
+(`AD_ABGLEICH_MINUTEN`, 0 = nur von Hand) und mit **„Windows aus AD
+abgleichen“** über der Liste. Gelesen werden Computerkonten mit „Windows“ im
+Betriebssystem, ohne Domain Controller, mit dem Konto `STATION_AD_JOIN_USER`
+(oder `AD_LESE_USER`/`AD_LESE_PASSWORD`, falls gesetzt).
+
+- **Neu im AD** → als Windows-Rechner aufgenommen, „aus dem AD“. Haus und
+  Drucker werden dabei **einmal** zugeteilt: das Haus aus der OU
+  (`OU=Rosenweg 13`, `OU=Haus 13`, `OU=R13`, `OU=RW13`) oder, wenn die nichts
+  sagt, aus dem Namensanfang (`R9-…`, `RW9-…`, `ROSENWEG9-…`); der Drucker ist
+  der des Hauses (`DRUCKER[].haus`: 9 → DruckerR9, 13 → DruckerR13, andere
+  Häuser keiner). Danach schreibt der Abgleich Haus und Drucker nie wieder —
+  was hier eingestellt wird, gilt.
+- **Kein Haus erkennbar** (z. B. `WIN11-1`) → „Standort fehlt“, Drucker leer.
+  drucker.ps1 lässt dann den bisherigen Standard stehen und nimmt DruckerR9 nur,
+  wenn es den nicht gibt. Haus und Drucker unter **Einstellen …** wählen.
+- **Im AD deaktiviert / gelöscht** → markiert („im AD deaktiviert“, „im AD
+  nicht mehr vorhanden“), nie automatisch entfernt.
+- **Hier entfernt** → kommt nicht wieder, solange das AD-Konto (objectGUID)
+  dasselbe ist; ein neu beigetretener Rechner gleichen Namens dagegen schon.
+- **Umbenannt im AD** → Name folgt, Einstellungen bleiben.
+- Steht unter dem Namen schon eine Linux-Station, wird nichts angelegt
+  (Namenskonflikt in der Zeile unter den Knöpfen).
+
+**„Windows-Rechner eintragen“** bleibt für Rechner, die nicht im AD stehen;
+ein vorher so eingetragener wird beim Abgleich mit seinem AD-Konto verknüpft,
+ohne dass sich an Haus oder Drucker etwas ändert. Windows-Rechner haben keinen
+Agenten und kein Token: sie zählen nie als „neu“ oder „länger still“, und im
+Menü gibt es nur **Einstellen …** und **Entfernen …**.
 
 Abgefragt wird der Wert ohne Anmeldung, nur aus dem internen Netz, über
 `GET /api/stations/drucker/<rechner>` (siehe [api.md](api.md), 4.1).
