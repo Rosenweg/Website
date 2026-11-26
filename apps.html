@@ -30,6 +30,17 @@
         table.dl td.v { color: var(--leise); font-size: .9rem; white-space: nowrap; }
         a.knopf { display: inline-block; padding: 6px 12px; border-radius: 8px; background: var(--rot); color: #fff; text-decoration: none; font-size: .9rem; white-space: nowrap; }
         code { font-size: .8rem; word-break: break-all; }
+        .app { display: flex; gap: 16px; align-items: flex-start; }
+        .app + .app { border-top: 1px solid var(--linie); margin-top: 16px; padding-top: 16px; }
+        .app img { width: 64px; height: 64px; flex: none; border-radius: 14px; }
+        .app h3 { margin: 0; font-size: 1.05rem; }
+        .app .rumpf { flex: 1; min-width: 0; }
+        .knoepfe { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+        .knoepfe a.knopf { display: inline-flex; flex-direction: column; line-height: 1.25; padding: 6px 12px; }
+        .knoepfe a.knopf small { opacity: .85; font-size: .75rem; }
+        details.neu { margin-top: 8px; font-size: .9rem; }
+        details.neu summary { cursor: pointer; color: var(--leise); }
+        details.neu div { white-space: pre-wrap; margin-top: 4px; }
     </style>
 </head>
 <body>
@@ -38,7 +49,7 @@
         <img src="/logo-rosenweg.png" alt="">
         <div>
             <h1>Rosenweg-Apps</h1>
-            <div class="leise">Die Apps auf den Rosenweg-Telefonen</div>
+            <div class="leise">Für die Rosenweg-Telefone, eigene Handys und Computer</div>
         </div>
     </header>
 
@@ -51,7 +62,12 @@
         liegen auf der Anlage und kommen auf jedem Telefon mit. Beim Abmelden werden deine Daten vom Gerät entfernt.</p>
     </div>
 
-    <h2>Die Apps</h2>
+    <section id="kartenBereich" hidden>
+        <h2>Apps für Handy und Computer</h2>
+        <div class="karte" id="karten"></div>
+    </section>
+
+    <h2>Die Apps auf den Telefonen</h2>
     <div class="karte">
         <ul class="apps">
             <li><b>Rosenweg Gerät</b><span>Anmeldung, Sperre, App-Verwaltung</span></li>
@@ -73,7 +89,7 @@
         </ul>
     </div>
 
-    <h2>Herunterladen</h2>
+    <h2>Herunterladen (Android)</h2>
     <div class="karte">
         <p>Für dein eigenes Android-Handy. Auf den geteilten Telefonen hält Rosenweg Gerät die Apps selbst aktuell.</p>
         <table class="dl"><tbody id="downloads"><tr><td class="leise">Lade die Liste …</td></tr></tbody></table>
@@ -82,6 +98,7 @@
         <code id="signatur">7b3bac26e82b6103546b96861dcf1bb89b3239424ff11fdf684975cf78c5a5ae</code>);
         Updates lassen sich nur über eine App mit derselben Signatur einspielen.
         Rosenweg Telefon: nach dem Installieren im Menü „Mit Rosenweg anmelden“.</p>
+        <p class="leise">Neue Versionen kommen automatisch hierher, sobald eine App freigegeben wird.</p>
     </div>
 
     <h2>Grundlage: Fossify</h2>
@@ -102,20 +119,72 @@
 (async () => {
     const ziel = document.getElementById('downloads');
     const basis = 'https://pbx.rosenweg4303.ch';
+    const mb = b => b ? (b / 1048576).toFixed(1) + ' MB' : '';
+    // Kurzer Hinweis je Plattform unter den Knöpfen
+    const HINWEIS = {
+        'android': 'Android: APK auf dem Handy öffnen.',
+        'linux-deb': 'Linux: Debian 13 (64 Bit), installieren mit „sudo apt install ./Datei.deb“.',
+        'macos': 'macOS: DMG öffnen und die App in „Programme“ ziehen.',
+        'windows': 'Windows: Installationsprogramm starten.'
+    };
+    function el(tag, cls, text) {
+        const e = document.createElement(tag);
+        if (cls) e.className = cls;
+        if (text) e.textContent = text;
+        return e;
+    }
     try {
         const r = await fetch(basis + '/api/apps/index.json', { cache: 'no-store' });
         if (!r.ok) throw new Error(r.status);
         const d = await r.json();
         if (d.signatur_sha256) document.getElementById('signatur').textContent = d.signatur_sha256;
+
+        // Apps mit eigener Karte (Logo, Beschreibung, je Plattform ein Download)
+        const karten = d.karten || [];
+        const mitKarte = new Set(karten.map(k => k.paket));
+        if (karten.length) {
+            const box = document.getElementById('karten');
+            for (const k of karten) {
+                const app = el('div', 'app');
+                const logo = el('img');
+                logo.src = /^\/[A-Za-z0-9/_.-]+$/.test(k.logo || '') ? k.logo : '/logo-rosenweg.png';
+                logo.alt = '';
+                const rumpf = el('div', 'rumpf');
+                rumpf.append(el('h3', '', k.name), el('p', '', k.text));
+                if (k.fuer) rumpf.append(el('p', 'leise', k.fuer));
+                const knoepfe = el('div', 'knoepfe');
+                const hinweise = [];
+                for (const dl of k.downloads) {
+                    const a = el('a', 'knopf');
+                    a.href = basis + dl.url;
+                    a.setAttribute('download', '');
+                    a.append(el('span', '', dl.titel), el('small', '', ['Version ' + dl.version, mb(dl.groesse)].filter(Boolean).join(' · ')));
+                    knoepfe.append(a);
+                    if (HINWEIS[dl.plattform]) hinweise.push(HINWEIS[dl.plattform]);
+                }
+                rumpf.append(knoepfe);
+                if (hinweise.length) rumpf.append(el('p', 'leise', hinweise.join(' ')));
+                const neu = k.downloads.find(x => x.notiz);
+                if (neu) {
+                    const det = el('details', 'neu');
+                    det.append(el('summary', '', 'Neu in Version ' + neu.version), el('div', '', neu.notiz));
+                    rumpf.append(det);
+                }
+                app.append(logo, rumpf);
+                box.append(app);
+            }
+            document.getElementById('kartenBereich').hidden = false;
+        }
+
         ziel.textContent = '';
         for (const a of d.apps) {
+            if (mitKarte.has(a.paket)) continue;
             const tr = document.createElement('tr');
             const name = document.createElement('td');
             name.textContent = a.name;
             const v = document.createElement('td');
             v.className = 'v';
-            v.textContent = [a.version_name ? 'Version ' + a.version_name : '',
-                             a.groesse ? (a.groesse / 1048576).toFixed(1) + ' MB' : ''].filter(Boolean).join(' · ');
+            v.textContent = [a.version_name ? 'Version ' + a.version_name : '', mb(a.groesse)].filter(Boolean).join(' · ');
             const k = document.createElement('td');
             k.style.textAlign = 'right';
             const link = document.createElement('a');
