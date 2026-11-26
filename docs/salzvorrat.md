@@ -73,6 +73,15 @@ gibt keine Gruppe je Haus): Rosenweg 2 und 4 → `stweg7-bewohner` (beide
 STWEG 7, also dürfen Bewohner von 2 auch in 4 buchen und umgekehrt),
 Rosenweg 9 → `r9-bewohner`, Kooperation (Rosenweg 10, STWEG 4) →
 `stweg4-bewohner`. Im Portal je Lager änderbar.
+
+Menü und Stationen: Der Eintrag „Salzvorrat“ in `js/nav.js` steht für
+Technik, Präsident und die drei Bewohnergruppen oben. Die Stationen zeigen den
+Starter der App Rosenweg Salz (os-stationen, `pakete/rosenweg-salz`) genau den
+Gruppen aus `/api/stations/<id>/apps` für die Seite `rosenweg-salz`: die aus
+nav.js plus `buchungsGruppen()` — `SALZ_GRUPPEN` und die `bewohner_gruppen`
+der aktiven Lager, wie sie im Portal stehen (`api/lib/stationapps.js`,
+`ZUSATZ_GRUPPEN`). Wer im Portal eine Gruppe dazunimmt, sieht den Starter nach
+dem nächsten Lauf von install.sh auf der Station.
 Grenzen je Konto: 600 Lese- und 120 Schreibanfragen pro Stunde (429 mit
 `Retry-After`).
 

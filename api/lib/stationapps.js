@@ -273,6 +273,32 @@ function appsFuerHaus(haus) {
  */
 const IMMER_ERLAUBT = ['technik', 'praesident', 'präsident'];
 
+// Seiten, deren Rechte nicht (nur) in nav.js stehen, sondern in der Datenbank
+// gepflegt werden. Die Gruppen von hier kommen zu denen aus nav.js dazu.
+//   rosenweg-salz: wer Salz buchen darf (routes/salz.js buchungsGruppen) —
+//                  die Bewohnergruppen stehen je Lager im Portal. Die
+//                  Stationen zeigen danach den Starter der App Rosenweg Salz
+//                  (os-stationen, pakete/rosenweg-salz, SEITE=rosenweg-salz).
+// Erst beim Aufruf geladen: routes/salz.js braucht die Datenbank.
+const ZUSATZ_GRUPPEN = {
+  'rosenweg-salz': () => require('../routes/salz').buchungsGruppen(),
+};
+
+async function zusatzGruppen(apps) {
+  const raus = {};
+  for (const a of apps) {
+    const holen = ZUSATZ_GRUPPEN[a.id];
+    if (!holen) continue;
+    try {
+      raus[a.id] = (await holen()).map((g) => String(g).toLowerCase());
+    } catch (e) {
+      // Dann eben nur die Gruppen aus nav.js.
+      console.error(`[stationapps] Gruppen für ${a.id} nicht lesbar:`, e.message);
+    }
+  }
+  return raus;
+}
+
 async function gruppenJeApp(pool, { haus = null } = {}) {
   const apps = appsFuerHaus(haus);
   const rechteSeiten = [...new Set(
@@ -297,13 +323,18 @@ async function gruppenJeApp(pool, { haus = null } = {}) {
     }
   }
 
+  const zusatz = await zusatzGruppen(apps);
+
   return apps.map((a) => {
     const roh = a.rechte ? String(a.rechte) : '';
     if (!roh || !a.rechte_art) return { ...a, gruppen: [] };
 
-    const gruppen = a.rechte_art === 'gruppen'
-      ? roh.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
-      : (nachSeite[roh] || []);
+    const gruppen = [
+      ...(a.rechte_art === 'gruppen'
+        ? roh.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+        : (nachSeite[roh] || [])),
+      ...(zusatz[a.id] || []),
+    ];
 
     // Eine Seite mit benanntem Recht, das keiner Gruppe zugeordnet ist, waere
     // sonst plötzlich fuer alle sichtbar. Dann lieber nur fuer die, die

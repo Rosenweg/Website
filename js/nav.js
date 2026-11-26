@@ -63,7 +63,13 @@ const SERVICES_GROUPS = [
       { label: 'Auslagen / Vorschüsse', href: 'auslagen.html', activeKey: 'auslagen', perm: 'auslagen' },
       { label: 'Stundensatz (Auslagen)', href: 'auslagen-stundensatz.html', activeKey: 'auslagen-stundensatz', perm: 'auslagen-stundensatz' },
       { label: 'Handwerker & Lieferanten', href: 'handwerker.html', activeKey: 'handwerker', perm: 'handwerker' },
-      { label: 'Salzvorrat', href: 'salz.html', activeKey: 'salz', permAny: 'technik,praesident' },
+      // Salz buchen dürfen die Bewohner der Lager (api/routes/salz.js LAGER_START:
+      // Rosenweg 2+4 = stweg7-bewohner, 9 = r9-bewohner, Kooperation im
+      // Rosenweg 10 = stweg4-bewohner) und die Technik. Die Seite zeigt danach
+      // nur, was /api/salz/ich erlaubt. Die Stationen nehmen für den Starter
+      // der App zusätzlich die Gruppen, die im Portal je Lager stehen
+      // (api/lib/stationapps.js, ZUSATZ_GRUPPEN).
+      { label: 'Salzvorrat', href: 'salz.html', activeKey: 'salz', permAny: 'technik,praesident,stweg7-bewohner,r9-bewohner,stweg4-bewohner' },
       { label: 'Proxmox', href: 'proxmox-verwaltung.html', activeKey: 'proxmox', perm: 'proxmox-verwaltung' },
       { label: 'Stationen', href: 'stationen.html', activeKey: 'stationen', permAny: 'technik,praesident' },
       { label: 'Sicherungen', href: 'sicherungen.html', activeKey: 'sicherungen', permAny: 'technik,praesident' },
