@@ -1315,14 +1315,20 @@ let castNotfall = () => false;
 
 const castEmpfaenger = () => castw.empfaengerWahl(process.env.CAST_APP_ID);
 
-/** Was die Anzeige dieses Geräts zeigt — genau wie bei einer display-Station. */
+/**
+ * Was die Anzeige dieses Geräts zeigt — wie bei einer display-Station, nur
+ * die schlanke Seite (display-lite.html, siehe castw.castAdresse): an
+ * display.html stürzt ein Chromecast 1 ab. overrides roles.display.cast_seite
+ * = 'voll' lässt display.html stehen.
+ */
 function castZiel(st) {
   const cfg = buildConfig({ ...st, role: 'display' });
   const d = cfg.roles?.display || {};
+  const url = castw.castAdresse(d.url, d.cast_seite);
   return {
-    url: d.url,
+    url,
     reloadMinuten: Number(d.reload_interval_minutes) || 0,
-    erlaubt: castw.adresseErlaubt(d.url, d.allowed_domains),
+    erlaubt: castw.adresseErlaubt(url, d.allowed_domains),
   };
 }
 

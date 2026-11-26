@@ -16576,7 +16576,7 @@ function requireMqttTechnik(req, res, next) {
 // (/api/display/rss). Deckt auch die per Chat gesetzten Notfälle ab (message-store
 // published display/emergency direkt, nicht über /api/display/announce).
 let _apiMqttClient = null;
-const displayCache = { announcement: null, emergency: null };
+const displayCache = { announcement: null, emergency: null, announcements: null };
 function apiMqttPublishClient() {
   if (_apiMqttClient) return _apiMqttClient;
   const url = process.env.MQTT_URL;
@@ -16604,6 +16604,12 @@ function apiMqttPublishClient() {
     }, 2000);
   });
   _apiMqttClient.on('message', (topic, payload) => {
+    // Die Liste mitführen, damit /api/display/stand sie ohne MQTT herausgeben
+    // kann (display-lite.html, Chromecasts).
+    if (topic === 'display/announcements') {
+      try { const l = JSON.parse(payload.toString('utf8')); displayCache.announcements = Array.isArray(l) ? l : []; } catch { displayCache.announcements = []; }
+      return;
+    }
     const ch = topic === 'display/announcement' ? 'announcement' : topic === 'display/emergency' ? 'emergency' : null;
     if (!ch) return;
     try { displayCache[ch] = JSON.parse(payload.toString('utf8')); } catch { displayCache[ch] = null; }
@@ -16996,7 +17002,13 @@ app.get('/api/display/pdf/:name', async (req, res) => {
   } catch { res.status(404).end(); }
 });
 
-// GET /api/display/pdfbild/:name — die erste Seite als PNG. ÖFFENTLICH.
+// GET /api/display/pdfbild/:name[?dpi=100|150|200] — die erste Seite als PNG. ÖFFENTLICH.
+//
+// Ohne dpi 600 (siehe unten). Kleinere Geräte bitten um weniger: ein
+// Chromecast 1 stürzt an 4961×7016 Punkten ab (display-lite.html holt 150 dpi,
+// 1240×1754). Nur feste Stufen, damit niemand den Zwischenspeicher mit
+// beliebig vielen Fassungen füllt.
+const ANZEIGE_BILD_DPI = [100, 150, 200];
 //
 // Warum ein Bild und nicht das PDF selbst: die Anzeigetafeln laufen unter
 // Android, und deren WebView hat keinen eingebauten PDF-Betrachter. Ein
@@ -17029,7 +17041,9 @@ app.get('/api/display/pdfbild/:name', async (req, res) => {
     // Der Zeitstempel steckt im Namen: wird dieselbe Datei ersetzt, entsteht
     // ein neues Bild statt eines alten aus dem Zwischenspeicher.
     const marke = `${stat.size}-${Math.floor(stat.mtimeMs)}`;
-    const ziel = pathModule.join(ANZEIGE_BILD_CACHE, `${marke}-${name}.png`);
+    const dpiWunsch = Number(req.query.dpi);
+    const dpi = ANZEIGE_BILD_DPI.includes(dpiWunsch) ? dpiWunsch : 600;
+    const ziel = pathModule.join(ANZEIGE_BILD_CACHE, dpi === 600 ? `${marke}-${name}.png` : `${marke}-${dpi}dpi-${name}.png`);
 
     let bild = null;
     try { bild = await fs.readFile(ziel); } catch { /* noch nicht gerechnet */ }
@@ -17059,7 +17073,7 @@ app.get('/api/display/pdfbild/:name', async (req, res) => {
         // Megapunkte sind im Browser rund 140 MB Arbeitsspeicher. Auf den
         // Android-Tafeln ist das viel; wird das Bild dort leer, ist das der
         // Grund und 400 dpi (15,5 MP) waeren der Rueckzug.
-        execFile('pdftoppm', ['-png', '-r', '600', '-f', '1', '-l', '1', '-singlefile', quelle, rumpf],
+        execFile('pdftoppm', ['-png', '-r', String(dpi), '-f', '1', '-l', '1', '-singlefile', quelle, rumpf],
           { timeout: 20000 }, (err) => (err ? schiefgegangen(err) : fertig()));
       });
       await fs.rename(rumpf + '.png', ziel);
@@ -17387,6 +17401,39 @@ app.post('/api/display/announce', authMiddleware, requireMqttTechnik, async (req
       res.json({ ok: true, topic, active });
     });
   } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
+});
+
+// GET /api/display/stand?haus=N — der Stand beider Kanäle für Anzeigen ohne MQTT.
+//
+// ÖFFENTLICH wie /api/display/rss und das MQTT-Thema display/# selbst (der
+// Nur-Lese-Benutzer display-public steht im Quelltext von display.html): was
+// hier steht, hängt ohnehin im Treppenhaus. display-lite.html (Chromecasts)
+// fragt hier alle paar Sekunden nach, statt mqtt.js über WSS zu laden.
+//
+// Mit ?haus=N nur, was für dieses Haus bestimmt ist — wie meineAnkuendigungen()
+// in display.html. Kein 'by': wer etwas angelegt hat, braucht die Tafel nicht.
+// ok:false heisst, die API kennt den Stand (noch) nicht — etwa direkt nach dem
+// Start, bevor die retained Nachrichten da sind. Die Seite behält dann, was sie hat.
+app.get('/api/display/stand', (req, res) => {
+  const hausRoh = parseInt(String(req.query.haus || ''), 10);
+  const haus = Number.isInteger(hausRoh) && hausRoh > 0 ? hausRoh : null;
+  const inhalt = (d) => !!(d && d.active && (String(d.text || '').trim() || String(d.pdf || '').trim()));
+  const schlank = (d) => ({ text: String(d.text || ''), pdf: String(d.pdf || ''), ts: Number(d.ts) || 0 });
+  const em = displayCache.emergency, an = displayCache.announcement;
+  const liste = Array.isArray(displayCache.announcements) ? displayCache.announcements : null;
+  const meine = (liste || [])
+    .filter((a) => a && (String(a.text || '').trim() || String(a.pdf || '').trim()))
+    .filter((a) => !haus || !Array.isArray(a.haeuser) || !a.haeuser.length || a.haeuser.map(Number).includes(haus))
+    .map((a) => ({ id: Number(a.id) || 0, ...schlank(a) }));
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    ok: liste !== null || em !== null || an !== null,
+    jetzt: Date.now(),
+    emergency: inhalt(em) ? schlank(em) : null,
+    announcements: meine,
+    // Rückfall wie in display.html: der alte Einzelkanal, solange die Liste fehlt.
+    announcement: liste === null && inhalt(an) ? schlank(an) : null,
+  });
 });
 
 // RSS-Ticker-Feed für Digital-Signage (SlideShow-App Ticker-Zone). PUBLIC (kein

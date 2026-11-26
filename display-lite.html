@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rosenweg Anzeige (schlank)</title>
+  <link rel="icon" href="/img/logo-rosenweg-klein.png">
+  <!--
+    Die schlanke Anzeige für Geräte mit wenig Arbeitsspeicher — gebaut für den
+    Chromecast der ersten Generation (Chrome 90, 512 MB für alles). Der
+    Cast-Wächter schickt Chromecasts hierher statt auf display.html
+    (api/lib/castwaechter.js, castAdresse).
+
+    Was display.html dort umbringt, ist das Aushangbild: /api/display/pdfbild
+    rechnet ein A4 mit 600 dpi (4961x7016 Punkte, rund 140 MB entpackt). Am
+    26. November 2026 am Gerät nachgestellt: dieses Bild allein beendet die
+    App nach drei Sekunden, dieselbe Seite auf 1520 Punkte verkleinert läuft.
+    Syntax und MQTT waren es nicht — das Gerät kann ES2020 und verbindet sich.
+
+    Trotzdem bewusst schlicht, damit es auch auf dem nächsten alten Gerät läuft:
+      - reines ES5, kein Modul, keine Fremdbibliothek (kein mqtt.js)
+      - Stand per Abfrage (XHR) von /api/display/stand?haus=N alle 10 s
+        statt MQTT über WSS — die API führt den retained Stand ohnehin mit
+      - Aushangbilder mit 150 dpi (?dpi=150), Wappen als kleines PNG
+      - keine Webfonts, keine Animation, kein Blur, kein Schatten
+      - die Uhr ändert nur ihren Text; neu aufgebaut wird nur, wenn sich der
+        Inhalt ändert
+    Inhalt und Aufbau wie display.html: Ankündigungen als A4-Blatt (eines oder
+    zwei nebeneinander, Wechsel alle 15 s nach der Uhrzeit), Notfall rot über
+    den ganzen Schirm, sonst Uhr. ?haus=N wählt das Haus, ?gesperrt=1 zeigt den
+    Sperrhinweis.
+  -->
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: sans-serif; color: #f8fafc; background: #0f172a; overflow: hidden; cursor: none; }
+    #screen { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
+
+    /* Ruhezustand */
+    .idle { position: absolute; top: 50%; left: 0; right: 0; text-align: center;
+            -webkit-transform: translateY(-50%); transform: translateY(-50%); }
+    .brand { margin-bottom: 4vh; }
+    .brand img, .brand .bt { display: inline-block; vertical-align: middle; }
+    .brand img { height: 7vh; margin-right: 1.4vw; }
+    .brand .bt { text-align: left; }
+    .tt { font-weight: bold; font-size: 5vh; line-height: 1; }
+    .ss { font-size: 2.2vh; opacity: .7; margin-top: .4vh; }
+    .clock-t { font-size: 30vh; font-weight: 300; line-height: .95; }
+    .clock-t .sec { font-size: .42em; opacity: .55; margin-left: .12em; }
+    .clock-d { font-size: 5vh; font-weight: 300; opacity: .78; margin-top: 2.5vh; }
+
+    /* Aushänge */
+    .kopf { position: absolute; top: 1.5vh; left: 2.5vh; right: 2.5vh; height: 6vh; }
+    .kopf .marke { position: absolute; left: 0; top: 0; height: 6vh; }
+    .kopf .marke img, .kopf .marke .bt { display: inline-block; vertical-align: middle; }
+    .kopf .marke img { height: 5vh; margin-right: .7vw; }
+    .kopf .tt { font-size: 2.8vh; line-height: 1.1; }
+    .kopf .ss { font-size: 1.4vh; margin: 0; }
+    #uhr { position: absolute; right: 0; top: 0; text-align: right; font-weight: 300;
+           font-size: 3.4vh; line-height: 1.1; color: rgba(248,250,252,.92); }
+    #uhr .dat { display: block; font-size: .42em; opacity: .6; }
+    .reihe { position: absolute; top: 9vh; bottom: 2.5vh; left: 2.5vh; right: 2.5vh; text-align: center; white-space: nowrap; }
+    .blatt { display: inline-block; vertical-align: top; white-space: normal; position: relative;
+             background: #fff; color: #333; overflow: hidden; border-radius: .8vh; }
+    .blatt + .blatt { margin-left: 2.5vh; }
+    .blatt-titel { position: absolute; top: 0; left: 0; right: 0; color: #CC0000; font-weight: bold;
+                   text-align: center; padding: .7em 1em; border-bottom: 1px solid #ddd; background: #fff;
+                   font-size: 1.9vh; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .blatt-bild { position: absolute; left: 0; right: 0; bottom: 0; top: 0; text-align: center; background: #fff; }
+    .blatt-bild img { max-width: 100%; max-height: 100%; }
+    .briefkopf { position: absolute; top: 5%; left: 7%; right: 7%; padding-bottom: .6em;
+                 border-bottom: 1px solid #ddd; font-size: 2.1vh; text-align: left; }
+    .briefkopf img, .briefkopf .bt { display: inline-block; vertical-align: middle; }
+    .briefkopf img { height: 2.4em; margin-right: .8em; }
+    .briefkopf .wm { color: #CC0000; font-weight: bold; font-size: 1.15em; line-height: 1.1; }
+    .briefkopf .ort { color: #595959; font-size: .72em; }
+    /* Der Textbereich unter dem Briefkopf; fitText zieht die Schrift auf die Fläche. */
+    .kasten { position: absolute; left: 7%; right: 7%; bottom: 5%; overflow: hidden; text-align: center;
+              font-weight: bold; line-height: 1.2; word-wrap: normal; }
+    .kasten .fit { display: inline-block; }
+
+    /* Notfall: rot, ganzer Schirm, ohne Puls */
+    .notfall { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: #c81e1e; color: #fff;
+               border: 1vh solid #fff; text-align: center; }
+    .notfall .sym { position: absolute; top: 5vh; left: 0; right: 0; height: 16vh; }
+    .notfall .sym svg { height: 16vh; width: 16vh; }
+    .notfall .kick { position: absolute; top: 23vh; left: 0; right: 0; font-size: 5vh; font-weight: bold;
+                     letter-spacing: .16em; text-transform: uppercase; }
+    .notfall .kasten { top: 33vh; left: 5vh; right: 5vh; bottom: 5vh; line-height: 1.1; word-wrap: break-word; }
+    .notfall .pdf-titel { position: absolute; top: 31vh; left: 5vh; right: 5vh; font-weight: bold; font-size: 2.6vh; }
+    .notfall .bild { position: absolute; top: 36vh; left: 5vh; right: 5vh; bottom: 4vh; }
+    .notfall .bild img { max-width: 100%; max-height: 100%; background: #fff; border-radius: 1vh; }
+
+    #stat { position: absolute; bottom: 1.6vh; right: 1.8vh; font-size: 1.6vh; color: rgba(255,255,255,.5); }
+    #stat .dot { display: inline-block; width: 1.2vh; height: 1.2vh; border-radius: 50%; background: #94a3b8;
+                 margin-right: .6vh; vertical-align: middle; }
+    #stat.ok .dot { background: #34d399; }
+    #stat.err .dot { background: #f87171; }
+    #age { position: absolute; bottom: 1.6vh; left: 1.8vh; font-size: 1.6vh; color: rgba(255,255,255,.4); }
+    body.emergency #stat, body.emergency #age { color: rgba(255,255,255,.7); }
+    #sperrhinweis { position: absolute; bottom: 5vh; right: 1.8vh; display: none; padding: .35em .9em;
+                    border-radius: 999px; background: rgba(204,0,0,.14); border: 1px solid rgba(204,0,0,.45);
+                    color: rgba(255,214,214,.92); font-size: 1.6vh; }
+    body.gesperrt #sperrhinweis { display: block; }
+  </style>
+</head>
+<body>
+  <div id="screen"></div>
+  <div id="sperrhinweis">Station gesperrt — ausser Dienst</div>
+  <div id="age"></div>
+  <div id="stat"><span class="dot"></span><span id="stat-t">verbinde…</span></div>
+
+  <script>
+  (function () {
+    'use strict';
+
+    var ABFRAGE_MS = 10000;     // Stand holen; einen Notfall-Wechsel stösst der Wächter ohnehin an
+    var ROTATION_MS = 15000;    // wie display.html
+    var BILD_DPI = 150;         // A4 = 1240x1754: scharf genug für 720p, klein genug fürs Gerät
+    var LOGO = '/img/logo-rosenweg-klein.png';
+    var WD = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
+    var MO = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+
+    function $(id) { return document.getElementById(id); }
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+    function zwei(x) { return (x < 10 ? '0' : '') + x; }
+    function trim(s) { return String(s || '').replace(/^\s+|\s+$/g, ''); }
+
+    function param(name) {
+      var m = new RegExp('[?&]' + name + '=([^&#]*)').exec(location.search);
+      return m ? decodeURIComponent(m[1]) : null;
+    }
+    var MEIN_HAUS = (function () {
+      var n = parseInt(param('haus'), 10);
+      return n > 0 ? n : null;
+    })();
+    if (param('gesperrt') === '1') document.body.className += ' gesperrt';
+
+    var stand = { emergency: null, announcements: [], announcement: null };
+    var zuletztOk = 0, fehler = false, geladenAm = Date.now();
+    var gezeigt = { art: null, sig: null };
+    var aktuellTs = 0;
+
+    function hatInhalt(d) { return !!(d && (trim(d.text) || trim(d.pdf))); }
+    function bildVon(pdf) {
+      return pdf.replace('/api/display/pdf/', '/api/display/pdfbild/') + '?dpi=' + BILD_DPI;
+    }
+
+    // ===== Was gezeigt wird =====
+    function blaetterProSchirm() {
+      var h = window.innerHeight * 0.88, b = h * (210 / 297);
+      return (b * 2 + window.innerHeight * 0.025) <= window.innerWidth * 0.95 ? 2 : 1;
+    }
+
+    function auswahl() {
+      if (hatInhalt(stand.emergency)) return { art: 'notfall', d: stand.emergency };
+      var liste = [], i;
+      for (i = 0; i < (stand.announcements || []).length; i++) {
+        if (hatInhalt(stand.announcements[i])) liste.push(stand.announcements[i]);
+      }
+      if (!liste.length && hatInhalt(stand.announcement)) liste.push(stand.announcement);
+      if (!liste.length) return { art: 'idle' };
+      var n = Math.min(blaetterProSchirm(), liste.length);
+      var takt = Math.floor(Date.now() / ROTATION_MS);
+      var start = (takt * n) % liste.length, teil = [];
+      for (i = 0; i < n; i++) teil.push(liste[(start + i) % liste.length]);
+      return { art: 'aushang', liste: teil };
+    }
+
+    // ===== Zeichnen =====
+    function marke(cls) {
+      return '<div class="' + cls + '"><img src="' + LOGO + '" alt="" onerror="this.style.display=\'none\'">' +
+        '<div class="bt"><div class="tt">Rosenweg</div><div class="ss">Kaiseraugst</div></div></div>';
+    }
+
+    function zeichneIdle() {
+      document.body.className = document.body.className.replace(/\s*emergency/g, '');
+      $('screen').innerHTML = '<div class="idle">' + marke('brand') +
+        '<div class="clock-t" id="c-t"></div><div class="clock-d" id="c-d"></div></div>';
+      uhr();
+    }
+
+    function blattHtml(a, b, h) {
+      var text = trim(a.text), pdf = trim(a.pdf);
+      var stil = ' style="width:' + b + 'px;height:' + h + 'px"';
+      if (pdf) {
+        var oben = text ? Math.round(h * 0.045) + 'px' : '0';
+        return '<div class="blatt"' + stil + '>' +
+          (text ? '<div class="blatt-titel">' + esc(text) + '</div>' : '') +
+          '<div class="blatt-bild" style="top:' + oben + '"><img src="' + esc(bildVon(pdf)) + '" alt="Aushang"></div></div>';
+      }
+      return '<div class="blatt"' + stil + '>' +
+        '<div class="briefkopf"><img src="' + LOGO + '" alt="" onerror="this.style.display=\'none\'">' +
+        '<div class="bt"><div class="wm">Rosenweg Kaiseraugst</div><div class="ort">Stockwerkeigentümergemeinschaft</div></div></div>' +
+        '<div class="kasten" style="top:' + Math.round(h * 0.2) + 'px"><span class="fit">' + esc(text) + '</span></div></div>';
+    }
+
+    function zeichneAushaenge(liste) {
+      document.body.className = document.body.className.replace(/\s*emergency/g, '');
+      // Grösse ausrechnen: erst an der Höhe, wird es zu breit, an der Breite.
+      var platzH = window.innerHeight * 0.885, abstand = window.innerHeight * 0.025;
+      var platzB = window.innerWidth - window.innerHeight * 0.05 - abstand * (liste.length - 1);
+      var h = platzH, b = h * (210 / 297);
+      if (b * liste.length > platzB) { b = platzB / liste.length; h = b * (297 / 210); }
+      b = Math.floor(b); h = Math.floor(h);
+      var html = '<div class="kopf">' + marke('marke') + '<div id="uhr"></div></div><div class="reihe">';
+      for (var i = 0; i < liste.length; i++) html += blattHtml(liste[i], b, h);
+      $('screen').innerHTML = html + '</div>';
+      uhr();
+      fitText();
+    }
+
+    function warnzeichen() {
+      return '<svg viewBox="0 0 100 90"><path d="M50 4 L97 86 L3 86 Z" fill="#fff"/>' +
+        '<rect x="45" y="30" width="10" height="32" fill="#c81e1e"/><rect x="45" y="68" width="10" height="10" fill="#c81e1e"/></svg>';
+    }
+
+    function zeichneNotfall(d) {
+      if (!/emergency/.test(document.body.className)) document.body.className += ' emergency';
+      var text = trim(d.text), pdf = trim(d.pdf);
+      var html = '<div class="notfall"><div class="sym">' + warnzeichen() + '</div><div class="kick">Notfall · Achtung</div>';
+      if (pdf) {
+        html += (text ? '<div class="pdf-titel">' + esc(text) + '</div>' : '') +
+          '<div class="bild"><img src="' + esc(bildVon(pdf)) + '" alt="Notfall"></div>';
+      } else {
+        html += '<div class="kasten"><span class="fit">' + esc(text) + '</span></div>';
+      }
+      $('screen').innerHTML = html + '</div>';
+      fitText();
+    }
+
+    // Grösste Schrift, bei der der ganze Text in seinen Kasten passt (Binärsuche).
+    function fitText() {
+      var spans = document.querySelectorAll('#screen .fit');
+      for (var k = 0; k < spans.length; k++) {
+        var span = spans[k], box = span.parentNode;
+        var w = box.clientWidth, h = box.clientHeight;
+        if (w < 2 || h < 2) continue;
+        var lo = 8, hi = h;
+        for (var i = 0; i < 14; i++) {
+          var mid = (lo + hi) / 2;
+          span.style.fontSize = mid + 'px';
+          if (box.scrollWidth <= w && box.scrollHeight <= h) lo = mid; else hi = mid;
+        }
+        span.style.fontSize = Math.floor(lo) + 'px';
+      }
+    }
+
+    function render() {
+      var a = auswahl(), sig;
+      if (a.art === 'idle') sig = 'idle';
+      else if (a.art === 'notfall') sig = 'n|' + a.d.text + '|' + a.d.pdf;
+      else {
+        sig = 'a';
+        for (var i = 0; i < a.liste.length; i++) sig += '|' + a.liste[i].text + '|' + a.liste[i].pdf;
+      }
+      sig += '|' + window.innerWidth + 'x' + window.innerHeight;
+      if (sig !== gezeigt.sig) {
+        gezeigt = { art: a.art, sig: sig };
+        if (a.art === 'idle') zeichneIdle();
+        else if (a.art === 'notfall') zeichneNotfall(a.d);
+        else zeichneAushaenge(a.liste);
+      }
+      if (a.art === 'idle') aktuellTs = 0;
+      else if (a.art === 'notfall') aktuellTs = Number(a.d.ts) || 0;
+      else {
+        aktuellTs = 0;
+        for (var j = 0; j < a.liste.length; j++) aktuellTs = Math.max(aktuellTs, Number(a.liste[j].ts) || 0);
+      }
+    }
+
+    // Nur Text setzen — die Seite wird dafür nicht neu aufgebaut.
+    function uhr() {
+      var n = new Date();
+      var hm = zwei(n.getHours()) + ':' + zwei(n.getMinutes());
+      var datum = WD[n.getDay()] + ', ' + n.getDate() + '. ' + MO[n.getMonth()];
+      var t = $('c-t'), d = $('c-d'), u = $('uhr');
+      if (t) t.innerHTML = hm + '<span class="sec">' + zwei(n.getSeconds()) + '</span>';
+      if (d) d.textContent = datum + ' ' + n.getFullYear();
+      if (u) u.innerHTML = hm + '<span class="dat">' + datum + '</span>';
+    }
+
+    function alter() {
+      var el = $('age');
+      if (!aktuellTs) { el.textContent = ''; return; }
+      var s = Math.max(0, Math.round((Date.now() - aktuellTs) / 1000)), t;
+      if (s < 60) t = 'gerade eben';
+      else if (s < 3600) t = 'vor ' + Math.round(s / 60) + ' Min';
+      else if (s < 86400) t = 'vor ' + Math.round(s / 3600) + ' Std';
+      else t = 'vor ' + Math.round(s / 86400) + ' Tg';
+      el.textContent = 'aktualisiert ' + t;
+    }
+
+    function status() {
+      var cls, txt;
+      if (!zuletztOk) { cls = fehler ? 'err' : ''; txt = fehler ? 'keine Verbindung' : 'verbinde…'; }
+      else if (Date.now() - zuletztOk > 3 * ABFRAGE_MS + 5000) { cls = 'err'; txt = 'keine Daten'; }
+      else { cls = 'ok'; txt = 'live'; }
+      $('stat').className = cls;
+      $('stat-t').textContent = txt;
+    }
+
+    // ===== Stand holen =====
+    function holen(url, fertig) {
+      var x = new XMLHttpRequest();
+      x.open('GET', url, true);
+      x.timeout = 8000;
+      x.onreadystatechange = function () {
+        if (x.readyState !== 4) return;
+        fertig(x.status >= 200 && x.status < 300 ? x.responseText : null);
+      };
+      x.send();
+    }
+
+    function abfragen() {
+      holen('/api/display/stand' + (MEIN_HAUS ? '?haus=' + MEIN_HAUS : '') + (MEIN_HAUS ? '&' : '?') + '_=' + Date.now(), function (txt) {
+        var d = null;
+        try { d = txt ? JSON.parse(txt) : null; } catch (e) { d = null; }
+        if (!d) { fehler = true; status(); return; }
+        fehler = false;
+        zuletztOk = Date.now();
+        // ok:false heisst: die API kennt den Stand noch nicht (gerade neu
+        // gestartet). Dann behalten, was da ist, statt die Tafel zu leeren.
+        if (d.ok !== false) {
+          stand.emergency = d.emergency || null;
+          stand.announcements = d.announcements || [];
+          stand.announcement = d.announcement || null;
+        }
+        render();
+        status();
+      });
+    }
+
+    // ===== Sich selbst auf den neuen Stand bringen =====
+    // Wie display.html: alle fünf Minuten die eigene Datei holen und mit dem
+    // Stand beim Laden vergleichen. Dazu nach zwölf Stunden ohnehin einmal neu
+    // laden, damit das Gerät nicht wochenlang an derselben Seite Speicher
+    // sammelt. Neu geladen wird nur, wenn die Datei eben erreichbar war — eine
+    // Fehlerseite bliebe auf dem Chromecast stehen, bis jemand den Stecker
+    // zieht. Und nie während eines Notfalls.
+    var eigenerStand = null;
+    function pruefsumme(s) {
+      var x = 0;
+      for (var i = 0; i < s.length; i++) x = (x * 31 + s.charCodeAt(i)) | 0;
+      return s.length + ':' + x;
+    }
+    function nachsehen() {
+      holen(location.pathname + '?_=' + Date.now(), function (txt) {
+        if (!txt) return;
+        var jetzt = pruefsumme(txt);
+        if (eigenerStand === null) { eigenerStand = jetzt; return; }
+        var alt = Date.now() - geladenAm > 12 * 3600 * 1000;
+        if (jetzt === eigenerStand && !alt) return;
+        if (hatInhalt(stand.emergency)) return;
+        location.reload();
+      });
+    }
+
+    var resizeTimer = null;
+    window.onresize = function () {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(render, 300);
+    };
+
+    render();
+    status();
+    abfragen();
+    nachsehen();
+    setInterval(abfragen, ABFRAGE_MS);
+    setInterval(nachsehen, 5 * 60 * 1000);
+    // Sekundentakt: Uhr, und der Wechsel zum nächsten Blatt. render() baut nur
+    // neu, wenn sich etwas geändert hat.
+    setInterval(function () { render(); uhr(); alter(); status(); }, 1000);
+  })();
+  </script>
+</body>
+</html>

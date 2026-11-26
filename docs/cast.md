@@ -6,8 +6,8 @@ Ein Chromecast (1., 2. Generation, nur Cast-Firmware) ist für Technik eine
 
 | | Station `display` | Chromecast |
 |---|---|---|
-| Seite | `display.rosenweg4303.ch?haus=N` | dieselbe (aus `buildConfig`, Rolle `display`) |
-| Ankündigungen / Notfall | display.html abonniert `display/#` (retained) | dasselbe — es läuft dieselbe Seite |
+| Seite | `display.rosenweg4303.ch?haus=N` | `display-lite.html?haus=N` auf demselben Host (aus `buildConfig`, Rolle `display`, dann `castAdresse`) |
+| Ankündigungen / Notfall | display.html abonniert `display/#` (retained) | display-lite.html fragt `/api/display/stand?haus=N` alle 10 s (dieselben retained Stände, von der API mitgeführt) |
 | Haus, Standort, Notiz, overrides | `/stationen` | `/stationen` (Art „Anzeige (Chromecast)") |
 | Neuladen | `station-display-reload`, `reload_interval_minutes` | der Empfänger, mit demselben Wert |
 | Hält die Seite offen | Kiosk-Sitzung (cage + Chromium) | **Cast-Wächter** der API |
@@ -16,6 +16,24 @@ Ein Chromecast (1., 2. Generation, nur Cast-Firmware) ist für Technik eine
 Es gibt keine freie Adresse, keine Diashow und keine Lautstärke je Gerät —
 wer die Adresse ändern muss, tut es wie bei einer Station in den overrides
 (`roles.display.url`, nur Hosts aus `roles.display.allowed_domains`).
+
+### Warum display-lite.html
+
+Am 26. November 2026 am Chromecast 1 (Firmware 1.56, Chrome 90) nachgestellt:
+display.html startet, verbindet MQTT, und die App endet zwei bis drei Sekunden
+später. Schuld ist das Aushangbild — `/api/display/pdfbild` liefert ein A4 mit
+600 dpi (4961×7016, rund 140 MB entpackt). Eine leere Seite mit nur diesem
+Bild stürzt genauso ab, mit demselben Bild auf 1520 Punkte verkleinert läuft
+sie. Syntax und MQTT sind es nicht (Chrome 90 kann ES2020).
+
+Der Wächter schickt Chromecasts deshalb auf `display-lite.html` (Abbildung in
+`castw.castAdresse`: `/` und `/display.html` → `/display-lite.html`, Haus und
+übrige Parameter bleiben). Die Seite ist reines ES5 ohne Bibliothek, holt den
+Stand per XHR von `GET /api/display/stand?haus=N` (öffentlich wie der
+RSS-Feed) und die Aushangbilder mit `?dpi=150`. `overrides`
+`roles.display.cast_seite: "voll"` lässt display.html stehen (für neuere
+Geräte); eine von Hand gesetzte andere Seite in `roles.display.url` bleibt
+unverändert.
 
 ## Aufbau
 
@@ -190,10 +208,9 @@ Standort. Danach erscheint er in der Stationsliste wie eine Station;
 
 ## Offen / zu prüfen am Gerät
 
-- **Chromecast 1 und display.html**: Das Chrome auf Chromecast 1 ist alt.
-  display.html nutzt moderne Syntax (optional catch binding, async/await) und
-  mqtt.min.js v5. Ob sie dort läuft, zeigt erst der erste echte Start — falls
-  nicht, braucht es eine schlanke Fassung der Anzeige (ohne neue Syntax).
+- **Chromecast 1 und display.html**: geklärt, siehe „Warum display-lite.html".
+  Das 600-dpi-Aushangbild bringt auch andere schwache Geräte an die Grenze;
+  display.html könnte ebenfalls `?dpi=…` nutzen, falls eine Tafel leer bleibt.
 - **CAF auf Chromecast 1**: Der Empfänger lädt SDK v3 und fällt bei Fehler
   auf v2 zurück; ob v3 auf Firmware 1.56 startet, am Gerät prüfen.
 - **DashCast nach Navigation**: ob die Firmware die App nach `force`

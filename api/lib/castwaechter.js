@@ -202,6 +202,29 @@ function adresseErlaubt(url, erlaubt) {
   } catch { return false; }
 }
 
+/**
+ * Welche Seite ein Chromecast bekommt: die schlanke Anzeige statt display.html.
+ *
+ * Ein Chromecast der ersten Generation (Chrome 90, 512 MB für alles) stürzt
+ * an display.html ab — nicht an der Syntax und nicht an MQTT, sondern am
+ * Aushangbild: /api/display/pdfbild rechnet ein A4 mit 600 dpi
+ * (4961×7016, rund 140 MB entpackt). Lädt er das, beendet das Gerät die App
+ * binnen Sekunden (am 26. November 2026 am Gerät nachgestellt). display-lite.html
+ * holt dieselben Aushänge in kleiner Auflösung, ohne Fremdbibliothek.
+ *
+ * Abgebildet wird nur die Anzeige selbst (/ und /display.html); eine von Hand
+ * überschriebene andere Adresse bleibt, wie sie ist. seite 'voll' (overrides
+ * roles.display.cast_seite) lässt display.html stehen — für neuere Geräte.
+ */
+const LITE_PFAD = '/display-lite.html';
+function castAdresse(url, seite) {
+  if (seite === 'voll' || !url) return url;
+  let u;
+  try { u = new URL(url); } catch { return url; }
+  if (u.pathname !== '/' && u.pathname !== '' && u.pathname !== '/display.html') return url;
+  return `${u.protocol}//${u.host}${LITE_PFAD}${u.search}${u.hash}`;
+}
+
 /** IPv4 oder Hostname — nichts, was nach Pfad, Port oder Schema aussieht. */
 function adressePruefen(roh) {
   const a = String(roh || '').trim().toLowerCase();
@@ -220,4 +243,5 @@ module.exports = {
   DASHCAST, EIGEN_NAMESPACE, LEERLAUF_APPS,
   empfaengerWahl, ladeNachricht, vordergrund, istLeerlauf, startpause,
   entscheiden, gestartet, gescheitert, adresseErlaubt, adressePruefen, macPruefen,
+  LITE_PFAD, castAdresse,
 };
