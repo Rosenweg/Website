@@ -15,6 +15,8 @@ Abhaengigkeit zur Haupt-API fuer den Betrieb. Zwei Auth-Welten:
 SIP-Telefone (LAN/VPN): aus der sip_extensions-Tabelle generiert die API
 /etc/asterisk/pjsip_phones.conf und triggert 'pjsip reload' via AMI.
 """
+import base64
+import binascii
 import hashlib
 import hmac
 import ipaddress
@@ -23,15 +25,21 @@ import time
 import os
 import re
 import secrets as pysecrets
+import shutil
 from datetime import datetime, timedelta, timezone
 from xml.sax.saxutils import escape as xesc
 from zoneinfo import ZoneInfo
 
 import requests
 import segno
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from flask import Flask, Response, jsonify, request, send_file, send_from_directory
 
+import adb_updater
 import ami
+import apk
 import db
 import nummernvergabe
 import voicemail
@@ -676,7 +684,7 @@ def config_put():
         return deny
     b = request.get_json(silent=True) or {}
     allowed = {"hours_open_from", "hours_open_to", "ring_timeout", "weekdays", "telefon_gruppen",
-               "telefon_ausblenden", "telefon_unsichtbar"}
+               "telefon_ausblenden", "telefon_unsichtbar", "portal_pfade"}
     import re as _re
     hhmm = _re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
     for k, v in b.items():
@@ -690,6 +698,15 @@ def config_put():
             return jsonify({"error": "telefon_ausblenden: Paketnamen durch Komma getrennt"}), 400
         if k == "telefon_gruppen" and not _re.fullmatch(r"[\w äöüÄÖÜ,.-]{0,300}", str(v)):
             return jsonify({"error": "telefon_gruppen: Gruppennamen durch Komma getrennt"}), 400
+        if k == "portal_pfade":
+            try:
+                r = json.loads(str(v))
+            except ValueError:
+                return jsonify({"error": "portal_pfade ist kein gueltiges JSON"}), 400
+            if not isinstance(r, dict) or not all(
+                    isinstance(e, list) and all(isinstance(x, str) and "/api/" in x and len(x) < 200 for x in e)
+                    for e in r.values()):
+                return jsonify({"error": "portal_pfade: {paket: [\"/api/...\", \"GET /api/...\"]}"}), 400
     conn = db.connect()
     try:
         for k, v in b.items():
@@ -1343,8 +1360,16 @@ def telefon_status():
         bis = int(w["wlan_debug_bis"]) if w and int(w["wlan_debug_bis"] or 0) > time.time() else 0
         # technik: Geraete-App sperrt die gefaehrlichen Einstellungen nur fuer alle anderen
         # wlan_debug_bis: zentral eingeschaltetes "Debugging ueber WLAN" (epoch s, 0 = aus)
+        # adb_dienst: Updater-Schluessel jetzt zulassen (ab Geraet v237 bestaetigt die
+        # Bedienungshilfe "USB-Debugging zulassen?" nur fuer genau diesen Fingerabdruck)
+        extra = {}
+        u = conn.execute("SELECT freigabe_bis, zugelassen FROM telefon_updater WHERE ext = ?", (ext,)).fetchone()
+        if u and not u["zugelassen"] and int(u["freigabe_bis"] or 0) > time.time() and bis:
+            fp = adb_updater.fingerabdruck()
+            if fp:
+                extra["adb_dienst"] = {"fingerabdruck": fp, "bis": int(u["freigabe_bis"])}
         return jsonify({"ext": ext, "geraet": geraet["name"] if geraet else ext, "technik": technik,
-                        "wlan_debug_bis": bis, **_sitzung_json(row), **_apps_fuer(conn, row)})
+                        "wlan_debug_bis": bis, **extra, **_sitzung_json(row), **_apps_fuer(conn, row)})
     finally:
         conn.close()
 
@@ -1434,7 +1459,7 @@ def telefon_sip_person():
 # PKCE) und holt hier einen festen Zugang <nummer>-p<id>. Ohne Sitzung an einem geteilten
 # Telefon; er bleibt, bis die App abmeldet, Technik ihn loescht oder die Nummer inaktiv wird.
 SIP_PRIVAT_RE = re.compile(r"3[0-9]{5}-p[0-9]{1,6}")
-SIP_PRIVAT_MAX = 5   # Handys pro Person
+SIP_PRIVAT_MAX = int(os.environ.get("SIP_PRIVAT_MAX", "20"))   # Handys pro Person (Stefan 26.11.2026: 20, jede App meldet sich einzeln an)
 
 
 def _sip_privat_abschnitte(conn):
@@ -2042,6 +2067,144 @@ APPS_OEFFENTLICH_OHNE = {"ch.rosenweg4303.telefon"}
 APPS_HERKUNFT = {"https://www.rosenweg4303.ch", "https://rosenweg4303.ch"}
 
 
+APPS_SIGNATUR_SHA256 = apk.SIGNATUR_SHA256
+
+# ─── Weitere Rosenweg-Apps auf /apps (Stefan 26.11.2026: "jede App gehoert auf /apps") ───
+# Apps mit eigenem Repo (Flutter), die es fuer mehrere Plattformen gibt. Ihre Dateien kommen
+# nicht aus dem Katalog der geteilten Telefone, sondern
+#   - von der CI der App bei einem Release-Tag (POST /api/apps/release): sie meldet sich mit dem OIDC-Token
+#     von GitHub Actions an (kein gespeichertes Geheimnis; geprueft werden Signatur, Repo, Tag),
+#   - oder von der Technik von Hand (POST /api/pbx/apps-versionen/..., z.B. ein DMG ohne CI).
+# Android-APKs muessen mit dem Rosenweg-Schluessel signiert sein und den Paketnamen aus dem
+# Register tragen. Steht die App auch im Katalog der geteilten Telefone, wird dort dieselbe
+# APK eingespielt (die Freigabe fuer die Telefone und ihre Gruppen bleibt Sache der Technik).
+#
+# Neue App: Eintrag hier, Logo nach www img/apps/<app>.png, Schritt "Auf /apps" in der CI
+# (Action Rosenweg/Website/.github/actions/apps-release). Erst mit einer Datei erscheint sie.
+APPS_REGISTER = {
+    "vm": {
+        "name": "Rosenweg Virtuelle Computer", "repo": "Rosenweg/rosenweg-vm", "paket": "ch.rosenweg4303.vm",
+        "logo": "/img/apps/rosenweg-vm.png", "reihenfolge": 10,
+        "text": "Die eigenen virtuellen Computer der Anlage öffnen – im Haus und unterwegs, "
+                "mit Ton, USB-Geräten und freigegebenen Ordnern.",
+        "fuer": "Für alle, denen die Technik einen virtuellen Computer eingerichtet hat.",
+    },
+    "salz": {
+        "name": "Rosenweg Salz", "repo": "Rosenweg/rosenweg-salz", "paket": "ch.rosenweg4303.salz",
+        "logo": "/img/apps/rosenweg-salz.png", "reihenfolge": 20,
+        "text": "Salzvorrat der Enthärtungsanlagen: Anlieferung und eingefüllte Säcke mit dem "
+                "Barcode buchen, Bestand und Reichweite je Lager.",
+        "fuer": "Buchen dürfen die Bewohner von Rosenweg 2, 4 und 9, die Kooperation (Lager im "
+                "Rosenweg 10) und die Technik. Alle anderen sehen nur einen Hinweis.",
+    },
+    # Noch kein Repo/Release (26.11.2026): steht bereit, erscheint mit der ersten Datei.
+    "profil": {
+        "name": "Rosenweg Profil", "repo": "Rosenweg/rosenweg-profil", "paket": "ch.rosenweg4303.profil",
+        "logo": "/img/apps/rosenweg-profil.png", "reihenfolge": 30,
+        "text": "Die eigenen Angaben im Rosenweg-Portal ansehen und ändern.",
+        "fuer": "",
+    },
+}
+APPS_PLATTFORMEN = {
+    # endung -> Kennbytes am Anfang (DMG: Kennung "koly" im letzten 512-Byte-Block)
+    "android":   {"titel": "Android", "endungen": {".apk": b"PK\x03\x04"},
+                  "mime": "application/vnd.android.package-archive"},
+    "linux-deb": {"titel": "Linux (Debian 13)", "endungen": {".deb": b"!<arch>\ndebian-binary"},
+                  "mime": "application/vnd.debian.binary-package"},
+    "macos":     {"titel": "macOS", "endungen": {".dmg": None}, "mime": "application/x-apple-diskimage"},
+    "windows":   {"titel": "Windows", "endungen": {".exe": b"MZ", ".msi": b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"},
+                  "mime": "application/octet-stream"},
+}
+# Katalog-Apps (geteilte Telefone + Tabelle auf /apps): Repo -> Paketname. Ihre Releases ersetzen
+# die APK im Katalog; anlegen, Gruppen und "aktiv" bleiben Sache der Technik (/smartphones).
+APPS_KATALOG_REPOS = {
+    "Rosenweg/calculator-rosenweg": "ch.rosenweg4303.math",
+    "Rosenweg/calendar-rosenweg": "ch.rosenweg4303.calendar",
+    "Rosenweg/camera-rosenweg": "ch.rosenweg4303.camera",
+    "Rosenweg/clock-rosenweg": "ch.rosenweg4303.clock",
+    "Rosenweg/contacts-rosenweg": "ch.rosenweg4303.contacts",
+    "Rosenweg/documents-rosenweg": "ch.rosenweg4303.documents",
+    "Rosenweg/file-manager-rosenweg": "ch.rosenweg4303.filemanager",
+    "Rosenweg/gallery-rosenweg": "ch.rosenweg4303.gallery",
+    "Rosenweg/launcher-rosenweg": "ch.rosenweg4303.home",
+    "Rosenweg/messages-rosenweg": "ch.rosenweg4303.messages",
+    "Rosenweg/notes-rosenweg": "ch.rosenweg4303.notes",
+    "Rosenweg/paint-rosenweg": "ch.rosenweg4303.paint",
+    "Rosenweg/phone-rosenweg": "ch.rosenweg4303.phone",
+    "Rosenweg/voice-recorder-rosenweg": "ch.rosenweg4303.voicerecorder",
+    "Rosenweg/keyboard-rosenweg": "ch.rosenweg4303.keyboard",
+    "Rosenweg/rosenweg-karten": "ch.rosenweg4303.karten",
+    "Rosenweg/android-sip-rosenweg": "ch.rosenweg4303.telefon",   # Rosenweg Geraet: nur Katalog, nicht oeffentlich
+}
+APPS_BEHALTEN = 3          # Fassungen je App und Plattform (die aktuelle eingeschlossen)
+APPS_DATEIEN_DIR = os.path.join(TELEFON_APPS_DIR, "dateien")
+APPS_DATEI_MAX = 600 * 1024 * 1024
+_VERSION = re.compile(r"[0-9]+(\.[0-9]+){1,3}([-+.][0-9A-Za-z.]{1,20})?")
+
+# GitHub Actions OIDC: https://docs.github.com/actions/security-for-github-actions/security-hardening-your-deployments/about-security-hardening-with-openid-connect
+GITHUB_OIDC_ISS = "https://token.actions.githubusercontent.com"
+APPS_OIDC_AUD = os.environ.get("PBX_APPS_OIDC_AUD", "https://pbx.rosenweg4303.ch/api/apps")
+_GITHUB_JWKS = {"zeit": 0.0, "keys": {}}
+
+
+def _b64_lesen(s):
+    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+
+
+def _jwt_teile(token):
+    """(kopf, claims, teile) ohne Pruefung oder None."""
+    try:
+        teile = token.split(".")
+        if len(teile) != 3:
+            return None
+        return json.loads(_b64_lesen(teile[0])), json.loads(_b64_lesen(teile[1])), teile
+    except (ValueError, binascii.Error, UnicodeDecodeError):
+        return None
+
+
+def _github_schluessel(kid):
+    jetzt = time.time()
+    if (kid not in _GITHUB_JWKS["keys"] or jetzt - _GITHUB_JWKS["zeit"] > 3600) and jetzt - _GITHUB_JWKS["zeit"] > 60:
+        try:
+            r = requests.get(GITHUB_OIDC_ISS + "/.well-known/jwks", timeout=10)
+            r.raise_for_status()
+            _GITHUB_JWKS["keys"] = {k["kid"]: k for k in r.json().get("keys", []) if k.get("kty") == "RSA" and k.get("kid")}
+            _GITHUB_JWKS["zeit"] = jetzt
+        except (requests.RequestException, ValueError, KeyError):
+            app.logger.warning("GitHub-JWKS nicht ladbar")
+    return _GITHUB_JWKS["keys"].get(kid)
+
+
+def _github_oidc(token):
+    """Claims eines gueltigen GitHub-Actions-OIDC-Tokens fuer APPS_OIDC_AUD, sonst None."""
+    t = _jwt_teile(token)
+    if not t:
+        return None
+    kopf, claims, teile = t
+    if kopf.get("alg") != "RS256" or claims.get("iss") != GITHUB_OIDC_ISS:
+        return None
+    jwk = _github_schluessel(str(kopf.get("kid", "")))
+    if not jwk:
+        return None
+    try:
+        schluessel = rsa.RSAPublicNumbers(int.from_bytes(_b64_lesen(jwk["e"]), "big"),
+                                          int.from_bytes(_b64_lesen(jwk["n"]), "big")).public_key()
+        schluessel.verify(_b64_lesen(teile[2]), f"{teile[0]}.{teile[1]}".encode(), padding.PKCS1v15(), hashes.SHA256())
+    except (InvalidSignature, ValueError, KeyError, binascii.Error):
+        return None
+    jetzt = time.time()
+    if not (float(claims.get("exp", 0)) > jetzt and float(claims.get("nbf", claims.get("iat", 0))) < jetzt + 60):
+        return None
+    aud = claims.get("aud")
+    if APPS_OIDC_AUD not in (aud if isinstance(aud, list) else [aud]):
+        return None
+    return claims
+
+
+_apk_zertifikat_sha256 = apk.zertifikat_sha256
+_apk_manifest = apk.manifest
+
+
 def _oeffentlich(res):
     herkunft = request.headers.get("Origin", "")
     if herkunft in APPS_HERKUNFT:
@@ -2051,20 +2214,70 @@ def _oeffentlich(res):
     return res
 
 
+
+
+def _apps_aktuell(conn, schluessel=None):
+    """Neueste Fassung je (schluessel, plattform) als Liste von Zeilen."""
+    sql = ("SELECT v.* FROM apps_versionen v JOIN (SELECT schluessel, plattform, MAX(id) AS id FROM apps_versionen "
+           "GROUP BY schluessel, plattform) m ON m.id = v.id")
+    if schluessel:
+        return conn.execute(sql + " WHERE v.schluessel = ?", (schluessel,)).fetchall()
+    return conn.execute(sql).fetchall()
+
+
+def _register_nach_paket(paket):
+    return next((k for k, e in APPS_REGISTER.items() if e["paket"] == paket), None)
+
+
 @app.get("/api/apps/index.json")
 def apps_index():
+    """apps: alle Android-APKs (Updater der Apps, Tabelle auf /apps) — Form wie bisher, dazu notiz.
+    karten: Apps aus APPS_REGISTER mit mindestens einer Datei, je Plattform ein Download."""
     conn = db.connect()
     try:
         rows = conn.execute("SELECT paket, name, sha256, groesse, version_code, version_name, updated_at "
                             "FROM telefon_apps WHERE art = 'apk' AND aktiv = 1 AND apk_datei IS NOT NULL "
                             "ORDER BY reihenfolge, name").fetchall()
+        aktuell = _apps_aktuell(conn)
     finally:
         conn.close()
-    apps = [{"paket": r["paket"], "name": r["name"], "sha256": r["sha256"], "groesse": r["groesse"],
-             "version_code": r["version_code"], "version_name": r["version_name"], "stand": r["updated_at"],
-             "url": f"/api/apps/{r['paket']}.apk"}
-            for r in rows if r["paket"] not in APPS_OEFFENTLICH_OHNE]
-    return _oeffentlich(jsonify({"apps": apps, "signatur_sha256": "7b3bac26e82b6103546b96861dcf1bb89b3239424ff11fdf684975cf78c5a5ae"}))
+    neu = {(v["schluessel"], v["plattform"]): v for v in aktuell}
+    apps = []
+    for r in rows:
+        if r["paket"] in APPS_OEFFENTLICH_OHNE:
+            continue
+        v = neu.get((_register_nach_paket(r["paket"]) or r["paket"], "android"))
+        apps.append({"paket": r["paket"], "name": r["name"], "sha256": r["sha256"], "groesse": r["groesse"],
+                     "version_code": r["version_code"], "version_name": r["version_name"], "stand": r["updated_at"],
+                     "url": f"/api/apps/{r['paket']}.apk",
+                     "notiz": v["notiz"] if v and v["sha256"] == r["sha256"] else ""})
+    im_katalog = {a["paket"]: a for a in apps}
+    karten = []
+    for app_id, e in APPS_REGISTER.items():
+        downloads = []
+        a = im_katalog.get(e["paket"])
+        v = neu.get((app_id, "android"))
+        if not a and v:
+            # nicht im Katalog der Telefone: trotzdem in 'apps', damit der Updater sie kennt
+            a = {"paket": e["paket"], "name": e["name"], "sha256": v["sha256"], "groesse": v["groesse"],
+                 "version_code": v["version_code"], "version_name": v["version"], "stand": v["zeit"],
+                 "url": f"/api/apps/{e['paket']}.apk", "notiz": v["notiz"]}
+            apps.append(a)
+        if a:
+            downloads.append({"plattform": "android", "titel": "Android", "version": a["version_name"],
+                              "groesse": a["groesse"], "sha256": a["sha256"], "stand": a["stand"],
+                              "url": a["url"], "notiz": a["notiz"]})
+        for pf_id, pf in APPS_PLATTFORMEN.items():
+            v = neu.get((app_id, pf_id))
+            if pf_id == "android" or not v:
+                continue
+            downloads.append({"plattform": pf_id, "titel": pf["titel"], "version": v["version"],
+                              "groesse": v["groesse"], "sha256": v["sha256"], "stand": v["zeit"],
+                              "url": f"/api/apps/datei/{app_id}/{pf_id}", "notiz": v["notiz"]})
+        if downloads:
+            karten.append({"app": app_id, "name": e["name"], "text": e["text"], "fuer": e["fuer"],
+                           "logo": e["logo"], "paket": e["paket"], "downloads": downloads})
+    return _oeffentlich(jsonify({"apps": apps, "karten": karten, "signatur_sha256": APPS_SIGNATUR_SHA256}))
 
 
 @app.get("/api/apps/<paket>.apk")
@@ -2075,14 +2288,242 @@ def apps_download(paket):
     try:
         r = conn.execute("SELECT name, apk_datei, version_name FROM telefon_apps "
                          "WHERE paket = ? AND art = 'apk' AND aktiv = 1", (paket,)).fetchone()
+        v = None
+        app_id = _register_nach_paket(paket)
+        if (not r or not r["apk_datei"]) and app_id:
+            v = next((x for x in _apps_aktuell(conn, app_id) if x["plattform"] == "android"), None)
     finally:
         conn.close()
+    if v:
+        name = re.sub(r"[^A-Za-z0-9]+", "-", f"{APPS_REGISTER[app_id]['name']}-{v['version']}").strip("-").lower()
+        return _oeffentlich(send_from_directory(APPS_DATEIEN_DIR, v["datei"], as_attachment=True,
+                                                download_name=f"{name}.apk",
+                                                mimetype=APPS_PLATTFORMEN["android"]["mime"]))
     if not r or not r["apk_datei"]:
         return jsonify({"error": "unbekannt"}), 404
     name = re.sub(r"[^A-Za-z0-9]+", "-", f"{r['name']}-{r['version_name'] or ''}").strip("-").lower()
     return _oeffentlich(send_from_directory(TELEFON_APPS_DIR, r["apk_datei"], as_attachment=True,
                                             download_name=f"{name}.apk",
                                             mimetype="application/vnd.android.package-archive"))
+
+
+@app.get("/api/apps/datei/<app_id>/<plattform>")
+def apps_datei(app_id, plattform):
+    if app_id not in APPS_REGISTER or plattform not in APPS_PLATTFORMEN or plattform == "android":
+        return jsonify({"error": "unbekannt"}), 404
+    conn = db.connect()
+    try:
+        v = next((x for x in _apps_aktuell(conn, app_id) if x["plattform"] == plattform), None)
+    finally:
+        conn.close()
+    if not v:
+        return jsonify({"error": "unbekannt"}), 404
+    endung = os.path.splitext(v["datei"])[1]
+    name = re.sub(r"[^A-Za-z0-9]+", "-", f"{APPS_REGISTER[app_id]['name']}-{v['version']}").strip("-").lower()
+    return _oeffentlich(send_from_directory(APPS_DATEIEN_DIR, v["datei"], as_attachment=True,
+                                            download_name=f"{name}{endung}",
+                                            mimetype=APPS_PLATTFORMEN[plattform]["mime"]))
+
+
+def _apps_einspielen(schluessel, plattform, quelle, version_soll=None):
+    """Datei aus dem Multipart-Feld 'datei' pruefen, ablegen und freigeben.
+    schluessel: App aus APPS_REGISTER oder Paketname einer Katalog-App.
+    Felder: datei, version, sha256 (Pflicht fuer die CI), paket (Android, optional), notiz."""
+    register = APPS_REGISTER.get(schluessel)
+    paket_soll = register["paket"] if register else schluessel
+    pf = APPS_PLATTFORMEN[plattform]
+    if not register and plattform != "android":
+        return jsonify({"error": "Katalog-Apps gibt es nur fuer Android"}), 400
+    f = request.files.get("datei")
+    if not f or not f.filename:
+        return jsonify({"error": "Feld 'datei' fehlt"}), 400
+    endung = os.path.splitext(f.filename)[1].lower()
+    if endung not in pf["endungen"]:
+        return jsonify({"error": f"{pf['titel']}: erlaubt sind {', '.join(pf['endungen'])}"}), 400
+    version = str(request.form.get("version") or "").strip()
+    version = version[1:] if version[:1] == "v" else version
+    sha_soll = str(request.form.get("sha256") or "").strip().lower()
+    if version_soll is not None and not re.fullmatch(r"[0-9a-f]{64}", sha_soll):
+        return jsonify({"error": "sha256 der Datei fehlt"}), 400
+    paket_angabe = str(request.form.get("paket") or "").strip()
+    if paket_angabe and paket_angabe != paket_soll:
+        return jsonify({"error": f"paket {paket_angabe} gehoert nicht zu diesem Repo ({paket_soll})"}), 400
+    notiz = str(request.form.get("notiz") or "").strip()[:4000]
+    notiz = _STEUERZEICHEN.sub(lambda m: m.group(0) if m.group(0) in "\n\t" else "", notiz)
+    os.makedirs(APPS_DATEIEN_DIR, exist_ok=True)
+    tmp = os.path.join(APPS_DATEIEN_DIR, f".hoch-{pysecrets.token_hex(8)}{endung}")
+    try:
+        h, n = hashlib.sha256(), 0
+        with open(tmp, "wb") as out:
+            while True:
+                stueck = f.stream.read(1024 * 1024)
+                if not stueck:
+                    break
+                n += len(stueck)
+                if n > APPS_DATEI_MAX:
+                    return jsonify({"error": "Datei zu gross"}), 413
+                h.update(stueck)
+                out.write(stueck)
+        sha = h.hexdigest()
+        if sha_soll and not hmac.compare_digest(sha, sha_soll):
+            return jsonify({"error": "Pruefsumme stimmt nicht (Datei unvollstaendig?)"}), 400
+        with open(tmp, "rb") as chk:
+            kopf = chk.read(32)
+            chk.seek(max(0, n - 512))
+            schluss = chk.read(4)
+        kenn = pf["endungen"][endung]
+        if (kenn is None and schluss != b"koly") or (kenn is not None and not kopf.startswith(kenn)):
+            return jsonify({"error": f"keine gueltige {endung}-Datei"}), 400
+        version_code = None
+        if plattform == "android":
+            if _apk_zertifikat_sha256(tmp) != APPS_SIGNATUR_SHA256:
+                return jsonify({"error": "APK ist nicht mit dem Rosenweg-Schluessel signiert"}), 400
+            paket, version_code, vname = _apk_manifest(tmp)
+            if paket != paket_soll:
+                return jsonify({"error": f"APK hat Paket {paket}, erwartet {paket_soll}"}), 400
+            if not version_code:
+                return jsonify({"error": "versionCode im APK nicht lesbar"}), 400
+            version = version or (vname or "")
+        if not _VERSION.fullmatch(version):
+            return jsonify({"error": "version fehlt oder ungueltig (z.B. 1.0.0)"}), 400
+        if version_soll is not None and version.split("+")[0] != version_soll:
+            return jsonify({"error": f"Version {version} passt nicht zum Tag {version_soll}"}), 400
+        if plattform == "android" and not register:
+            conn = db.connect()
+            try:
+                da = conn.execute("SELECT 1 FROM telefon_apps WHERE paket = ? AND art = 'apk'", (paket_soll,)).fetchone()
+            finally:
+                conn.close()
+            if not da:
+                return jsonify({"error": f"{paket_soll} steht nicht im App-Katalog – zuerst auf "
+                                         "/smartphones anlegen"}), 409
+        name_teil = re.sub(r"[^a-z0-9]+", "-", schluessel.lower())
+        datei = f"{name_teil}-{plattform}-{sha[:12]}{endung}"
+        os.replace(tmp, os.path.join(APPS_DATEIEN_DIR, datei))
+        tmp = None
+        conn = db.connect()
+        weg = []
+        try:
+            katalog = None
+            if plattform == "android":
+                katalog = conn.execute("SELECT apk_datei FROM telefon_apps WHERE paket = ? AND art = 'apk'",
+                                       (paket_soll,)).fetchone()
+                if katalog:
+                    # dieselbe Fassung in den Katalog der geteilten Telefone (Freigabe bleibt, wie sie ist)
+                    kdatei = f"{paket_soll}-{sha[:12]}.apk"
+                    shutil.copyfile(os.path.join(APPS_DATEIEN_DIR, datei), os.path.join(TELEFON_APPS_DIR, kdatei))
+                    conn.execute("UPDATE telefon_apps SET apk_datei=?, sha256=?, groesse=?, version_code=?, "
+                                 "version_name=?, updated_at=datetime('now') WHERE paket=?",
+                                 (kdatei, sha, n, version_code, version, paket_soll))
+                    if katalog["apk_datei"] and katalog["apk_datei"] != kdatei:
+                        weg.append(os.path.join(TELEFON_APPS_DIR, katalog["apk_datei"]))
+            conn.execute("INSERT INTO apps_versionen (schluessel, plattform, version, version_code, datei, sha256, "
+                         "groesse, notiz, quelle) VALUES (?,?,?,?,?,?,?,?,?)",
+                         (schluessel, plattform, version, version_code, datei, sha, n, notiz, quelle))
+            # aeltere Fassungen begrenzen (dieselbe Datei kann mehrfach vorkommen: nur loeschen, wenn ungenutzt)
+            alte = conn.execute("SELECT id, datei FROM apps_versionen WHERE schluessel = ? AND plattform = ? "
+                                "ORDER BY id DESC LIMIT -1 OFFSET ?", (schluessel, plattform, APPS_BEHALTEN)).fetchall()
+            for a in alte:
+                conn.execute("DELETE FROM apps_versionen WHERE id = ?", (a["id"],))
+            conn.commit()
+            for a in alte:
+                if not conn.execute("SELECT 1 FROM apps_versionen WHERE datei = ?", (a["datei"],)).fetchone():
+                    weg.append(os.path.join(APPS_DATEIEN_DIR, a["datei"]))
+        finally:
+            conn.close()
+        for pfad in weg:
+            try:
+                os.remove(pfad)
+            except OSError:
+                pass
+        if katalog:
+            adb_updater.anstossen()   # geteilte Telefone bekommen die Fassung per adb (adb_updater.py)
+        app.logger.info("apps: %s %s %s (%s) von %s", schluessel, plattform, version, sha[:12], quelle)
+        return jsonify({"ok": True, "schluessel": schluessel, "plattform": plattform, "version": version,
+                        "version_code": version_code, "sha256": sha, "groesse": n, "katalog": bool(katalog)})
+    finally:
+        if tmp:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
+@app.post("/api/apps/release")
+def apps_release():
+    """Fuer die CI der App-Repos (Action Rosenweg/Website/.github/actions/apps-release).
+    Authorization: Bearer <GitHub-Actions-OIDC-Token, audience APPS_OIDC_AUD> — kein Geheimnis.
+    Zugelassen: Repos aus APPS_REGISTER/APPS_KATALOG_REPOS, nur fuer einen Tag (v)<version>.
+    Multipart: datei, plattform, version, sha256, paket (Android), notiz."""
+    claims = _github_oidc(_bearer() or "")
+    if not claims:
+        return jsonify({"error": "kein gueltiges GitHub-OIDC-Token"}), 401
+    repo = str(claims.get("repository", ""))
+    ref = str(claims.get("ref", ""))
+    schluessel = next((k for k, e in APPS_REGISTER.items() if e["repo"] == repo), None) or APPS_KATALOG_REPOS.get(repo)
+    tag = ref[len("refs/tags/"):] if ref.startswith("refs/tags/") else ""
+    tag_version = tag[1:] if tag[:1] == "v" else tag
+    if (not schluessel or claims.get("repository_owner") != "Rosenweg" or claims.get("ref_type") != "tag"
+            or not _VERSION.fullmatch(tag_version)
+            or claims.get("event_name") not in ("push", "release", "workflow_dispatch")):
+        app.logger.warning("apps: Release abgewiesen: %s %s %s", repo, ref, claims.get("event_name"))
+        return jsonify({"error": "nur eingetragene Rosenweg-App-Repos, nur fuer einen Release-Tag"}), 403
+    plattform = str(request.form.get("plattform") or "android")
+    if plattform not in APPS_PLATTFORMEN:
+        return jsonify({"error": "plattform: " + ", ".join(APPS_PLATTFORMEN)}), 400
+    return _apps_einspielen(schluessel, plattform, f"{repo}@{tag}", version_soll=tag_version)
+
+
+@app.get("/api/pbx/apps-versionen")
+def apps_versionen_liste():
+    _, deny = require_admin()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        rows = conn.execute("SELECT id, schluessel, plattform, version, version_code, sha256, groesse, notiz, quelle, zeit "
+                            "FROM apps_versionen ORDER BY schluessel, plattform, id DESC").fetchall()
+    finally:
+        conn.close()
+    return jsonify({"register": [{"app": k, "name": e["name"], "repo": e["repo"], "paket": e["paket"]}
+                                 for k, e in APPS_REGISTER.items()],
+                    "katalog_repos": APPS_KATALOG_REPOS, "behalten": APPS_BEHALTEN,
+                    "versionen": [dict(r) for r in rows]})
+
+
+@app.post("/api/pbx/apps-versionen/<schluessel>/<plattform>")
+def apps_versionen_hochladen(schluessel, plattform):
+    """Technik von Hand (z.B. macOS-DMG vom eigenen Mac). Multipart: datei, version, sha256?, notiz?"""
+    user, deny = require_admin()
+    if deny:
+        return deny
+    if plattform not in APPS_PLATTFORMEN or (schluessel not in APPS_REGISTER
+                                             and schluessel not in APPS_KATALOG_REPOS.values()):
+        return jsonify({"error": "unbekannt"}), 404
+    return _apps_einspielen(schluessel, plattform, actor(user))
+
+
+@app.delete("/api/pbx/apps-versionen/<int:vid>")
+def apps_versionen_loeschen(vid):
+    """Eine Fassung zurueckziehen; ist es die neueste, gilt wieder die vorherige (nur /apps-Dateien;
+    den Katalog der Telefone setzt das nicht zurueck)."""
+    _, deny = require_admin()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        r = conn.execute("SELECT datei FROM apps_versionen WHERE id = ?", (vid,)).fetchone()
+        conn.execute("DELETE FROM apps_versionen WHERE id = ?", (vid,))
+        conn.commit()
+        noch = r and conn.execute("SELECT 1 FROM apps_versionen WHERE datei = ?", (r["datei"],)).fetchone()
+    finally:
+        conn.close()
+    if r and not noch:
+        try:
+            os.remove(os.path.join(APPS_DATEIEN_DIR, r["datei"]))
+        except OSError:
+            pass
+    return jsonify({"ok": bool(r)})
 
 
 @app.get("/api/pbx/telefon-apps")
@@ -2168,8 +2609,11 @@ def telefon_app_apk_hochladen(paket):
         with open(tmp, "wb") as out:
             out.write(daten)
         os.replace(tmp, os.path.join(TELEFON_APPS_DIR, datei))
-        conn.execute("UPDATE telefon_apps SET apk_datei=?, sha256=?, groesse=?, updated_at=datetime('now') "
-                     "WHERE paket=?", (datei, sha, len(daten), paket))
+        # versionCode/-Name aus dem Manifest: der adb-Updater vergleicht danach
+        _p, vcode, vname = apk.manifest(os.path.join(TELEFON_APPS_DIR, datei))
+        conn.execute("UPDATE telefon_apps SET apk_datei=?, sha256=?, groesse=?, version_code=?, version_name=?, "
+                     "updated_at=datetime('now') WHERE paket=?",
+                     (datei, sha, len(daten), vcode if _p == paket else None, vname if _p == paket else None, paket))
         conn.commit()
         alt = r["apk_datei"]
         if alt and alt != datei:
@@ -2177,6 +2621,7 @@ def telefon_app_apk_hochladen(paket):
                 os.remove(os.path.join(TELEFON_APPS_DIR, alt))
             except OSError:
                 pass
+        adb_updater.anstossen()   # geteilte Telefone bekommen die Fassung per adb
         return jsonify({"ok": True, "paket": paket, "sha256": sha, "groesse": len(daten)})
     finally:
         conn.close()
@@ -2362,28 +2807,85 @@ def _person_der_nebenstelle(conn, ext):
     return (r["email"], r["name"]) if r and r["email"] else (None, None)
 
 
-@app.get("/api/telefon/anrufliste")
-def telefon_anrufliste():
-    """Anrufe der Person, die an dieser Nebenstelle angemeldet ist — ueber alle Geraete."""
-    ext, deny = _nebenstelle()
-    if deny:
-        return deny
-    limit = min(int(request.args.get("limit", 200) or 200), 500)
+def _privat_zugang():
+    """HTTP-Basic <nummer>-p<id>:passwort eines eigenen Handys (telefon_sip_privat).
+    -> (email, name) | None. Nur fuer Anrufliste/Voicemail der Person (nicht PIN,
+    Nextcloud, Messenger: die gehoeren zur Sitzung auf geteilten Telefonen)."""
+    a = request.authorization
+    if not a or not a.username or not a.password or not SIP_PRIVAT_RE.fullmatch(a.username):
+        return None
+    zid = int(a.username.split("-p", 1)[1])
     conn = db.connect()
     try:
-        email, name = _person_der_nebenstelle(conn, ext)
+        r = conn.execute("SELECT email, nummer, passwort FROM telefon_sip_privat WHERE id = ?", (zid,)).fetchone()
+        if not r or a.username != f"{r['nummer']}-p{zid}" or \
+                not hmac.compare_digest(str(r["passwort"]).encode(), a.password.encode()):
+            return None
+        n = conn.execute("SELECT name FROM personen_nummern WHERE nummer = ? AND lower(email) = lower(?)",
+                         (r["nummer"], r["email"])).fetchone()
+        return r["email"], (n["name"] if n else "")
+    finally:
+        conn.close()
+
+
+def _person_fuer_verlauf():
+    """Person fuer Anrufliste/Voicemail: Nebenstelle mit Sitzung (geteiltes Telefon, wie
+    bisher) oder eigener Handy-Zugang. -> ((email, name), None) | (None, response)"""
+    a = request.authorization
+    if a and a.username and SIP_PRIVAT_RE.fullmatch(a.username):
+        p = _privat_zugang()
+        if not p:
+            return None, (jsonify({"error": "Unbekannter Zugang"}), 401)
+        return p, None
+    ext, deny = _nebenstelle()
+    if deny:
+        return None, deny
+    conn = db.connect()
+    try:
+        return _person_der_nebenstelle(conn, ext), None
+    finally:
+        conn.close()
+
+
+@app.get("/api/telefon/anrufliste")
+def telefon_anrufliste():
+    """Anrufe der Person, die an dieser Nebenstelle angemeldet ist (bzw. der das eigene Handy
+    gehoert) — ueber alle Geraete und die persoenliche Nummer.
+    ?limit= (max 500), optional ?tage= (nur die letzten N Tage, max 366) und ?vor=<beginn>
+    (aeltere Seite: nur Anrufe vor diesem Zeitpunkt). gegenueber_name = interner Name."""
+    person, deny = _person_fuer_verlauf()
+    if deny:
+        return deny
+    email, name = person
+    limit = min(int(request.args.get("limit", 200) or 200), 500)
+    bedingung, werte = "", []
+    tage = request.args.get("tage")
+    if tage and tage.isdigit() and 0 < int(tage) <= 366:
+        bedingung += " AND started_at >= datetime('now', ?)"
+        werte.append(f"-{int(tage)} days")
+    vor = request.args.get("vor") or ""
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", vor):
+        bedingung += " AND started_at < ?"
+        werte.append(vor)
+    conn = db.connect()
+    try:
         if not email:
             return jsonify({"angemeldet": False, "anrufe": []})
         rows = conn.execute(
             "SELECT id, direction, caller_id, dialed, ext, person, ziel_ext, ziel_person, started_at, "
             "answered_at, duration_seconds, hangup_cause, voicemail_summary, voicemail_path "
-            "FROM calls WHERE lower(person) = lower(?) OR lower(ziel_person) = lower(?) "
-            "ORDER BY started_at DESC LIMIT ?", (email, email, limit)).fetchall()
+            "FROM calls WHERE (lower(person) = lower(?) OR lower(ziel_person) = lower(?))" + bedingung +
+            " ORDER BY started_at DESC LIMIT ?", (email, email, *werte, limit)).fetchall()
+        namen = {}
+        for r in conn.execute("SELECT lower(email) e, name FROM personen_nummern WHERE aktiv = 1"):
+            namen.setdefault(r["e"], r["name"])
         anrufe = []
         for r in rows:
             ich_rufe = (r["person"] or "").lower() == email.lower() and r["direction"] in ("internal", "outbound")
             angenommen = bool(r["answered_at"]) or (r["hangup_cause"] or "").upper() == "ANSWERED"
+            gegenueber = (r["ziel_person"] if ich_rufe else r["person"]) or ""
             anrufe.append({
+                "gegenueber_name": namen.get(gegenueber.lower(), ""),
                 "id": r["id"],
                 # aus Sicht der Person
                 "richtung": "ausgehend" if ich_rufe else ("eingehend" if angenommen else "verpasst"),
@@ -2402,12 +2904,12 @@ def telefon_anrufliste():
 @app.get("/api/telefon/voicemail/<int:call_id>")
 def telefon_voicemail(call_id):
     """Persoenliche Voicemail anhoeren — nur die Person, der sie gehoert."""
-    ext, deny = _nebenstelle()
+    person, deny = _person_fuer_verlauf()
     if deny:
         return deny
+    email = person[0]
     conn = db.connect()
     try:
-        email, _ = _person_der_nebenstelle(conn, ext)
         r = conn.execute("SELECT voicemail_path, ziel_person FROM calls WHERE id = ?", (call_id,)).fetchone()
         if not email or not r or not r["voicemail_path"] or (r["ziel_person"] or "").lower() != email.lower():
             return jsonify({"error": "Nicht gefunden"}), 404
@@ -2721,6 +3223,152 @@ def telefon_messenger():
     sig = _b64url(hmac.new(MESSENGER_ANLAGE_SECRET.encode(), f"{kopf}.{inhalt}".encode(), hashlib.sha256).digest())
     return jsonify({"token": f"{kopf}.{inhalt}.{sig}", "gueltig_bis": jetzt + MESSENGER_TOKEN_STUNDEN * 3600,
                     "server": os.environ.get("MESSENGER_URL", "https://chat.rosenweg4303.ch")})
+
+
+# ─── Portal-Anfragen der Rosenweg-Apps auf geteilten Telefonen ───────────────
+# Auf einem geteilten Telefon meldet sich keine App selbst an (rosenweg-basis,
+# docs/geteilte-telefone.md). Die App ruft Rosenweg Geraet (AnlageProvider
+# "portal_anfrage"), Geraet ruft hier mit seinem Geraetezugang, und diese API stellt
+# die Anfrage an die Haupt-API — im Namen der Person, die gerade am Telefon
+# angemeldet ist. Dafuer stellt sie ein Token fuer GENAU diese eine Anfrage aus
+# (HS256, PORTAL_ANLAGE_SECRET, 60 s, einmal; Haupt-API: api/lib/anlagetoken.js).
+# Kein Token verlaesst CT 220: weder Geraet noch die App bekommt eines.
+#
+# Welche Pfade eine App so erreichen darf, steht in der Config "portal_pfade"
+# (JSON {paket: [eintrag, ...], "*": [...]} — "*" gilt fuer alle Apps). Eintrag:
+#   "/api/salz/"          alles darunter, alle Methoden
+#   "/api/auth/me"        genau dieser Pfad, alle Methoden
+#   "GET /api/me"         nur mit diesen Methoden (mehrere: "GET,PUT /api/me")
+# Fehlt die Config, gilt PORTAL_PFADE_STANDARD. Die Haupt-API sperrt zusaetzlich
+# alles, was einen Ausweis aendert (PAT_GESPERRT in api/middleware/auth.js).
+PORTAL_ANLAGE_SECRET = os.environ.get("PORTAL_ANLAGE_SECRET", "")
+PORTAL_TOKEN_S = 60
+PORTAL_KOERPER_MAX = 256 * 1024
+# Binder: die Antwort geht als Bundle an die App (Transaktionen bis ~1 MB)
+PORTAL_ANTWORT_MAX = 512 * 1024
+PORTAL_METHODEN = ("GET", "POST", "PUT", "DELETE")
+PORTAL_PFADE_STANDARD = {
+    "*": ["GET /api/auth/me", "GET /api/me"],
+    "ch.rosenweg4303.salz": ["/api/salz/"],
+}
+_PORTAL_PFAD = re.compile(r"/api/[A-Za-z0-9._~!$&'()*+,;=:@%/-]{1,1000}(\?[A-Za-z0-9._~!$&'()*+,;=:@%/?-]{0,1000})?")
+_PORTAL_KODIERT_VERBOTEN = re.compile(r"%(2e|2f|5c|00)", re.I)
+
+
+def _portal_pfad_ok(pfad):
+    """Nur /api/..., keine Punkt-Segmente, keine kodierten / . \\ oder NUL, kein //."""
+    if not isinstance(pfad, str) or not _PORTAL_PFAD.fullmatch(pfad):
+        return False
+    weg = pfad.split("?", 1)[0]
+    if "//" in weg or _PORTAL_KODIERT_VERBOTEN.search(pfad):
+        return False
+    return not any(teil in (".", "..") for teil in weg.split("/"))
+
+
+def _portal_regeln(conn):
+    roh = _cfg(conn).get("portal_pfade", "")
+    if roh:
+        try:
+            r = json.loads(roh)
+            if isinstance(r, dict):
+                return r
+        except ValueError:
+            app.logger.warning("portal_pfade ist kein JSON — Standard gilt")
+    return PORTAL_PFADE_STANDARD
+
+
+def _portal_erlaubt(regeln, paket, methode, pfad):
+    weg = pfad.split("?", 1)[0].lower()
+    for eintrag in list(regeln.get("*") or []) + list(regeln.get(paket) or []):
+        teile = str(eintrag).strip().split(None, 1)
+        methoden, muster = (teile[0].upper().split(","), teile[1]) if len(teile) == 2 else (None, teile[0])
+        muster = muster.lower()
+        if methoden and methode not in methoden:
+            continue
+        if (muster.endswith("/") and weg.startswith(muster)) or weg == muster:
+            return True
+    return False
+
+
+def _portal_pfad_normal(pfad):
+    """Wie authMiddleware der Haupt-API: ohne /api/, klein, ohne // und End-Schraegstriche."""
+    p = re.sub(r"/{2,}", "/", pfad.split("?", 1)[0].lower())
+    p = re.sub(r"^/api/", "", p)
+    return p.strip("/")
+
+
+def _portal_token(sitzung, ext, paket, methode, pfad, jetzt=None):
+    jetzt = int(jetzt if jetzt is not None else time.time())
+    kopf = _b64url(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
+    inhalt = _b64url(json.dumps({
+        "iss": "rosenweg-anlage", "aud": "rosenweg-portal", "sub": str(sitzung["user_id"] or ""),
+        "email": sitzung["email"], "ext": ext, "paket": paket, "methode": methode,
+        "pfad": _portal_pfad_normal(pfad), "iat": jetzt, "exp": jetzt + PORTAL_TOKEN_S,
+        "jti": pysecrets.token_hex(16),
+    }, separators=(",", ":"), ensure_ascii=False).encode())
+    sig = _b64url(hmac.new(PORTAL_ANLAGE_SECRET.encode(), f"{kopf}.{inhalt}".encode(), hashlib.sha256).digest())
+    return f"{kopf}.{inhalt}.{sig}"
+
+
+def _portal_sitzung_marke(ext, sitzung):
+    """Wechselt mit jeder An-/Abmeldung; die Apps laden neu, wenn sie sich aendert."""
+    return hashlib.sha256(f"{ext}|{sitzung['email']}|{sitzung['seit']}".encode()).hexdigest()[:16]
+
+
+@app.post("/api/telefon/portal")
+def telefon_portal():
+    """Rosenweg Geraet: {methode, pfad, koerper (JSON-Text|null), paket} -> {status, json, sitzung}.
+    409 nicht_angemeldet: niemand am Telefon. 403: Pfad fuer diese App nicht freigegeben."""
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    if not PORTAL_ANLAGE_SECRET:
+        return jsonify({"error": "Portal-Zugang der Telefone nicht eingerichtet"}), 503
+    b = request.get_json(silent=True) or {}
+    methode = str(b.get("methode") or "GET").upper()
+    pfad = b.get("pfad")
+    paket = str(b.get("paket") or "")
+    koerper = b.get("koerper")
+    if methode not in PORTAL_METHODEN:
+        return jsonify({"error": "Methode nicht erlaubt"}), 400
+    if not _portal_pfad_ok(pfad):
+        return jsonify({"error": "Pfad ungueltig"}), 400
+    if not _PAKET.fullmatch(paket) or paket.startswith("web."):
+        return jsonify({"error": "paket ungueltig"}), 400
+    if koerper is not None and (not isinstance(koerper, str) or len(koerper.encode()) > PORTAL_KOERPER_MAX):
+        return jsonify({"error": "Anfrage zu gross"}), 413
+    conn = db.connect()
+    try:
+        s = conn.execute("SELECT user_id, email, name, seit FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+        regeln = _portal_regeln(conn)
+    finally:
+        conn.close()
+    if not s or not s["email"]:
+        return jsonify({"error": "Niemand angemeldet", "nicht_angemeldet": True}), 409
+    if not _portal_erlaubt(regeln, paket, methode, pfad):
+        app.logger.info("portal %s %s %s %s: nicht freigegeben", ext, paket, methode, pfad.split("?", 1)[0])
+        return jsonify({"error": "Diese App darf das auf geteilten Telefonen nicht", "nicht_freigegeben": True}), 403
+    kopf = {"Authorization": f"Bearer {_portal_token(s, ext, paket, methode, pfad)}",
+            "Accept": "application/json", "X-Rosenweg-Telefon": ext}
+    if koerper is not None:
+        kopf["Content-Type"] = "application/json"
+    try:
+        r = requests.request(methode, f"{MAIN_API_BASE}{pfad}", headers=kopf,
+                             data=koerper.encode() if koerper is not None else None,
+                             timeout=20, allow_redirects=False, stream=True)
+        try:
+            roh = r.raw.read(PORTAL_ANTWORT_MAX + 1, decode_content=True)
+        finally:
+            r.close()
+    except requests.RequestException as e:
+        app.logger.warning("portal %s: Haupt-API nicht erreichbar (%s)", ext, type(e).__name__)
+        return jsonify({"error": "Keine Verbindung zum Portal"}), 502
+    if len(roh) > PORTAL_ANTWORT_MAX:
+        return jsonify({"error": "Antwort zu gross fuer das Telefon"}), 502
+    if methode != "GET" or r.status_code >= 400:
+        app.logger.info("portal %s %s %s %s -> %s", ext, paket, methode, pfad.split("?", 1)[0], r.status_code)
+    return jsonify({"status": r.status_code, "json": roh.decode("utf-8", "replace"),
+                    "sitzung": _portal_sitzung_marke(ext, s)})
 
 
 @app.get("/api/pbx/nummernplan")
@@ -3054,12 +3702,9 @@ def telefon_wlan_debug(ext):
             minuten = max(0, min(int(b.get("minuten", 60)), 240))
         except (TypeError, ValueError):
             return jsonify({"error": "minuten: Zahl 0..240"}), 400
-        bis = int(time.time()) + minuten * 60 if minuten else 0
-        conn.execute("INSERT INTO telefon_wartung (ext, wlan_debug_bis, durch, geaendert) VALUES (?,?,?,datetime('now')) "
-                     "ON CONFLICT(ext) DO UPDATE SET wlan_debug_bis = excluded.wlan_debug_bis, "
-                     "durch = excluded.durch, geaendert = excluded.geaendert", (ext, bis, actor(user)))
-        conn.execute("INSERT INTO telefon_log (ext, ereignis, durch) VALUES (?,?,?)",
-                     (ext, f"wlan-debug {minuten} min" if minuten else "wlan-debug aus", actor(user)))
+        bis = db.wartung_setzen(conn, ext, minuten, actor(user))
+        # von Hand geschaltet: der Updater schaltet diese Wartung nicht mehr selbst aus
+        conn.execute("UPDATE telefon_updater SET wartung_von_uns = 0 WHERE ext = ?", (ext,))
         conn.commit()
     finally:
         conn.close()
@@ -3100,6 +3745,70 @@ def telefon_adb_melden():
         conn.close()
     return jsonify({"ok": True})
 
+def _updater_json(conn, ext, u, jetzt):
+    """Stand des adb-Updaters fuer eine Nebenstelle (fuer /smartphones)."""
+    if not u:
+        return {"zugelassen": False, "zulassen_bis": 0, "ergebnis": "", "geprueft": 0, "sofort": False,
+                "ausstehend": []}
+    return {"zugelassen": bool(u["zugelassen"]),
+            "zulassen_bis": int(u["freigabe_bis"]) if int(u["freigabe_bis"] or 0) > jetzt else 0,
+            "ergebnis": u["ergebnis"], "geprueft": int(u["geprueft"] or 0), "sofort": bool(u["sofort"]),
+            "ausstehend": [{"paket": a["paket"], "name": a["name"], "ist": a["ist"], "soll": a["soll"],
+                            "version": a["version_name"]} for a in adb_updater.ausstehend(conn, ext)]}
+
+
+@app.post("/api/telefon/<ext>/updater")
+def telefon_updater(ext):
+    """Technik/Praesident: adb-Updater fuer ein geteiltes Telefon.
+    {aktion: 'zulassen'}  Updater-Schluessel einmal zulassen (Wartung 15 Min. an, Geraet bestaetigt
+                          die Rueckfrage nur fuer den Fingerabdruck des Updaters, 5 Min. lang)
+    {aktion: 'jetzt'}     sofort pruefen und - wenn die Regeln es erlauben - einspielen
+    {aktion: 'vergessen'} Zulassung/Seriennummer vergessen (Telefon ersetzt oder zurueckgesetzt)"""
+    user, deny = require_admin()
+    if deny:
+        return deny
+    if not re.fullmatch(r"[0-9]{2,8}", ext):
+        return jsonify({"error": "Nebenstelle ungueltig"}), 400
+    aktion = str((request.get_json(silent=True) or {}).get("aktion") or "")
+    if aktion not in ("zulassen", "jetzt", "vergessen"):
+        return jsonify({"error": "aktion: zulassen | jetzt | vergessen"}), 400
+    if aktion == "zulassen" and not adb_updater.fingerabdruck():
+        return jsonify({"error": "Der Updater hat noch keinen adb-Schluessel (pbx/DEPLOY-PBX-API.md)"}), 409
+    conn = db.connect()
+    weck = False
+    try:
+        if not conn.execute("SELECT 1 FROM sip_extensions WHERE ext = ? AND context = 'geteilt'", (ext,)).fetchone():
+            return jsonify({"error": "Kein geteiltes Telefon"}), 404
+        adb_updater.zeile(conn, ext)
+        if aktion == "zulassen":
+            bis = int(time.time()) + adb_updater.FREIGABE_S
+            conn.execute("UPDATE telefon_updater SET zugelassen = 0, freigabe_bis = ? WHERE ext = ?", (bis, ext))
+            w = conn.execute("SELECT wlan_debug_bis FROM telefon_wartung WHERE ext = ?", (ext,)).fetchone()
+            if not w or int(w["wlan_debug_bis"] or 0) < bis:
+                db.wartung_setzen(conn, ext, adb_updater.WARTUNG_MIN, actor(user))
+                conn.execute("UPDATE telefon_updater SET wartung_von_uns = 1 WHERE ext = ?", (ext,))
+                weck = True
+        elif aktion == "jetzt":
+            conn.execute("UPDATE telefon_updater SET sofort = 1 WHERE ext = ?", (ext,))
+        else:
+            conn.execute("UPDATE telefon_updater SET zugelassen = 0, freigabe_bis = 0, seriennummer = '' "
+                         "WHERE ext = ?", (ext,))
+            conn.execute("DELETE FROM telefon_apps_ist WHERE ext = ?", (ext,))
+        conn.execute("INSERT INTO telefon_log (ext, ereignis, durch) VALUES (?,?,?)",
+                     (ext, f"updater {aktion}", actor(user)))
+        conn.commit()
+    finally:
+        conn.close()
+    if weck:
+        try:
+            ami.originate(f"PJSIP/{ext}", "suchen", "s", callerid='"Wartung" <2098>', timeout_ms=15000)
+        except Exception as e:  # noqa: BLE001
+            app.logger.warning("Wartung wecken %s: %s", ext, type(e).__name__)
+    gestartet = aktion != "vergessen" and adb_updater.anstossen()
+    app.logger.info("Updater %s: %s durch %s", ext, aktion, actor(user))
+    return jsonify({"ok": True, "gestartet": gestartet})
+
+
 @app.get("/api/pbx/smartphones")
 def smartphones_uebersicht():
     """Technik/Praesident: alles fuer rosenweg4303.ch/smartphones in einer Antwort, ohne
@@ -3118,6 +3827,7 @@ def smartphones_uebersicht():
         sitz = {r["ext"]: r for r in conn.execute("SELECT ext, name, seit FROM telefon_sitzungen")}
         wart = {r["ext"]: r for r in conn.execute("SELECT ext, wlan_debug_bis, durch FROM telefon_wartung")}
         adb = {r["ext"]: r for r in conn.execute("SELECT ext, adresse, port, gemeldet FROM telefon_adb")}
+        upd = {r["ext"]: r for r in conn.execute("SELECT * FROM telefon_updater")}
         telefone = []
         for e in conn.execute("SELECT ext, name, client, enabled FROM sip_extensions "
                               "WHERE context = 'geteilt' ORDER BY ext"):
@@ -3132,6 +3842,7 @@ def smartphones_uebersicht():
                 "adb": (f"{adb[e['ext']]['adresse']}:{adb[e['ext']]['port']}"
                         if e["ext"] in adb and adb[e["ext"]]["port"] and bis > jetzt
                         and jetzt - int(adb[e["ext"]]["gemeldet"] or 0) < 900 else None),
+                "updater": _updater_json(conn, e["ext"], upd.get(e["ext"]), jetzt),
             })
         privat = [{"id": r["id"], "kennung": f"{r['nummer']}-p{r['id']}", "nummer": r["nummer"],
                    "geraet": r["geraet"], "seit": r["created_at"],
@@ -3140,7 +3851,8 @@ def smartphones_uebersicht():
         log = db.rows_to_dicts(conn.execute("SELECT ext, ereignis, name, durch, zeit FROM telefon_log "
                                             "ORDER BY id DESC LIMIT 40").fetchall())
         return jsonify({"telefone": telefone, "privat": privat, "log": log,
-                        "gruppen": sorted(_telefon_gruppen(conn))})
+                        "gruppen": sorted(_telefon_gruppen(conn)),
+                        "updater_fingerabdruck": adb_updater.fingerabdruck()})
     finally:
         conn.close()
 

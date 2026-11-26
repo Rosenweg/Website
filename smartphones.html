@@ -28,7 +28,7 @@
         <img src="/logo-rosenweg.png" alt="" class="w-12 h-12">
         <div>
             <h1 class="text-2xl font-bold">Smartphones</h1>
-            <div class="text-sm text-slate-500">Geteilte Rosenweg-Telefone und Rosenweg Telefon auf eigenen Handys</div>
+            <div class="text-sm text-slate-500">Geteilte Rosenweg-Telefone, Rosenweg Telefon und Messenger auf eigenen Handys</div>
         </div>
     </div>
 
@@ -55,6 +55,10 @@
                 <h2 class="font-semibold mt-5 mb-1">Rosenweg Telefon auf dem eigenen Handy</h2>
                 <p class="text-sm text-slate-600">App von der <a href="/apps" class="text-red-700 underline">Apps-Seite</a> laden,
                     im Menü „Mit Rosenweg anmelden“. Deine Nummer klingelt dann auch dort.</p>
+                <h2 class="font-semibold mt-5 mb-1">Rosenweg Messenger auf dem eigenen Handy</h2>
+                <p class="text-sm text-slate-600">App von der <a href="/apps" class="text-red-700 underline">Apps-Seite</a> laden
+                    und „Mit Rosenweg-Konto anmelden“ tippen. Hier abmelden, wenn das Handy weg ist: der Messenger löscht dort dann seine Chats.</p>
+                <ul id="meineMessenger" class="divide-y text-sm mt-1"></ul>
             </section>
         </div>
 
@@ -68,13 +72,17 @@
                 <table class="w-full text-sm">
                     <thead class="text-left text-slate-500"><tr>
                         <th class="py-1 pr-2">Nebenstelle</th><th class="pr-2">Gerät</th><th class="pr-2">Anlage</th>
-                        <th class="pr-2">Angemeldet</th><th class="pr-2">WLAN-Debugging</th><th></th></tr></thead>
+                        <th class="pr-2">Angemeldet</th><th class="pr-2">WLAN-Debugging</th><th class="pr-2">Apps</th><th></th></tr></thead>
                     <tbody id="telefone" class="divide-y"></tbody>
                 </table>
                 </div>
                 <p class="text-xs text-slate-500 mt-3">Wartung per adb: das Telefon wird kurz von 2098 „Wartung“ angerufen und schaltet adb ein,
                     erreichbar über das Netz mit <code>adb connect &lt;IP&gt;:5555</code> (steht in der Zeile, sobald das Telefon den Port meldet).
                     Nach einem Neustart stellt Rosenweg Gerät Port 5555 selbst wieder her.</p>
+                <p class="text-xs text-slate-500 mt-1">Apps: Neue Fassungen aus dem App-Katalog spielt die Anlage selbst per adb ein –
+                    nur wenn niemand angemeldet ist, nicht telefoniert wird und der Bildschirm aus ist; Rosenweg Gerät selbst nur nachts.
+                    Pro Telefon einmal „Updater zulassen“ (Telefon im WLAN „Rosenweg“, abgemeldet).
+                    <span id="updaterFp"></span></p>
             </section>
 
             <section class="bg-white rounded-xl shadow p-5">
@@ -83,6 +91,17 @@
                     <thead class="text-left text-slate-500"><tr><th class="py-1 pr-2">Zugang</th><th class="pr-2">Handy</th><th class="pr-2">Anlage</th><th class="pr-2">Seit</th><th></th></tr></thead>
                     <tbody id="privat" class="divide-y"></tbody>
                 </table>
+            </section>
+
+            <section class="bg-white rounded-xl shadow p-5">
+                <h2 class="font-semibold mb-3">Eigene Handys mit Rosenweg Messenger</h2>
+                <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="text-left text-slate-500"><tr><th class="py-1 pr-2">Zugang</th><th class="pr-2">Person</th><th class="pr-2">Handy</th><th class="pr-2">Zuletzt</th><th class="pr-2">Seit</th><th></th></tr></thead>
+                    <tbody id="messengerPrivat" class="divide-y"></tbody>
+                </table>
+                </div>
+                <p class="text-xs text-slate-500 mt-2">Sperren wirkt am Broker sofort (spätestens nach etwa einer Minute); der Messenger auf dem Handy meldet sich beim nächsten Kontakt ab und löscht seine Daten.</p>
             </section>
 
             <section class="bg-white rounded-xl shadow p-5">
@@ -147,6 +166,37 @@ async function api(pfad, opts) {
     return r;
 }
 async function json(r) { return r.json().catch(() => ({})); }
+// Website-API (Messenger-Zugaenge liegen hier, nicht in der Anlage)
+async function web(pfad, opts) {
+    const r = await AuthentikAuth.apiFetch(pfad, opts);
+    if (r.status === 401) { abgelaufen = true; zeigeGate(); throw new Error('auth'); }
+    return r;
+}
+
+// ── Rosenweg Messenger auf eigenen Handys ──
+async function ladeMessenger() {
+    const d = await json(await web('/api/messenger/zugaenge'));
+    $('meineMessenger').innerHTML = (d.zugaenge || []).map(z => `<li class="py-2 flex items-center gap-2">
+        <div class="flex-1"><b>${esc(z.geraet || 'Eigenes Handy')}</b><div class="text-xs text-slate-500">Rosenweg Messenger · seit ${esc(zeit(z.seit))}${z.zuletzt ? ' · zuletzt ' + esc(zeit(z.zuletzt)) : ''}</div></div>
+        <button class="knopf" onclick="messengerAbmelden(${Number(z.id)}, '${esc(z.geraet || 'Eigenes Handy')}', false)">Abmelden</button></li>`).join('')
+        || '<li class="py-2 text-slate-500">Auf keinem eigenen Handy angemeldet.</li>';
+}
+async function ladeMessengerAlle() {
+    const r = await web('/api/messenger/zugaenge?alle=1');
+    if (!r.ok) return;
+    const d = await json(r);
+    $('messengerPrivat').innerHTML = (d.zugaenge || []).map(z => `<tr>
+        <td class="py-2 pr-2 font-mono">${esc(z.kennung)}</td><td class="pr-2">${esc(z.name || z.email || '–')}</td>
+        <td class="pr-2">${esc(z.geraet || '–')}</td><td class="pr-2">${esc(zeit(z.zuletzt))}</td><td class="pr-2">${esc(zeit(z.seit))}</td>
+        <td class="text-right"><button class="knopf rot" onclick="messengerAbmelden(${Number(z.id)}, '${esc(z.kennung)} (${esc(z.name || '')})', true)">Sperren</button></td></tr>`).join('')
+        || '<tr><td class="py-2 text-slate-500" colspan="6">Noch keine.</td></tr>';
+}
+async function messengerAbmelden(id, name, technik) {
+    if (!confirm(technik ? 'Messenger-Zugang ' + name + ' sperren?' : name + ' abmelden? Der Messenger löscht dort beim nächsten Kontakt seine Chats; neu anmelden geht jederzeit.')) return;
+    const r = await web('/api/messenger/zugaenge/' + id, {method: 'DELETE'});
+    melde(r.ok ? (technik ? 'Zugang ' + name + ' gesperrt.' : name + ' abgemeldet.') : ((await json(r)).error || 'Fehler'), !r.ok);
+    ladeMessenger().catch(() => {}); ladeMessengerAlle().catch(() => {});
+}
 
 // ── Anmelde-QR und eigene Sitzungen (frueher pbx.rosenweg4303.ch/telefon) ──
 async function holeQr() {
@@ -208,6 +258,31 @@ async function wlanDebug(ext, minuten) {
     melde(minuten ? 'WLAN-Debugging an ' + ext + ' bis ' + new Date(d.wlan_debug_bis * 1000).toLocaleTimeString('de-CH', {hour:'2-digit', minute:'2-digit'})
                     + (d.geweckt ? ' – das Telefon wird kurz angerufen.' : ' – Telefon nicht erreicht, es übernimmt den Stand beim nächsten Kontakt.')
                   : 'WLAN-Debugging an ' + ext + ' wird ausgeschaltet.');
+    lade();
+}
+// ── adb-Updater (Stefan 26.11.2026: neue App-Versionen spielt die Anlage selbst ein) ──
+function updaterZelle(t) {
+    const u = t.updater || {};
+    const e = u.ergebnis ? `<div class="text-xs text-slate-500 mt-1">${esc(u.ergebnis)}</div>` : '';
+    if (!u.zugelassen) {
+        if (u.zulassen_bis) return 'wird zugelassen …' + e;
+        return `<button class="knopf" onclick="updater('${esc(t.ext)}', 'zulassen')">Updater zulassen</button>` + e;
+    }
+    const offen = u.ausstehend || [];
+    const liste = offen.map(a => `${a.name} ${a.ist} → ${a.soll}`).join('\n');
+    const stand = offen.length ? `<span title="${esc(liste)}">${offen.length} Update${offen.length > 1 ? 's' : ''} offen</span>`
+                               : (u.geprueft ? 'aktuell' : 'noch nicht geprüft');
+    const wann = u.geprueft ? `<div class="text-xs text-slate-500">geprüft ${esc(new Date(u.geprueft * 1000).toLocaleString('de-CH',
+                 {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}))}</div>` : '';
+    return stand + (u.sofort ? ' · läuft …' : ` <button class="knopf" onclick="updater('${esc(t.ext)}', 'jetzt')">⟳ Jetzt</button>`) + wann + e;
+}
+async function updater(ext, aktion) {
+    if (aktion === 'zulassen' && !confirm('Updater für ' + ext + ' zulassen?\nDas Telefon schaltet adb 15 Minuten ein und bestätigt die Rückfrage nur für den Schlüssel der Anlage.\nNur abgemeldet und im WLAN „Rosenweg“.')) return;
+    const r = await api('/api/telefon/' + encodeURIComponent(ext) + '/updater', {method: 'POST', body: {aktion}});
+    const d = await json(r);
+    if (!r.ok) { melde(d.error || 'Ging nicht.', true); return; }
+    melde(aktion === 'zulassen' ? 'Telefon ' + ext + ' wird zugelassen – Ergebnis in 1–3 Minuten hier.'
+                                : 'Updater für ' + ext + ' gestartet – Ergebnis in wenigen Minuten hier.');
     lade();
 }
 async function handyAbmelden(id, name) {
@@ -288,6 +363,7 @@ async function lade() {
     if (!r.ok) { melde(d.error || 'Übersicht nicht verfügbar.', true); return; }
     $('technik').classList.remove('hidden');
     ladeKatalog();
+    ladeMessengerAlle().catch(() => {});
     const punkt = ok => `<span class="punkt" style="background:${ok ? '#16a34a' : '#cbd5e1'}"></span>`;
     $('telefone').innerHTML = (d.telefone || []).map(t => `<tr>
         <td class="py-2 pr-2 font-mono">${esc(t.ext)}</td>
@@ -299,10 +375,13 @@ async function lade() {
                          + (t.adb ? `<div class="text-xs font-mono select-all mt-1" title="Port meldet Rosenweg Gerät">adb connect ${esc(t.adb)}</div>`
                                   : '<div class="text-xs text-slate-500 mt-1">Port noch nicht gemeldet</div>')
                          : `<button class="knopf" onclick="wlanDebug('${esc(t.ext)}', 60)">🛠 1 Std.</button>`}</td>
+        <td class="pr-2">${updaterZelle(t)}</td>
         <td class="text-right space-x-1 whitespace-nowrap">
             <button class="knopf" onclick="klingeln('${esc(t.ext)}')">🔔 Klingeln</button>
             ${t.angemeldet ? `<button class="knopf" onclick="abmelden('${esc(t.ext)}')">Abmelden</button>` : ''}</td></tr>`).join('')
-        || '<tr><td class="py-2 text-slate-500" colspan="6">Keine geteilten Telefone.</td></tr>';
+        || '<tr><td class="py-2 text-slate-500" colspan="7">Keine geteilten Telefone.</td></tr>';
+    $('updaterFp').textContent = d.updater_fingerabdruck ? 'Schlüssel des Updaters: ' + d.updater_fingerabdruck
+                                                          : 'Der Updater hat noch keinen adb-Schlüssel.';
     $('privat').innerHTML = (d.privat || []).map(p => `<tr>
         <td class="py-2 pr-2 font-mono">${esc(p.kennung)}</td><td class="pr-2">${esc(p.geraet || '–')}</td>
         <td class="pr-2">${punkt(p.registriert)} ${p.registriert ? 'erreichbar' : 'nicht erreichbar'}</td>
@@ -323,6 +402,7 @@ function zeigeGate() { $('inhalt').classList.add('hidden'); $('gate').classList.
     if (!AuthentikAuth.isLoggedIn()) { zeigeGate(); return; }
     $('inhalt').classList.remove('hidden');
     try { await ladeMeine(); } catch (e) {}
+    ladeMessenger().catch(() => {});
     await holeQr();
     // Nach einem 401 (Login abgelaufen) nicht weiter abfragen: jede Abfrage waere ein
     // gescheiterter Versuch, und nach 8 sperrt CrowdSec 24 h (rosenweg/anmeldung-bf).

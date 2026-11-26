@@ -140,6 +140,10 @@ adb shell am broadcast -a ch.rosenweg4303.telefon.ADB_ABGLEICH \
 # Installationsverbot 10 Minuten aufheben, z.B. für adb install -r
 adb shell am broadcast -a ch.rosenweg4303.telefon.ADB_INSTALLATION \
     -n ch.rosenweg4303.telefon/org.sipdroid.sipua.rosenweg.AdbFreigabe
+
+# ab Gerät v237: Installationsverbot sofort wieder setzen (nach adb install)
+adb shell am broadcast -a ch.rosenweg4303.telefon.ADB_INSTALLATION_ENDE \
+    -n ch.rosenweg4303.telefon/org.sipdroid.sipua.rosenweg.AdbFreigabe
 ```
 
 Geräte nicht per `adb reboot` neu starten, solange jemand daran arbeitet.
@@ -357,6 +361,33 @@ Daten gelöscht — die Akku-Ausnahme und die Freigabe des Anrufkontos gingen ve
   - `adb_allowed_connection_time 0`: Freigaben verfallen nicht nach 7 Tagen ohne Verbindung.
   - Die Netz-Rückfrage von „Debugging über WLAN“ bestätigt die Bedienungshilfe nur im WLAN „Rosenweg“; in einem anderen, noch nicht vertrauten Netz (Zugangspunkt) muss sie einmal jemand bestätigen.
   - Zum Testen per adb: `am broadcast -a ch.rosenweg4303.telefon.ADB_SELBST_WIEDERHERSTELLEN -n ch.rosenweg4303.telefon/org.sipdroid.sipua.rosenweg.AdbFreigabe` (Ergebnis im Log `RosenwegAdbSelbst`).
+
+### Apps per adb aktualisieren (adb-Updater, Entwurf 26. November 2026)
+
+Stefan: „Das zentrale System soll sich per adb mit den geteilten Telefonen verbinden und neue App-Versionen selbst einspielen.“ Rosenweg Gerät holt den Katalog zwar selbst (beim Start, bei der Anmeldung, sonst höchstens alle 6 Stunden) und installiert still als Device Owner. Der adb-Weg kommt dazu, weil
+
+- neue Fassungen damit **gleich nach der Freigabe** ankommen, nicht erst beim nächsten Abgleich,
+- **Rosenweg Gerät selbst** sich so von außen ersetzen lässt (auch wenn sein eigener Abgleich hängt),
+- die Anlage **sieht, was auf jedem Telefon installiert ist** (/smartphones, Spalte „Apps“).
+
+**Ablauf** (`pbx/api/adb_updater.py`, Timer alle 15 Min. + sofort nach einer Freigabe im Katalog oder „⟳ Jetzt“):
+
+1. Fällig ist ein Telefon, wenn es laut letzter Prüfung ältere Fassungen hat, der Katalog seither neuer ist oder es noch nie geprüft wurde. Nach einem Fehlversuch frühestens nach 1 Stunde wieder.
+2. Hindernisse → warten: jemand angemeldet, Abmeldung vor weniger als 10 Min. (Nachlauf/Uploads), Gespräch auf der Nebenstelle (AMI `core show channels`). Notrufe werden nie gewählt oder getestet; der Updater ruft nur den bestehenden Weckanruf 2098 auf.
+3. adb ein über die bestehende Wartung (`telefon_wartung`, Weckanruf 2098, 15 Min.), auf die Meldung von Gerät warten (`telefon_adb`, Port 5555).
+4. Nur Adressen aus `PBX_ADB_NETZE` (Vorgabe RK-Clients `100.64.9.0/24`); Seriennummer muss zur Nebenstelle passen (beim Zulassen gemerkt).
+5. Installierte Fassungen lesen (`cmd package list packages --show-versioncode`) → `telefon_apps_ist`.
+6. Je ältere Katalog-App: erneut Hindernisse prüfen, dazu **Bildschirm aus** und Akku ≥ 30 % (oder am Strom); APK prüfen (SHA-256 wie im Katalog, Rosenweg-Zertifikat `7b3bac26…a5ae`, Paket und versionCode aus dem Manifest, mit `apksigner` auch kryptografisch); `ADB_INSTALLATION`, `adb install -r` (nie Downgrade, nie Erstinstallation – die macht Gerät inkl. Ausblenden). **Rosenweg Gerät selbst zuletzt und nur nachts** (`PBX_ADB_NACHT`, Vorgabe 01–05 Uhr).
+7. Installationsverbot sofort wieder setzen (`ADB_INSTALLATION_ENDE`, ab Gerät v237), Wartung wieder aus, wenn der Updater sie eingeschaltet hat (von Hand eingeschaltete bleibt).
+8. Jeder Schritt steht in `telefon_log` (durch „App-Updater“) und damit im Verlauf auf /smartphones.
+
+Nie: Neustart, `pm uninstall`, Einstellungen ändern, andere Netze. Der Updater kennt nur `install -r`, `am broadcast` an Gerät, `getprop`, `dumpsys power/battery` und die Paketliste.
+
+**Schlüssel:** eigener adb-Schlüssel des Updaters, nur auf CT 220 unter `/var/lib/pbx-adb/.android/` (0700, Benutzer `asterisk`), nie im Repo. Pro Telefon einmal zulassen: /smartphones „Updater zulassen“ (Telefon abgemeldet, im WLAN „Rosenweg“). Die Anlage schaltet adb 15 Min. ein und gibt Gerät im Status den Fingerabdruck mit (`adb_dienst`, 5 Min.); die Bedienungshilfe bestätigt „USB-Debugging zulassen? / immer zulassen“ **nur für genau diesen Fingerabdruck** (wie beim eigenen Schlüssel, ab Gerät v237). `adb_allowed_connection_time 0` sorgt dafür, dass die Zulassung nicht verfällt. „Vergessen“ gibt es über `POST /api/telefon/<ext>/updater {aktion: "vergessen"}` (Telefon ersetzt).
+
+**Netzweg:** Abgemeldete Telefone sind im WLAN „Rosenweg“ im RK-Clients-Netz (VLAN 9, `100.64.9.0/24`); CT 220 (VLAN 2) erreicht dieses Netz heute schon. Angemeldete Telefone sind im Wohnungsnetz und von der Infrastruktur aus nicht erreichbar – das passt zur Regel „nur abgemeldet“. Telefone in fremden WLANs (z. B. Juronetz) bedient der Updater nicht; sie bekommen Updates über den eigenen Abgleich von Gerät.
+
+Endpunkte: `POST /api/telefon/<ext>/updater {aktion: zulassen|jetzt|vergessen}` (Technik), `GET /api/pbx/smartphones` liefert je Telefon `updater` (zugelassen, ausstehend, Ergebnis, geprüft) und `updater_fingerabdruck`.
 
 ### Eigene Handys von außen: SIP über TLS (25. November 2026)
 

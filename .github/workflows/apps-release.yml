@@ -1,0 +1,74 @@
+# Wiederverwendbar: die Dateien eines GitHub-Release an /apps schicken.
+# Fuer App-Repos, die ihr Release von Hand machen (lokal mit dem Rosenweg-Schluessel
+# signiert, dann `gh release create v1.2.3 app.apk --notes "..."`). Aufrufer:
+#
+#   name: Auf /apps
+#   on:
+#     release: { types: [published] }
+#     workflow_dispatch:          # erneut senden: gh workflow run apps.yml --ref v1.2.3
+#   permissions: { contents: read, id-token: write }
+#   jobs:
+#     apps:
+#       uses: Rosenweg/Website/.github/workflows/apps-release.yml@main
+#       with: { paket: ch.rosenweg4303.phone }
+#
+# Achtung: Releases, die ein Workflow mit GITHUB_TOKEN anlegt, loesen "release published"
+# nicht aus — solche Workflows rufen die Action apps-release direkt auf.
+name: Release an /apps
+
+on:
+  workflow_call:
+    inputs:
+      paket:
+        description: Android-Paketname (Kontrolle)
+        type: string
+        default: ''
+      muster:
+        description: Welche Release-Dateien (gh release download -p, eines pro Zeile)
+        type: string
+        default: |
+          *.apk
+          *.deb
+          *.dmg
+          *.exe
+          *.msi
+      runner:
+        description: runs-on als JSON (Standard ubuntu-latest)
+        type: string
+        default: '"ubuntu-latest"'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  senden:
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: 30
+    steps:
+      - name: Release-Dateien holen
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MUSTER: ${{ inputs.muster }}
+        run: |
+          set -euo pipefail
+          [ "$GITHUB_REF_TYPE" = tag ] || { echo "::error::Nur fuer einen Release-Tag (--ref v1.2.3)"; exit 1; }
+          args=()
+          while IFS= read -r m; do [ -n "${m// /}" ] && args+=(-p "$m"); done <<< "$MUSTER"
+          mkdir -p "$RUNNER_TEMP/release"
+          gh release download "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" -D "$RUNNER_TEMP/release" "${args[@]}"
+          gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --json body -q .body > "$RUNNER_TEMP/notiz.txt"
+          ls -la "$RUNNER_TEMP/release"
+          {
+            echo "notiz<<NOTIZ_ENDE_$GITHUB_RUN_ID"
+            head -c 4000 "$RUNNER_TEMP/notiz.txt"
+            echo
+            echo "NOTIZ_ENDE_$GITHUB_RUN_ID"
+          } >> "$GITHUB_OUTPUT"
+        id: holen
+
+      - uses: Rosenweg/Website/.github/actions/apps-release@main
+        with:
+          dateien: ${{ runner.temp }}/release/*
+          paket: ${{ inputs.paket }}
+          notiz: ${{ steps.holen.outputs.notiz }}

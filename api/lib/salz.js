@@ -32,11 +32,16 @@ const MIN_SPANNE_TAGE = 14;
  *   kgProWoche null = zu wenig Daten
  */
 function verbrauchProWoche(einfuellungen, jetzt = new Date()) {
-  const ab = jetzt.getTime() - FENSTER_TAGE * TAG_MS;
-  const liste = (einfuellungen || [])
+  const alle = (einfuellungen || [])
     .map(e => ({ t: new Date(e.am).getTime(), kg: Number(e.kg) || 0 }))
-    .filter(e => Number.isFinite(e.t) && e.t >= ab && e.t <= jetzt.getTime() && e.kg > 0)
+    .filter(e => Number.isFinite(e.t) && e.t <= jetzt.getTime() && e.kg > 0)
     .sort((a, b) => a.t - b.t);
+  // Zuerst das letzte halbe Jahr; reicht das nicht (z. B. nach dem Import
+  // alter Listen), zählt der ganze Verlauf (Entscheid Stefan 26.11.2026).
+  const ab = jetzt.getTime() - FENSTER_TAGE * TAG_MS;
+  const fenster = alle.filter(e => e.t >= ab);
+  const genug = l => l.length >= MIN_EINFUELLUNGEN && l[l.length - 1].t - l[0].t >= MIN_SPANNE_TAGE * TAG_MS;
+  const liste = genug(fenster) ? fenster : alle;
   const n = liste.length;
   const spanneMs = n >= 2 ? liste[n - 1].t - liste[0].t : 0;
   const spanneTage = Math.round(spanneMs / TAG_MS * 10) / 10;

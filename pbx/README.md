@@ -351,6 +351,61 @@ Fuer eigene, dedizierte Geraete vertretbar; es haengt unter dem Namen
 „SIP-Telefone (Linphone)" in den Nextcloud-Sicherheitseinstellungen und ist dort
 mit einem Klick widerrufbar.
 
+## Seite /apps und App-Releases (Stand 26.11.2026)
+
+`www.rosenweg4303.ch/apps` (`apps.html`) liest `https://pbx.rosenweg4303.ch/api/apps/index.json`
+(öffentlich, CORS für www) – **nicht** `www…/api/apps/…` (das ist die Haupt-API und liefert 404).
+
+- `apps`: alle öffentlichen Android-APKs aus dem App-Katalog der geteilten Telefone
+  (`telefon_apps`, ohne Rosenweg Gerät) – dieselbe Liste nutzt der Updater der Apps.
+- `karten`: Apps aus `APPS_REGISTER` in `api/app.py` (Rosenweg Virtuelle Computer, Rosenweg Salz,
+  vorbereitet Rosenweg Profil) mit Logo, Text und je Plattform einem Download
+  (Android, Linux-.deb, macOS-.dmg, Windows). Erscheint erst mit der ersten Datei.
+
+**Neue Versionen kommen automatisch:** Die CI eines App-Repos schickt beim Release-Tag die Dateien an
+`POST /api/apps/release` (Action `.github/actions/apps-release` bzw. wiederverwendbarer Workflow
+`.github/workflows/apps-release.yml` in diesem Repo). Anmeldung mit dem OIDC-Token von GitHub
+Actions – kein gespeichertes Geheimnis. Die Anlage lässt nur die eingetragenen Repos zu
+(`APPS_REGISTER`, `APPS_KATALOG_REPOS`), nur für einen Tag `v1.2.3`/`1.2.3`, und prüft Prüfsumme,
+Dateityp, Version = Tag und bei APKs Rosenweg-Signatur und Paketnamen. Katalog-Apps müssen auf
+/smartphones angelegt sein (Gruppen, „aktiv“ bleiben Sache der Technik); ihre APK wird ersetzt.
+Je App und Plattform bleiben `APPS_BEHALTEN` = 3 Fassungen in `apps_versionen`
+(Dateien unter `/var/lib/pbx-api/apps/dateien/`).
+
+Release von Hand (lokal signiert): `gh release create v1.2.3 app.apk --notes "…"` – der Workflow
+`apps.yml` des Repos schickt sie weiter. Erneut senden: `gh workflow run apps.yml --ref v1.2.3`.
+Technik ohne GitHub: `POST /api/pbx/apps-versionen/<app|paket>/<plattform>` (multipart `datei`,
+`version`, `notiz`; Bearer-Token der Technik), Liste `GET /api/pbx/apps-versionen`, Fassung
+zurückziehen `DELETE /api/pbx/apps-versionen/<id>`.
+
+Neue App: Eintrag in `APPS_REGISTER` (oder `APPS_KATALOG_REPOS`), Logo nach `img/apps/<app>.png`
+(Turm + Weg + Rose), Release-Schritt im Repo.
+
+## Apps auf geteilten Telefonen: Portal-Anfragen (Stand 26.11.2026)
+
+Flutter-Apps (rosenweg-basis, z. B. Rosenweg Salz) melden sich auf geteilten
+Telefonen nicht selbst an. Der Weg einer Anfrage:
+
+```
+App ──ContentResolver.call("portal_anfrage")──▶ Rosenweg Gerät (AnlageProvider)
+     prüft: Signatur des Aufrufers, Methode, Pfad, Grösse
+Gerät ──POST /api/telefon/portal (Gerätezugang)──▶ PBX-API (CT 220)
+     prüft: Sitzung am Telefon, Freigabe paket→Pfad (Config portal_pfade)
+PBX-API ──Bearer <Anlage-Token für genau diese Anfrage>──▶ Haupt-API (CT 128)
+     prüft: Signatur, 60 s, einmal, Methode+Pfad, PAT_GESPERRT, Konto aktiv
+```
+
+Kein Token verlässt CT 220. Antwort an die App: `{status, json, sitzung}`;
+`sitzung` wechselt mit jeder An-/Abmeldung (die App lädt dann neu).
+
+- Einrichten: `PORTAL_ANLAGE_SECRET` mit demselben Wert in `/etc/default/pbx-api`
+  und `/opt/rosenweg-core/.env`.
+- Freigaben: Config `portal_pfade` (PUT `/api/pbx/config`), JSON
+  `{"*": ["GET /api/auth/me", "GET /api/me"], "ch.rosenweg4303.salz": ["/api/salz/"]}`.
+  Endet ein Eintrag auf `/`, gilt alles darunter; davor optional Methoden
+  (`GET,PUT /api/...`). Ohne Config gilt `PORTAL_PFADE_STANDARD` in `app.py`.
+- Grenzen: Anfrage 256 KiB, Antwort 512 KiB (Binder).
+
 ## Anpassung
 
 | Was | Wo |
@@ -373,6 +428,8 @@ LXC-Snapshot taeglich via Proxmox (PVE GUI → CT 220 → Backup). Voicemail-Rec
 **Interne Nummern Technik (25.11.2026, Nummernplan: 1XXX Gruppen, 2000–2099 Dienste, 2100–2199 Geräte):**
 - **1000 = Ring-Group Technik:** klingelt bei allen Mitgliedern, ohne Geschäftszeiten, ohne Voicemail.
 - **2000 = Dienst Technik:** wie die Amtsnummer – Geschäftszeiten, Ring-Group, sonst gemeinsame Voicemail (Abschrift, WhatsApp an Technik, Auto-Reklamation).
+
+**Anrufer bei internen Anrufen (26.11.2026):** Auf Rosenweg-Geräten (Nebenstellen, App-Zugänge, geteilte Telefone) erscheint bei internen Anrufen nie eine externe Nummer. Rosenweg-Endpunkte rufen mit ihrer Caller-ID aus `pjsip_phones.conf` an (nach Anmeldung „Name 3HHWWP“). Ohne interne Nummer (Local/-Kanäle, Originate ohne CallerID, Testanrufe) setzt `[intern-absender]` „Rosenweg Telefonanlage 2000“. Die eigene Amtsnummer von innen gewählt geht direkt auf 2000, nicht über den Trunk hinaus und wieder herein. Bei der Weiterleitung auf ein externes Handy kommt dagegen die Amtsnummer an, so ist es gewollt. Den Namen schickt der Trunk heute nicht mit (`from_user` leert den Anzeigenamen, `send_pai` ist aus).
 
 ## Phase 2 (Roadmap)
 

@@ -396,6 +396,7 @@ nie im Repo.**
 | `ZEV_ABSENDER` | erlaubte Absender der ZEV-Rechnungsmails |
 | `IMAP_SERVERNAME`, `ZEV_IMAP_SERVERNAME` | Servername für die TLS-Prüfung der Postfächer |
 | `IMAP_TLS_INSECURE=1`, `ZEV_IMAP_TLS_INSECURE=1`, `DMARC_IMAP_TLS_INSECURE=1` | Notausgang, falls ein Zertifikat ungültig ist (nur vorübergehend) |
+| `PORTAL_ANLAGE_SECRET` | Apps auf geteilten Telefonen (Rosenweg Gerät → PBX-API → hier, `lib/anlagetoken.js`); derselbe Wert in `/etc/default/pbx-api` auf CT 220. Fehlt er, ist der Weg aus (401) |
 | `NODE_ENV=production` | keine Stacktraces im Browser |
 | `NODE_TLS_REJECT_UNAUTHORIZED=0` | **noch gesetzt** (UniFi/Mailcow/PVE mit eigenen Zertifikaten) – soll durch `NODE_EXTRA_CA_CERTS` ersetzt werden |
 

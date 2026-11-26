@@ -1,0 +1,9 @@
+[Unit]
+Description=Rosenweg PBX: adb-Updater sofort starten (/smartphones "Jetzt", neue Freigabe im Katalog)
+
+[Path]
+PathModified=/var/lib/pbx-adb/anstoss
+Unit=pbx-adb-updater.service
+
+[Install]
+WantedBy=paths.target

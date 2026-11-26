@@ -6,6 +6,8 @@ const crypto = require('crypto');
 const { pool, auditCtx } = require('../lib/db');
 const { AUTHENTIK_CLIENT_ID } = require('../lib/config');
 const { validateAuthentikToken, validateAppToken, istAppToken, resolveAncestorGroups, ACCESS_LEVELS } = require('../lib/auth');
+const { istAnlageToken, anlageTokenPruefen } = require('../lib/anlagetoken');
+const { isTechnik, isPraesident } = require('../lib/groups');
 const { karteZugangPruefen } = require('../routes/app-karte');
 
 // Pfade, die einen Ausweis erzeugen oder ändern — für Zugangstoken tabu.
@@ -128,7 +130,43 @@ async function authMiddleware(req, res, next) {
       return auditCtx.run({ userEmail: req.user.email || 'pat:' + row.id }, next);
     }
 
-    // 0b. Karten-Sitzung einer Rosenweg-App auf einem privaten Geraet
+    // 0b. Anlage-Portal-Token: App auf einem geteilten Telefon, ueber Rosenweg
+    //     Geraet und die PBX-API (lib/anlagetoken.js). Gilt fuer genau eine
+    //     Anfrage (Methode + Pfad), einmal, hoechstens 120 s. Wie ein PAT darf
+    //     es nichts aendern, womit man sich anmeldet (PAT_GESPERRT) — nur das
+    //     Lesen der eigenen Angaben (GET /api/auth/me) ist frei.
+    if (istAnlageToken(token)) {
+      // Zweiter authMiddleware in derselben Anfrage (App- und Routen-Ebene): schon geprueft
+      if (req.anlage && req.anlage.token === token) return next();
+      const p = anlageTokenPruefen(token);
+      if (!p) return res.status(401).json({ error: 'Anmeldung am Telefon abgelaufen' });
+      const vollerPfad = ((req.baseUrl || '') + req.path).toLowerCase()
+        .replace(/\/{2,}/g, '/').replace(/^\/api\//, '').replace(/^\/+|\/+$/g, '');
+      if (p.methode !== req.method || p.pfad !== vollerPfad) {
+        return res.status(403).json({ error: 'Anlage-Token gilt fuer eine andere Anfrage' });
+      }
+      const nurLesen = req.method === 'GET' && vollerPfad === 'auth/me';
+      if (!nurLesen && PAT_GESPERRT.some(pfx => vollerPfad === pfx || vollerPfad.startsWith(pfx + '/'))) {
+        return res.status(403).json({ error: 'Auf einem geteilten Telefon nicht erlaubt — bitte im Portal' });
+      }
+      const u = await pool.query(
+        `SELECT id, email, name, wohnung, stweg, role, active, groups_json
+           FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1`, [p.email]);
+      const zeile = u.rows[0];
+      if (!zeile || zeile.active === false) return res.status(401).json({ error: 'Konto unbekannt oder gesperrt' });
+      const groups = (() => { try { return JSON.parse(zeile.groups_json || '[]'); } catch { return []; } })();
+      req.user = {
+        id: zeile.id, user_id: zeile.id, email: zeile.email, name: zeile.name,
+        wohnung: zeile.wohnung, stweg: zeile.stweg, role: zeile.role, groups,
+        auth_source: 'anlage',
+      };
+      req.user.isAdmin = zeile.role === 'admin' || isTechnik(groups) || isPraesident(groups);
+      // requireUserLogin sperrt Token-Verwaltung & Co. auch fuer diesen Weg
+      req.anlage = { ext: String(p.ext || ''), paket: String(p.paket || ''), token };
+      return auditCtx.run({ userEmail: zeile.email || 'anlage:' + req.anlage.ext }, next);
+    }
+
+    // 0c. Karten-Sitzung einer Rosenweg-App auf einem privaten Geraet
     //     (routes/app-karte.js): wie ein App-Token, aber die Karte ist ein
     //     schwaecherer Ausweis als das Passwort — darum dieselbe Sperrliste
     //     wie fuer PATs (kein Token, Passkey, Passwort, MQTT-Zugang).
@@ -229,7 +267,7 @@ function requirePermission(page, level = 'read') {
 // selbst), damit ein kompromittierter PAT keine neuen PATs anlegen oder andere
 // widerrufen kann. Wir checken req.pat (gesetzt durch PAT-Auth) und lehnen ab.
 function requireUserLogin(req, res, next) {
-  if (req.pat) return res.status(403).json({ error: 'Token-Verwaltung nur via Browser-Login (Authentik) möglich' });
+  if (req.pat || req.anlage) return res.status(403).json({ error: 'Token-Verwaltung nur via Browser-Login (Authentik) möglich' });
   // Karten-Sitzung (routes/app-karte.js): gleich wie ein PAT, nur Browser-Login
   if (req.appKarte) return res.status(403).json({ error: 'Nur mit Browser-Login (Rosenweg-Konto) möglich, nicht mit der Karte' });
   next();
