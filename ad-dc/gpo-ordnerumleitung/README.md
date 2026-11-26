@@ -33,7 +33,7 @@ Das ist derselbe Ordner wie «Persönlich» in der Nextcloud ([Plan](../../docs/
 - **Gleiche Ziele wie `logon.bat`:** Bei stefan.mueller ist der alte Ort derselbe wie der neue. Windows verschiebt also nichts und trägt nur die Umleitung als eigene ein.
 - **Keine Offline-Dateien:** Ohne Gegenmassnahme macht Windows umgeleitete Ordner automatisch offline verfügbar. Das führt zu Abgleichkonflikten und zu alten Ständen nach einem Netzausfall. Die Richtlinie setzt deshalb die Benutzerrichtlinie «Umgeleitete Ordner nicht automatisch offline verfügbar machen» (`HKCU\Software\Policies\Microsoft\Windows\NetCache`, `DisableFRAdminPin=1`, in `User\Registry.pol`).
 - **Sicherheitsfilterung wie in der GPMC:** Authentifizierte Benutzer dürfen die Richtlinie weiter **lesen**, denn seit MS16-072 liest der Rechner sie mit seinem eigenen Konto. **Anwenden** darf nur die Gruppe Ordnerumleitung. `samba-tool ntacl sysvolreset` überträgt das auf die Dateien im sysvol.
-- **Computerteil abgeschaltet** (`flags=1`): Er ist leer, und die Rechner sparen sich die Auswertung beim Start.
+- **Computerteil abgeschaltet** (`flags=2`; `1` hiesse Benutzerteil aus — damit wirkte die Richtlinie nicht): Er ist leer, und die Rechner sparen sich die Auswertung beim Start.
 - **Kein `samba-tool gpo create`:** Wie beim [Rosenweg-Look](../gpo-rosenweg-look-windows/README.md) arbeitet das Skript direkt in der sam.ldb. Ein Admin-Passwort gehört nicht in ein Skript.
 
 ## Ausrollen
