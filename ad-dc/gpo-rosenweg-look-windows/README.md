@@ -4,7 +4,7 @@ Windows-Rechner der Domäne sehen damit aus wie die Stationen:
 
 - dasselbe Hintergrund- und Sperrbild
 - Akzentfarbe Mint-Blau `#0C75DE`
-- Taskleiste zentriert wie bei Windows 11, mit dem Rosenweg-Wappen als Start-Knopf
+- Taskleiste links, mit dem Rosenweg-Wappen als Start-Knopf
 - Rosenweg als Hersteller mit Logo
 - das Logo als Standard-Kontobild
 - BGInfo: Rechner, Adressen, angemeldete Person, Windows-Stand und letztes Update oben rechts auf dem Hintergrund (`bginfo.ps1`, bei jeder Anmeldung)
@@ -34,7 +34,7 @@ Bilder oder Skript anpassen, dann auf dc1 im Ordner `./einrichten.sh` ausführen
 - **Richtlinie direkt in der sam.ldb statt über `samba-tool gpo create`:** Das Maschinenkonto des DC darf keine Richtlinien anlegen, und ein Admin-Passwort gehört nicht in ein Skript.
 - **`scripts.ini` mit `powershell.exe -ExecutionPolicy Bypass` statt `psscripts.ini`:** Ein Windows-Client steht ab Werk auf `Restricted` und würde das Skript sonst verweigern.
 - **Hintergrund und Sperrbild über PersonalizationCSP:** Das geht nur bei Enterprise/Education, und Benutzer können es nicht überschreiben. Auf den Stationen gehören diese Bilder ebenfalls der Station.
-- **Taskleiste zentriert:** Das ist eine Benutzereinstellung (`TaskbarAl=1`). Das Skript lädt deshalb beim Start jedes Profil und die Vorlage für neue Profile kurz und setzt sie dort. Bis zum 26.11.2026 stand sie links. Stefan will aber die Anordnung von Windows 11, mit dem Wappen an der Stelle des Windows-Knopfs.
+- **Taskleiste links:** Das ist eine Benutzereinstellung (`TaskbarAl=0`). Das Skript lädt deshalb beim Start jedes Profil und die Vorlage für neue Profile kurz und setzt sie dort. Der Start-Knopf von Open-Shell ist genau auf den linksbündigen Windows-Knopf zugeschnitten (siehe unten).
 - **BGInfo pro Rechner:** Das Bild heisst `bginfo-<RECHNER>.png` und liegt in `%LOCALAPPDATA%`. Es wird bei jeder Anmeldung frisch erzeugt. Beim Abmelden setzt `bginfo.ps1 -Abmelden` den Hintergrund auf das neutrale Stationsbild zurück, als zweites Abmeldeskript. Windows legt nämlich eine Kopie des Hintergrunds im servergespeicherten Profil ab (`%APPDATA%\Microsoft\Windows\Themes`) und zeigt sie bei der nächsten Anmeldung zuerst an, auch auf einem anderen Rechner. So erschien auf WIN11-1 zuerst «R9-PC1, Windows 10».
 
 ## Programm-Whitelist (AppLocker)
@@ -123,16 +123,17 @@ Als die angemeldete Person selbst genügt `drucker.ps1 -Anlass Probe`.
 1. `einrichten.sh` lädt den Installer einmal von GitHub nach `programme/`, prüft die Prüfsumme und legt ihn ins sysvol. Der Installer kommt nicht ins Git, weil er ein 10 MB grosses Fremdprogramm ist. Hat dc1 kein Netz, die Datei von Hand nach `programme/` legen. Die Prüfsumme wird trotzdem geprüft.
 2. `rosenweg-look.ps1` prüft beim Start, ob der Rechner Windows 11 hat (Build 22000 oder höher) und ob Open-Shell 4.4.198 schon installiert ist. Fehlt es oder ist eine andere Version installiert, kopiert das Skript den Installer nach `C:\Windows\Temp`, prüft die Prüfsumme erneut und installiert still nur die Startmenü-Komponente: `/qn ADDLOCAL=StartMenu NOSTART=1 START_MENU_FOLDER=0`. Explorer-Zusatz, IE-Teil und Update-Dienst werden nicht installiert, Updates kommen von hier.
 3. Die Einstellungen setzt das Skript als Richtlinie unter `HKLM\SOFTWARE\Policies\OpenShell\StartMenu`, so wie die ADMX von Open-Shell sie schreibt: zu jedem Wert ein `<Name>_State`, 0 = fest, 2 = nur Vorgabe.
-   - **Fest:** `MenuStyle=2` (Windows 7), `MouseClick=1` und `WinKey=1` (klassisches Menü), `EnableStartButton=1`, `StartButtonType=2` (eigenes Bild), `StartButtonPath=C:\ProgramData\Rosenweg\startknopf.png`, `StartButtonSize=48`, `StartButtonAlign=1` (unten bündig).
+   - **Fest:** `MenuStyle=2` (Windows 7), `MouseClick=1` und `WinKey=1` (klassisches Menü), `EnableStartButton=1`, `StartButtonType=2` (eigenes Bild), `StartButtonPath=C:\ProgramData\Rosenweg\startknopf.png`, `StartButtonSize=56`, `StartButtonAlign=1` (unten bündig).
    - **Nur Vorgabe:** Skin `Immersive`. Er folgt hell/dunkel und der Akzentfarbe.
    - **Aus:** die Update-Prüfung (`OpenShell\Update=0`).
 4. Wirksam wird Open-Shell bei der nächsten Anmeldung. Es startet über `HKLM\...\Run`, ein Explorer-Neustart ist nicht nötig.
 
-**Start-Knopf:** `bilder/startknopf.png`, 144×432 px, PNG mit Transparenz.
+**Start-Knopf:** `bilder/startknopf.png`, 168×432 px, PNG mit Transparenz.
 
-- **Format:** Open-Shell erwartet die drei Zustände untereinander: normal, darüber und gedrückt (`StartButton.cpp`: Höhe ÷ 3). Je Zustand sind es 144 px, weil Open-Shell die 48 px Breite mit der Anzeigeskalierung hochrechnet. So bleibt der Knopf bis 300 % scharf.
-- **Wichtig:** Unter Windows 11 legt Open-Shell seinen Knopf nur **über** den Windows-Knopf, an dessen linke Kante, und blendet diesen nicht aus. Wo das Bild durchsichtig ist, schaut das Windows-Symbol durch. Das Wappen sitzt deshalb genau über dem Symbol der **zentrierten** Taskleiste, die Masse stehen in `startknopf-erzeugen.py`.
-- **Taskleiste links:** Dafür passt dieses Bild nicht, weil das Symbol dort 10 px weiter rechts sitzt. Für ein neues Logo: `python3 startknopf-erzeugen.py`, danach `./einrichten.sh`.
+- **Format:** Open-Shell erwartet die drei Zustände untereinander: normal, darüber und gedrückt (`StartButton.cpp`: Höhe ÷ 3). Das Bild ist in dreifacher Grösse gezeichnet, weil Open-Shell die 56 px Breite mit der Anzeigeskalierung hochrechnet. So bleibt der Knopf bis 300 % scharf.
+- **Wichtig:** Unter Windows 11 legt Open-Shell seinen Knopf nur **über** den Windows-Knopf, an dessen linke Kante, und blendet diesen nicht aus. Wo das Bild durchsichtig ist, schaut das Windows-Symbol durch.
+- **Masse:** Der linksbündige Windows-Knopf ist 55×48 px gross, sein Symbol sitzt bei x=21..43, Mitte (32 | 24), gemessen am 26.11.2026 auf win11-1. Das Wappen sitzt mit 40 px Durchmesser genau dort, die Herleitung steht in `startknopf-erzeugen.py`.
+- **Zentrierte Taskleiste:** Dafür passt das Bild nicht, weil das Symbol dort 10 px weiter links sitzt. Für ein neues Logo: `python3 startknopf-erzeugen.py`, danach `./einrichten.sh`.
 
 **Windows 10 auch:** In `rosenweg-look.ps1` `$OpenShellAbBuild = 10240` setzen.
 
