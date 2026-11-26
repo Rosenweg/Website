@@ -88,6 +88,7 @@ for (const methode of ['get', 'post', 'put', 'delete', 'patch', 'use']) {
 // fuer Audit gewrappt. initDB() bleibt unten im Bootstrap und nutzt diesen pool.
 const { pool, energyPool, auditCtx } = require('./lib/db');
 const { haeuserAusAuswahl } = require('./lib/haeuser');
+const benutzername = require('./lib/benutzername');
 const zlibModul = require('zlib');
 
 // Mail (transporter, loggedSendMail, isAllowlistedSender, generateOTP, EMAIL_ALLOWLIST,
@@ -528,7 +529,8 @@ app.get('/api/auth/callback', async (req, res) => {
     const userInfo = await userResp.json();
 
     const email = (userInfo.email || userInfo.sub).toLowerCase();
-    const username = userInfo.preferred_username || email.split('@')[0];
+    // preferred_username = Authentik-Benutzername; Ersatz nur, falls ein Anbieter ihn nicht liefert
+    const username = userInfo.preferred_username || benutzername.vorschlag({ name: userInfo.name, email }) || email.split('@')[0];
     const name = userInfo.name || username;
     const groups = userInfo.groups || [];
     const isAdmin = groups.some(g => { const gl = g.toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident'; });
@@ -6655,6 +6657,17 @@ async function autoCreateVollmachtForVerwalter(client, wohnungId, stweg, kontakt
   }
 }
 
+// Kontakt ohne eindeutigen Benutzernamen: kein Konto, einmal je Adresse und
+// Prozess an Technik melden (der Abgleich laeuft bei jedem Speichern erneut).
+const benutzernameRueckfragen = new Set();
+function benutzernameRueckfrage(email, name, grund) {
+  console.warn(`[Authentik] Kein Konto fuer ${email}: ${grund} - Rueckfrage an Technik`);
+  if (benutzernameRueckfragen.has(email)) return;
+  benutzernameRueckfragen.add(email);
+  notifyTechnik(`Konto nicht angelegt: ${name || '(ohne Namen)'} <${email}> - ${grund}. `
+    + 'Bitte in der Benutzerverwaltung von Hand anlegen (vorname.nachname) oder die Person pruefen.', 'konto-rueckfrage');
+}
+
 // Sync kontakte with email to Authentik as users and assign STWEG groups
 // bewohntVon: 'eigentuemer' means self-occupied → Eigentümer/Verwalter also get bewohner group
 async function syncKontakteToAuthentik(stweg, kontakte, bewohntVon) {
@@ -6662,7 +6675,9 @@ async function syncKontakteToAuthentik(stweg, kontakte, bewohntVon) {
   // Authentik-Zugang: automatisch für Eigentümer/Verwalter, opt-in für Mieter/Bewohner.
   const withEmail = kontakte.filter(k => {
     if (!k.email || !k.email.includes('@')) return false;
-    if (k.email.startsWith('druckerr9+') || k.email.startsWith('druckerr13+')) return false;
+    // Platzhalter (druckerr9+vorname.nachname@…) und nackte Druckeradressen: Post
+    // geht an den Drucker, die Person hat kein Konto.
+    if (benutzername.istPlatzhalter(k.email)) return false;
     if (k.rolle === 'eigentuemer' || k.rolle === 'verwalter') return k.authentik_zugang !== false;
     return k.authentik_zugang === true;
   });
@@ -6684,29 +6699,30 @@ async function syncKontakteToAuthentik(stweg, kontakte, bewohntVon) {
       let user = existingUsers.find(u => u.email?.toLowerCase() === email);
 
       if (!user) {
-        // Create user in Authentik
-        const username = email.split('@')[0].replace(/[^a-z0-9._-]/gi, '').substring(0, 50).toLowerCase() || 'konto';
-        // Benutzername ist auf Knoten/Diensten die Kennung (Unix-Konto, sudo, Dateien):
-        // keine System-/Dienstnamen und keinen schon vergebenen Namen (auch Gross-/Klein-
-        // schreibung, auch jenseits der ersten Ergebnisseite) uebernehmen -> sonst Zusatz.
-        const RESERVIERT = new Set(['root', 'admin', 'administrator', 'akadmin', 'ansible', 'github', 'claude', 'nobody', 'daemon', 'postmaster', 'www-data', 'backup', 'guest', 'gast']);
+        // Create user in Authentik. Benutzername = vorname.nachname aus dem Namen
+        // (lib/benutzername), nie aus dem Mail-Teil vor dem @. Er ist auf Knoten/
+        // Diensten die Kennung (AD, Unix-Konto, Home): bei fehlendem Namen, System-/
+        // Dienstnamen oder schon vergebenem Namen (auch Gross/Klein, auch jenseits der
+        // ersten Ergebnisseite) kein Konto anlegen, sondern Technik fragen -
+        // vorname.nachname2 waere oft dieselbe Person mit zweiter Adresse.
+        const finalUsername = benutzername.vorschlag({ vorname: k.vorname, nachname: k.nachname, name: k.name, email });
         const belegt = async (n) => existingUsers.some(u => String(u.username || '').toLowerCase() === n)
           || ((await authentikAPI('GET', `/core/users/?username=${encodeURIComponent(n)}`)).results || []).length > 0;
-        let finalUsername = username;
         try {
-          if (RESERVIERT.has(username) || await belegt(username)) {
-            finalUsername = `${username.slice(0, 43)}-${crypto.randomBytes(3).toString('hex')}`;
-            if (await belegt(finalUsername)) throw new Error('Benutzername belegt');
-          }
+          let grund = null;
+          if (!finalUsername) grund = 'kein Vor- und Nachname erkennbar';
+          else if (benutzername.RESERVIERT.has(finalUsername)) grund = `${finalUsername} ist reserviert`;
+          else if (await belegt(finalUsername)) grund = `${finalUsername} ist schon vergeben`;
+          if (grund) { benutzernameRueckfrage(email, k.name, grund); continue; }
         } catch (err) {
-          console.error(`[Authentik] Benutzername fuer ${email} nicht pruefbar/frei:`, err.message);
+          console.error(`[Authentik] Benutzername fuer ${email} nicht pruefbar:`, err.message);
           continue;
         }
 
         try {
           user = await authentikAPI('POST', '/core/users/', {
             username: finalUsername,
-            name: k.name || email.split('@')[0],
+            name: k.name || finalUsername,
             email,
             is_active: true,
           });
@@ -7704,8 +7720,9 @@ app.post('/api/internal/carddav-sync', authMiddleware, adminOnly, async (req, re
 app.post('/api/wohnungen/sync-authentik', authMiddleware, adminOnly, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT k.rolle, k.name, k.email, w.stweg, w.bewohnt_von
+      `SELECT k.rolle, k.name, k.email, w.stweg, w.bewohnt_von, p.vorname, p.nachname
        FROM wohnungen_kontakte k JOIN wohnungen w ON k.wohnung_id = w.id
+       LEFT JOIN personen p ON p.id = k.person_id
        WHERE k.email IS NOT NULL AND k.email != ''
        ORDER BY w.stweg`
     );
@@ -10912,7 +10929,15 @@ app.post('/api/admin/users', authMiddleware, requirePermission('bewohner-verwalt
     // Fuer alle (auch Admins): kein zweites Konto, das sich nur in Gross/Klein
     // unterscheidet – sonst traefe der AD-Sync ein bestehendes AD-Konto.
     const kollision = await kontoKollision(username, isAdmin ? null : email);
-    if (kollision) return res.status(409).json({ error: kollision });
+    if (kollision) {
+      // Gleicher Name, andere Person? Freien Namen mit Ziffer vorschlagen; der Dialog
+      // fragt nach, bevor er ihn nimmt (nie automatisch nummerieren).
+      let vorschlag = null;
+      if (kollision === 'Benutzername existiert bereits' && benutzername.FORM.test(username)) {
+        vorschlag = await benutzername.freierMitZiffer(username, async (n) => !!(await kontoKollision(n, null))).catch(() => null);
+      }
+      return res.status(409).json({ error: kollision, vorschlag });
+    }
     let allGroupsCache = null;
     if (!isAdmin && groups && groups.length > 0) {
       const allGroupsData = await authentikAPI('GET', '/core/groups/?page_size=500');

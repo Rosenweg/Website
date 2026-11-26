@@ -22,6 +22,7 @@ auf dem Knoten, der den Container gerade hat (`ha-manager status`).
 | `doc-github-backup.sh` | CT 106 `fileserver`, `/usr/local/bin/`, Cron `/etc/cron.d/rosenweg-documents` | Dokumentenablage ↔ Repo `Rosenweg/documents` | unten |
 | `desktop-schreibschutz-loesen.sh` | CT 106 | entfernt das Windows-READONLY-Bit von angepassten Ordnern | Kopfkommentar |
 | `docker-images-aufraeumen.sh` + `docker-aufraeumen.service`/`.timer` | CT 128 `core-backend`, sonntags 04:15 | namenlose API-Images löschen | Kopfkommentar |
+| `konten-druckerr-umbenennen.py` | PVE-Knoten (root), einmalig; `ssh root@100.64.2.21 'python3 -' < scripts/konten-druckerr-umbenennen.py` | Konten `druckerr9vorname.nachname` auf `vorname.nachname` (AD, Authentik, Portal-DB, Ordner); Standard Probelauf, `--ausfuehren` nur für Plan AUTO, pausiert ad-sync währenddessen | Kopfkommentar |
 | `sync-avatars-to-ad.py` | CT 108 `dc1`, Cron | Profilbilder aus Authentik ins AD (`thumbnailPhoto`) | unten |
 | `whatsapp-bot-session-backup.sh` | CT 116, Cron 03:00 | Sicherung der WhatsApp-Sitzung | Kopfkommentar |
 | `whatsapp-bot-session-restore.sh` | CT 116 | Sitzung aus einer Sicherung zurückspielen | Kopfkommentar |

@@ -1815,13 +1815,18 @@
                         body: { name, email, is_active: true, groups },
                     });
                 } else {
-                    const username = name.toLowerCase()
-                        .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
-                        .replace(/[^a-z0-9\s.-]/g, '').trim().split(/\s+/)
-                        .filter(Boolean);
-                    // Server verlangt vorname.nachname (^[a-z0-9]+(\.[a-z0-9-]+)+$)
-                    const vor = (username[0] || '').replace(/[^a-z0-9]/g, '');
-                    const nach = (username.length >= 2 ? username[username.length - 1] : '').replace(/[^a-z0-9-]/g, '').replace(/^-+|-+$/g, '');
+                    // Gleiche Regel wie api/lib/benutzername.js: vorname.nachname, klein,
+                    // ae/oe/ue/ss, Akzente weg, Partikel zum Nachnamen ("Di Meo" -> dimeo).
+                    const tl = (x) => x.toLowerCase().replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+                        .replace(/æ/g, 'ae').replace(/[øœ]/g, 'oe').replace(/ł/g, 'l').replace(/đ/g, 'd').replace(/ı/g, 'i')
+                        .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                    const teil = (x) => tl(x).replace(/[^a-z0-9-]+/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
+                    const partikel = new Set(['von', 'van', 'vom', 'zu', 'zum', 'de', 'di', 'da', 'del', 'della', 'dello', 'dos', 'das', 'do', 'du', 'der', 'den', 'des', 'la', 'le', 'lo', 'ten', 'ter', 'al', 'el', 'st']);
+                    const w = name.trim().split(/\s+/).filter(Boolean);
+                    let i = w.length - 1;
+                    while (i > 1 && partikel.has(tl(w[i - 1]))) i--;
+                    const vor = w.length >= 2 ? teil(w[0]) : '';
+                    const nach = w.length >= 2 ? teil(w.slice(i).join('')) : '';
                     if (!vor || !nach) {
                         errorDiv.textContent = 'Bitte Vor- und Nachname eingeben.';
                         errorDiv.classList.remove('hidden');
@@ -1829,11 +1834,25 @@
                         btn.textContent = 'Speichern';
                         return;
                     }
-                    const uname = vor + '.' + nach;
+                    let uname = vor + '.' + nach;
                     res = await AuthentikAuth.apiFetch('/api/admin/users', {
                         method: 'POST',
                         body: { username: uname, name, email, groups },
                     });
+                    // Name schon vergeben: nur nach Rueckfrage mit Ziffer anlegen
+                    // (gleicher Name kann dieselbe Person mit anderer Adresse sein).
+                    if (res.status === 409) {
+                        const d = await res.clone().json().catch(() => ({}));
+                        if (d.vorschlag && confirm(`Den Benutzernamen ${uname} gibt es schon.\n\n`
+                            + `Ist ${name} eine andere Person? Dann als ${d.vorschlag} anlegen.\n`
+                            + 'Sonst abbrechen und das bestehende Konto verwenden.')) {
+                            uname = d.vorschlag;
+                            res = await AuthentikAuth.apiFetch('/api/admin/users', {
+                                method: 'POST',
+                                body: { username: uname, name, email, groups },
+                            });
+                        }
+                    }
                 }
 
                 if (!res.ok) {
