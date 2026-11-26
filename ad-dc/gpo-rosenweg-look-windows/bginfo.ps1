@@ -14,14 +14,40 @@
 # fuer alle, und der Name der Person ist beim Start noch nicht bekannt. Den
 # Hintergrund aendern kann die Person trotzdem nicht (NoChangingWallPaper,
 # von rosenweg-look.ps1 in jedes Profil geschrieben).
+#
+# Pro RECHNER eine Datei (bginfo-<RECHNER>.png) und bei jeder Anmeldung frisch
+# erzeugt. Beim ABMELDEN (-Abmelden, Abmeldeskript der Richtlinie) wird der
+# Hintergrund auf das neutrale Stationsbild zurueckgesetzt: Windows legt eine
+# Kopie des Hintergrunds im servergespeicherten Teil des Profils ab
+# (%APPDATA%\Microsoft\Windows\Themes\TranscodedWallpaper, CachedFiles) und
+# zeigt sie bei der naechsten Anmeldung sofort an - auch auf einem anderen
+# Rechner. So stand auf WIN11-1 nach der Anmeldung zuerst "R9-PC1, Windows 10"
+# (26.11.2026), bis diese Aufgabe lief.
 # ============================================================================
+param([switch]$Abmelden)
 $ErrorActionPreference = 'SilentlyContinue'
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
+Add-Type -Namespace Rosenweg -Name Tapete -MemberDefinition '[DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int SystemParametersInfo(int a, int b, string c, int d);'
 
 $basis = Join-Path $env:ProgramData 'Rosenweg\hintergrund.png'
 $ziel  = Join-Path $env:LOCALAPPDATA 'Rosenweg'
 New-Item -ItemType Directory -Force -Path $ziel | Out-Null
-$datei = Join-Path $ziel 'bginfo.png'
+$datei = Join-Path $ziel "bginfo-$env:COMPUTERNAME.png"
+# Aeltere Fassung ohne Rechnernamen
+Remove-Item (Join-Path $ziel 'bginfo.png') -Force -ErrorAction SilentlyContinue
+
+if ($Abmelden) {
+    # Neutral: nur das Stationsbild, ohne Rechner und Person. Erst setzen (das
+    # schreibt TranscodedWallpaper neu), dann die zwischengespeicherten Bilder
+    # in Grossformaten loeschen - Windows baut sie bei Bedarf neu.
+    if (Test-Path $basis) {
+        Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name WallpaperStyle -Value '10'
+        Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name TileWallpaper -Value '0'
+        [Rosenweg.Tapete]::SystemParametersInfo(20, 0, $basis, 3) | Out-Null
+    }
+    Remove-Item (Join-Path $env:APPDATA 'Microsoft\Windows\Themes\CachedFiles') -Recurse -Force -ErrorAction SilentlyContinue
+    return
+}
 
 # --- Angaben ----------------------------------------------------------------
 $rechner = $env:COMPUTERNAME
@@ -108,5 +134,4 @@ $bild.Dispose()
 # --- Setzen -----------------------------------------------------------------
 Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name WallpaperStyle -Value '10'
 Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name TileWallpaper -Value '0'
-Add-Type -Namespace Rosenweg -Name Tapete -MemberDefinition '[DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int SystemParametersInfo(int a, int b, string c, int d);'
 [Rosenweg.Tapete]::SystemParametersInfo(20, 0, $datei, 3) | Out-Null
