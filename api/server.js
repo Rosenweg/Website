@@ -3047,14 +3047,14 @@ app.post('/api/wasch/sperrzeiten', authMiddleware, waschAdmin('write'), async (r
     let benachrichtigt = 0;
     for (const person of waschRegeln.jePerson(b.rows)) {
       if (!person.email) continue;
-      const m = waschRegeln.sperrMeldung({
+      const angaben = {
         name: person.name, raum: raum.name, grund: p.grund, von: r.rows[0].start_time, bis: r.rows[0].end_time,
         reservationen: person.reservationen, url: `${SITE_URL}/waschkueche.html`,
-      });
+      };
+      const m = waschRegeln.sperrMeldung(angaben);
       try {
-        await sendTemplated('wasch-sperrzeit', {
-          user_name: person.name, raum: raum.name, grund: p.grund, anzahl: person.reservationen.length,
-        }, { from: MAIL_FROM, to: person.email, subject: m.betreff, text: m.text });
+        await sendTemplated('wasch-sperrzeit', waschRegeln.sperrKontext(angaben),
+          { from: MAIL_FROM, to: person.email, subject: m.betreff, text: m.text });
         benachrichtigt++;
       } catch (e) {
         console.error('[wasch-sperrzeit] Mail an', person.user_id, e.message);
@@ -16475,6 +16475,8 @@ const MAIL_TEMPLATE_DEFAULTS = [
       + '</body></html>',
     notiz: 'Pickup-Reminder ungeholte Druckaufträge an Technik/Präsident (HTML-Tabelle). Variablen: rows[].{empfaenger,drucker,alter_style,alter,betreff,aktion_url}, anzahl, auftrag_wort, wartet_wort, subject_wort. Felder sind bereits HTML-escaped.',
   },
+  // Waschküche: Sperrzeit hat Reservationen storniert (Text und Variablen in lib/wasch-regeln.js)
+  waschRegeln.SPERR_VORLAGE,
 ];
 
 async function seedMailTemplates() {

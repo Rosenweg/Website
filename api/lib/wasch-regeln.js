@@ -132,6 +132,39 @@ function sperrMeldung({ name, raum, grund, von, bis, reservationen, url }) {
   return { betreff, text, kurz };
 }
 
+/**
+ * Mail-Vorlage „wasch-sperrzeit“ (im Vorlagen-Editor anpassbar). Ergibt mit
+ * sperrKontext() denselben Text wie sperrMeldung().
+ */
+const SPERR_VORLAGE = {
+  source_type: 'wasch-sperrzeit', empfaenger_kategorie: null,
+  subject_template: 'Waschküche: {{storniert_text}} ({{grund}})',
+  body_template:
+    'Hallo {{user_name}},\n\n'
+    + '{{raum}} ist gesperrt: {{grund}}\nGesperrt: {{zeitraum}}\n\n'
+    + 'Darum {{diese_reservationen}} von dir storniert:\n'
+    + '{{#each reservationen}}  – {{text}}\n{{/each}}\n'
+    + 'Bitte reserviere eine andere Zeit: {{url}}\n\nDiese E-Mail wurde automatisch versendet.',
+  notiz: 'An Bewohner, deren Reservationen eine neue Sperrzeit storniert hat (eine Mail je Person). '
+    + 'Variablen: user_name, raum, grund, zeitraum, gesperrt_von, gesperrt_bis (Text, z. B. „Mo 30.11.2026 08:00“), '
+    + 'anzahl, storniert_text („Reservation storniert“ / „2 Reservationen storniert“), '
+    + 'diese_reservationen („ist diese Reservation“ / „sind diese Reservationen“), '
+    + 'reservationen[].text (Zeitraum je Reservation), url',
+};
+
+/** Kontext fuer die Vorlage „wasch-sperrzeit“ – gleiche Angaben wie sperrMeldung(). */
+function sperrKontext({ name, raum, grund, von, bis, reservationen, url }) {
+  const n = reservationen.length;
+  return {
+    user_name: name || '', raum, grund, anzahl: n,
+    zeitraum: zeitraumText(von, bis), gesperrt_von: zeitText(von), gesperrt_bis: zeitText(bis),
+    storniert_text: n === 1 ? 'Reservation storniert' : `${n} Reservationen storniert`,
+    diese_reservationen: n === 1 ? 'ist diese Reservation' : 'sind diese Reservationen',
+    reservationen: reservationen.map(r => ({ text: zeitraumText(r.start_time, r.end_time) })),
+    url: url || '',
+  };
+}
+
 /** Stornierte Reservationen je Person gruppieren (fuer je eine Nachricht). */
 function jePerson(zeilen) {
   const m = new Map();
@@ -144,7 +177,7 @@ function jePerson(zeilen) {
 }
 
 module.exports = {
-  zeitText, zeitraumText, sperrMeldung, jePerson,
+  zeitText, zeitraumText, sperrMeldung, sperrKontext, SPERR_VORLAGE, jePerson,
   STANDARD, FELDER, einstellungen, einstellungenPruefen, abrechnungsMonat,
   autoAbrechnungFaellig, sperrzeitPruefen,
 };
