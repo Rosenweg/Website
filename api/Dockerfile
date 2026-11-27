@@ -46,6 +46,8 @@ COPY docs/Home.md docs/README.md docs/verwaltung-anleitung.md docs/email.md \
 COPY api/scripts/ ./scripts/
 # site-config.json wird vom Auto-Seed gelesen (legacy Verwaltung -> DB)
 COPY site-config.json ./
+# Register der Rosenweg-Apps (lib/appregister.js, GET /api/apps/register; die PBX holt es dort)
+COPY apps-register.json ./
 # nav.js ist die einzige Quelle der Seitenliste; die Stationen leiten
 # daraus ihre Programme ab (lib/stationapps.js).
 COPY js/nav.js ./nav.js

@@ -11,6 +11,7 @@
 // 15 Minuten; wer nur die Karten-UID hat, bekommt eine eigene, sichtbare und
 // gemeldete Sitzung — nie die des Opfers.
 const crypto = require('crypto');
+const appregister = require('./appregister');
 
 const TOKEN_PRAEFIX = 'rw_app_';
 const SITZUNG_RE = /^ks_[0-9a-f]{32}$/;
@@ -79,7 +80,9 @@ function appGeraetPruefen(b) {
     ok: true,
     werte: {
       app, kennung, schluessel: b.schluessel,
-      appName: anzeigeText(b.app_name || app, 60),
+      // Name aus dem App-Register (apps-register.json), wo es die App kennt: die
+      // Anfrage kann sich so nicht als andere App ausgeben (Liste, Mail "neues Gerät")
+      appName: anzeigeText(appregister.nachPaket(app.toLowerCase())?.name || b.app_name || app, 60),
       geraetName: anzeigeText(g.name || 'Unbekanntes Gerät', 60),
       plattform: anzeigeText(g.plattform || '', 40),
     },

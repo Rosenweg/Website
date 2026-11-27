@@ -9,6 +9,7 @@ const { validateAuthentikToken, validateAppToken, istAppToken, resolveAncestorGr
 const { istAnlageToken, anlageTokenPruefen } = require('../lib/anlagetoken');
 const { isTechnik, isPraesident } = require('../lib/groups');
 const { karteZugangPruefen } = require('../routes/app-karte');
+const appKennungLib = require('../lib/appkennung');
 
 // Pfade, die einen Ausweis erzeugen oder ändern — für Zugangstoken tabu.
 // Relativ zu /api/, Präfix-Vergleich auf Segmentgrenze.
@@ -69,6 +70,14 @@ async function authMiddleware(req, res, next) {
   const token = req.headers.authorization?.replace('Bearer ', '');
   if (!token) return res.status(401).json({ error: 'Nicht authentifiziert' });
 
+  // X-Rosenweg-App: <paket>/<version> (lib/appkennung.js) — Selbstauskunft der
+  // App, entscheidet nichts; geht ins Audit (app.client) und in app_kennungen.
+  req.rosenwegApp = appKennungLib.appKennung(req.headers['x-rosenweg-app']);
+  const weiter = (wer, ausweis) => {
+    if (req.rosenwegApp && req.user?.email) appKennungLib.merken(pool, req.user.email, req.rosenwegApp, ausweis);
+    return auditCtx.run({ userEmail: wer, app: req.rosenwegApp?.text }, next);
+  };
+
   try {
     // 0. Personal Access Token (PAT) — prefix-erkennbar, für M2M/AI-Agents
     //    Wirkt als 'login als der User der den Token erstellt hat'.
@@ -127,7 +136,7 @@ async function authMiddleware(req, res, next) {
       // last_used async (kein await damit Antwort nicht blockiert)
       const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || req.socket.remoteAddress;
       pool.query('UPDATE api_tokens SET last_used_at=NOW(), last_used_ip=$1 WHERE id=$2', [ip, row.id]).catch(() => {});
-      return auditCtx.run({ userEmail: req.user.email || 'pat:' + row.id }, next);
+      return weiter(req.user.email || 'pat:' + row.id, 'pat');
     }
 
     // 0b. Anlage-Portal-Token: App auf einem geteilten Telefon, ueber Rosenweg
@@ -163,7 +172,7 @@ async function authMiddleware(req, res, next) {
       req.user.isAdmin = zeile.role === 'admin' || isTechnik(groups) || isPraesident(groups);
       // requireUserLogin sperrt Token-Verwaltung & Co. auch fuer diesen Weg
       req.anlage = { ext: String(p.ext || ''), paket: String(p.paket || ''), token };
-      return auditCtx.run({ userEmail: zeile.email || 'anlage:' + req.anlage.ext }, next);
+      return weiter(zeile.email || 'anlage:' + req.anlage.ext, 'anlage');
     }
 
     // 0c. Karten-Sitzung einer Rosenweg-App auf einem privaten Geraet
@@ -184,7 +193,11 @@ async function authMiddleware(req, res, next) {
       }
       req.user = k.user;
       req.appKarte = k.sitzung;
-      return auditCtx.run({ userEmail: req.user.email || 'karte:' + k.sitzung.id }, next);
+      // Eine Sitzung gehoert genau einer App: meldet sich eine andere, auffallen lassen
+      if (req.rosenwegApp && k.sitzung.app && req.rosenwegApp.paket !== String(k.sitzung.app).toLowerCase()) {
+        console.warn(`[app-kennung] Sitzung ${k.sitzung.id} gehoert ${k.sitzung.app}, Anfrage meldet ${req.rosenwegApp.text}`);
+      }
+      return weiter(req.user.email || 'karte:' + k.sitzung.id, k.sitzung.art || 'karte');
     }
 
     // 1. Try local session token first
@@ -208,7 +221,7 @@ async function authMiddleware(req, res, next) {
         pool.query('UPDATE sessions SET expires_at = $1 WHERE token = $2',
           [new Date(Date.now() + SESSION_TTL_MS), token]).catch(() => {});
       }
-      return auditCtx.run({ userEmail: req.user.email || req.user.name || 'unknown' }, next);
+      return weiter(req.user.email || req.user.name || 'unknown', 'website');
     }
 
     // 2. Access-Token der Rosenweg-Apps (Authentik "rosenweg-apps", PKCE).
@@ -220,7 +233,7 @@ async function authMiddleware(req, res, next) {
       if (user?.gebremst) return res.status(429).json({ error: 'Zu viele Anmeldeversuche — bitte kurz warten.' });
       if (user) {
         req.user = user;
-        return auditCtx.run({ userEmail: user.email || user.name || 'unknown' }, next);
+        return weiter(user.email || user.name || 'unknown', 'app');
       }
       return res.status(401).json({ error: 'Anmeldung abgelaufen' });
     }
@@ -230,7 +243,7 @@ async function authMiddleware(req, res, next) {
       const user = await validateAuthentikToken(token);
       if (user) {
         req.user = user;
-        return auditCtx.run({ userEmail: user.email || user.name || 'unknown' }, next);
+        return weiter(user.email || user.name || 'unknown', 'authentik');
       }
     }
 
