@@ -21561,6 +21561,38 @@ app.get('/api/isp/noc/public/server', async (req, res) => {
 });
 app.get('/api/isp/noc/server', authMiddleware, requireTechnikOrPraesident, nocServerHandler);
 
+// Fernwartung der geteilten Telefone im NOC (Prüfmodul telefone.fernwartung, lib/nocfernwartung.js):
+// die pbx-api auf CT 220 kennt Tunnel, Not-Aus und fremde adb-Rückfragen und holt den Handshake
+// bei der adb-zentrale. Gefragt mit dem PBX-Geheimnis, 20 s gemerkt.
+const nocFernwartung = require('./lib/nocfernwartung');
+const PBX_API_URL = (process.env.PBX_API_URL || `http://${PBX_HOST}:8095`).replace(/\/+$/, '');
+let _nocFw = null;
+let _nocFwT = 0;
+async function nocFernwartungHandler(req, res) {
+  try {
+    if (!_nocFw || Date.now() - _nocFwT > 20_000) {
+      if (!PBX_SHARED_SECRET) return res.json({ eingerichtet: false, fehlt: ['PBX_SHARED_SECRET'], telefone: [] });
+      const r = await fetch(`${PBX_API_URL}/api/pbx/fernwartung/noc`, {
+        headers: { 'X-PBX-Secret': PBX_SHARED_SECRET }, signal: AbortSignal.timeout(6000),
+      });
+      if (!r.ok) throw new Error('pbx-api HTTP ' + r.status);
+      _nocFw = { ...nocFernwartung.fernwartungFuerNoc(await r.json()), ts: Date.now() };
+      _nocFwT = Date.now();
+    }
+    res.json(req.nocOffen ? nocFernwartung.fernwartungOeffentlich(_nocFw) : _nocFw);
+  } catch (e) {
+    console.warn('[noc] Fernwartung:', e.message);
+    res.status(502).json({ error: 'Fernwartung nicht lesbar' });
+  }
+}
+app.get('/api/isp/noc/public/fernwartung', async (req, res) => {
+  const zugang = checkNocToken(req, res);
+  if (!zugang) return;
+  req.nocOffen = zugang === 'offen';
+  return nocFernwartungHandler(req, res);
+});
+app.get('/api/isp/noc/fernwartung', authMiddleware, requireTechnikOrPraesident, nocFernwartungHandler);
+
 // Ob ein Container laeuft, sagt wenig. Am 1. September 2026 stand
 // Nextcloud wochenlang im Wartungsmodus — CT 104 lief die ganze Zeit,
 // das NOC zeigte "web: gruen", und unbenutzbar war es trotzdem. Darum

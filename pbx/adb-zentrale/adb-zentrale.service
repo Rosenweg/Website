@@ -1,0 +1,39 @@
+# adb-zentrale: Endpunkt des dauerhaften adb-Tunnels der geteilten Telefone.
+# Ohne Sonderrechte: WireGuard und Netzstapel im Prozess, kein CAP_NET_ADMIN,
+# keine Schnittstelle, kein Weiterleiten. Der adb-Schluessel liegt NICHT bei
+# diesem Dienst, sondern bei adbz (rw-adb).
+[Unit]
+Description=Rosenweg adb-zentrale (Fernwartung der geteilten Telefone)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=/etc/adb-zentrale/env
+ExecStart=/opt/adb-zentrale/adb-zentrale
+User=adb-zentrale
+Group=adb-zentrale
+StateDirectory=adb-zentrale
+StateDirectoryMode=0700
+Restart=on-failure
+RestartSec=3
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+# AF_NETLINK und AF_UNIX braucht wireguard-go beim Binden des UDP-Sockets.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
