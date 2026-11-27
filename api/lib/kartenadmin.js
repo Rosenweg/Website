@@ -332,7 +332,7 @@ async function ablehnen(token, jetzt = Date.now()) {
 async function alleAbmelden(token, jetzt = Date.now()) {
   const e = await standLesen(token);
   if (!e || e.status !== 'abgelehnt' || jetzt - Number(e.erledigt || 0) > 60 * 60 * 1000) {
-    return { ok: false, meldung: 'Das geht nur kurz nach dem Ablehnen. Bitte im Profil unter „App-Anmeldungen“ abmelden.' };
+    return { ok: false, meldung: 'Das geht nur kurz nach dem Ablehnen. Bitte im Profil unter „Deine Handys mit Rosenweg-Apps“ abmelden.' };
   }
   await deps.sitzungenWiderrufen({ email: e.email }, 'alle abgemeldet nach abgelehnter Karten-Aktion');
   deps.protokollieren?.('app-abmeldung', { email: e.email, durch: 'bestaetigungslink', erfolg: true, detail: `alle (${e.id})` });
