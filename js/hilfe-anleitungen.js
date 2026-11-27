@@ -62,6 +62,8 @@ const ANLEITUNGEN = {
       'dokumente-hochladen-und-ordnen.pdf': 'Dokumente hochladen und ordnen',
       'stweg-seite-bearbeiten.pdf': 'STWEG-Seite bearbeiten',
       'terminumfragen.pdf': 'Terminumfragen',
+      'zev-rechnungen-zuordnen.pdf': 'ZEV-Stromrechnungen zuordnen (Rosenweg 9)',
+      'meg-einstellplaetze-verwalten.pdf': 'MEG: Einstellplätze verwalten',
       'rosenweg-konto-anmelden.pdf': 'Mit dem Rosenweg-Konto anmelden',
       'rosenweg-karte-anmelden.pdf': 'Anmelden mit der Rosenweg-Karte',
     },
@@ -77,6 +79,7 @@ const ANLEITUNGEN = {
       'reklamationen-bearbeiten.pdf': 'Reklamationen bearbeiten',
       'handwerker-und-lieferanten.pdf': 'Handwerker und Lieferanten',
       'auslagen.pdf': 'Auslagen',
+      'projekte-pflegen.pdf': 'Projekte pflegen',
       'vollmachten-verwalten.pdf': 'Vollmachten verwalten',
       'unterschriftenlisten.pdf': 'Unterschriftenlisten und Rückläufe',
     },
@@ -110,7 +113,7 @@ const ABSCHNITT_PDF = {
   'passwort': [['bewohner', 'rosenweg-konto-anmelden.pdf']],
   'waschküche': [['bewohner', 'waschkueche-reservieren.pdf']],
   'dokumente': [['bewohner', 'dokumente-finden.pdf'], ['ausschuss', 'dokumente-hochladen-und-ordnen.pdf']],
-  'energie': [['bewohner', 'rosenweg-9-strom-heizung.pdf']],
+  'energie': [['bewohner', 'rosenweg-9-strom-heizung.pdf'], ['ausschuss', 'zev-rechnungen-zuordnen.pdf']],
   'wlan': [['bewohner', 'wlan-verbinden.pdf']],
   'kontakte-sync': [['bewohner', 'telefonbuch.pdf']],
   'verwaltung': [['hausverwaltung', 'objektverwaltung-felder-und-knoepfe.pdf'], ['ausschuss', 'wohnungen-und-kontakte-pflegen.pdf']],
@@ -121,11 +124,12 @@ const ABSCHNITT_PDF = {
   'auslagen': [['ausschuss', 'auslagen.pdf']],
   'vollmachten': [['bewohner', 'vollmacht-erteilen.pdf'], ['ausschuss', 'vollmachten-verwalten.pdf']],
   'handwerker': [['ausschuss', 'handwerker-und-lieferanten.pdf']],
-  'zutritt': [['bewohner', 'zutritt-tueren-karten.pdf']],
   'mein-zugang': [['bewohner', 'internet-mein-zugang.pdf']],
   'projekte': [['bewohner', 'fuer-eigentuemer.pdf'], ['ausschuss', 'projekte-pflegen.pdf']],
   'doodle': [['bewohner', 'terminumfragen.pdf']],
   'brief-tracking': [['ausschuss', 'hausverwaltung-und-briefe.pdf']],
+  'email-verteiler': [['hausverwaltung', 'hausverwaltung-ueberblick.pdf'], ['ausschuss', 'mails-schreiben-und-freigeben.pdf']],
+  'zutritt': [['bewohner', 'zutritt-tueren-karten.pdf']],
   'berechtigungen': [['technik', 'rechte-und-kontoloeschungen.pdf']],
   'loeschungen': [['technik', 'rechte-und-kontoloeschungen.pdf']],
 };
@@ -151,7 +155,8 @@ const HilfeAnleitungen = {
   abschnitte(doc) {
     for (const [id, liste] of Object.entries(ABSCHNITT_PDF)) {
       const sec = doc.getElementById(id);
-      const body = sec && sec.querySelector(':scope > div.p-8');
+      // Inhalt = zweites <div> der Section (p-6 oder p-8), nach dem farbigen Kopf.
+      const body = sec && sec.querySelector(':scope > div.p-6, :scope > div.p-8');
       if (!body) continue;
       const zeile = doc.createElement('div');
       zeile.className = 'rw-pdf-zeile flex flex-wrap items-center gap-2 text-sm text-gray-600';
