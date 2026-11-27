@@ -72,6 +72,17 @@
       "technik": false,
       "_notiz": "Flutter, alle Plattformen (Plan Welle 1). Ersetzt in der App pwa/reparatur (angemeldet), reklamationen.html und stwegN/pages/reklamationen.html; die Web-Seiten bleiben, auch der oeffentliche Melde-Ort-QR. Push ohne ntfy (Entscheid Stefan 27.11.2026): Abfrage beim Oeffnen."
     },
+    "mailfreigabe": {
+      "name": "Rosenweg Mail-Freigabe",
+      "repo": "Rosenweg/rosenweg-mailfreigabe",
+      "paket": "ch.rosenweg4303.mailfreigabe",
+      "logo": "/img/apps/rosenweg-mailfreigabe.png?v=20261128",
+      "reihenfolge": 55,
+      "text": "Mails der Verwaltung prüfen und freigeben: Empfänger und Inhalt auf einen Blick, Freigeben oder Ablehnen mit zwei Tipps, Benachrichtigung, sobald eine Mail wartet – auch bei geschlossener App.",
+      "fuer": "Für die Technik und den Präsidenten sowie alle, die laut Freigabe-Regeln Mails freigeben.",
+      "technik": true,
+      "_notiz": "Flutter, alle Plattformen (Plan Welle 2, vorgezogen: wenige Nutzer, taeglich und eilig). Ersetzt in der App verwaltung-mail-outbox.html; die Web-Seite bleibt (auch Freigabe-Regeln und Mail-Log). Benachrichtigung ohne Push (kein ntfy): HintergrundAbfrage der Basis 0.8.0, Endpunkt /api/verwaltung-mail-queue/zur-freigabe."
+    },
     "waschkueche": {
       "name": "Rosenweg Waschküche",
       "repo": "Rosenweg/rosenweg-waschkueche",
