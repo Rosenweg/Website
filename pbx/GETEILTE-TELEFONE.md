@@ -102,6 +102,7 @@ Wichtig für die geplante Einrichtung per QR ohne Kabel.
 | Rotes Notfall-Fenster über dem Sperrbildschirm (Android 14 erteilt es nicht von selbst) | `adb shell appops set ch.rosenweg4303.messages USE_FULL_SCREEN_INTENT allow` | dito |
 | Exakte Wecker: Notfall-Erinnerung alle 2 min bis gelesen, auch im Tiefschlaf | `adb shell appops set ch.rosenweg4303.messages SCHEDULE_EXACT_ALARM allow` | dito |
 | Zugriff auf alle Dateien (Aufräumen beim Abmelden) | `adb shell appops set ch.rosenweg4303.telefon MANAGE_EXTERNAL_STORAGE allow` | dito |
+| Fernwartung: Band „Fernwartung aktiv – Technik (Name)“ über allen Apps, im Kiosk und auf dem Sperrbild von Rosenweg Gerät | `adb shell appops set ch.rosenweg4303.telefon SYSTEM_ALERT_WINDOW allow` | dito; ohne: nur die Benachrichtigung „Fernwartung aktiv“, kein Band |
 | Geräte-App darf „Nicht stören“ kurz ausschalten (Telefon suchen: klingelt auch bei Nicht stören) | `adb shell cmd notification allow_dnd ch.rosenweg4303.telefon` | dito; ohne: Suchanruf klingelt nur bei stumm/vibrieren, nicht bei „Nicht stören“ |
 | Rosenweg Launcher darf Widgets ohne Rückfrage einbinden (Uhr-Widget auf der Startseite, die sich nicht bearbeiten lässt) | `adb shell appwidget grantbind --package ch.rosenweg4303.home --user 0` | dito; ohne: Android fragt einmal nach |
 | Seitentaste lang = Ausschaltmenü statt KI-Assistent (Neustart auch im gesperrten Zustand: wer vergisst, sich abzumelden, wird durch den Neustart abgemeldet, die PIN ist weg) | `adb shell settings put global function_key_config_longpress_type 0` und `adb shell settings put global power_button_long_press 1` (Samsung prüft beide; 103 = digitaler Assistent), dazu `adb shell settings put secure lock_function_val 0` (Samsung „Netzwerk und Sicherheit sperren“ aus — sonst verlangt das Ausschaltmenü vor dem Neustart die PIN; getestet 24.11.2026) | dito; Notlösung ohne Menü: Leiser + Seitentaste ~7 s (erzwungener Neustart) |
@@ -416,6 +417,74 @@ Nie: Neustart, `pm uninstall`, Einstellungen ändern, andere Netze. Der Updater 
 **Netzweg:** Abgemeldete Telefone sind im WLAN „Rosenweg“ im RK-Clients-Netz (VLAN 9, `100.64.9.0/24`); CT 220 (VLAN 2) erreicht dieses Netz heute schon. Angemeldete Telefone sind im Wohnungsnetz und von der Infrastruktur aus nicht erreichbar – das passt zur Regel „nur abgemeldet“. Telefone in fremden WLANs (z. B. Juronetz) bedient der Updater nicht; sie bekommen Updates über den eigenen Abgleich von Gerät.
 
 Endpunkte: `POST /api/telefon/<ext>/updater {aktion: zulassen|jetzt|vergessen}` (Technik), `GET /api/pbx/smartphones` liefert je Telefon `updater` (zugelassen, ausstehend, Ergebnis, geprüft) und `updater_fingerabdruck`.
+
+### Fernwartung über den dauerhaften adb-Tunnel (Phase 1, 27. November 2026)
+
+Stefan: dauerhaft, weil die Telefone nicht privat sind – wer das Telefon benutzt, sieht trotzdem
+jede Sitzung. Entscheide: Tunnel **in Rosenweg Gerät** (keine eigene App), Bildschirm (scrcpy)
+auch bei angemeldeter Person **erlaubt mit Band**, Technik arbeitet **nur per SSH auf adb-zentrale**,
+Zentrale als eigener CT auf pve2 mit WireGuard **UDP 51832** unter **adb.rosenweg4303.ch**.
+Code: `pbx/adb-zentrale/` (Zentrale, Einrichtung: dortiges README), `pbx/api` (Peers, Not-Aus,
+Verlauf), Rosenweg Gerät (`Fernwartung*`), rwtunnel im Repo rosenweg-vm (Telefonseite, Hörmodus).
+
+```
+Telefon (Rosenweg Gerät) ──WireGuard UDP 51832──► adb-zentrale (CT, Netzstapel im Prozess, kein TUN)
+  im Tunnel nur 10.243.44.n:5555 → 127.0.0.1:5555 (adbd)   127.0.0.1:2<ext> nur während einer Sitzung
+            und 10.243.44.n:7000 (wer, wozu – fürs Band)   Technik: ssh adb-zentrale; rw-adb <ext> …
+```
+
+- **Telefon:** Gerät erzeugt einmal ein WireGuard-Schlüsselpaar (privat nur in `noBackupFilesDir`),
+  meldet den öffentlichen Teil (`POST /api/telefon/tunnel`) und wartet. Auf /smartphones steht
+  „neuer Schlüssel … Bestätigen“. Nach dem Bestätigen gibt der Status `fernwartung: {stand: bereit,
+  adresse, gateway, peer_public, endpoint, endpoint_intern, schluessel}`; Gerät startet den Tunnel
+  als Vordergrunddienst (`FernwartungDienst`, stille Benachrichtigung „Fernwartung bereit“), auch
+  nach Neustart und Update. adb bleibt dann **dauerhaft an**, Port 5555 stellt Gerät selbst her.
+- **Band:** Jede adb-Verbindung kommt im Netzstapel des Telefons an. Solange eine offen ist (und
+  10 s danach), zeigt Gerät oben über allem „🛠 Fernwartung aktiv – Technik (Name) seit 14:02“
+  und die Benachrichtigung wird laut. Den Namen meldet die Zentrale auf :7000; fehlt er, steht
+  „unbekannt“ – das Band erscheint trotzdem. Braucht `SYSTEM_ALERT_WINDOW` (Skript).
+- **Not-Aus:** /smartphones „⛔ aus“ je Telefon, oben „⛔ Fernwartung alle aus“. Wirkt zweifach:
+  die pbx-api nimmt den Peer sofort aus der Zentrale (offene Sitzung gekappt, auch wenn das
+  Telefon nicht antwortet), und der Weckanruf 2098 holt den Status `fernwartung: {stand: aus}` –
+  Gerät stoppt den Tunnel und setzt `ADB_ENABLED=0` (kein adbd, auch nicht per USB). „ein“ geht
+  ohne USB. „Verwerfen“ löscht den Schlüssel (Telefon ersetzt oder zurückgesetzt).
+- **Schlüssel:** Die Bedienungshilfe bestätigt „USB-Debugging zulassen?“ nur noch für drei
+  Fingerabdrücke: den eigenen von Gerät, den der Zentrale (`adbz`, `rw-adb schluessel`) und den des
+  Updaters; die beiden letzten stehen im Status (`fernwartung.schluessel`). Eine **fremde** Rückfrage
+  lehnt sie ab („Ablehnen“) und meldet sie (`POST /api/telefon/fernwartung/meldung`, Verlauf, NOC rot
+  für 24 h). Ausnahme **Wartung vor Ort**: Ist auf /smartphones „🛠 1 Std.“ an, bleibt eine fremde
+  Rückfrage stehen (z. B. für den Mac am USB) und wird nur gemeldet.
+- **Zugang für Technik:** nur per SSH auf adb-zentrale (Zugriffsmatrix, Host nur für Technik),
+  dort `rw-adb liste`, `rw-adb 2002`, `rw-adb 2002 shell …`, `rw-adb 2002 logcat …`,
+  `rw-adb 2002 einrichten`, `rw-adb 2002 ende` (sonst nach 30 Min. ohne Verkehr). Der adb-Schlüssel
+  liegt nur bei `adbz` im CT. Jede Sitzung (wer, wozu, Beginn, Ende, Bytes, rw-adb-Befehle) steht im
+  Journal des CT und auf /smartphones unter „Fernwartung: Sitzungen“. `reboot`, `uninstall`,
+  `pm clear` und Ähnliches lehnt rw-adb ab; eine interaktive Shell steht als „shell“ im Protokoll.
+  scrcpy ist erlaubt (Band), läuft aber mangels Bildschirm nicht auf dem CT – mit „nur SSH“ gibt es
+  in Phase 1 keine Bildschirmübertragung.
+- **Ehrliche Grenze:** adbd hört auf Port 5555 auf allen Schnittstellen; ohne Root lässt sich das
+  nicht auf den Tunnel beschränken. Darum zusätzlich die UniFi-Regel unten und „nur bekannte Schlüssel“
+  (`ro.adb.secure=1`, prüft das Skript).
+- **Einrichten eines Telefons:** Gerät ≥ Fernwartungs-Fassung installieren, Skript einmal laufen
+  lassen (`SYSTEM_ALERT_WINDOW`), auf /smartphones bestätigen, dann den Schlüssel der Zentrale
+  zulassen: `rw-adb <ext>` – die Bedienungshilfe bestätigt die Rückfrage (Fingerabdruck steht im
+  Status). Ab da geht jeder Schritt des Skripts über den Tunnel (`rw-adb <ext> einrichten`);
+  `--device-owner` und die allererste Schlüssel-Zulassung bleiben vor Ort (Henne und Ei).
+
+**UniFi: TCP zu den Telefonen sperren (Anleitung, noch nicht umgesetzt).** Erst nach dem Test am
+A15 und wenn der Updater über den Tunnel läuft (bis dahin braucht CT 220 den direkten Weg):
+
+1. UniFi Network → *Client Devices*: die geteilten Telefone (MAC) in eine Gruppe „Geteilte Telefone“
+   (bzw. als Firewall-Gruppe „Adressen“ über die festen DHCP-Reservierungen in RK-Clients und den
+   RW*-Clients-Netzen).
+2. *Settings → Security → Firewall* (Zone-Based: Zonen der Clients-Netze → gleiche Zone und
+   „Internal“): neue Regel **„Geteilte Telefone: kein TCP hinein“**, Aktion *Block*, Protokoll TCP,
+   Ziel = Gruppe „Geteilte Telefone“, alle Ports, Zustand *New* (established/related bleibt erlaubt –
+   SIP, Status, Nextcloud gehen vom Telefon aus).
+3. Darüber eine Ausnahme nur, falls noch nötig: *Allow* TCP 5555 von CT 220 (Rückfall, bis
+   `PBX_ADB_NETZE` entfällt). Danach entfernen.
+4. Prüfen: vom Mac im selben WLAN `nc -vz <telefon> 5555` → keine Verbindung; `rw-adb <ext>
+   shell echo ok` auf adb-zentrale → ok (der Tunnel geht vom Telefon aus, UDP).
 
 ### Eigene Handys von außen: SIP über TLS (25. November 2026)
 

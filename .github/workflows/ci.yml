@@ -51,11 +51,11 @@ jobs:
       - name: Kontakte-Sync (Verzeichnis ohne echte Nummern)
         run: python3 -m unittest discover -s contacts-sync -v
 
-      - name: PBX-API (Kartenverwaltung ohne Geraet)
+      - name: PBX-API (Kartenverwaltung ohne Geraet, Fernwartung ohne Zentrale)
         run: |
           python3 -m venv "$RUNNER_TEMP/pbx"
           "$RUNNER_TEMP/pbx/bin/pip" install --quiet -r pbx/api/requirements.txt
-          cd pbx/api && "$RUNNER_TEMP/pbx/bin/python" -m unittest test_karten_verwalter -v
+          cd pbx/api && "$RUNNER_TEMP/pbx/bin/python" -m unittest test_karten_verwalter test_apps_stand test_fernwartung -v
 
       - name: Z-Push-Sicht je Konto (PHP, Befund F1-7)
         run: |
@@ -77,6 +77,24 @@ jobs:
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
       - run: go test -count=1 ./...
+
+  adb-zentrale:
+    # Endpunkt des adb-Tunnels der geteilten Telefone (pbx/adb-zentrale): Format, vet, Tests
+    # mit echtem WireGuard-Handshake (Netzstapel im Prozess, kein Root noetig), Skripte
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pbx/adb-zentrale
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: pbx/adb-zentrale/go.mod
+          cache-dependency-path: pbx/adb-zentrale/go.sum
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test -count=1 -race ./...
+      - run: for f in setup.sh rw-adb rw-adb-intern ../../scripts/geteiltes-telefon-einrichten.sh; do bash -n "$f"; done
 
   edge-plugin:
     # Eigenes Traefik-Plugin (edge-traefik/plugins/echteip): Format, vet, Tests

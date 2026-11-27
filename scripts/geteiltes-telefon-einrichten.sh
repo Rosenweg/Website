@@ -10,6 +10,10 @@
 #   --nur-adb        nur adb über TCP Port 5555 wieder setzen (nach einem Neustart des
 #                    Telefons ist er weg; per USB: Seriennummer aus "adb devices")
 #
+# Über den Fernwartungs-Tunnel (pbx/adb-zentrale): auf adb-zentrale "rw-adb <ext> einrichten"
+# ruft dieses Skript mit der Seriennummer 127.0.0.1:2<ext> auf (lokaler Sitzungsport, nicht
+# das WLAN des Telefons). Alles ausser --device-owner geht so ohne USB.
+#
 # Notrufe werden nie getestet. Das Telefon wird nicht neu gestartet.
 set -u
 SERIE=${1:?Seriennummer fehlt (adb devices)}; shift
@@ -31,7 +35,13 @@ schritt() {   # schritt "Beschreibung" befehl…
   if out=$("$@" 2>&1); then echo "ok      $was"; else echo "FEHLER  $was: $(echo "$out" | tail -1)"; FEHLER=$((FEHLER+1)); fi
 }
 
-a get-state >/dev/null 2>&1 || { echo "Telefon $SERIE nicht erreichbar (adb devices, USB-Debugging; über das Netz: auf /smartphones zuerst \"1 Std.\")"; exit 1; }
+# Seriennummer eines Sitzungsports der adb-zentrale (127.0.0.1:2xxxx): über den Tunnel
+TUNNEL=0
+case "$SERIE" in 127.0.0.1:2[0-9][0-9][0-9][0-9]) TUNNEL=1 ;; esac
+a get-state >/dev/null 2>&1 || {
+  if [ $TUNNEL = 1 ]; then echo "Telefon $SERIE über den Tunnel nicht erreichbar (rw-adb <ext> zuerst, Telefon wecken auf /smartphones)"
+  else echo "Telefon $SERIE nicht erreichbar (adb devices, USB-Debugging; über das Netz: auf /smartphones zuerst \"1 Std.\")"; fi
+  exit 1; }
 
 # Wartung per adb über das Netz (Stefan 25.11.2026): klassisches adb auf Port 5555. Zentral
 # geschaltet wird nur adb selbst (/smartphones, Gerät setzt ADB_ENABLED). Hält auch bei
@@ -42,12 +52,22 @@ adb_tcp() {
     echo "ok      adb über TCP Port 5555 (war schon)"; return
   fi
   a tcpip 5555 >/dev/null 2>&1   # adbd startet neu, die Verbindung bricht kurz ab
-  case "$SERIE" in
-    *:*) # selbst über das Netz verbunden: neu verbinden, danach über Port 5555 weiter
-         sleep 3; SERIE="${SERIE%:*}:5555"; "$ADB" connect "$SERIE" >/dev/null 2>&1 ;;
-    *)   sleep 2 ;;
-  esac
-  for _ in 1 2 3 4 5 6 7 8 9 10; do a get-state >/dev/null 2>&1 && break; sleep 2; done
+  if [ $TUNNEL = 1 ]; then
+    # Über den Tunnel: die Seriennummer ist der Sitzungsport der Zentrale und bleibt gleich
+    # (nicht auf :5555 umschreiben) - warten, bis adbd wieder da ist, und neu verbinden.
+    sleep 3; "$ADB" disconnect "$SERIE" >/dev/null 2>&1; "$ADB" connect "$SERIE" >/dev/null 2>&1
+  else
+    case "$SERIE" in
+      *:*) # selbst über das Netz verbunden: neu verbinden, danach über Port 5555 weiter
+           sleep 3; SERIE="${SERIE%:*}:5555"; "$ADB" connect "$SERIE" >/dev/null 2>&1 ;;
+      *)   sleep 2 ;;
+    esac
+  fi
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    a get-state >/dev/null 2>&1 && break
+    [ $TUNNEL = 1 ] && "$ADB" connect "$SERIE" >/dev/null 2>&1
+    sleep 2
+  done
   if [ "$(a shell getprop service.adb.tcp.port 2>/dev/null | tr -d '\r')" = 5555 ]; then
     echo "ok      adb über TCP Port 5555"
   else
@@ -125,6 +145,9 @@ else
   echo "später   Rosenweg Messenger noch nicht installiert (Katalog) — Skript danach nochmals laufen lassen"
 fi
 schritt "Zugriff auf alle Dateien (Aufräumen beim Abmelden)" a shell appops set $GERAET MANAGE_EXTERNAL_STORAGE allow
+# Fernwartung (dauerhafter adb-Tunnel, pbx/adb-zentrale): Band "Fernwartung aktiv - Technik (Name)"
+# über allen Apps, im Kiosk und über dem Sperrbildschirm von Rosenweg Gerät
+schritt "Fernwartung: Band über allen Apps (Rosenweg Gerät)" a shell appops set $GERAET SYSTEM_ALERT_WINDOW allow
 schritt "\"Nicht stören\" kurz ausschalten (Telefon suchen)" a shell cmd notification allow_dnd $GERAET
 
 # Startseite
@@ -148,4 +171,10 @@ echo "  Browser:          $(a shell cmd role get-role-holders android.app.role.B
 echo "  Seitentaste:      $(a shell settings get global function_key_config_longpress_type | tr -d '\r')/$(a shell settings get global power_button_long_press | tr -d '\r') (soll 0/1)"
 echo "  Netz+Sicherheit:  $(a shell settings get secure lock_function_val | tr -d '\r') (soll 0)"
 echo "  adb über TCP:     Port $(a shell getprop service.adb.tcp.port | tr -d '\r') (soll 5555)"
+# Nur bekannte Schlüssel: ohne ro.adb.secure=1 nähme adbd jeden Rechner an (Userbuild: 1)
+SICHER=$(a shell getprop ro.adb.secure | tr -d '\r')
+echo "  adb nur mit Schlüssel: ro.adb.secure=$SICHER (soll 1)"
+[ "$SICHER" = 1 ] || { echo "FEHLER  ro.adb.secure ist nicht 1 - dieses Telefon nicht für die Fernwartung verwenden"; FEHLER=$((FEHLER+1)); }
+echo "  Band (Overlay):   $(a shell appops get $GERAET SYSTEM_ALERT_WINDOW | tr -d '\r') (soll allow)"
+echo "  Fernwartung:      $(a shell dumpsys activity services $GERAET/org.sipdroid.sipua.rosenweg.FernwartungDienst 2>/dev/null | grep -c ServiceRecord | tr -d '\r') Dienst (1 = Tunnel läuft; Stand auf /smartphones)"
 [ $FEHLER = 0 ] && echo "Fertig, alle Schritte ok." || { echo "$FEHLER Schritt(e) fehlgeschlagen."; exit 1; }

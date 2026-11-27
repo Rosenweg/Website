@@ -282,6 +282,47 @@ CREATE TABLE IF NOT EXISTS telefon_updater (
     ergebnis        TEXT NOT NULL DEFAULT ''     -- kurz, fuer /smartphones
 );
 
+-- Fernwartung ueber den dauerhaften adb-Tunnel (Plan adb-tunnel-telefone, 27.11.2026): je
+-- geteiltem Telefon ein fester WireGuard-Schluessel (entsteht auf dem Telefon, hier nur der
+-- oeffentliche Teil) und eine feste Adresse im Tunnelnetz. Aktiv bei adb-zentrale erst nach
+-- "Bestaetigen" auf /smartphones; aus = Not-Aus (Peer weg, Telefon setzt ADB_ENABLED=0).
+CREATE TABLE IF NOT EXISTS telefon_tunnel (
+    ext          TEXT PRIMARY KEY,
+    pubkey       TEXT NOT NULL,
+    ip           TEXT NOT NULL UNIQUE,
+    bestaetigt   INTEGER NOT NULL DEFAULT 0,
+    aus          INTEGER NOT NULL DEFAULT 0,
+    gemeldet     INTEGER NOT NULL DEFAULT 0,      -- epoch s, letzte Meldung des Telefons
+    durch        TEXT,                            -- wer zuletzt bestaetigt/geschaltet hat
+    geaendert    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Sitzungen ueber den Tunnel (von adb-zentrale gemeldet). person = Konto auf adb-zentrale
+-- bzw. "App-Updater"; befehle = JSON-Liste der rw-adb-Befehlszeilen (interaktiv nur "shell").
+CREATE TABLE IF NOT EXISTS telefon_fernwartung (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    ext          TEXT NOT NULL,
+    person       TEXT NOT NULL DEFAULT '',
+    zweck        TEXT NOT NULL DEFAULT '',
+    beginn       INTEGER NOT NULL,
+    ende         INTEGER,
+    bytes_hin    INTEGER NOT NULL DEFAULT 0,
+    bytes_her    INTEGER NOT NULL DEFAULT 0,
+    befehle      TEXT NOT NULL DEFAULT '[]',
+    grund        TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS telefon_fernwartung_ext ON telefon_fernwartung (ext, beginn);
+
+-- Fremde adb-Rueckfragen ("USB-Debugging zulassen?" mit unbekanntem Fingerabdruck), die die
+-- Bedienungshilfe von Rosenweg Geraet abgelehnt hat (NOC rot, Verlauf auf /smartphones).
+CREATE TABLE IF NOT EXISTS telefon_adb_fremd (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    ext            TEXT NOT NULL,
+    fingerabdruck  TEXT NOT NULL,
+    abgelehnt      INTEGER NOT NULL DEFAULT 1,
+    zeit           INTEGER NOT NULL
+);
+
 -- Was der Updater zuletzt auf dem Telefon gesehen hat (versionCode je Paket).
 CREATE TABLE IF NOT EXISTS telefon_apps_ist (
     ext           TEXT NOT NULL,
@@ -289,6 +330,24 @@ CREATE TABLE IF NOT EXISTS telefon_apps_ist (
     version_code  INTEGER,
     geprueft      INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (ext, paket)
+);
+
+-- Versionsstand der Rosenweg-Apps auf den Geraeten (Updater der Apps, Stefan 27.11.2026: "die
+-- Apps melden ihre Version ... ohne Personendaten"). geraet = SHA-256-Kennung (Android: aus der
+-- ANDROID_ID, Computer: aus der Maschinen-ID), nicht umkehrbar. Eine Meldung ersetzt alle Zeilen
+-- des Geraets fuer die Plattform (nicht mehr gemeldet = deinstalliert). Geteilte Telefone stehen
+-- zusaetzlich mit Nebenstelle in telefon_apps_ist (adb-Updater).
+CREATE TABLE IF NOT EXISTS apps_stand (
+    geraet        TEXT NOT NULL,
+    plattform     TEXT NOT NULL,           -- 'android' | 'linux-deb' | 'macos' | 'windows'
+    paket         TEXT NOT NULL,
+    version       TEXT NOT NULL DEFAULT '',
+    version_code  INTEGER,
+    geteilt       INTEGER NOT NULL DEFAULT 0,  -- Android mit Rosenweg Geraet
+    station       INTEGER NOT NULL DEFAULT 0,  -- Rosenweg-Station / verwaltete Installation
+    system        TEXT NOT NULL DEFAULT '',
+    zuletzt       INTEGER NOT NULL,            -- epoch s
+    PRIMARY KEY (geraet, plattform, paket)
 );
 
 -- WLAN der geteilten Telefone (Stefan 25.11.2026): SSID "Rosenweg" mit PPSK, das Passwort

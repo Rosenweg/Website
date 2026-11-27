@@ -318,8 +318,10 @@
     let gridMeterId = null; // dynamically resolved from category='grid'
     let prodMeterId = null; // dynamically resolved from category='production'
 
+    // Technik und Präsident sehen alle Zähler (wie die API, Befund W11). Nur der
+    // genaue Gruppenname zählt, nicht „…technik…“ als Teil eines Namens.
     function isTechnik(user) {
-        return user?.groups?.some(g => g.toLowerCase().includes('technik'));
+        return !!user?.groups?.some(g => { const gl = String(g).toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident'; });
     }
 
     function meterDisplayName(m) {
@@ -356,7 +358,7 @@
         currentUser = await AuthentikAuth.init({
             requireAuth: true,
             onLogin(user) {
-                if (isTechnik(user)) {
+                if (isTechnik(user) || AuthentikAuth.hasPermission('energie-config', 'read')) {
                     document.getElementById('config-link').classList.remove('hidden');
                 }
             }
@@ -369,8 +371,9 @@
                 const res = await AuthentikAuth.apiFetch(`${API}/meters`);
                 meters = await res.json();
             } else {
-                // E-Mail und Gruppen nimmt der Server aus der Anmeldung.
-                const res = await AuthentikAuth.apiFetch(`${API}/meine-zaehler?gemeinschaft=1`);
+                // E-Mail und Gruppen nimmt der Server aus der Anmeldung; stweg=1 nimmt
+                // für Ausschuss/Verwaltung mit Recht „Energie-Monitor“ die Zähler der STWEG dazu.
+                const res = await AuthentikAuth.apiFetch(`${API}/meine-zaehler?gemeinschaft=1&stweg=1`);
                 meters = await res.json();
             }
             allMeters = meters;

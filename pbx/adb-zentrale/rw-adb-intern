@@ -1,0 +1,123 @@
+#!/bin/bash
+# rw-adb-intern: laeuft als Benutzer adbz (sudo aus rw-adb). Nur adbz hat den
+# adb-Schluessel der Zentrale (/var/lib/adbz/.android, 0700); die Person auf dem
+# CT bekommt ihn nie zu sehen. Wer es war, sagt sudo (SUDO_USER, nicht faelschbar).
+#
+#   rw-adb liste                      Telefone, Handshake, laufende Sitzungen
+#   rw-adb schluessel                 Fingerabdruck des Zentrale-Schluessels
+#   rw-adb <ext>                      Sitzung oeffnen und verbinden (Band am Telefon)
+#   rw-adb <ext> shell dumpsys battery
+#   rw-adb <ext> logcat -s RosenwegAdbSelbst
+#   rw-adb <ext> einrichten [--browser …]   geteiltes-telefon-einrichten.sh ueber den Tunnel
+#   rw-adb <ext> ende                 Sitzung beenden (sonst nach 30 Min. ohne Verkehr)
+#
+# Nicht ueber den Tunnel (Regel: nie ohne Rueckfrage neu starten, nichts
+# deinstallieren, keine Daten loeschen): reboot, uninstall, pm clear & Co. lehnt
+# rw-adb ab. Eine interaktive Shell kann das nicht verhindern - sie steht als
+# "shell" im Protokoll, und das Telefon zeigt das Band.
+set -euo pipefail
+umask 077
+export HOME=/var/lib/adbz ANDROID_USER_HOME=/var/lib/adbz/.android ANDROID_ADB_SERVER_PORT=5038
+# shellcheck disable=SC1091
+. /etc/adb-zentrale/rw-adb.env   # ZW_URL, ZW_LOKAL_TOKEN, ZW_SITZUNG_BASIS
+PERSON=${SUDO_USER:-}
+[ -n "$PERSON" ] && [ "$PERSON" != root ] || { echo "rw-adb: nur ueber sudo als eigenes Konto (rw-adb …)" >&2; exit 2; }
+EINRICHTEN=/opt/adb-zentrale/geteiltes-telefon-einrichten.sh
+
+api() {   # api METHODE PFAD [JSON]
+    local m=$1 p=$2 d=${3:-}
+    if [ -n "$d" ]; then
+        curl -sS -m 20 -X "$m" -H "Authorization: Bearer $ZW_LOKAL_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary "$d" -w '\n%{http_code}' "$ZW_URL$p"
+    else
+        curl -sS -m 20 -X "$m" -H "Authorization: Bearer $ZW_LOKAL_TOKEN" -w '\n%{http_code}' "$ZW_URL$p"
+    fi
+}
+status() { tail -n1 <<<"$1"; }
+inhalt() { sed '$d' <<<"$1"; }
+fehler() { inhalt "$1" | jq -r '.error // .' 2>/dev/null || inhalt "$1"; }
+json() { jq -cn "$@"; }
+
+case "${1:-}" in
+""|-h|--hilfe|hilfe)
+    sed -n '5,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+liste)
+    r=$(api GET /zustand)
+    [ "$(status "$r")" = 200 ] || { echo "Zentrale: $(fehler "$r")" >&2; exit 1; }
+    inhalt "$r" | jq -r --argjson jetzt "$(date +%s)" '
+        .peers[] | [ .ext, .ip,
+          (if .letzter_handshake == 0 then "nie" else "\(($jetzt - .letzter_handshake) / 60 | floor) min" end),
+          (if .sitzung then "Sitzung \(.sitzung.person) (\(.sitzung.zweck)) Port \(.sitzung.port)" else "-" end)
+        ] | @tsv' | column -t -s $'\t' -N "EXT,TUNNEL,HANDSHAKE,SITZUNG"
+    exit 0 ;;
+schluessel)
+    adb start-server >/dev/null 2>&1 || true
+    awk '{print $1}' "$ANDROID_USER_HOME/adbkey.pub" | base64 -d | md5sum | awk '{print toupper($1)}' | sed 's/../&:/g; s/:$//'
+    exit 0 ;;
+esac
+
+EXT=$1; shift
+[[ "$EXT" =~ ^[0-9]{4}$ ]] || { echo "rw-adb: Nebenstelle (4 Ziffern) erwartet, nicht \"$EXT\"" >&2; exit 2; }
+SERIE="127.0.0.1:$(( ${ZW_SITZUNG_BASIS:-20000} + 10#$EXT ))"
+
+if [ "${1:-}" = ende ]; then
+    adb disconnect "$SERIE" >/dev/null 2>&1 || true
+    r=$(api DELETE "/sitzungen/$EXT?person=$PERSON")
+    [ "$(status "$r")" = 200 ] || { echo "rw-adb: $(fehler "$r")" >&2; exit 1; }
+    echo "Sitzung $EXT beendet."; exit 0
+fi
+
+befehl="$*"
+verboten='(^| )(reboot|reboot-bootloader|uninstall|root|unroot|remount|disable-verity|enable-verity|sideload|usb|tcpip)( |$)|pm +(uninstall|clear)|cmd +package +(uninstall|clear)|svc +power +(reboot|shutdown)|sys\.powerctl|wipe|MASTER_CLEAR|FACTORY_RESET|rm +-[a-z]*r'
+if [[ "$befehl" =~ $verboten ]]; then
+    echo "rw-adb: \"$befehl\" geht nicht über den Tunnel (kein Neustart, nichts deinstallieren, keine Daten löschen)." >&2
+    exit 3
+fi
+case "${1:-}" in
+"")         zweck=shell ;;
+einrichten) zweck=einrichten ;;
+logcat)     zweck=logcat ;;
+shell)      zweck=shell ;;
+*)          zweck=befehl ;;
+esac
+
+r=$(api POST /sitzungen "$(json --arg e "$EXT" --arg p "$PERSON" --arg z "$zweck" '{ext:$e, person:$p, zweck:$z}')")
+case "$(status "$r")" in
+200) ;;
+404) echo "rw-adb: $EXT hat keinen Tunnel (noch nicht bestätigt oder Not-Aus, /smartphones)" >&2; exit 1 ;;
+409) echo "rw-adb: $(fehler "$r")" >&2; exit 1 ;;
+*)   echo "rw-adb: Zentrale: $(fehler "$r")" >&2; exit 1 ;;
+esac
+protokoll() { api POST "/sitzungen/$EXT/befehl" "$(json --arg p "$PERSON" --arg b "$1" '{person:$p, befehl:$b}')" >/dev/null || true; }
+
+adb start-server >/dev/null 2>&1 || true
+if ! adb -s "$SERIE" get-state >/dev/null 2>&1; then
+    adb connect "$SERIE" >/dev/null 2>&1 || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do adb -s "$SERIE" get-state >/dev/null 2>&1 && break; sleep 1; done
+fi
+if ! adb -s "$SERIE" get-state >/dev/null 2>&1; then
+    echo "rw-adb: Telefon $EXT antwortet nicht über den Tunnel." >&2
+    echo "        Schläft es? Auf /smartphones wecken (Wartung 2098). Ist der Schlüssel der Zentrale zugelassen? (rw-adb schluessel)" >&2
+    exit 1
+fi
+
+case "${1:-}" in
+"")
+    protokoll "verbinden"
+    echo "Verbunden mit $EXT über den Tunnel ($SERIE). Am Telefon steht jetzt das Band \"Fernwartung aktiv\"."
+    echo "  rw-adb $EXT shell …   rw-adb $EXT logcat …   rw-adb $EXT ende"
+    ;;
+einrichten)
+    shift
+    protokoll "einrichten $*"
+    ADB=adb "$EINRICHTEN" "$SERIE" "$@"
+    ;;
+shell)
+    if [ $# -eq 1 ]; then protokoll "shell"; else protokoll "$befehl"; fi
+    exec adb -s "$SERIE" "$@"
+    ;;
+*)
+    protokoll "$befehl"
+    exec adb -s "$SERIE" "$@"
+    ;;
+esac

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Waschküchen-Verwaltung (Ausschuss) - STWEG 3</title>
+    <title>Waschküchen-Verwaltung - STWEG 3</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="/js/authentik-auth.js?v=6"></script>
     <style>
@@ -27,16 +27,16 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
                         </svg>
                     </div>
-                    <h1 class="text-2xl font-bold text-gray-800 mb-2">Ausschuss-Zugang</h1>
-                    <p class="text-gray-600">Nur für Ausschussvertreter (Technik-Gruppe)</p>
+                    <h1 class="text-2xl font-bold text-gray-800 mb-2">Waschküchen-Verwaltung</h1>
+                    <p class="text-gray-600">Für Technik, Präsident und wer in der Rechteverwaltung „Waschküche-Admin“ hat (Ausschuss oder Verwaltung STWEG 3)</p>
                 </div>
                 <div id="sso-login-container"></div>
                 <div id="access-denied" class="hidden mt-4 p-3 bg-red-50 border-l-4 border-red-500 rounded">
-                    <p class="text-sm text-red-800">Sie haben keine Administratorrechte. Nur Mitglieder der Technik-Gruppe haben Zugang.</p>
+                    <p class="text-sm text-red-800">Kein Zugang: Dein Konto hat das Recht „Waschküche-Admin“ nicht. Die Technik oder der Präsident kann es in der Rechteverwaltung geben.</p>
                 </div>
                 <div class="mt-6 pt-6 border-t border-gray-200">
                     <p class="text-xs text-gray-600">
-                        Zugriff nur mit Authentik SSO und Technik-Gruppenzugehörigkeit.
+                        Ansehen braucht „Waschküche-Admin“ lesen, Räume, Einstellungen und Abrechnung ändern braucht schreiben. Türschlösser stellt die Technik ein.
                     </p>
                 </div>
             </div>
@@ -234,6 +234,7 @@
             return res.json();
         }
 
+        let TECHNIK = false, DARF_SCHREIBEN = false;
         // HTML-Escape fuer alle Server-Werte (Namen/Wohnung sind vom Bewohner selbst setzbar)
         function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
@@ -251,18 +252,23 @@
             const tabBtns = document.querySelectorAll('.tab-btn');
             const tabContents = document.querySelectorAll('.tab-content');
 
-            // SSO Authentication with Technik group check
+            // Zugang (Befund W10): Technik/Präsident oder Recht „waschküche-admin“;
+            // die API prüft zusätzlich Ausschuss/Verwaltung der STWEG (lib/wasch-admin.js)
             const user = await AuthentikAuth.init({
                 requireAuth: false,
                 onLogin: async (u) => {
-                    const groups = u.groups || [];
-                    const isAdmin = groups.includes('Technik') || groups.includes('technik');
-                    if (!isAdmin) {
+                    const groups = (u.groups || []).map(g => String(g).toLowerCase());
+                    TECHNIK = groups.some(g => g === 'technik' || g === 'präsident' || g === 'praesident');
+                    DARF_SCHREIBEN = AuthentikAuth.hasPermission('waschküche-admin', 'write');
+                    if (!AuthentikAuth.hasPermission('waschküche-admin', 'read')) {
                         document.getElementById('access-denied').classList.remove('hidden');
                         return;
                     }
                     authSection.classList.add('hidden');
                     mainContent.classList.remove('hidden');
+                    // Mit Leserecht nur ansehen: keine Knöpfe zum Ändern
+                    ['add-room-btn', 'run-billing-btn'].forEach(id => document.getElementById(id)?.classList.toggle('hidden', !DARF_SCHREIBEN));
+                    document.getElementById('room-door').disabled = !TECHNIK;
                     await loadDashboard();
                 },
             });
@@ -343,7 +349,7 @@
                                     <h3 class="text-lg font-semibold text-gray-800">${esc(r.name)}</h3>
                                     <p class="text-sm text-gray-600">${esc(r.location || 'Kein Standort')}</p>
                                 </div>
-                                <button data-aktion="edit-room" data-id="${esc(r.id)}" data-name="${esc(r.name)}" data-location="${esc(r.location || '')}" data-meter="${esc(r.energy_meter_id || '')}" data-door="${esc(r.unifi_door_id || '')}"
+                                <button data-aktion="edit-room" ${DARF_SCHREIBEN ? '' : 'hidden'} data-id="${esc(r.id)}" data-name="${esc(r.name)}" data-location="${esc(r.location || '')}" data-meter="${esc(r.energy_meter_id || '')}" data-door="${esc(r.unifi_door_id || '')}"
                                     class="text-blue-600 hover:text-blue-800 text-sm font-medium">Bearbeiten</button>
                             </div>
                             <div class="space-y-2 text-sm">
@@ -396,6 +402,8 @@
                     energy_meter_id: document.getElementById('room-meter').value.trim() || null,
                     unifi_door_id: document.getElementById('room-door').value.trim() || null,
                 };
+                // Neue Räume gehören zu STWEG 3 (die API prüft die STWEG)
+                if (!editingRoomId) body.stweg = 3;
                 if (!body.name) { toast('Name ist erforderlich', 'error'); return; }
                 try {
                     if (editingRoomId) {
@@ -581,11 +589,11 @@
                                         <label class="block text-sm font-medium text-gray-700 mb-1">${f.label}</label>
                                         <input type="${f.type}" step="${f.step || ''}" data-key="${f.key}"
                                             class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 setting-input"
-                                            value="${esc(val)}" placeholder="${f.placeholder || ''}">
+                                            value="${esc(val)}" placeholder="${f.placeholder || ''}" ${DARF_SCHREIBEN ? '' : 'disabled'}>
                                     </div>`;
                             }).join('')}
                             <p class="text-xs text-gray-500">UniFi Access (Türen, Host, Token) wird in der Zutritt-App unter <a href="https://pwa.rosenweg4303.ch/zutritt/" class="underline">pwa.rosenweg4303.ch/zutritt</a> eingestellt.</p>
-                            <button id="save-settings-btn" class="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition">
+                            <button id="save-settings-btn" ${DARF_SCHREIBEN ? '' : 'hidden'} class="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition">
                                 Speichern
                             </button>
                         </div>

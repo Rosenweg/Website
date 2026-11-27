@@ -402,6 +402,17 @@ Neue App: Eintrag in `apps-register.json` (`apps` für eigene Repos mit mehreren
 Authentik-Rücksprünge (`<paket>:/anmeldung`) legt `scripts/authentik-apps-ruecksprung.py` an
 (Probelauf ohne `--ausfuehren`).
 
+## Versionsstand der Apps im NOC (Stand 27.11.2026)
+
+Die Updater der Apps melden bei jeder Prüfung, welche Rosenweg-Apps in welcher Fassung installiert sind – ohne Personendaten:
+
+| | |
+|---|---|
+| Meldung | `POST /api/apps/stand` (öffentlich, gebremst: 30/h je Gerät): `{"geraet": "<sha256>", "plattform": "android\|linux-deb\|macos\|windows", "geteilt": bool, "station": bool, "system": "…", "apps": [{"paket": "ch.rosenweg4303.…", "version": "1.2.0", "version_code": 20}]}` |
+| Wer meldet | Android: commons-rosenweg `updater` ab 0.1.6 (die zuständige App für alle installierten, Gerät = SHA-256 der ANDROID_ID). Computer: `rosenweg_basis` (`RosenwegAktualisierung`, Gerät = SHA-256 der Maschinen-ID), auch auf Stationen (dort ohne Update). |
+| Tabelle | `apps_stand` (je Gerät, Plattform, Paket; eine Meldung ersetzt die vorige; nach 90 Tagen weg). Geteilte Telefone zusätzlich mit Nebenstelle aus `telefon_apps_ist` (adb-Updater). |
+| Ansicht | ISP-Admin, Reiter **📱 App-Versionen**: je App und Plattform „x von n veraltet“ und die Liste (`GET /api/pbx/apps-stand`, Technik/Präsident). Massstab ist die neueste freigegebene Fassung (`telefon_apps` bzw. `apps_versionen`). |
+
 ## Apps auf geteilten Telefonen: Portal-Anfragen (Stand 26.11.2026)
 
 Flutter-Apps (rosenweg-basis, z. B. Rosenweg Salz) melden sich auf geteilten

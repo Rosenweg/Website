@@ -209,7 +209,7 @@ async function zeigeDetail() {
                 <td class="pr-3 text-right font-mono">${b.saecke > 0 ? '+' : ''}${Number(b.saecke)}</td>
                 <td class="pr-3">${esc(b.sorte || '')}</td>
                 <td class="pr-3">${esc(b.von || '')}</td>
-                <td class="text-right">${!b.storniert_am && (darfEinstellen || b.eigene) ? `<button class="knopf" onclick="storno(${Number(b.id)})">Rückgängig</button>` : ''}</td>
+                <td class="text-right">${!b.storniert_am && (b.rueckgaengig ?? (darfEinstellen || b.eigene)) ? `<button class="knopf" title="Eigene Buchungen gehen innert 24 Stunden, danach nur durch die Technik" onclick="storno(${Number(b.id)})">Rückgängig</button>` : ''}</td>
             </tr>`).join('') || '<tr><td colspan="6" class="py-2 text-slate-500">Noch keine Buchungen.</td></tr>';
     } catch (e) { melde(e.message, true); }
 }

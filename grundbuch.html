@@ -170,6 +170,7 @@
                     <button onclick="closeModal()" class="px-3 py-2 text-sm bg-gray-100 border rounded hover:bg-gray-200">Abbrechen</button>
                     <button id="m-release" onclick="releaseReservation()" class="hidden px-3 py-2 text-sm bg-amber-100 text-amber-800 border border-amber-300 rounded hover:bg-amber-200">Reservierung freigeben</button>
                     <button onclick="saveAnteil()" id="m-save" class="px-4 py-2 text-sm bg-emerald-600 text-white rounded hover:bg-emerald-700">Speichern</button>
+                    <button onclick="verifyAnteil()" id="m-verify" class="hidden px-4 py-2 text-sm bg-purple-600 text-white rounded hover:bg-purple-700" title="Angaben mit dem Auszug verglichen: Anteil freigeben">Prüfen und freigeben</button>
                 </div>
             </div>
         </div>
@@ -178,11 +179,17 @@
     <script>
     const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
     let me = null, anteileCache = [], current = null;
+    // Freigeben (verifizieren) dürfen Ausschuss, Technik und Präsident (wie die API, Befund W14)
+    let DARF_FREIGEBEN = false;
+    function istAusschussOderTechnik(groups) {
+        return (groups || []).some(g => { const gl = String(g).toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident' || /^stweg[1-7]-ausschuss$/.test(gl) || gl === 'meg-ausschuss'; });
+    }
 
     document.addEventListener('DOMContentLoaded', async () => {
         const user = await AuthentikAuth.init({ requireAuth: true });
         if (!user) return; // init() leitet bei not-logged-in selbst nach Authentik weiter
         me = user;
+        DARF_FREIGEBEN = istAusschussOderTechnik(user.groups);
         document.getElementById('auth-gate').classList.add('hidden');
         document.getElementById('content').classList.remove('hidden');
         await Promise.all([loadStats(), loadAnteile()]);
@@ -301,6 +308,7 @@
         document.getElementById('m-bild').value = '';
         document.getElementById('m-error').classList.add('hidden');
         document.getElementById('m-release').classList.toggle('hidden', !(current.status === 'reserviert' && current.reserviert_von === me?.email));
+        document.getElementById('m-verify').classList.toggle('hidden', !(DARF_FREIGEBEN && current.status === 'erfasst'));
         // Reservieren
         if (current.status === 'offen') {
             try {
@@ -405,6 +413,21 @@
         } finally {
             document.getElementById('m-save').disabled = false;
             document.getElementById('m-save').textContent = 'Speichern';
+        }
+    }
+
+    // Erfassten Anteil freigeben: gilt für den gespeicherten Stand (Änderungen zuerst speichern)
+    async function verifyAnteil() {
+        if (!current || current.status !== 'erfasst') return;
+        if (!confirm('Angaben mit dem Grundbuchauszug verglichen und korrekt? Freigegeben wird der gespeicherte Stand – Änderungen hier zuerst speichern. Danach ist der Anteil freigegeben; ändern können ihn nur noch Ausschuss und Technik.')) return;
+        try {
+            const r = await AuthentikAuth.apiFetch(`/api/grundbuch/anteile/${current.parzelle}/${current.sub_id}/verify`, { method: 'POST' });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(d.error || 'Fehler ' + r.status);
+            closeModal();
+        } catch (e) {
+            const el = document.getElementById('m-error');
+            el.textContent = e.message; el.classList.remove('hidden');
         }
     }
 

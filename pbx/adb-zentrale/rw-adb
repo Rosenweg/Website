@@ -1,0 +1,5 @@
+#!/bin/bash
+# rw-adb: adb zu einem geteilten Telefon ueber den Fernwartungs-Tunnel.
+# Ruft rw-adb-intern als Benutzer adbz auf (sudoers: /etc/sudoers.d/rw-adb).
+# Hilfe: rw-adb hilfe
+exec sudo -u adbz /opt/adb-zentrale/rw-adb-intern "$@"
