@@ -196,9 +196,27 @@
     let currentEdit = null;
     let pendingKontakte = [];
 
+    // Befund V6: Der Ausschuss darf nur Verwaltungen seiner STWEG(s) speichern.
+    // Auswahl darauf beschraenken und vorbelegen (nicht „STWEG-übergreifend“).
+    let EIGENE_STWEGS = null; // null = alle (Technik/Präsident)
+    function stwegAuswahl(groups) {
+        const g = (groups || []).map(x => String(x).toLowerCase());
+        if (g.some(x => x === 'technik' || x === 'präsident' || x === 'praesident')) return;
+        EIGENE_STWEGS = [];
+        g.forEach(x => { const m = x.match(/^stweg([1-7])-ausschuss$/); if (m) EIGENE_STWEGS.push(m[1]); if (x === 'meg-ausschuss') EIGENE_STWEGS.push('8'); });
+        const sel = document.getElementById('m-stweg');
+        [...sel.options].forEach(o => { if (!EIGENE_STWEGS.includes(o.value)) o.remove(); });
+    }
+    // Fehlermeldung des Servers zeigen, nicht nur den Status
+    async function fehlerText(r) {
+        const d = await r.json().catch(() => ({}));
+        return d.error || ('Fehler ' + r.status);
+    }
+
     (async function() {
         const user = await AuthentikAuth.init({ requireAuth: true });
         if (!user) return;
+        stwegAuswahl(user.groups);
         load();
     })();
 
@@ -207,7 +225,7 @@
     async function load() {
         const r = await AuthentikAuth.apiFetch('/api/verwaltungen');
         if (!r.ok) {
-            document.getElementById('loading').textContent = 'Fehler ' + r.status;
+            document.getElementById('loading').textContent = await fehlerText(r);
             return;
         }
         const d = await r.json();
@@ -281,7 +299,7 @@
 
     function fillForm(v) {
         document.getElementById('m-id').value = v.id || '';
-        document.getElementById('m-stweg').value = v.stweg || '';
+        document.getElementById('m-stweg').value = v.stweg || (EIGENE_STWEGS && EIGENE_STWEGS.length ? EIGENE_STWEGS[0] : '');
         document.getElementById('m-aktiv').value = v.aktiv === false ? 'false' : 'true';
         document.getElementById('m-firma').value = v.firma_name || '';
         document.getElementById('m-sichtbarkeit').value = v.kontakt_sichtbarkeit || 'ausschuss';
@@ -348,7 +366,7 @@
         const url = currentEdit ? `/api/verwaltungen/${currentEdit}` : '/api/verwaltungen';
         const method = currentEdit ? 'PUT' : 'POST';
         const r = await AuthentikAuth.apiFetch(url, { method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-        if (!r.ok) { alert('Fehler: ' + r.status); return; }
+        if (!r.ok) { alert(await fehlerText(r)); return; }
         const v = await r.json();
         // Kontakte synchronisieren — alte löschen + alle aktuellen neu anlegen (einfache Strategie)
         const verwId = v.id;
@@ -372,7 +390,7 @@
         if (!currentEdit) return;
         if (!confirm('Diese Verwaltung wirklich löschen?')) return;
         const r = await AuthentikAuth.apiFetch(`/api/verwaltungen/${currentEdit}`, { method: 'DELETE' });
-        if (!r.ok) { alert('Fehler: ' + r.status); return; }
+        if (!r.ok) { alert(await fehlerText(r)); return; }
         closeModal();
         await load();
     }
