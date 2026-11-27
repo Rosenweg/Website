@@ -253,7 +253,10 @@
     }
     function renderUnzugeordnet(rows) {
         const sec = $('unz-section');
-        if (!rows || !rows.length) { sec.classList.add('hidden'); return; }
+        // Nur Rechnungen dieser STWEG (zuordenbar zu den Wohnungen unten); ohne STWEG
+        // liefert der Server nur an Technik/Präsident.
+        rows = (rows || []).filter(z => z.stweg == null || Number(z.stweg) === STWEG);
+        if (!rows.length) { sec.classList.add('hidden'); return; }
         sec.classList.remove('hidden');
         $('unz-body').innerHTML = rows.map(z => `<tr class="border-b last:border-0 align-top" data-id="${z.id}">
             <td class="py-2 pr-3 text-xs whitespace-nowrap">${esc((z.empfangen_am || '').slice(0, 10))}</td>

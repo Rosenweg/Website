@@ -80,4 +80,30 @@ function zevDarfRechnungSehen({ email, rechnung, kontakte, zevAktiv, eigentuemer
   return meineRollen.some(r => partei.has(r)) && empfRollen.some(r => partei.has(r));
 }
 
-module.exports = { zevSlug, zevAliasAddress, isValidEmail, zevGotoTargets, zevBewohnendePartei, zevDarfRechnungSehen };
+// ─── STWEG einer nicht zugeordneten Rechnung (Z1) ─────────────────────────
+// Eine Rechnung ohne Alias-Treffer gehoert trotzdem zu der Anlage, deren
+// Adressen sie erreicht hat. Reihenfolge (nur aktive ZEV-Konfigurationen):
+//  1. Empfaenger passt auf `prefix.*@domain` genau einer STWEG,
+//  2. Empfaenger ist das Archiv-Postfach genau einer STWEG,
+//  3. es gibt nur eine aktive ZEV-STWEG (heute STWEG 3 / Haus 9: ein Postfach).
+// Sonst null: dann bleibt die Rechnung bei Technik/Praesident.
+function zevStwegFuerEmpfaenger(recips, cfgs) {
+  const adr = [...new Set((recips || []).map(r => String(r || '').trim().toLowerCase()).filter(Boolean))];
+  const aktiv = (cfgs || []).filter(c => c && c.aktiv !== false && Number.isInteger(Number(c.stweg)));
+  const eindeutig = (liste) => {
+    const set = new Set(liste.map(c => Number(c.stweg)));
+    return set.size === 1 ? [...set][0] : null;
+  };
+  const perAlias = aktiv.filter(c => {
+    const p = String(c.alias_prefix || 'zev').toLowerCase();
+    const d = String(c.alias_domain || '').toLowerCase();
+    if (!ZEV_PREFIX_RE.test(p) || !ZEV_DOMAIN_RE.test(d)) return false;
+    return adr.some(a => a.startsWith(p + '.') && a.endsWith('@' + d));
+  });
+  if (perAlias.length) return eindeutig(perAlias);
+  const perArchiv = aktiv.filter(c => c.archiv_mailbox && adr.includes(String(c.archiv_mailbox).trim().toLowerCase()));
+  if (perArchiv.length) return eindeutig(perArchiv);
+  return eindeutig(aktiv);
+}
+
+module.exports = { zevSlug, zevAliasAddress, isValidEmail, zevGotoTargets, zevBewohnendePartei, zevDarfRechnungSehen, zevStwegFuerEmpfaenger };

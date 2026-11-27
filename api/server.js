@@ -17,7 +17,7 @@ const druckApi = require('./lib/druckapi'); // Druck-API CT 111 und Gotenberg (D
 const { STWEG_GROUPS, parseStweg, getUserStwegs, stwegFolderName, folderStwegNr, isTechnik, isPraesident, getAusschussStwegs, isAusschussForAny, canSeeVerwaltungKontakte,
   VERWALTUNG_GROUPS, istVerwaltungUebergang, verwaltungStwegs, isVerwaltungFor, isVerwaltungForAny, verwaltetAlleStwegs, istVerwaltungsGruppenName, getStwegsMitVerwaltung } = require('./lib/groups');
 const { nummernKanal, darfEchteNummernSehen, istTechnikOderPraesident, interneNummerFinden, nummernAusgeben, nummernAusBodyEntfernen, interneNummernLaden, interneNummernCacheLeeren, interneNummernPruefen, nummernSicht } = require('./lib/nummernsicht');
-const { zevAliasAddress, zevGotoTargets, zevDarfRechnungSehen } = require('./lib/zev');
+const { zevAliasAddress, zevGotoTargets, zevDarfRechnungSehen, zevStwegFuerEmpfaenger } = require('./lib/zev');
 const reklMelder = require('./lib/reklamation-melder');
 const vollmachtRechte = require('./lib/vollmacht-rechte');
 const projekteRechte = require('./lib/projekte-rechte');
@@ -5992,6 +5992,7 @@ async function pollZevArchive() {
   try {
     await client.connect();
     const { map: aliasMap } = await buildZevAliasMap();
+    const zevCfgs = (await pool.query('SELECT stweg, aktiv, alias_prefix, alias_domain, archiv_mailbox FROM zev_config WHERE aktiv = true').catch(() => ({ rows: [] }))).rows;
     const lock = await client.getMailboxLock('INBOX');
     try {
       const mb = client.mailbox;
@@ -6020,7 +6021,7 @@ async function pollZevArchive() {
           const recips = [].concat(parsed.to?.value || [], parsed.cc?.value || []).map(a => String(a.address || '').toLowerCase());
           const hdrTo = String(parsed.headers?.get('delivered-to') || parsed.headers?.get('x-original-to') || '').toLowerCase();
           if (hdrTo) recips.push(...hdrTo.split(/[<>,\s]+/).filter(Boolean));
-          let match = null;
+          let match = null, unsicher = false;
           for (const r of recips) { if (aliasMap[r] && !aliasMap[r].kollision) { match = aliasMap[r]; break; } }
           // Absender pruefen: die Alias-Adressen kann jeder anschreiben. Eine Mail von
           // fremdem Absender (ZEV_ABSENDER) oder mit DMARC-/Spam-Befund wird archiviert,
@@ -6035,8 +6036,14 @@ async function pollZevArchive() {
             if (authFehler || !erlaubt) {
               console.warn(`[ZEV-Archiv] Absender ${abs || '?'} nicht vertrauenswuerdig (authFehler=${authFehler}) -> unzugeordnet`);
               match = null;
+              unsicher = true;
             }
           }
+          // Z1: Ohne Alias-Treffer trotzdem die STWEG der Anlage ableiten (Empfaenger-
+          // Domain/Archiv-Postfach/einzige ZEV-STWEG), damit Ausschuss und Verwaltung
+          // dieser STWEG die Rechnung sehen und zuordnen koennen. Mails von nicht
+          // vertrauenswuerdigem Absender bleiben ohne STWEG (nur Technik/Praesident).
+          const stwegUnz = (!match && !unsicher) ? zevStwegFuerEmpfaenger(recips, zevCfgs) : null;
           // B3: Zuordnung. allgemein = Allgemeinzaehler (kein Bewohner), unzugeordnet = kein Alias-Match.
           const zuordnung = match ? (match.typ === 'allgemein' ? 'allgemein' : 'wohnung') : 'unzugeordnet';
           const zevRecip = recips.find(r => /^zev[._]/.test(r)) || null;
@@ -6055,7 +6062,7 @@ async function pollZevArchive() {
             const ins = await pool.query(
               `INSERT INTO zev_rechnungen (stweg, wohnung_id, alias_address, bewohner_email, bewohner_name, message_id, betreff, absender, empfangen_am, pdf_filename, pdf_size, pdf_data, rechnungsnummer, rechnungsdatum, zeitraum_von, zeitraum_bis, objekt, betrag_chf, positionen, zuordnung, parse_ok, parse_attempts)
                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) ON CONFLICT (message_id) DO NOTHING RETURNING id`,
-              [match?.stweg || null, match?.wohnung_id || null, match?.alias_address || zevRecip,
+              [match?.stweg || stwegUnz || null, match?.wohnung_id || null, match?.alias_address || zevRecip,
                match?.bewohner_email || null, match?.bewohner_name || null, messageId,
                parsed.subject || null, parsed.from?.value?.[0]?.address || null, parsed.date || null,
                pdf?.filename || null, pdf ? pdf.content.length : null, pdf ? pdf.content : null,
@@ -8317,8 +8324,9 @@ app.post('/api/zev/rechnung/:id/bezahlt', authMiddleware, async (req, res) => {
 app.get('/api/zev/unzugeordnet', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
   try {
     // Technik/Praesident alle; sonst nur Rechnungen der eigenen Ausschuss-STWEGs
-    // bzw. der von der Hausverwaltung betreuten STWEGs (Rechnungen ohne STWEG
-    // bleiben bei Technik).
+    // bzw. der von der Hausverwaltung betreuten STWEGs. Die STWEG setzt der Poller
+    // auch ohne Alias-Treffer (Z1, zevStwegFuerEmpfaenger); nur nicht ableitbare
+    // Rechnungen (z. B. fremder Absender) bleiben bei Technik.
     const g = req.user?.groups || [];
     const alle = isTechnik(g) || isPraesident(g);
     const zevStwegs = [...new Set([...getAusschussStwegs(g), ...verwaltungStwegs(g)])];
@@ -8359,10 +8367,15 @@ app.post('/api/zev/rechnung/:id/zuordnen', authMiddleware, requirePermission('wo
       if ((alt.rows[0].zuordnung || 'unzugeordnet') !== 'unzugeordnet') {
         return res.status(409).json({ error: 'Rechnung ist bereits zugeordnet. Umhängen nur durch Technik.' });
       }
-      // Rechnung ohne STWEG (Alias unbekannt) nur Technik/Praesident – sonst
-      // koennte jeder Ausschuss fremde Rechnungen in die eigene STWEG ziehen.
-      if (!eigene.has(stweg) || alt.rows[0].stweg == null || !eigene.has(alt.rows[0].stweg)) {
-        return res.status(403).json({ error: 'Kein Zugriff auf diese STWEG' });
+      // Rechnung ohne STWEG (nicht ableitbar, z. B. fremder Absender) nur Technik/
+      // Praesident – sonst koennte jeder Ausschuss fremde Rechnungen in die eigene
+      // STWEG ziehen. Zuordnen nur innerhalb der STWEG der Rechnung (Z1).
+      const altStweg = alt.rows[0].stweg;
+      if (altStweg == null || !eigene.has(altStweg)) {
+        return res.status(403).json({ error: 'Diese Rechnung gehört zu keiner deiner STWEGs. Bitte Technik fragen.' });
+      }
+      if (stweg !== altStweg) {
+        return res.status(403).json({ error: `Diese Rechnung gehört zu STWEG ${altStweg}. Bitte eine Wohnung dieser STWEG wählen.` });
       }
     }
     let bewEmail = (typeof b.bewohner_email === 'string' && b.bewohner_email.trim()) ? b.bewohner_email.trim() : null;
