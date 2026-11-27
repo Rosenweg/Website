@@ -1,0 +1,56 @@
+# Anmeldung mit dem Rosenweg-Konto apptest (Chrome, Authentik rosenweg-apps, PKCE).
+# Wird aus den App-Abläufen mit runFlow aufgerufen, wenn der Anmeldeschirm sichtbar ist:
+#   - runFlow: { when: { visible: "Mit Rosenweg-Konto anmelden" }, file: anmelden.yaml, env: { APP: <paket> } }
+# BENUTZER und PASSWORT gibt lauf.sh mit -e aus /etc/android-dauertest.env mit
+# (Maestro protokolliert nur "${PASSWORT}", nie den Wert).
+# Fälle: Chrome kennt die Authentik-Sitzung schon (kein Formular) oder nicht; Chrome fragt
+# beim Rücksprung <paket>:/anmeldung "Continue to <App>?" oder nicht.
+appId: ${APP}
+---
+- tapOn: "Mit Rosenweg-Konto anmelden"
+# Erststart von Chrome (emulator.sh schaltet ihn ab; falls doch)
+- tapOn:
+    text: "No thanks|Use without an account"
+    optional: true
+- extendedWaitUntil:
+    visible: "Email or Username|E-Mail oder Benutzername|Continue to .*|Weiter zu .*"
+    timeout: 45000
+    optional: true
+- runFlow:
+    when:
+      visible: "Email or Username|E-Mail oder Benutzername"
+    commands:
+      - tapOn: "Email or Username|E-Mail oder Benutzername"
+      - inputText: ${BENUTZER}
+      - tapOn: "Anmelden|Log in"
+      - extendedWaitUntil:
+          visible: "Password|Passwort"
+          timeout: 30000
+      - tapOn: "Password|Passwort"
+      - inputText: ${PASSWORT}
+      - pressKey: Enter
+      - extendedWaitUntil:
+          visible: "Continue to .*|Weiter zu .*"
+          timeout: 30000
+          optional: true
+# Klicks direkt nach dem Einblenden ignoriert Chrome (Schutz gegen untergeschobene
+# Klicks) - erst warten, dann tippen, bei Bedarf nochmal.
+- runFlow:
+    when:
+      visible: "Continue to .*|Weiter zu .*"
+    commands:
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - tapOn:
+          text: "Continue|Weiter"
+          retryTapIfNoChange: true
+- runFlow:
+    when:
+      visible: "Continue to .*|Weiter zu .*"
+    commands:
+      - waitForAnimationToEnd:
+          timeout: 2000
+      - tapOn: "Continue|Weiter"
+- extendedWaitUntil:
+    notVisible: "Mit Rosenweg-Konto anmelden"
+    timeout: 30000
