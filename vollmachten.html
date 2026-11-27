@@ -661,6 +661,15 @@
     } catch (e) { wrap.innerHTML = '<div class="text-red-500 p-1">Fehler: ' + esc(e.message) + '</div>'; }
   }
 
+  // UI-Typ -> DB-Typ (eigentuemer|verwaltung|mieter|extern). „Person aus
+  // Objektverwaltung“ ohne Auswahl eines Kontakts (Name von Hand getippt) ist
+  // nicht belegt -> extern, wie api/lib/vollmacht-rechte.js bvTyp (F2-6).
+  function bvTypFuerServer(uiTyp, actualTyp) {
+    if (actualTyp) return actualTyp;
+    if (uiTyp === 'person') return 'extern';
+    return uiTyp;
+  }
+
   function pickKontakt(k) {
     document.getElementById('m-bv-name').value = k.name || '';
     document.getElementById('m-bv-email').value = k.email || '';
@@ -765,7 +774,7 @@
       vollmachtgeber_email: cleanVg[0].email,
       vollmachtgeber_adresse: cleanVg[0].adresse,
       vollmachtgeber: cleanVg, // ganze Liste für vollmachten_vollmachtgeber-Tabelle
-      bevollmaechtigter_typ: document.getElementById('m-bv-actual-typ').value || document.getElementById('m-bv-typ').value,
+      bevollmaechtigter_typ: bvTypFuerServer(document.getElementById('m-bv-typ').value, document.getElementById('m-bv-actual-typ').value),
       bevollmaechtigter_verwaltung_id: parseInt(document.getElementById('m-bv-verwaltung').value, 10) || null,
       bevollmaechtigter_name: document.getElementById('m-bv-name').value.trim(),
       bevollmaechtigter_email: document.getElementById('m-bv-email').value.trim() || null,

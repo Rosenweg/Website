@@ -27379,7 +27379,9 @@ app.post('/api/vollmachten', authMiddleware, async (req, res) => {
     if (!b.vollmachtgeber_name || !b.bevollmaechtigter_name || !b.bevollmaechtigter_typ || !b.art) {
       return res.status(400).json({ error: 'Pflichtfelder: vollmachtgeber_name, bevollmaechtigter_name, bevollmaechtigter_typ, art' });
     }
-    if (!['eigentuemer','verwaltung','mieter','extern'].includes(b.bevollmaechtigter_typ)) {
+    // 'person' (Formular, Name von Hand) -> extern (lib/vollmacht-rechte.js bvTyp)
+    b.bevollmaechtigter_typ = vollmachtRechte.bvTyp(b.bevollmaechtigter_typ);
+    if (!b.bevollmaechtigter_typ) {
       return res.status(400).json({ error: 'Ungueltiger bevollmaechtigter_typ' });
     }
     if (!['generell','spezifisch','auskunft'].includes(b.art)) {
@@ -27463,6 +27465,10 @@ app.put('/api/vollmachten/:id', authMiddleware, async (req, res) => {
       'SELECT 1 FROM vollmachten_vollmachtgeber WHERE vollmacht_id = $1 AND signed_at IS NOT NULL LIMIT 1', [id]);
     if (signiert.rows.length > 0) {
       return res.status(409).json({ error: 'Bereits teilweise signiert — Änderungen nicht mehr möglich. Entwurf löschen und neu erfassen.' });
+    }
+    if (b.bevollmaechtigter_typ !== undefined) {
+      b.bevollmaechtigter_typ = vollmachtRechte.bvTyp(b.bevollmaechtigter_typ);
+      if (!b.bevollmaechtigter_typ) return res.status(400).json({ error: 'Ungueltiger bevollmaechtigter_typ' });
     }
     const vgFehler = vmGeberListeFehler(b.vollmachtgeber);
     if (vgFehler) return res.status(400).json({ error: vgFehler });

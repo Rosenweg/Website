@@ -44,3 +44,17 @@ test('Server und Seite nutzen die gemeinsame Regel', () => {
   const seite = fs.readFileSync(path.join(__dirname, '..', '..', 'vollmachten.html'), 'utf8');
   assert.match(seite, /const canRevoke = v\.darf_widerrufen === true;/);
 });
+
+test('F2-6: Typ „Person“ mit getipptem Namen wird extern, nie ein ungültiger Typ', () => {
+  assert.equal(vr.bvTyp('person'), 'extern');
+  assert.equal(vr.bvTyp('Eigentuemer'), 'eigentuemer');
+  assert.equal(vr.bvTyp('mieter'), 'mieter');
+  assert.equal(vr.bvTyp('verwaltung'), 'verwaltung');
+  assert.equal(vr.bvTyp(''), null);
+  assert.equal(vr.bvTyp('irgendwas'), null);
+  const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.equal((server.match(/vollmachtRechte\.bvTyp\(b\.bevollmaechtigter_typ\)/g) || []).length, 2); // POST und PUT
+  const seite = fs.readFileSync(path.join(__dirname, '..', '..', 'vollmachten.html'), 'utf8');
+  assert.match(seite, /bevollmaechtigter_typ: bvTypFuerServer\(/);
+  assert.match(seite, /if \(uiTyp === 'person'\) return 'extern';/);
+});

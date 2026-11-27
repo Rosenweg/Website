@@ -85,7 +85,21 @@ function vmDarfFuerAndereIrgendwo(groups, perm) {
   return widerrufAdmin(groups || []) || vmVerwaltungStwegs(groups, perm, 'write').size > 0;
 }
 
+// ─── Typ des Bevollmaechtigten (Befund F2-6) ─────────────────────────
+// Die Datenbank kennt eigentuemer | verwaltung | mieter | extern
+// (vm_typ_chk). Das Formular bietet zusaetzlich „Person aus Objektverwaltung“
+// (UI-Wert person); den genauen Typ setzt erst die Auswahl eines Kontakts.
+// Wird der Name von Hand getippt, kam 'person' an und der Server lehnte ab.
+// Ohne Auswahl ist die Person nicht aus der Objektverwaltung belegt -> extern.
+const BV_TYPEN = ['eigentuemer', 'verwaltung', 'mieter', 'extern'];
+function bvTyp(typ) {
+  const t = String(typ || '').trim().toLowerCase();
+  if (t === 'person') return 'extern';
+  return BV_TYPEN.includes(t) ? t : null;
+}
+
 module.exports = {
+  BV_TYPEN, bvTyp,
   widerrufAdmin, istVollmachtgeber, darfWiderrufenRecht, darfWiderrufen,
   vmVerwaltungStwegs, vmSicht, vmSichtErlaubt, vmDarfVerwalten, vmDarfFuerAndereIrgendwo,
 };
