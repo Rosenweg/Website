@@ -1640,7 +1640,10 @@ def telefon_privat_nextcloud():
     app_name = sauber(b.get("app_name") or b.get("app"), 60) or "Rosenweg-App"
     geraet = sauber(b.get("geraet"), 60) or "Handy"
     # eindeutig je Anmeldung: der Token-Dienst widerruft nach Name
-    name = f"{app_name} auf {geraet} ({pysecrets.token_hex(3)})"
+    # nc-token (CT 104) erlaubt im Namen nur [A-Za-z0-9 ._äöüÄÖÜ-]{3,64} - keine Klammern
+    # (sonst 400 -> "Nextcloud-Zugang fehlgeschlagen" bei jeder App auf dem eigenen Handy).
+    roh = re.sub(r"[^A-Za-z0-9 ._äöüÄÖÜ-]", " ", f"{app_name} auf {geraet}")
+    name = re.sub(r"\s+", " ", roh).strip()[:56] + " - " + pysecrets.token_hex(3)
     try:
         a = requests.post(f"{NC_TOKEN_URL}/ausstellen", json={"email": konto["email"], "name": name},
                           headers={"X-NC-Token-Secret": NC_TOKEN_SECRET}, timeout=60)
