@@ -247,10 +247,10 @@
                 <!-- Comments -->
                 <div class="bg-white rounded-xl shadow p-6">
                     <h2 class="text-lg font-bold text-gray-800 mb-4">Kommentare & Feedback</h2>
-                    <form onsubmit="postComment(event)" class="flex gap-2 mb-4">
+                    ${p.darf_kommentieren === false ? '<p class="text-xs text-gray-500 mb-4">Kommentieren können die Eigentümer. Die Verwaltung liest mit.</p>' : `<form onsubmit="postComment(event)" class="flex gap-2 mb-4">
                         <input type="text" id="comment-input" placeholder="Kommentar schreiben..." class="flex-1 border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" required>
                         <button type="submit" class="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-emerald-700 transition">Senden</button>
-                    </form>
+                    </form>`}
                     <div>${commentsHtml}</div>
                 </div>
             </div>`;

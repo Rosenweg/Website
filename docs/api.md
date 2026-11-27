@@ -289,7 +289,7 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 |---|---|
 | `GET/POST/PUT/DELETE /api/auslagen…`, Belege, Positionen, `scan-beleg` | Recht `auslagen:read`; sehen: Ersteller, A🅢, T/P (Entwürfe nur Ersteller und T/P); Status ändern A🅢/T/P, keine Selbstgenehmigung; „ausbezahlt“ T/P/Verwaltung bzw. Ersteller („erhalten“); Scan 30 / Std. |
 | `PUT/DELETE /api/auslagen-stundensatz` | Recht `auslagen-stundensatz:write` |
-| `/api/projects…` | lesen und kommentieren: Eigentümer; bearbeiten: Ausschuss (jede STWEG) oder T/P |
+| `/api/projects…` | lesen: Eigentümer, T/P oder Verwaltung mit Recht `projekte` (Auslagen eines Projekts dann nur ihrer STWEG(s), `lib/projekte-rechte.js`); kommentieren: Eigentümer; bearbeiten: Ausschuss (jede STWEG) oder T/P |
 | `/api/handwerker*`, `/api/handwerker-events`, `/api/handwerker-notfall` | Recht `handwerker` |
 | `GET /api/dashboard`, `POST /api/ki-search` (30 / Min.), `GET /api/telefonbuch` | angemeldet, Inhalt nach Rolle gefiltert |
 

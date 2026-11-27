@@ -20,6 +20,7 @@ const { nummernKanal, darfEchteNummernSehen, istTechnikOderPraesident, interneNu
 const { zevAliasAddress, zevGotoTargets } = require('./lib/zev');
 const reklMelder = require('./lib/reklamation-melder');
 const vollmachtRechte = require('./lib/vollmacht-rechte');
+const projekteRechte = require('./lib/projekte-rechte');
 const stwegSichtLib = require('./lib/stweg-sicht');
 const verteilerVerwaltung = require('./lib/verteiler-verwaltung');
 
@@ -11970,6 +11971,17 @@ function requireEigentuemer(req, res, next) {
   res.status(403).json({ error: 'Nur für Eigentümer' });
 }
 
+/** Middleware: Projekte lesen (Eigentuemer, Technik/Praesident, Verwaltung mit Recht projekte; lib/projekte-rechte.js) */
+async function requireProjekteLesen(req, res, next) {
+  const groups = req.user?.groups || [];
+  let perm;
+  if (!projekteRechte.projekteLesen(groups, undefined)) {
+    try { perm = (await getUserPermissions(groups))['projekte']; } catch { perm = undefined; }
+  }
+  if (projekteRechte.projekteLesen(groups, perm)) return next();
+  res.status(403).json({ error: 'Nur für Eigentümer oder die Verwaltung (Recht Projekte)' });
+}
+
 /** Middleware: require ausschuss or technik for editing */
 function requireAusschussOrTechnik(req, res, next) {
   const groups = req.user?.groups || [];
@@ -12197,7 +12209,7 @@ app.put('/api/projects/:slug/budget', authMiddleware, requireAusschussOrTechnik,
 });
 
 // GET /api/projects - List projects
-app.get('/api/projects', authMiddleware, requireEigentuemer, async (req, res) => {
+app.get('/api/projects', authMiddleware, requireProjekteLesen, async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT * FROM projects ORDER BY created_at DESC');
     res.json(rows);
@@ -12207,7 +12219,7 @@ app.get('/api/projects', authMiddleware, requireEigentuemer, async (req, res) =>
 });
 
 // GET /api/projects/:slug - Get project with all data
-app.get('/api/projects/:slug', authMiddleware, requireEigentuemer, async (req, res) => {
+app.get('/api/projects/:slug', authMiddleware, requireProjekteLesen, async (req, res) => {
   try {
     const { rows: [project] } = await pool.query('SELECT * FROM projects WHERE slug = $1', [req.params.slug]);
     if (!project) return res.status(404).json({ error: 'Projekt nicht gefunden' });
@@ -12216,11 +12228,17 @@ app.get('/api/projects/:slug', authMiddleware, requireEigentuemer, async (req, r
       pool.query('SELECT * FROM project_timeline WHERE project_id = $1 ORDER BY datum', [project.id]),
       pool.query('SELECT * FROM project_comments WHERE project_id = $1 ORDER BY created_at DESC', [project.id]),
       pool.query('SELECT * FROM project_attachments WHERE project_slug = $1 ORDER BY created_at', [req.params.slug]),
-      pool.query(
-        `SELECT status, COUNT(*)::int AS n, COALESCE(SUM(betrag_chf), 0)::numeric AS summe
-           FROM auslagen WHERE projekt_slug = $1 GROUP BY status`,
-        [req.params.slug],
-      ),
+      (() => {
+        // Verwaltung: nur Auslagen ihrer STWEG(s) (lib/projekte-rechte.js)
+        const params = [req.params.slug];
+        const sicht = projekteRechte.projektAuslagenSicht(req.user?.groups || []);
+        const filter = sicht ? ` AND ${stwegSichtLib.sichtSql(sicht, 'stweg', params)}` : '';
+        return pool.query(
+          `SELECT status, COUNT(*)::int AS n, COALESCE(SUM(betrag_chf), 0)::numeric AS summe
+             FROM auslagen WHERE projekt_slug = $1${filter} GROUP BY status`,
+          params,
+        );
+      })(),
     ]);
     const auslagenStat = { total_count: 0, total_chf: 0, by_status: {} };
     for (const r of auslagenSumme.rows) {
@@ -12232,6 +12250,7 @@ app.get('/api/projects/:slug', authMiddleware, requireEigentuemer, async (req, r
       ...project,
       candidates: candidates.rows, timeline: timeline.rows, comments: comments.rows, attachments: attachments.rows,
       auslagen_stat: auslagenStat,
+      darf_kommentieren: projekteRechte.projekteKommentieren(req.user?.groups || []),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -12239,19 +12258,23 @@ app.get('/api/projects/:slug', authMiddleware, requireEigentuemer, async (req, r
 });
 
 // GET /api/projects/:slug/auslagen — alle Auslagen eines Projekts mit Summen
-app.get('/api/projects/:slug/auslagen', authMiddleware, requireEigentuemer, async (req, res) => {
+app.get('/api/projects/:slug/auslagen', authMiddleware, requireProjekteLesen, async (req, res) => {
   try {
+    // Verwaltung: nur Auslagen ihrer STWEG(s) (lib/projekte-rechte.js)
+    const params = [req.params.slug];
+    const sicht = projekteRechte.projektAuslagenSicht(req.user?.groups || []);
+    const filter = sicht ? ` AND ${stwegSichtLib.sichtSql(sicht, 'stweg', params)}` : '';
     const r = await pool.query(
       `SELECT a.id, a.user_email, a.user_name, a.stweg, a.datum, a.kategorie, a.beschreibung,
               a.betrag_chf, a.status, a.bearbeitet_am, a.ausbezahlt_am, a.created_at
-         FROM auslagen a WHERE a.projekt_slug = $1
+         FROM auslagen a WHERE a.projekt_slug = $1${filter.replace(/\bstweg\b/g, 'a.stweg')}
         ORDER BY a.created_at DESC`,
-      [req.params.slug],
+      params,
     );
     const summe = await pool.query(
       `SELECT status, COUNT(*)::int AS n, COALESCE(SUM(betrag_chf), 0)::numeric AS s
-         FROM auslagen WHERE projekt_slug = $1 GROUP BY status`,
-      [req.params.slug],
+         FROM auslagen WHERE projekt_slug = $1${filter} GROUP BY status`,
+      params,
     );
     const by_status = {};
     for (const row of summe.rows) by_status[row.status] = { count: row.n, summe: Number(row.s) };
