@@ -78,13 +78,14 @@
             <section class="bg-white rounded-xl shadow p-5">
                 <div class="flex items-center gap-3 mb-3">
                     <h2 class="font-semibold flex-1">Geteilte Telefone</h2>
+                    <button id="fwAlleAus" class="knopf rot hidden" onclick="fernwartungAlleAus()" title="Fernwartung an allen Telefonen sofort aus">⛔ Fernwartung alle aus</button>
                     <button class="knopf" onclick="lade()">Neu laden</button>
                 </div>
                 <div class="overflow-x-auto">
                 <table class="w-full text-sm">
                     <thead class="text-left text-slate-500"><tr>
                         <th class="py-1 pr-2">Nebenstelle</th><th class="pr-2">Gerät</th><th class="pr-2">Anlage</th>
-                        <th class="pr-2">Angemeldet</th><th class="pr-2">WLAN-Debugging</th><th class="pr-2">Apps</th><th></th></tr></thead>
+                        <th class="pr-2">Angemeldet</th><th class="pr-2">Fernwartung</th><th class="pr-2">WLAN-Debugging</th><th class="pr-2">Apps</th><th></th></tr></thead>
                     <tbody id="telefone" class="divide-y"></tbody>
                 </table>
                 </div>
@@ -95,6 +96,10 @@
                     nur wenn niemand angemeldet ist, nicht telefoniert wird und der Bildschirm aus ist; Rosenweg Gerät selbst nur nachts.
                     Pro Telefon einmal „Updater zulassen“ (Telefon im WLAN „Rosenweg“, abgemeldet).
                     <span id="updaterFp"></span></p>
+                <p class="text-xs text-slate-500 mt-1">Fernwartung: dauerhafter Tunnel vom Telefon zur adb-zentrale, Technik arbeitet dort per SSH
+                    mit <code>rw-adb &lt;Nebenstelle&gt;</code>. Am Telefon steht während jeder Sitzung das Band „Fernwartung aktiv – Technik (Name)“.
+                    Neuer Schlüssel eines Telefons: erst „Bestätigen“, dann steht der Tunnel. „⛔ aus“ wirkt sofort an der Zentrale und schaltet
+                    adb am Telefon ab; „ein“ geht ohne USB. <span id="fwZentrale"></span></p>
             </section>
 
             <section class="bg-white rounded-xl shadow p-5">
@@ -147,6 +152,12 @@
                     <button class="knopf mt-3" style="background:#1e3a8a;color:#fff" onclick="speichereApp()">Speichern</button>
                 </details>
                 <input type="file" id="a_datei" accept=".apk" class="hidden" onchange="apkHoch(this)">
+            </section>
+
+            <section id="fwVerlaufBox" class="bg-white rounded-xl shadow p-5 hidden">
+                <h2 class="font-semibold mb-1">Fernwartung: Sitzungen</h2>
+                <p class="text-xs text-slate-500 mb-2">Jede Sitzung über den Tunnel, gemeldet von der adb-zentrale (wer, wozu, wie lange, Befehle von rw-adb; eine interaktive Shell steht als „shell“).</p>
+                <ul id="fwVerlauf" class="divide-y text-sm"></ul>
             </section>
 
             <section class="bg-white rounded-xl shadow p-5">
@@ -415,6 +426,58 @@ async function loescheApp(paket) {
     ladeKatalog();
 }
 
+// ── Fernwartung über den dauerhaften adb-Tunnel (pbx/adb-zentrale) ──
+const FW_FARBE = {gruen: '#16a34a', gelb: '#f59e0b', rot: '#dc2626', blau: '#0284c7', grau: '#cbd5e1'};
+const uhrzeit = s => new Date(s * 1000).toLocaleTimeString('de-CH', {hour:'2-digit', minute:'2-digit'});
+function fernwartungZelle(t) {
+    const f = t.fernwartung;
+    if (!f) return '–';
+    const p = `<span class="punkt" style="background:${FW_FARBE[f.ampel] || FW_FARBE.grau}"></span> `;
+    const knopf = (aktion, text, rot) => `<button class="knopf${rot ? ' rot' : ''}" onclick="fernwartung('${esc(t.ext)}', '${aktion}')">${text}</button>`;
+    const fremd = f.fremd ? `<div class="text-xs text-red-700 mt-1" title="${esc(f.fremd.fingerabdruck)}">fremde adb-Rückfrage ${f.fremd.abgelehnt ? 'abgelehnt' : 'offen gelassen (Wartung vor Ort)'} ${esc(uhrzeit(f.fremd.zeit))}</div>` : '';
+    if (f.stand === 'keiner') return '<span class="text-slate-400">noch kein Schlüssel</span> ' + knopf('aus', '⛔ aus', true);
+    if (f.stand === 'aus') return p + 'aus' + (f.durch ? `<div class="text-xs text-slate-500">${esc(f.durch)}</div>` : '') + ' ' + knopf('ein', 'ein') + fremd;
+    if (f.stand === 'wartet') return p + `<span title="${esc(f.pubkey)}">neuer Schlüssel ${esc((f.pubkey || '').slice(0, 8))}…</span> `
+        + knopf('bestaetigen', 'Bestätigen') + ' ' + knopf('vergessen', 'Verwerfen') + fremd;
+    const hs = f.letzter_handshake ? 'Kontakt ' + uhrzeit(f.letzter_handshake) : 'noch kein Kontakt';
+    const s = f.sitzung;
+    const sitz = s ? `<div class="text-xs text-sky-700 mt-1">🛠 ${esc(s.person)} (${esc(s.zweck)}) seit ${esc(uhrzeit(s.beginn))}</div>` : '';
+    return p + `<span class="font-mono text-xs" title="Adresse im Tunnel">${esc(f.adresse || '')}</span> · ${hs} `
+        + knopf('aus', '⛔ aus', true) + sitz + fremd;
+}
+async function fernwartung(ext, aktion) {
+    const frage = {
+        bestaetigen: 'Schlüssel von ' + ext + ' bestätigen?\nDanach steht der Tunnel zur adb-zentrale dauerhaft.',
+        aus: 'Fernwartung an ' + ext + ' ausschalten?\nDie Zentrale trennt sofort, das Telefon schaltet adb ab (auch USB).',
+        vergessen: 'Schlüssel von ' + ext + ' verwerfen?\nDas Telefon meldet beim nächsten Kontakt einen neuen.',
+    }[aktion];
+    if (frage && !confirm(frage)) return;
+    const r = await api('/api/telefon/' + encodeURIComponent(ext) + '/fernwartung', {method: 'POST', body: {aktion}});
+    const d = await json(r);
+    if (!r.ok) { melde(d.error || 'Ging nicht.', true); return; }
+    melde({bestaetigen: 'Bestätigt', aus: 'Fernwartung aus', ein: 'Fernwartung wieder ein', vergessen: 'Schlüssel verworfen'}[aktion]
+          + ' (' + ext + ')' + (d.zentrale ? '' : ' – adb-zentrale nicht erreicht, sie übernimmt den Stand in spätestens 5 Min.')
+          + (d.geweckt ? '' : ' – Telefon nicht erreicht, es übernimmt den Stand beim nächsten Kontakt.'), !d.zentrale);
+    lade();
+}
+async function fernwartungAlleAus() {
+    if (!confirm('Fernwartung an ALLEN geteilten Telefonen sofort ausschalten?\nWieder ein geht je Telefon mit „ein“, ohne USB.')) return;
+    const r = await api('/api/pbx/fernwartung/alle-aus', {method: 'POST'});
+    const d = await json(r);
+    melde(r.ok ? 'Fernwartung an ' + d.telefone + ' Telefonen aus.' : (d.error || 'Ging nicht.'), !r.ok);
+    lade();
+}
+function fernwartungVerlauf(liste) {
+    const dauer = v => v.ende ? Math.max(1, Math.round((v.ende - v.beginn) / 60)) + ' min' : 'läuft';
+    const kb = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.round(n / 1024) + ' KB';
+    $('fwVerlauf').innerHTML = liste.map(v => `<li class="py-1 flex gap-3">
+        <span class="text-slate-500 w-24 shrink-0">${esc(new Date(v.beginn * 1000).toLocaleString('de-CH', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}))}</span>
+        <span class="font-mono w-12 shrink-0">${esc(v.ext)}</span>
+        <span class="flex-1">${esc(v.person)} · ${esc(v.zweck)} · ${dauer(v)}${v.ende ? ' · ' + kb(v.bytes_hin + v.bytes_her) : ''}
+            ${(v.befehle || []).length ? `<div class="text-xs text-slate-500 font-mono">${(v.befehle || []).slice(0, 5).map(esc).join(' · ')}${v.befehle.length > 5 ? ' …' : ''}</div>` : ''}</span>
+        <span class="text-slate-500">${esc(v.grund || '')}</span></li>`).join('') || '<li class="py-1 text-slate-500">Noch keine.</li>';
+}
+
 async function lade() {
     const r = await api('/api/pbx/smartphones');
     if (r.status === 403) { $('technik').classList.add('hidden'); return; }
@@ -429,6 +492,7 @@ async function lade() {
         <td class="pr-2">${esc(t.name)}</td>
         <td class="pr-2">${punkt(t.registriert)} ${t.registriert ? 'erreichbar' : 'nicht erreichbar'}</td>
         <td class="pr-2">${t.angemeldet ? esc(t.angemeldet) + '<div class="text-xs text-slate-500">seit ' + esc(zeit(t.seit)) + '</div>' : '<span class="text-slate-400">niemand</span>'}</td>
+        <td class="pr-2">${fernwartungZelle(t)}</td>
         <td class="pr-2">${t.wlan_debug_bis ? 'an bis ' + new Date(t.wlan_debug_bis * 1000).toLocaleTimeString('de-CH', {hour:'2-digit', minute:'2-digit'})
                          + ` <button class="knopf" onclick="wlanDebug('${esc(t.ext)}', 0)">aus</button>`
                          + (t.adb ? `<div class="text-xs font-mono select-all mt-1" title="Port meldet Rosenweg Gerät">adb connect ${esc(t.adb)}</div>`
@@ -438,7 +502,13 @@ async function lade() {
         <td class="text-right space-x-1 whitespace-nowrap">
             <button class="knopf" onclick="klingeln('${esc(t.ext)}')">🔔 Klingeln</button>
             ${t.angemeldet ? `<button class="knopf" onclick="abmelden('${esc(t.ext)}')">Abmelden</button>` : ''}</td></tr>`).join('')
-        || '<tr><td class="py-2 text-slate-500" colspan="7">Keine geteilten Telefone.</td></tr>';
+        || '<tr><td class="py-2 text-slate-500" colspan="8">Keine geteilten Telefone.</td></tr>';
+    const fz = d.fernwartung_zentrale || {};
+    $('fwAlleAus').classList.toggle('hidden', !fz.eingerichtet);
+    $('fwVerlaufBox').classList.toggle('hidden', !fz.eingerichtet);
+    $('fwZentrale').textContent = !fz.eingerichtet ? 'Die adb-zentrale ist noch nicht eingerichtet.'
+        : fz.erreichbar ? 'Schlüssel der Zentrale: ' + (fz.fingerabdruck || 'noch keiner') : 'adb-zentrale gerade nicht erreichbar.';
+    if (fz.eingerichtet) fernwartungVerlauf(d.fernwartung_verlauf || []);
     $('updaterFp').textContent = d.updater_fingerabdruck ? 'Schlüssel des Updaters: ' + d.updater_fingerabdruck
                                                           : 'Der Updater hat noch keinen adb-Schlüssel.';
     $('privat').innerHTML = (d.privat || []).map(p => `<tr>

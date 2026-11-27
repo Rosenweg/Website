@@ -1423,6 +1423,10 @@ def telefon_status():
             fp = adb_updater.fingerabdruck()
             if fp:
                 extra["adb_dienst"] = {"fingerabdruck": fp, "bis": int(u["freigabe_bis"])}
+        # fernwartung: dauerhafter adb-Tunnel (pbx/adb-zentrale) - neu | wartet | bereit | aus
+        fw = _fw_status(conn, ext)
+        if fw is not None:
+            extra["fernwartung"] = fw
         return jsonify({"ext": ext, "geraet": geraet["name"] if geraet else ext, "technik": technik,
                         "wlan_debug_bis": bis, **extra, **_sitzung_json(row), **_apps_fuer(conn, row)})
     finally:
@@ -1871,7 +1875,6 @@ def telefon_einloesen():
 KARTE_FEHL_MAX = 10          # Fehlversuche pro Nebenstelle ...
 KARTE_FEHL_FENSTER_S = 60    # ... pro Minute
 _KARTE_FEHL = {}             # ext -> [Zeitpunkte der Fehlversuche]
-KARTEN_VERWALTER = {"technik", "präsident", "praesident"}
 
 
 def _karten_uid(roh):
@@ -1959,151 +1962,170 @@ def telefon_karte():
         conn.close()
 
 
-def _token_art(token):
-    """Nur die Art des Ausweises fuers Log, nie das Token selbst."""
-    t = token or ""
-    for p in ("rw_app_", "rw_pat_"):
-        if t.startswith(p):
-            return p + "..."
-    return "JWT" if t.count(".") == 2 else "Token"
+# ─── Kartenverwaltung: umgezogen in die Haupt-API (Entscheid Stefan 27.11.2026) ──
+# "Karten gehoeren nicht in die Telefonanlage." Nachschlagen, Zuordnen, Entziehen,
+# Loeschen, die Personenliste und das Kartenprotokoll liegen jetzt in der Haupt-API
+# unter /api/karten/* (api/routes/karten.js, Logik api/lib/kartenverwaltung.js) und
+# werden dort mit der normalen Anmeldung geprueft (Technik/Praesident, Karte = Schluessel,
+# Admin-Aktionen mit der Karte protokolliert und quittiert).
+#
+# UEBERGANG: Die alte App Rosenweg Karten (Java 1.6.3, ANLAGE_WEB=https://pbx.rosenweg4303.ch)
+# und Rosenweg Geraet (AnlageProvider karten_*, HTTP-Basic des Telefons) rufen noch
+# /api/telefon/karten/*. Diese Pfade reichen hier nur noch weiter:
+#   - mit "Authorization: Bearer ..." (App auf dem eigenen Handy): Kopf unveraendert an
+#     die Haupt-API, die den Ausweis selbst prueft;
+#   - mit HTTP-Basic (geteiltes Telefon): die am Telefon angemeldete Person bekommt ein
+#     Anlage-Token fuer genau diese eine Anfrage (wie /api/telefon/portal, HS256,
+#     PORTAL_ANLAGE_SECRET, 60 s, einmal). Die Haupt-API sieht "anlage" = Karte.
+# Antworten haben dieselbe Form wie vorher; dazu "Deprecation: true" und ein Link auf den
+# neuen Pfad. Entfernen, sobald Rosenweg Karten von den Telefonen ist (Rosenweg Zutritt
+# ersetzt sie, ch.rosenweg4303.zutritt) - siehe pbx/GETEILTE-TELEFONE.md.
+KARTEN_UMZUG = {
+    "personen": ("GET", "/api/karten/personen"),
+    "info": ("POST", "/api/karten/info"),
+    "zuordnen": ("POST", "/api/karten/zuordnen"),
+    "entziehen": ("POST", "/api/karten/entziehen"),
+    "loeschen": ("POST", "/api/karten/loeschen"),
+}
+# Paket im Anlage-Token: die alte App (fuer Protokoll und App-Kennung der Haupt-API)
+KARTEN_ALT_PAKET = "ch.rosenweg4303.karten"
 
 
-def _karten_verwalter():
-    """Geraet + angemeldete Person mit Technik/Praesident. -> (ext, sitzung, None) oder (.., .., response).
-    Ohne Geraet (Rosenweg Karten auf dem eigenen Handy, Stefan 25.11.2026): Bearer-Token der
-    Rosenweg-Anmeldung (Website-Login, Authentik rosenweg-apps oder Karten-Sitzung rw_app_) mit
-    Technik/Praesident - Karte wie Schluessel: dieselben Rechte wie das Konto.
-
-    Nur nach dem Schema unterscheiden: Werkzeug (ab 2.3) liest auch "Bearer ..." in
-    request.authorization, ein "not request.authorization" schickte jede App zu _geraet()
-    (401 "Geraet nicht berechtigt", Anmeldeschleife in Rosenweg Karten 1.6.2, 27.11.2026)."""
+def _karten_weiterreichen(was):
+    methode, ziel = KARTEN_UMZUG[was]
+    kopf = {"Accept": "application/json"}
     if _bearer():
-        person = current_user()
-        if not person:
-            person = _rosenweg_konto()
-        if not person:
-            app.logger.warning("Rosenweg Karten: Anmeldung ungueltig (%s)", _token_art(_bearer()))
-            return None, None, (jsonify({"error": "Rosenweg-Anmeldung ungueltig"}), 401)
-        gruppen = {str(g).lower() for g in (person.get("groups") or [])}
-        if not (gruppen & KARTEN_VERWALTER):
-            app.logger.info("Rosenweg Karten: %s nicht berechtigt", person.get("email") or "?")
-            return "App", None, (jsonify({"error": "nicht berechtigt"}), 403)
-        return "App", {"name": person.get("name") or "", "email": person.get("email") or ""}, None
-    ext, deny = _geraet()
-    if deny:
-        return None, None, deny
-    conn = db.connect()
+        kopf["Authorization"] = request.headers.get("Authorization", "")
+        wer = "App"
+    else:
+        ext, deny = _geraet()
+        if deny:
+            return deny
+        conn = db.connect()
+        try:
+            s = conn.execute("SELECT user_id, email, name, seit FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+        finally:
+            conn.close()
+        if not s or not s["email"]:
+            return jsonify({"error": "nicht berechtigt"}), 403
+        if not PORTAL_ANLAGE_SECRET:
+            return jsonify({"error": "Portal-Zugang der Telefone nicht eingerichtet"}), 503
+        kopf["Authorization"] = f"Bearer {_portal_token(s, ext, KARTEN_ALT_PAKET, methode, ziel)}"
+        kopf["X-Rosenweg-Telefon"] = ext
+        wer = ext
+    daten = None
+    if methode == "POST":
+        d = request.get_json(silent=True) or {}
+        daten = {k: d[k] for k in ("uid", "email") if k in d}
+    app.logger.info("Kartenverwaltung ueber den alten Pfad (%s): %s %s -> %s", wer, methode, request.path, ziel)
     try:
-        s = conn.execute("SELECT name, email, gruppen FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
-    finally:
-        conn.close()
-    try:
-        gruppen = {str(g).lower() for g in json.loads((s["gruppen"] if s else None) or "[]")}
-    except ValueError:
-        gruppen = set()
-    if not s or not (gruppen & KARTEN_VERWALTER):
-        return ext, None, (jsonify({"error": "nicht berechtigt"}), 403)
-    return ext, s, None
-
-
-def _karten_durch(ext, s):
-    if ext == "App":
-        return f"Rosenweg Karten ({s['name']} <{s['email']}>)"
-    return f"Telefon {ext} ({s['name']} <{s['email']}>)"
-
-
-def _karten_weiter(ext, s, ereignis, methode, pfad, daten, ziel_email=None):
-    try:
-        status, body = _haupt_karte(methode, pfad, daten)
+        r = requests.request(methode, f"{MAIN_API_BASE}{ziel}", headers=kopf, json=daten, timeout=25,
+                             allow_redirects=False)
     except requests.RequestException as e:
-        app.logger.warning("Karten %s: Website nicht erreichbar (%s)", ext, type(e).__name__)
+        app.logger.warning("Karten %s: Haupt-API nicht erreichbar (%s)", wer, type(e).__name__)
         return jsonify({"error": "Keine Verbindung zur Anlage"}), 502
-    conn = db.connect()
     try:
-        ziel = ziel_email or (body.get("person") or {}).get("email") or ""
-        karte = body.get("display_id") or (daten or {}).get("nfc_id") or pfad.rsplit("/", 1)[-1]
-        _karten_log(conn, ext, ereignis, s["email"], s["name"],
-                    f"karte:{karte}" + (f"->{ziel}" if ziel else "") + ("" if status == 200 else f":{status}"))
-        conn.commit()
-    finally:
-        conn.close()
-    return jsonify(body), status
+        body = r.json()
+    except ValueError:
+        body = {"error": "Antwort der Haupt-API unlesbar"}
+    antwort = jsonify(body)
+    antwort.status_code = r.status_code
+    antwort.headers["Deprecation"] = "true"
+    antwort.headers["Link"] = f'<https://www.rosenweg4303.ch{ziel}>; rel="successor-version"'
+    return antwort
 
 
 @app.post("/api/telefon/karten/info")
 def telefon_karten_info():
-    ext, s, deny = _karten_verwalter()
-    if deny:
-        return deny
-    uid = _karten_uid((request.get_json(silent=True) or {}).get("uid"))
-    if not uid:
-        return jsonify({"error": "Karte nicht lesbar"}), 400
-    resp, status = _karten_weiter(ext, s, "karte-info", "GET", f"/api/pbx/karte/{uid}", None)
-    if status == 200:
-        # Gruppen und Website-ID braucht das Telefon nicht
-        d = resp.get_json() or {}
-        p = d.get("person")
-        if p:
-            d["person"] = {"name": p.get("name"), "email": p.get("email")}
-        d["uid"] = uid
-        return jsonify(d)
-    return resp, status
+    return _karten_weiterreichen("info")
 
 
 @app.post("/api/telefon/karten/zuordnen")
 def telefon_karten_zuordnen():
-    ext, s, deny = _karten_verwalter()
-    if deny:
-        return deny
-    d = request.get_json(silent=True) or {}
-    uid = _karten_uid(d.get("uid"))
-    email = str(d.get("email") or "").strip().lower()
-    if not uid or not re.fullmatch(r"[^\s@]+@[^\s@]+", email):
-        return jsonify({"error": "Karte oder E-Mail fehlt"}), 400
-    return _karten_weiter(ext, s, "karte-zu", "POST", "/api/pbx/karte/zuordnen",
-                          {"nfc_id": uid, "email": email, "durch": _karten_durch(ext, s)}, ziel_email=email)
+    return _karten_weiterreichen("zuordnen")
 
 
 @app.post("/api/telefon/karten/entziehen")
 def telefon_karten_entziehen():
-    ext, s, deny = _karten_verwalter()
-    if deny:
-        return deny
-    uid = _karten_uid((request.get_json(silent=True) or {}).get("uid"))
-    if not uid:
-        return jsonify({"error": "Karte nicht lesbar"}), 400
-    return _karten_weiter(ext, s, "karte-weg", "POST", "/api/pbx/karte/entziehen",
-                          {"nfc_id": uid, "durch": _karten_durch(ext, s)})
+    return _karten_weiterreichen("entziehen")
 
 
 @app.post("/api/telefon/karten/loeschen")
 def telefon_karten_loeschen():
-    """Entzogene Karte aus dem Bestand von UniFi Access loeschen (defekt/verloren)."""
-    ext, s, deny = _karten_verwalter()
-    if deny:
-        return deny
-    uid = _karten_uid((request.get_json(silent=True) or {}).get("uid"))
-    if not uid:
-        return jsonify({"error": "Karte nicht lesbar"}), 400
-    return _karten_weiter(ext, s, "karte-geloescht", "POST", "/api/pbx/karte/loeschen",
-                          {"nfc_id": uid, "durch": _karten_durch(ext, s)})
+    return _karten_weiterreichen("loeschen")
 
 
 @app.get("/api/telefon/karten/personen")
 def telefon_karten_personen():
-    """Auswahlliste fuer "Einer Person zuordnen": Personen aus dem Personen-Abgleich."""
-    _, _, deny = _karten_verwalter()
-    if deny:
-        return deny
+    return _karten_weiterreichen("personen")
+
+
+# ─── Kartenprotokoll der Anlage in die Haupt-API uebernehmen (einmalig) ──────
+# Die Anlage schrieb Kartenaktionen (karte-info, karte-zu, karte-weg, karte-geloescht)
+# in telefon_log. Sie gehen einmal an die Haupt-API (access_karten_protokoll, aktion
+# telefon-info|telefon-zuordnen|telefon-entziehen|telefon-loeschen, quelle "pbx:<id>").
+# Idempotent: die Haupt-API legt keine Zeile doppelt an; danach merkt sich die Anlage die
+# hoechste uebernommene id (config karten_protokoll_bis). Die Zeilen bleiben in telefon_log
+# (PBX-Admin zeigt sie weiter). An-/Abmeldungen am Telefon bleiben nur hier.
+#   python3 -c "import app; print(app.karten_protokoll_uebernehmen())"   (auf CT 220)
+# und automatisch beim Start (Thread, wenn KARTEN_PROTOKOLL_UEBERNAHME nicht "aus" ist).
+KARTEN_PROTOKOLL_EREIGNISSE = ("karte-info", "karte-zu", "karte-weg", "karte-geloescht")
+
+
+def karten_protokoll_uebernehmen(post=None, stapel=500):
+    """-> {"uebernommen": n, "gelesen": m, "bis": id}. Wirft bei Fehlern der Haupt-API."""
+    post = post or requests.post
     conn = db.connect()
     try:
-        rows = conn.execute("SELECT lower(email) AS email, MIN(name) AS name FROM personen_nummern "
-                            "WHERE aktiv = 1 AND email <> '' GROUP BY lower(email)").fetchall()
+        bis = int(_cfg(conn).get("karten_protokoll_bis", "0") or 0)
     finally:
         conn.close()
-    personen = sorted(({"name": r["name"], "email": r["email"]} for r in rows),
-                      key=lambda p: (p["name"] or "").lower())
-    return jsonify({"personen": personen})
+    gesamt = {"uebernommen": 0, "gelesen": 0, "bis": bis}
+    while True:
+        conn = db.connect()
+        try:
+            zeilen = [dict(z) for z in conn.execute(
+                "SELECT id, ext, ereignis, email, name, durch, zeit FROM telefon_log WHERE id > ? AND ereignis IN "
+                f"({','.join('?' * len(KARTEN_PROTOKOLL_EREIGNISSE))}) ORDER BY id LIMIT ?",
+                (bis, *KARTEN_PROTOKOLL_EREIGNISSE, stapel)).fetchall()]
+        finally:
+            conn.close()
+        if not zeilen:
+            return gesamt
+        r = post(f"{MAIN_API_BASE}/api/pbx/karten-protokoll/uebernahme", json={"zeilen": zeilen},
+                 headers={"X-PBX-Secret": PBX_SHARED_SECRET}, timeout=60)
+        if r.status_code != 200:
+            raise RuntimeError(f"Haupt-API: HTTP {r.status_code}")
+        d = r.json()
+        bis = zeilen[-1]["id"]
+        gesamt["uebernommen"] += int(d.get("uebernommen") or 0)
+        gesamt["gelesen"] += len(zeilen)
+        gesamt["bis"] = bis
+        conn = db.connect()
+        try:
+            conn.execute("INSERT INTO config (key, value) VALUES ('karten_protokoll_bis', ?) "
+                         "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (str(bis),))
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def _karten_protokoll_im_hintergrund():
+    if os.environ.get("KARTEN_PROTOKOLL_UEBERNAHME", "").lower() in ("aus", "0", "nein", "false"):
+        return
+    import threading
+
+    def lauf():
+        for versuch in range(6):
+            try:
+                g = karten_protokoll_uebernehmen()
+                if g["gelesen"]:
+                    app.logger.info("Kartenprotokoll an die Haupt-API: %s", g)
+                return
+            except Exception as e:  # noqa: BLE001 - naechster Versuch, nie den Start stoeren
+                app.logger.warning("Kartenprotokoll-Uebernahme (Versuch %d): %s", versuch + 1, e)
+                time.sleep(60 * (versuch + 1))
+    threading.Thread(target=lauf, name="karten-protokoll", daemon=True).start()
 
 
 # ─── App-Katalog der geteilten Telefone ─────────────────────────────────────
@@ -2268,6 +2290,7 @@ APPS_REGISTER = {}
 APPS_KATALOG_REPOS = {}
 APPS_KATALOG_INFO = {}
 APPS_OEFFENTLICH_OHNE = set()
+APPS_AUFGEGEBEN = set()        # aus apps-register.json "aufgegeben": nicht mehr auf /apps
 _APPS_REGISTER_STAND = {"zeit": 0.0, "quelle": "", "fehler": ""}
 _APP_SCHLUESSEL = re.compile(r"[a-z][a-z0-9-]{0,30}")
 _APP_PAKET = re.compile(r"[a-z][a-z0-9_]*(\.[a-z0-9_]+){1,6}")
@@ -2276,7 +2299,7 @@ _APP_REPO = re.compile(r"Rosenweg/[A-Za-z0-9._-]{1,100}")
 
 def _apps_register_uebernehmen(d, quelle):
     """Register pruefen und die vier Namen neu binden (atomar je Name). True = uebernommen."""
-    global APPS_REGISTER, APPS_KATALOG_REPOS, APPS_KATALOG_INFO, APPS_OEFFENTLICH_OHNE
+    global APPS_REGISTER, APPS_KATALOG_REPOS, APPS_KATALOG_INFO, APPS_OEFFENTLICH_OHNE, APPS_AUFGEGEBEN
     try:
         if d.get("version") != 1:
             raise ValueError("version")
@@ -2299,11 +2322,18 @@ def _apps_register_uebernehmen(d, quelle):
                 info[paket] = i
             if e.get("nicht_oeffentlich"):
                 ohne.add(paket)
+        # Aufgegebene Apps (z.B. Rosenweg Karten, 27.11.2026): nicht mehr auf /apps, keine Releases
+        aus = set()
+        for paket in (d.get("aufgegeben") or {}):
+            if not _APP_PAKET.fullmatch(paket):
+                raise ValueError(f"aufgegeben.{paket}")
+            aus.add(paket)
     except (AttributeError, KeyError, TypeError, ValueError) as e:
         _APPS_REGISTER_STAND["fehler"] = f"{quelle}: ungueltig ({e})"
         app.logger.warning("Apps-Register aus %s ungueltig: %s", quelle, e)
         return False
     APPS_REGISTER, APPS_KATALOG_REPOS, APPS_KATALOG_INFO, APPS_OEFFENTLICH_OHNE = register, repos, info, ohne
+    APPS_AUFGEGEBEN = aus
     _APPS_REGISTER_STAND.update(quelle=quelle, fehler="")
     return True
 
@@ -2464,6 +2494,9 @@ def apps_index():
     neu = {(v["schluessel"], v["plattform"]): v for v in aktuell}
     apps = []
     nur_anzeige = []
+    # Aufgegebene Apps zeigt /apps nicht mehr (auch nicht dem Updater); im Katalog der geteilten
+    # Telefone (telefon_apps) bleiben sie, bis die Technik sie dort abschaltet.
+    rows = [r for r in rows if r["paket"] not in APPS_AUFGEGEBEN]
     for r in rows:
         if r["paket"] in APPS_OEFFENTLICH_OHNE:
             nur_anzeige.append(r)   # auf /apps zeigen, aber ohne Datei (Stefan 27.11.2026)
@@ -3714,6 +3747,10 @@ PORTAL_PFADE_STANDARD = {
     # Rosenweg Uhr: Wecker, Weltuhren, Timer-Vorlagen der Person (Haupt-API routes/app-daten.js;
     # die Haupt-API laesst je Anlage-Token ohnehin nur die App selbst an ihre Daten)
     "ch.rosenweg4303.clock": ["GET,PUT /api/me/app-daten/ch.rosenweg4303.clock"],
+    # Rosenweg Zutritt (Technik/Praesident; die Haupt-API prueft die Rechte): Karten, UniFi Access,
+    # Anmeldungen der Apps, offene Bestaetigungen
+    "ch.rosenweg4303.zutritt": ["/api/karten/", "/api/access/", "GET /api/apps/sitzungen", "/api/apps/sitzungen/",
+                                "GET /api/me/bestaetigungen"],
 }
 _PORTAL_PFAD = re.compile(r"/api/[A-Za-z0-9._~!$&'()*+,;=:@%/-]{1,1000}(\?[A-Za-z0-9._~!$&'()*+,;=:@%/?-]{0,1000})?")
 _PORTAL_KODIERT_VERBOTEN = re.compile(r"%(2e|2f|5c|00)", re.I)
@@ -4275,6 +4312,399 @@ def telefon_updater(ext):
     return jsonify({"ok": True, "gestartet": gestartet})
 
 
+# ─── Fernwartung ueber den dauerhaften adb-Tunnel (pbx/adb-zentrale) ─────────
+# Plan adb-tunnel-telefone (Stefan 27.11.2026): Rosenweg Geraet haelt einen WireGuard-Tunnel zur
+# adb-zentrale offen; Technik arbeitet dort per SSH mit rw-adb. Diese API ist die Quelle der
+# Peers (telefon_tunnel), schaltet den Not-Aus und fuehrt den Verlauf (telefon_fernwartung).
+# Ohne PBX_ADB_ZENTRALE_URL bleibt alles beim Alten: der Status nennt keine Fernwartung.
+ADB_ZENTRALE_URL = os.environ.get("PBX_ADB_ZENTRALE_URL", "").rstrip("/")
+ADB_ZENTRALE_TOKEN = os.environ.get("PBX_ADB_ZENTRALE_TOKEN", "")
+FW_NETZ = ipaddress.ip_network(os.environ.get("PBX_ADB_TUNNEL_NETZ", "10.243.44.0/24"))
+_FW_MERK = {"info": (0.0, None), "zustand": (0.0, None)}
+
+
+def _zentrale(methode, pfad, daten=None, timeout=5):
+    """Anfrage an die Steuerung der adb-zentrale (Bearer PBX_ADB_ZENTRALE_TOKEN)."""
+    if not ADB_ZENTRALE_URL or len(ADB_ZENTRALE_TOKEN) < 32:
+        raise RuntimeError("adb-zentrale nicht eingerichtet")
+    r = requests.request(methode, ADB_ZENTRALE_URL + pfad, json=daten, timeout=timeout,
+                         headers={"Authorization": f"Bearer {ADB_ZENTRALE_TOKEN}"})
+    if r.status_code != 200:
+        raise RuntimeError(f"adb-zentrale {pfad.split('?')[0]}: HTTP {r.status_code}")
+    return r.json()
+
+
+def _zentrale_info(neu=False):
+    """{public_key, adb_fingerabdruck, gateway, endpoint_extern, endpoint_intern} (60 s gemerkt) oder None."""
+    zeit, info = _FW_MERK["info"]
+    if not neu and info and time.time() - zeit < 60:
+        return info
+    try:
+        info = _zentrale("GET", "/gesundheit", timeout=3)
+        _FW_MERK["info"] = (time.time(), info)
+    except Exception as e:  # noqa: BLE001 - Anlage laeuft ohne Zentrale weiter
+        if ADB_ZENTRALE_URL:
+            app.logger.warning("adb-zentrale: %s", e)
+        if time.time() - zeit > 3600:
+            info = None   # nach einer Stunde ohne Antwort nichts Altes mehr ausgeben
+    return info
+
+
+def _zentrale_zustand():
+    """{ext: {letzter_handshake, sitzung}} (10 s gemerkt), {} wenn nicht erreichbar."""
+    zeit, z = _FW_MERK["zustand"]
+    if z is not None and time.time() - zeit < 10:
+        return z
+    try:
+        z = {p["ext"]: p for p in _zentrale("GET", "/zustand", timeout=3).get("peers", [])}
+    except Exception:  # noqa: BLE001
+        z = None
+    _FW_MERK["zustand"] = (time.time(), z if z is not None else {})
+    return z if z is not None else {}
+
+
+def _fw_peers(conn):
+    return [{"ext": r["ext"], "public_key": r["pubkey"], "ip": r["ip"]} for r in conn.execute(
+        "SELECT ext, pubkey, ip FROM telefon_tunnel WHERE bestaetigt = 1 AND aus = 0 ORDER BY ext")]
+
+
+def _fw_schieben(conn):
+    """Die ganze Peer-Liste an die Zentrale (sonst holt sie sie spaetestens in 5 Min.)."""
+    try:
+        _zentrale("PUT", "/peers", {"peers": _fw_peers(conn)})
+        _FW_MERK["zustand"] = (0.0, None)
+        return True
+    except Exception as e:  # noqa: BLE001
+        app.logger.warning("Peers an adb-zentrale: %s", e)
+        return False
+
+
+def _fw_wecken(ext):
+    try:
+        ami.originate(f"PJSIP/{ext}", "suchen", "s", callerid='"Wartung" <2098>', timeout_ms=15000)
+        return True
+    except Exception as e:  # noqa: BLE001
+        app.logger.warning("Fernwartung wecken %s: %s", ext, type(e).__name__)
+        return False
+
+
+def _fw_schluessel():
+    """Fingerabdruecke, die Rosenweg Geraet ausser seinem eigenen zulassen darf: Zentrale, Updater."""
+    info = _zentrale_info() or {}
+    return [fp for fp in (info.get("adb_fingerabdruck") or "", adb_updater.fingerabdruck()) if fp]
+
+
+def _fw_status(conn, ext):
+    """Feld "fernwartung" im Status des Telefons, None = nicht nennen (Zentrale nicht eingerichtet)."""
+    if not ADB_ZENTRALE_URL:
+        return None
+    t = conn.execute("SELECT * FROM telefon_tunnel WHERE ext = ?", (ext,)).fetchone()
+    if not t:
+        return {"stand": "neu"}
+    if t["aus"]:
+        return {"stand": "aus"}
+    if not t["bestaetigt"]:
+        return {"stand": "wartet", "pubkey": t["pubkey"]}
+    d = {"stand": "bereit", "pubkey": t["pubkey"], "adresse": t["ip"],
+         "gateway": str(FW_NETZ.network_address + 1), "schluessel": _fw_schluessel()}
+    info = _zentrale_info()
+    if info:
+        d.update({"peer_public": info.get("public_key", ""), "endpoint": info.get("endpoint_extern", ""),
+                  "endpoint_intern": info.get("endpoint_intern", "")})
+    return d
+
+
+def _fw_log(conn, ext, ereignis, name=None, durch=None):
+    conn.execute("INSERT INTO telefon_log (ext, ereignis, name, durch) VALUES (?,?,?,?)", (ext, ereignis, name, durch))
+
+
+@app.post("/api/telefon/tunnel")
+def telefon_tunnel_melden():
+    """Rosenweg Geraet meldet seinen oeffentlichen WireGuard-Schluessel {pubkey}. Neu oder anders
+    als bisher: wartet auf "Bestaetigen" auf /smartphones (ein anderer Schluessel nimmt den alten
+    sofort aus der Zentrale). Antwort wie das Feld "fernwartung" im Status."""
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    if not ADB_ZENTRALE_URL:
+        return jsonify({"error": "Fernwartung nicht eingerichtet"}), 404
+    pub = str((request.get_json(silent=True) or {}).get("pubkey") or "").strip()
+    try:
+        if len(base64.b64decode(pub, validate=True)) != 32:
+            raise ValueError
+    except (ValueError, binascii.Error):
+        return jsonify({"error": "pubkey: 32 Byte Base64"}), 400
+    conn = db.connect()
+    try:
+        t = conn.execute("SELECT * FROM telefon_tunnel WHERE ext = ?", (ext,)).fetchone()
+        schieben = False
+        if not t or not t["pubkey"]:
+            # neu, oder nur ein Not-Aus ohne Schluessel vorgemerkt (der bleibt aus)
+            belegt = {r["ip"] for r in conn.execute("SELECT ip FROM telefon_tunnel")}
+            frei = next((str(a) for a in list(FW_NETZ.hosts())[1:] if str(a) not in belegt), None)
+            if not frei:
+                return jsonify({"error": "keine Tunnel-Adresse mehr frei"}), 409
+            if t:
+                conn.execute("UPDATE telefon_tunnel SET pubkey = ?, ip = ?, gemeldet = ? WHERE ext = ?",
+                             (pub, frei, int(time.time()), ext))
+            else:
+                conn.execute("INSERT INTO telefon_tunnel (ext, pubkey, ip, gemeldet) VALUES (?,?,?,?)",
+                             (ext, pub, frei, int(time.time())))
+            _fw_log(conn, ext, "fernwartung schluessel", durch="Telefon (neu)")
+        elif t["pubkey"] != pub:
+            schieben = bool(t["bestaetigt"])
+            conn.execute("UPDATE telefon_tunnel SET pubkey = ?, bestaetigt = 0, gemeldet = ?, geaendert = datetime('now') "
+                         "WHERE ext = ?", (pub, int(time.time()), ext))
+            _fw_log(conn, ext, "fernwartung schluessel", durch="Telefon (anderer Schluessel)")
+        else:
+            conn.execute("UPDATE telefon_tunnel SET gemeldet = ? WHERE ext = ?", (int(time.time()), ext))
+        conn.commit()
+        if schieben:
+            _fw_schieben(conn)
+        return jsonify(_fw_status(conn, ext))
+    finally:
+        conn.close()
+
+
+@app.post("/api/telefon/fernwartung/meldung")
+def telefon_fernwartung_meldung():
+    """Rosenweg Geraet meldet eine fremde adb-Rueckfrage {art: 'fremder_schluessel', fingerabdruck,
+    abgelehnt}. Steht im Verlauf und macht das NOC rot (24 h)."""
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    b = request.get_json(silent=True) or {}
+    fp = str(b.get("fingerabdruck") or "").upper()
+    if b.get("art") != "fremder_schluessel" or not re.fullmatch(r"([0-9A-F]{2}:){15}[0-9A-F]{2}", fp):
+        return jsonify({"error": "art/fingerabdruck ungueltig"}), 400
+    abgelehnt = 1 if b.get("abgelehnt", True) else 0
+    conn = db.connect()
+    try:
+        # hoechstens eine Meldung je Fingerabdruck und Telefon in 10 Minuten
+        if not conn.execute("SELECT 1 FROM telefon_adb_fremd WHERE ext = ? AND fingerabdruck = ? AND zeit > ?",
+                            (ext, fp, int(time.time()) - 600)).fetchone():
+            conn.execute("INSERT INTO telefon_adb_fremd (ext, fingerabdruck, abgelehnt, zeit) VALUES (?,?,?,?)",
+                         (ext, fp, abgelehnt, int(time.time())))
+            _fw_log(conn, ext, "adb fremd " + ("abgelehnt" if abgelehnt else "offen gelassen"), durch=fp)
+            conn.commit()
+            app.logger.warning("Fremde adb-Rueckfrage an %s: %s (%s)", ext, fp,
+                               "abgelehnt" if abgelehnt else "Wartung vor Ort, offen gelassen")
+    finally:
+        conn.close()
+    return jsonify({"ok": True})
+
+
+@app.post("/api/telefon/<ext>/fernwartung")
+def telefon_fernwartung_schalten(ext):
+    """Technik/Praesident: {aktion: bestaetigen | aus | ein | vergessen}.
+    aus = Not-Aus: Peer sofort aus der Zentrale (offene Sitzung gekappt) und Weckanruf 2098 -
+    Geraet setzt ADB_ENABLED=0 und stoppt den Tunnel. ein: wieder an, ohne USB."""
+    user, deny = require_admin()
+    if deny:
+        return deny
+    if not re.fullmatch(r"[0-9]{2,8}", ext):
+        return jsonify({"error": "Nebenstelle ungueltig"}), 400
+    aktion = str((request.get_json(silent=True) or {}).get("aktion") or "")
+    if aktion not in ("bestaetigen", "aus", "ein", "vergessen"):
+        return jsonify({"error": "aktion: bestaetigen | aus | ein | vergessen"}), 400
+    conn = db.connect()
+    try:
+        if not conn.execute("SELECT 1 FROM sip_extensions WHERE ext = ? AND context = 'geteilt'", (ext,)).fetchone():
+            return jsonify({"error": "Kein geteiltes Telefon"}), 404
+        t = conn.execute("SELECT * FROM telefon_tunnel WHERE ext = ?", (ext,)).fetchone()
+        if aktion in ("bestaetigen", "vergessen") and not t:
+            return jsonify({"error": "Das Telefon hat noch keinen Schluessel gemeldet"}), 409
+        if aktion == "bestaetigen":
+            conn.execute("UPDATE telefon_tunnel SET bestaetigt = 1, durch = ?, geaendert = datetime('now') WHERE ext = ?",
+                         (actor(user), ext))
+        elif aktion == "aus":
+            if t:
+                conn.execute("UPDATE telefon_tunnel SET aus = 1, durch = ?, geaendert = datetime('now') WHERE ext = ?",
+                             (actor(user), ext))
+            else:   # noch kein Schluessel: trotzdem merken, damit der Tunnel gar nicht erst startet
+                conn.execute("INSERT INTO telefon_tunnel (ext, pubkey, ip, aus, durch) VALUES (?, '', ?, 1, ?)",
+                             (ext, f"aus-{ext}", actor(user)))
+        elif aktion == "ein":
+            conn.execute("UPDATE telefon_tunnel SET aus = 0, durch = ?, geaendert = datetime('now') WHERE ext = ?",
+                         (actor(user), ext))
+            conn.execute("DELETE FROM telefon_tunnel WHERE ext = ? AND pubkey = ''", (ext,))
+        else:
+            conn.execute("DELETE FROM telefon_tunnel WHERE ext = ?", (ext,))
+        _fw_log(conn, ext, f"fernwartung {aktion}", durch=actor(user))
+        conn.commit()
+        sofort = True
+        if aktion in ("aus", "vergessen"):
+            try:
+                _zentrale("DELETE", f"/peers/{ext}?durch={requests.utils.quote(actor(user))}")
+            except Exception as e:  # noqa: BLE001
+                sofort = False
+                app.logger.warning("Not-Aus %s an der Zentrale: %s", ext, e)
+        geschoben = _fw_schieben(conn)
+    finally:
+        conn.close()
+    geweckt = _fw_wecken(ext)
+    app.logger.info("Fernwartung %s: %s durch %s", ext, aktion, actor(user))
+    return jsonify({"ok": True, "zentrale": sofort and geschoben, "geweckt": geweckt})
+
+
+@app.post("/api/pbx/fernwartung/alle-aus")
+def fernwartung_alle_aus():
+    """Technik/Praesident: Not-Aus fuer alle geteilten Telefone auf einmal."""
+    user, deny = require_admin()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        exts = [r["ext"] for r in conn.execute("SELECT ext FROM sip_extensions WHERE context = 'geteilt'")]
+        for ext in exts:
+            if conn.execute("SELECT 1 FROM telefon_tunnel WHERE ext = ?", (ext,)).fetchone():
+                conn.execute("UPDATE telefon_tunnel SET aus = 1, durch = ?, geaendert = datetime('now') WHERE ext = ?",
+                             (actor(user), ext))
+            else:
+                conn.execute("INSERT INTO telefon_tunnel (ext, pubkey, ip, aus, durch) VALUES (?, '', ?, 1, ?)",
+                             (ext, f"aus-{ext}", actor(user)))
+            _fw_log(conn, ext, "fernwartung aus (alle)", durch=actor(user))
+        conn.commit()
+        # Erst die Zentrale leeren (wirkt auch, wenn kein Telefon antwortet), dann wecken.
+        geschoben = _fw_schieben(conn)
+        for ext in exts:
+            try:
+                _zentrale("DELETE", f"/peers/{ext}?durch={requests.utils.quote(actor(user))}")
+            except Exception:  # noqa: BLE001
+                pass
+    finally:
+        conn.close()
+    geweckt = sum(1 for ext in exts if _fw_wecken(ext))
+    app.logger.warning("Fernwartung: alle aus durch %s", actor(user))
+    return jsonify({"ok": True, "telefone": len(exts), "zentrale": geschoben, "geweckt": geweckt})
+
+
+def _zentrale_berechtigt():
+    t = _bearer() or ""
+    if len(ADB_ZENTRALE_TOKEN) < 32 or not hmac.compare_digest(t.encode(), ADB_ZENTRALE_TOKEN.encode()):
+        return jsonify({"error": "Unauthorized"}), 401
+    return None
+
+
+@app.get("/api/pbx/fernwartung/peers")
+def fernwartung_peers():
+    """adb-zentrale holt die feste Peer-Liste (beim Start und alle 5 Min.)."""
+    deny = _zentrale_berechtigt()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        return jsonify({"peers": _fw_peers(conn)})
+    finally:
+        conn.close()
+
+
+def _fw_text(v, n):
+    return re.sub(r"[\x00-\x1f\x7f]", "", str(v or ""))[:n]
+
+
+@app.post("/api/pbx/fernwartung/sitzung")
+def fernwartung_sitzung():
+    """adb-zentrale meldet Beginn {art:'auf'} und Ende {art:'zu', bytes, befehle} einer Sitzung."""
+    deny = _zentrale_berechtigt()
+    if deny:
+        return deny
+    b = request.get_json(silent=True) or {}
+    ext = str(b.get("ext") or "")
+    if b.get("art") not in ("auf", "zu") or not re.fullmatch(r"[0-9]{2,8}", ext):
+        return jsonify({"error": "art/ext ungueltig"}), 400
+    person, zweck = _fw_text(b.get("person"), 64), _fw_text(b.get("zweck"), 20)
+    try:
+        beginn = int(b.get("beginn") or 0)
+        ende = int(b.get("ende") or 0)
+        hin, her = int(b.get("bytes_hin") or 0), int(b.get("bytes_her") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Zahlen erwartet"}), 400
+    befehle = [_fw_text(x, 200) for x in (b.get("befehle") or [])[:200]] if isinstance(b.get("befehle"), list) else []
+    conn = db.connect()
+    try:
+        offen = conn.execute("SELECT id FROM telefon_fernwartung WHERE ext = ? AND beginn = ? AND person = ?",
+                             (ext, beginn, person)).fetchone()
+        if b["art"] == "auf":
+            if not offen:
+                conn.execute("INSERT INTO telefon_fernwartung (ext, person, zweck, beginn) VALUES (?,?,?,?)",
+                             (ext, person, zweck, beginn))
+                _fw_log(conn, ext, "fernwartung an", name=person, durch=zweck)
+        else:
+            if offen:
+                conn.execute("UPDATE telefon_fernwartung SET ende = ?, bytes_hin = ?, bytes_her = ?, befehle = ?, grund = ? "
+                             "WHERE id = ?", (ende, hin, her, json.dumps(befehle), _fw_text(b.get("grund"), 80), offen["id"]))
+            else:
+                conn.execute("INSERT INTO telefon_fernwartung (ext, person, zweck, beginn, ende, bytes_hin, bytes_her, "
+                             "befehle, grund) VALUES (?,?,?,?,?,?,?,?,?)",
+                             (ext, person, zweck, beginn, ende, hin, her, json.dumps(befehle), _fw_text(b.get("grund"), 80)))
+            _fw_log(conn, ext, "fernwartung ab", name=person, durch=_fw_text(b.get("grund"), 80) or zweck)
+        conn.commit()
+    finally:
+        conn.close()
+    _FW_MERK["zustand"] = (0.0, None)
+    return jsonify({"ok": True})
+
+
+def _fw_uebersicht(conn, ext, zustand, regs, jetzt):
+    """Spalte "Fernwartung" auf /smartphones und Grundlage fuer das NOC.
+    ampel: gruen (Handshake < 3 Min. oder < 20 Min. und registriert), gelb (laenger still, Telefon
+    lebt aber), rot (still und nicht registriert, Not-Aus, fremde Rueckfrage in 24 h), blau (Sitzung),
+    grau (nicht eingerichtet / wartet auf Bestaetigung)."""
+    t = conn.execute("SELECT * FROM telefon_tunnel WHERE ext = ?", (ext,)).fetchone()
+    fremd = conn.execute("SELECT fingerabdruck, abgelehnt, zeit FROM telefon_adb_fremd WHERE ext = ? AND zeit > ? "
+                         "ORDER BY id DESC LIMIT 1", (ext, int(jetzt) - 86400)).fetchone()
+    z = zustand.get(ext) or {}
+    hs = int(z.get("letzter_handshake") or 0)
+    alter = jetzt - hs if hs else None
+    d = {"stand": "keiner", "adresse": None, "pubkey": None, "letzter_handshake": hs, "sitzung": z.get("sitzung"),
+         "fremd": dict(fremd) if fremd else None, "durch": None, "ampel": "grau"}
+    if t:
+        d.update({"stand": "aus" if t["aus"] else ("bereit" if t["bestaetigt"] else "wartet"),
+                  "adresse": t["ip"] if t["pubkey"] else None, "pubkey": t["pubkey"] or None, "durch": t["durch"]})
+    if d["stand"] == "aus" or fremd:
+        d["ampel"] = "rot"
+    elif d["stand"] == "bereit":
+        if d["sitzung"]:
+            d["ampel"] = "blau"
+        elif alter is not None and (alter < 180 or (alter < 1200 and str(ext) in regs)):
+            d["ampel"] = "gruen"
+        elif str(ext) in regs:
+            d["ampel"] = "gelb"
+        else:
+            d["ampel"] = "rot"
+    return d
+
+
+@app.get("/api/pbx/fernwartung/noc")
+def fernwartung_noc():
+    """Haupt-API (X-PBX-Secret): Fernwartung je geteiltem Telefon fuer das NOC - ohne Personennamen
+    (das NOC haengt an der Wand), ohne Schluessel und Adressen."""
+    err = require_agi()
+    if err:
+        return err
+    try:
+        regs = ami.registered_aors()
+    except Exception:  # noqa: BLE001
+        regs = set()
+    jetzt = time.time()
+    zustand = _zentrale_zustand() if ADB_ZENTRALE_URL else {}
+    conn = db.connect()
+    try:
+        telefone = []
+        for e in conn.execute("SELECT ext, name FROM sip_extensions WHERE context = 'geteilt' AND enabled = 1 ORDER BY ext"):
+            f = _fw_uebersicht(conn, e["ext"], zustand, regs, jetzt)
+            s = f["sitzung"] or {}
+            telefone.append({"ext": e["ext"], "name": e["name"], "stand": f["stand"], "ampel": f["ampel"],
+                             "letzter_handshake": f["letzter_handshake"], "registriert": str(e["ext"]) in regs,
+                             "sitzung": {"zweck": s.get("zweck"), "seit": s.get("beginn")} if s else None,
+                             "fremd": bool(f["fremd"])})
+        return jsonify({"eingerichtet": bool(ADB_ZENTRALE_URL), "zentrale": bool(_zentrale_info()) if ADB_ZENTRALE_URL else False,
+                        "telefone": telefone, "ts": int(jetzt)})
+    finally:
+        conn.close()
+
+
 @app.get("/api/pbx/smartphones")
 def smartphones_uebersicht():
     """Technik/Praesident: alles fuer rosenweg4303.ch/smartphones in einer Antwort, ohne
@@ -4294,6 +4724,7 @@ def smartphones_uebersicht():
         wart = {r["ext"]: r for r in conn.execute("SELECT ext, wlan_debug_bis, durch FROM telefon_wartung")}
         adb = {r["ext"]: r for r in conn.execute("SELECT ext, adresse, port, gemeldet FROM telefon_adb")}
         upd = {r["ext"]: r for r in conn.execute("SELECT * FROM telefon_updater")}
+        zustand = _zentrale_zustand() if ADB_ZENTRALE_URL else {}
         telefone = []
         for e in conn.execute("SELECT ext, name, client, enabled FROM sip_extensions "
                               "WHERE context = 'geteilt' ORDER BY ext"):
@@ -4309,6 +4740,7 @@ def smartphones_uebersicht():
                         if e["ext"] in adb and adb[e["ext"]]["port"] and bis > jetzt
                         and jetzt - int(adb[e["ext"]]["gemeldet"] or 0) < 900 else None),
                 "updater": _updater_json(conn, e["ext"], upd.get(e["ext"]), jetzt),
+                "fernwartung": _fw_uebersicht(conn, e["ext"], zustand, regs, jetzt),
             })
         privat = [{"id": r["id"], "kennung": f"{r['nummer']}-p{r['id']}", "nummer": r["nummer"],
                    "geraet": r["geraet"], "seit": r["created_at"],
@@ -4316,9 +4748,22 @@ def smartphones_uebersicht():
                   for r in conn.execute("SELECT id, nummer, geraet, created_at FROM telefon_sip_privat ORDER BY nummer, id")]
         log = db.rows_to_dicts(conn.execute("SELECT ext, ereignis, name, durch, zeit FROM telefon_log "
                                             "ORDER BY id DESC LIMIT 40").fetchall())
+        verlauf = []
+        for r in conn.execute("SELECT * FROM telefon_fernwartung ORDER BY beginn DESC, id DESC LIMIT 30"):
+            v = dict(r)
+            try:
+                v["befehle"] = json.loads(v["befehle"] or "[]")
+            except ValueError:
+                v["befehle"] = []
+            verlauf.append(v)
+        info = _zentrale_info() if ADB_ZENTRALE_URL else None
         return jsonify({"telefone": telefone, "privat": privat, "log": log,
                         "gruppen": sorted(_telefon_gruppen(conn)),
-                        "updater_fingerabdruck": adb_updater.fingerabdruck()})
+                        "updater_fingerabdruck": adb_updater.fingerabdruck(),
+                        "fernwartung_zentrale": {"eingerichtet": bool(ADB_ZENTRALE_URL), "erreichbar": bool(info),
+                                                 "fingerabdruck": (info or {}).get("adb_fingerabdruck", ""),
+                                                 "endpoint": (info or {}).get("endpoint_extern", "")},
+                        "fernwartung_verlauf": verlauf})
     finally:
         conn.close()
 
@@ -4413,5 +4858,6 @@ if __name__ == "__main__":
     if PBX_SHARED_SECRET:
         import threading
         threading.Thread(target=_personen_abgleich_schleife, daemon=True, name="personen-abgleich").start()
+        _karten_protokoll_im_hintergrund()
     from waitress import serve
     serve(app, host="0.0.0.0", port=PORT)

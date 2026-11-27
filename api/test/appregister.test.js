@@ -15,14 +15,20 @@ const daten = JSON.parse(fs.readFileSync(DATEI, 'utf8'));
 
 test('apps-register.json ist gueltig und kennt die bisherigen Apps', () => {
   assert.deepEqual(reg.pruefen(daten), []);
-  for (const k of ['vm', 'salz', 'kiosk', 'profil', 'karten']) assert.ok(daten.apps[k], k);
+  for (const k of ['vm', 'salz', 'kiosk', 'profil', 'zutritt']) assert.ok(daten.apps[k], k);
   assert.equal(daten.apps.salz.paket, 'ch.rosenweg4303.salz');
   assert.equal(Object.keys(daten.katalog).length >= 16, true);
   assert.equal(daten.katalog['ch.rosenweg4303.telefon'].nicht_oeffentlich, true);
-  // Rosenweg Karten ab 2.0.0 Flutter-App (alle Plattformen): unter apps, nicht mehr im Katalog
-  assert.equal(daten.apps.karten.paket, 'ch.rosenweg4303.karten');
-  assert.equal(daten.apps.karten.technik, true);
+  // Rosenweg Karten ist in Rosenweg Zutritt aufgegangen (Stefan 27.11.2026): eigenes Paket,
+  // Karten weder unter apps noch im Katalog, sondern unter aufgegeben
+  assert.equal(daten.apps.zutritt.paket, 'ch.rosenweg4303.zutritt');
+  assert.equal(daten.apps.zutritt.repo, 'Rosenweg/rosenweg-zutritt');
+  assert.equal(daten.apps.zutritt.technik, true);
+  assert.equal(daten.apps.karten, undefined);
   assert.equal(daten.katalog['ch.rosenweg4303.karten'], undefined);
+  assert.equal(daten.aufgegeben['ch.rosenweg4303.karten'].ersetzt_durch, 'ch.rosenweg4303.zutritt');
+  assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.zutritt.logo)));
+  assert.ok(!fs.existsSync(path.join(WURZEL, 'img', 'apps', 'rosenweg-karten.png')));
 });
 
 test('pruefen findet Fehler', () => {
@@ -38,6 +44,12 @@ test('pruefen findet Fehler', () => {
   d = kopie(); d.version = 2;
   assert.match(reg.pruefen(d).join('\n'), /version/);
   assert.deepEqual(reg.pruefen(null), ['kein Objekt']);
+  d = kopie(); d.aufgegeben['ch.rosenweg4303.salz'] = {};       // aufgegeben und zugleich unter apps
+  assert.match(reg.pruefen(d).join('\n'), /paket ch\.rosenweg4303\.salz doppelt/);
+  d = kopie(); d.aufgegeben = [];
+  assert.match(reg.pruefen(d).join('\n'), /aufgegeben ist kein Objekt/);
+  d = kopie(); delete d.aufgegeben;                                // freiwillig
+  assert.deepEqual(reg.pruefen(d), []);
 });
 
 test('nachPaket und oeffentliche Fassung', () => {
@@ -112,7 +124,8 @@ exec(src[i:j], g)
 ok = g["_apps_register_uebernehmen"](json.load(open(sys.argv[2], encoding="utf-8")), "test")
 kaputt = g["_apps_register_uebernehmen"]({"version": 1, "apps": {"x": {"paket": "kein paket"}}, "katalog": {}}, "kaputt")
 print(json.dumps({"ok": ok, "kaputt": kaputt, "register": g["APPS_REGISTER"], "repos": g["APPS_KATALOG_REPOS"],
-                  "info": g["APPS_KATALOG_INFO"], "ohne": sorted(g["APPS_OEFFENTLICH_OHNE"])}))
+                  "info": g["APPS_KATALOG_INFO"], "ohne": sorted(g["APPS_OEFFENTLICH_OHNE"]),
+                  "aus": sorted(g["APPS_AUFGEGEBEN"])}))
 `;
   const r = spawnSync('python3', ['-I', '-c', code, path.join(WURZEL, 'pbx', 'api', 'app.py'), DATEI], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
@@ -120,9 +133,11 @@ print(json.dumps({"ok": ok, "kaputt": kaputt, "register": g["APPS_REGISTER"], "r
   assert.equal(e.ok, true);
   assert.equal(e.kaputt, false);                       // ungueltig: alter Stand bleibt
   assert.equal(e.register.salz.repo, 'Rosenweg/rosenweg-salz');
-  assert.equal(e.register.karten.repo, 'Rosenweg/rosenweg-karten');
-  assert.equal(e.register.karten.technik, true);
-  assert.equal(e.repos['Rosenweg/rosenweg-karten'], undefined);
+  assert.equal(e.register.zutritt.repo, 'Rosenweg/rosenweg-zutritt');
+  assert.equal(e.register.zutritt.technik, true);
+  assert.equal(e.register.karten, undefined);
+  assert.equal(e.repos['Rosenweg/rosenweg-karten'], undefined);   // keine Releases mehr
+  assert.deepEqual(e.aus, ['ch.rosenweg4303.karten']);
   assert.equal(e.repos['Rosenweg/calendar-rosenweg'], 'ch.rosenweg4303.calendar');
   assert.deepEqual(e.ohne, ['ch.rosenweg4303.telefon']);
   assert.equal(e.register.kiosk._notiz, undefined);

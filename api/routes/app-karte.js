@@ -68,6 +68,8 @@ const ak = require('../lib/appkarte');
 const appregister = require('../lib/appregister');
 const appkennung = require('../lib/appkennung');
 const gg = require('../lib/geraet-gruppe');
+const kartenAdmin = require('../lib/kartenadmin');
+const { istKartenSitzung } = require('../lib/stufen');
 
 const MAX_SITZUNGEN = Math.max(1, parseInt(process.env.APP_KARTE_MAX_SITZUNGEN || '20', 10) || 20);
 const LAUFZEIT_TAGE = Math.max(1, parseInt(process.env.APP_KARTE_TAGE || '30', 10) || 30);
@@ -643,13 +645,30 @@ function appKarteRoutes(app, deps) {
     }
   });
 
-  // ── Übersicht im Portal: eigene; Technik/Präsident mit ?alle=1 alle ──
-  // Nur mit Browser-Anmeldung (requireUserLogin sperrt PATs und Karten-Sitzungen):
-  // wer nur eine Karte hat, soll nicht die anderen Sitzungen der Person abräumen.
+  // ── Übersicht im Portal und in Rosenweg Zutritt: eigene; Technik/Präsident mit ?alle=1 alle ──
+  // Entscheid Stefan 27.11.2026 ("Karte = volle Rechte"): auch mit einer Karten-, QR- oder
+  // Handy-Sitzung und am geteilten Telefon ansehen und abmelden — protokolliert. Ansehen mit der
+  // Karte steht im Kartenprotokoll (admin-mit-karte), Abmelden zusätzlich in der Quittung an die
+  // Person (lib/kartenadmin.js). Zugangstoken (PAT) bleiben draussen: ein Token für Skripte soll
+  // keine Anmeldungen abräumen.
+  const kontoOderKarte = (req, res, next) => {
+    if (req.pat) return res.status(403).json({ error: 'Mit einem Zugangstoken nicht möglich — bitte mit dem Rosenweg-Konto oder der Karte anmelden' });
+    kartenAdmin.vermerken(req, res);   // nur mit der Karte und nur schreibend
+    next();
+  };
+  const ansehenVermerken = (req, alle) => {
+    if (!istKartenSitzung(req)) return;
+    const k = req.appKarte || {};
+    kartenProtokollieren('admin-mit-karte', {
+      displayId: k.karte || null, email: req.user?.email, name: req.user?.name,
+      durch: `${req.auth?.art || 'karte'}:${k.id || (req.anlage ? 'anlage:' + req.anlage.ext : '')}`, erfolg: true,
+      detail: `Anmeldungen der Apps angesehen (${alle ? 'alle' : 'eigene'}) · GET /api/apps/sitzungen`,
+    }).catch?.(() => {});
+  };
   const spalten = `id, email, name, app, app_name, geraet_name, plattform, LEFT(geraet_kennung, 8) AS geraet, geraet_kennung,
                    karte_anzeige, art, created_at, created_ip, last_used_at, last_used_ip, expires_at,
                    revoked_at, revoked_by, revoked_reason`;
-  app.get('/api/apps/sitzungen', authMiddleware, requireUserLogin, async (req, res) => {
+  app.get('/api/apps/sitzungen', authMiddleware, kontoOderKarte, async (req, res) => {
     try {
       await tabellen();
       const alle = req.query.alle === '1' && ak.istTechnikOderPraesident(req.user.groups);
@@ -663,6 +682,7 @@ function appKarteRoutes(app, deps) {
       // Gruppenschluessel je Person statt Kennung (lib/geraet-gruppe.js): legt im Browser die Apps
       // desselben Handys zusammen (mit Telefon und Messenger); die volle Kennung geht nicht hinaus.
       const sitzungen = r.rows.map(({ geraet_kennung: k, ...s }) => ({ ...s, geraet_gruppe: gg.gruppe(s.email, k) }));
+      ansehenVermerken(req, alle);
       res.json({ sitzungen, alle, max_je_person: MAX_SITZUNGEN, laufzeit_tage: LAUFZEIT_TAGE });
     } catch (e) {
       console.error('[app-karte] liste:', e.message);
@@ -670,7 +690,7 @@ function appKarteRoutes(app, deps) {
     }
   });
 
-  app.delete('/api/apps/sitzungen/:id', authMiddleware, requireUserLogin, async (req, res) => {
+  app.delete('/api/apps/sitzungen/:id', authMiddleware, kontoOderKarte, async (req, res) => {
     const id = String(req.params.id || '');
     if (!ak.SITZUNG_RE.test(id)) return res.status(400).json({ error: 'Ungültige Sitzung' });
     try {
@@ -690,7 +710,7 @@ function appKarteRoutes(app, deps) {
   });
 
   // Alle Karten-Sitzungen einer Person (Karte verloren, Konto gesperrt) — Technik.
-  app.post('/api/apps/sitzungen/alle-abmelden', authMiddleware, requireUserLogin, async (req, res) => {
+  app.post('/api/apps/sitzungen/alle-abmelden', authMiddleware, kontoOderKarte, async (req, res) => {
     const technik = ak.istTechnikOderPraesident(req.user.groups);
     const email = String(req.body?.email || '').toLowerCase().trim();
     const ziel = technik && email ? email : String(req.user.email || '').toLowerCase();

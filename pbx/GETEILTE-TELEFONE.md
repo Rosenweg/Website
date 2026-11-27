@@ -102,6 +102,7 @@ Wichtig für die geplante Einrichtung per QR ohne Kabel.
 | Rotes Notfall-Fenster über dem Sperrbildschirm (Android 14 erteilt es nicht von selbst) | `adb shell appops set ch.rosenweg4303.messages USE_FULL_SCREEN_INTENT allow` | dito |
 | Exakte Wecker: Notfall-Erinnerung alle 2 min bis gelesen, auch im Tiefschlaf | `adb shell appops set ch.rosenweg4303.messages SCHEDULE_EXACT_ALARM allow` | dito |
 | Zugriff auf alle Dateien (Aufräumen beim Abmelden) | `adb shell appops set ch.rosenweg4303.telefon MANAGE_EXTERNAL_STORAGE allow` | dito |
+| Fernwartung: Band „Fernwartung aktiv – Technik (Name)“ über allen Apps, im Kiosk und auf dem Sperrbild von Rosenweg Gerät | `adb shell appops set ch.rosenweg4303.telefon SYSTEM_ALERT_WINDOW allow` | dito; ohne: nur die Benachrichtigung „Fernwartung aktiv“, kein Band |
 | Geräte-App darf „Nicht stören“ kurz ausschalten (Telefon suchen: klingelt auch bei Nicht stören) | `adb shell cmd notification allow_dnd ch.rosenweg4303.telefon` | dito; ohne: Suchanruf klingelt nur bei stumm/vibrieren, nicht bei „Nicht stören“ |
 | Rosenweg Launcher darf Widgets ohne Rückfrage einbinden (Uhr-Widget auf der Startseite, die sich nicht bearbeiten lässt) | `adb shell appwidget grantbind --package ch.rosenweg4303.home --user 0` | dito; ohne: Android fragt einmal nach |
 | Seitentaste lang = Ausschaltmenü statt KI-Assistent (Neustart auch im gesperrten Zustand: wer vergisst, sich abzumelden, wird durch den Neustart abgemeldet, die PIN ist weg) | `adb shell settings put global function_key_config_longpress_type 0` und `adb shell settings put global power_button_long_press 1` (Samsung prüft beide; 103 = digitaler Assistent), dazu `adb shell settings put secure lock_function_val 0` (Samsung „Netzwerk und Sicherheit sperren“ aus — sonst verlangt das Ausschaltmenü vor dem Neustart die PIN; getestet 24.11.2026) | dito; Notlösung ohne Menü: Leiser + Seitentaste ~7 s (erzwungener Neustart) |
@@ -207,35 +208,69 @@ sind (`status = assigned`), deren Konto für geteilte Telefone freigeschaltet is
 
 **Sicherheitshinweis:** Die UID ist nicht geheim und lässt sich mit jedem NFC-Telefon
 auslesen und auf eine beschreibbare Karte kopieren. Wer eine Karte verliert, meldet das
-sofort — die Karte wird in **Rosenweg Karten** (oder in UniFi Access) entzogen und gilt
+sofort — die Karte wird in **Rosenweg Zutritt** (oder in UniFi Access) entzogen und gilt
 dann weder an den Türen noch an den Telefonen.
 
-### Kartenverwaltung: App „Rosenweg Karten“
+### Kartenverwaltung: App „Rosenweg Zutritt“ (Haupt-API)
 
-Eigene App `ch.rosenweg4303.karten` (Repo `~/Documents/rosenweg-karten`), nur für
-Technik/Präsident. Karte antippen zeigt Inhaber, Inventarnummer und Status; dazu
-„Einer Person zuordnen“ (durchsuchbare Liste) und „Entziehen“ (mit Rückfrage).
+Entscheid Stefan 27.11.2026: **Karten gehören nicht in die Telefonanlage.** Die
+Kartenverwaltung liegt in der Haupt-API unter `/api/karten/*` (`api/routes/karten.js`,
+Logik `api/lib/kartenverwaltung.js`); die App dazu ist **Rosenweg Zutritt**
+(`ch.rosenweg4303.zutritt`, Repo `Rosenweg/rosenweg-zutritt`, alle Plattformen). Rosenweg
+Karten (`ch.rosenweg4303.karten`, Java 1.6.3) ist aufgegeben (`apps-register.json`,
+Abschnitt `aufgegeben`).
 
-- **Ohne INTERNET-Berechtigung und ohne Zugangsdaten**: alles läuft über den
-  `AnlageProvider` von Rosenweg Gerät (`ContentResolver.call`, Permission
-  `ch.rosenweg4303.permission.ANLAGE`, darum mit demselben Schlüssel signiert):
-  `karten_info(uid)`, `karten_zuordnen(uid, {email})`, `karten_entziehen(uid)`,
-  `karten_personen("personen")` → Bundle `json` (Antwort der Anlage) oder `fehler`
-  (+ `status`); `nicht_berechtigt = true`, wenn die angemeldete Person nicht Technik/
-  Präsident ist. Rosenweg Gerät prüft das live über `/api/telefon/status`, die Anlage
-  prüft nochmals an der Sitzung der Nebenstelle.
-- Katalog: als Android-App mit Gruppen `technik,präsident,praesident`.
+| Methode | Pfad (Haupt-API) | Körper | Antwort |
+|---|---|---|---|
+| GET | `/api/karten/personen` | – | `{personen:[{name,email}]}` (Personen mit interner Nummer, sonst aktive Konten), nach Name |
+| POST | `/api/karten/info` | `{uid}` | `{found, assigned, status, display_id, access_name, person:{name,email}, uid}` |
+| POST | `/api/karten/zuordnen` | `{uid, email}` | `{ok, importiert?, schon?, display_id, name}`; 404 ohne Access-Benutzer, 409 `{error, besitzer:{name}}` |
+| POST | `/api/karten/entziehen` | `{uid}` | `{ok, schon?, display_id, name}`; 404 Karte unbekannt |
+| POST | `/api/karten/loeschen` | `{uid}` | `{ok, display_id}`; nur entzogene Karten (sonst 409) |
+| GET | `/api/karten/protokoll` | `?tage=&aktion=&email=` | `{tage, eintraege:[…]}` (alter Pfad `/api/karten-protokoll` bleibt) |
+
+- **Rechte:** Technik oder Präsident (`requireTechnikOrPraesident`); eine Seite „karten“ in
+  der Rechteverwaltung gibt es nicht.
+- **Anmeldung:** Website-Login, `rosenweg-apps`-Token, Karten-/QR-/Handy-Sitzung (`rw_app_`)
+  und auf geteilten Telefonen das Anlage-Token (Rosenweg Gerät → `POST /api/telefon/portal`,
+  `portal_pfade` für `ch.rosenweg4303.zutritt`: `/api/karten/`, `/api/access/`,
+  `/api/apps/sitzungen…`, `GET /api/me/bestaetigungen`). Karte = Schlüssel: volle Rechte;
+  jede schreibende Aktion mit der Karte steht als `admin-mit-karte` im Kartenprotokoll und
+  wird per Mail quittiert (`api/lib/kartenadmin.js`). Keine Kartenaktion braucht die
+  E-Mail-Bestätigung (202); die App zeigt sie trotzdem an, falls eine Route sie verlangt.
 - Zuordnen: Kennt Access die Karte noch nicht, legt die Haupt-API sie als Fremdkarte an
   (`POST /credentials/nfc_cards/import`, CSV im Feld `file`) und ordnet sie dann dem
-  Access-Benutzer mit dieser E-Mail zu. Hat die Person keinen Access-Benutzer, kommt eine
-  Fehlermeldung (Benutzer zuerst in UniFi Access anlegen). Gehört die Karte schon jemand
-  anderem: Fehler mit Namen, zuerst entziehen. Fremdkarten müssen in Access erlaubt sein
-  (Einstellungen › Card Inventory › Third-Party NFC Cards).
-- Entziehen löst nur die Zuordnung; die Karte bleibt in der Access-Inventur.
-- Türleser übernehmen Änderungen nach etwa 30 s.
-- Jede Änderung steht in der Haupt-DB (`access_karten_protokoll`: Aktion, Karte, Ziel,
-  durch „Telefon <Nebenstelle> (Name <E-Mail>)“) und in `telefon_log`
-  (`karte-info`, `karte-zu`, `karte-weg`).
+  Access-Benutzer mit dieser E-Mail zu. Ohne Access-Benutzer: Fehlermeldung. Gehört die
+  Karte schon jemand anderem: Fehler mit Namen, zuerst entziehen. Fremdkarten müssen in
+  Access erlaubt sein (Einstellungen › Card Inventory › Third-Party NFC Cards).
+- Entziehen löst nur die Zuordnung; die Karte bleibt in der Access-Inventur. Türleser
+  übernehmen Änderungen nach etwa 30 s.
+- **Kartenprotokoll:** nur noch in der Haupt-DB (`access_karten_protokoll`: Aktion `info`,
+  `zuordnen`, `entziehen`, `loeschen`, `admin-mit-karte`, …; durch „Telefon <Nebenstelle>
+  (Name <E-Mail>)“, „<App>/<Version> (…)“ oder „Portal (…)“). Die alten Einträge der Anlage
+  (`telefon_log`: `karte-info`, `karte-zu`, `karte-weg`, `karte-geloescht`) übernimmt die
+  Anlage einmal beim Start (`karten_protokoll_uebernehmen()`, Aktion `telefon-…`, Quelle
+  `pbx:<id>`, doppelt nicht möglich; Marke `config.karten_protokoll_bis`). Sie bleiben
+  zusätzlich in `telefon_log`. An- und Abmeldungen per Karte am Telefon (`an`,
+  `karte-abgelehnt`) bleiben nur in der Anlage.
+
+#### Übergang (bis Rosenweg Karten von den zwei Telefonen ist)
+
+Rosenweg Karten 1.6.3 (`ANLAGE_WEB=https://pbx.rosenweg4303.ch`) und Rosenweg Gerät
+(`AnlageProvider` `karten_*`) rufen noch `/api/telefon/karten/*` der Anlage. Diese Pfade
+reichen nur noch weiter (`_karten_weiterreichen` in `pbx/api/app.py`), Antworten wie bisher
+plus `Deprecation: true` und `Link` auf den neuen Pfad:
+
+- mit `Authorization: Bearer …` (App auf dem eigenen Handy): Kopf unverändert an die
+  Haupt-API;
+- mit HTTP-Basic (geteiltes Telefon): Anlage-Token der angemeldeten Person für genau diese
+  Anfrage (`PORTAL_ANLAGE_SECRET` muss auf CT 220 gesetzt sein, wie für `/api/telefon/portal`).
+
+Die Haupt-API behält `/api/pbx/karte/zuordnen|entziehen|loeschen` (PBX-Geheimnis) für ältere
+Stände der Anlage; `GET /api/pbx/karte/:nfcId` bleibt für die Anmeldung am Telefon.
+Entfernen, sobald Stefan Rosenweg Karten auf den zwei Telefonen deinstalliert hat: die fünf
+Routen `/api/telefon/karten/*` in der Anlage, die drei schreibenden `/api/pbx/karte/*` in der
+Haupt-API und die `karten_*`-Methoden in Rosenweg Gerät.
 
 ### Endpunkte
 
@@ -244,21 +279,15 @@ Anlage (pbx-api, HTTP-Basic Nebenstelle:SIP-Passwort, nur Nebenstellen „geteil
 | Methode | Pfad | Körper | Antwort |
 |---|---|---|---|
 | POST | `/api/telefon/karte` | `{uid}` | wie `/api/telefon/einloesen`: `{ok, ext, angemeldet, name, email, seit, apps}`; Fehler `{error, grund}` mit 400 `unlesbar`, 404 `unbekannt`, 403 `gesperrt`/`nicht_freigeschaltet`, 429 `gebremst`, 502 `verbindung` |
-| POST | `/api/telefon/karten/info` | `{uid}` | `{found, assigned, status, display_id, access_name, person:{name,email}, uid}` |
-| POST | `/api/telefon/karten/zuordnen` | `{uid, email}` | `{ok, importiert?, schon?, display_id, name}`; 404 ohne Access-Benutzer, 409 `{error, besitzer:{name}}` |
-| POST | `/api/telefon/karten/entziehen` | `{uid}` | `{ok, schon?, display_id, name}`; 404 Karte unbekannt |
-| POST | `/api/telefon/karten/loeschen` | `{uid}` | `{ok, display_id}`; nur entzogene Karten (sonst 409), löscht aus dem Access-Bestand |
-| GET | `/api/telefon/karten/personen` | – | `{personen:[{name,email}]}` aus `personen_nummern` (Personen-Abgleich), nach Name |
-
-`/api/telefon/karten/*` nur, wenn die Sitzung der Nebenstelle die Gruppe technik,
-präsident oder praesident hat (sonst 403 `{error: "nicht berechtigt"}`).
+| * | `/api/telefon/karten/*` | wie `/api/karten/*` | Übergang, reicht an die Haupt-API weiter (siehe oben) |
 
 Haupt-API (`X-PBX-Secret`, nur von der Anlage):
 
 | Methode | Pfad | Körper | Antwort |
 |---|---|---|---|
 | GET | `/api/pbx/karte/:nfcId` | – | `{found:false}` oder `{found, assigned, status, display_id, access_name, person:{user_id, email, name, groups}}` |
-| POST | `/api/pbx/karte/zuordnen` | `{nfc_id, email, durch}` | siehe oben |
+| POST | `/api/pbx/karte/zuordnen` | `{nfc_id, email, durch}` | Übergang, wie `/api/karten/zuordnen` |
+| POST | `/api/pbx/karten-protokoll/uebernahme` | `{zeilen:[telefon_log]}` (≤ 1000) | `{ok, gelesen, uebernommen, uebersprungen, schon_da}`; einmalige Übernahme |
 | POST | `/api/pbx/karte/entziehen` | `{nfc_id, durch}` | siehe oben; Access: `PUT /users/{id}/nfc_cards/delete {token}` |
 | POST | `/api/pbx/karte/loeschen` | `{nfc_id, durch}` | Access: `DELETE /credentials/nfc_cards/tokens/{token}`; nur ohne Inhaber |
 
@@ -388,6 +417,74 @@ Nie: Neustart, `pm uninstall`, Einstellungen ändern, andere Netze. Der Updater 
 **Netzweg:** Abgemeldete Telefone sind im WLAN „Rosenweg“ im RK-Clients-Netz (VLAN 9, `100.64.9.0/24`); CT 220 (VLAN 2) erreicht dieses Netz heute schon. Angemeldete Telefone sind im Wohnungsnetz und von der Infrastruktur aus nicht erreichbar – das passt zur Regel „nur abgemeldet“. Telefone in fremden WLANs (z. B. Juronetz) bedient der Updater nicht; sie bekommen Updates über den eigenen Abgleich von Gerät.
 
 Endpunkte: `POST /api/telefon/<ext>/updater {aktion: zulassen|jetzt|vergessen}` (Technik), `GET /api/pbx/smartphones` liefert je Telefon `updater` (zugelassen, ausstehend, Ergebnis, geprüft) und `updater_fingerabdruck`.
+
+### Fernwartung über den dauerhaften adb-Tunnel (Phase 1, 27. November 2026)
+
+Stefan: dauerhaft, weil die Telefone nicht privat sind – wer das Telefon benutzt, sieht trotzdem
+jede Sitzung. Entscheide: Tunnel **in Rosenweg Gerät** (keine eigene App), Bildschirm (scrcpy)
+auch bei angemeldeter Person **erlaubt mit Band**, Technik arbeitet **nur per SSH auf adb-zentrale**,
+Zentrale als eigener CT auf pve2 mit WireGuard **UDP 51832** unter **adb.rosenweg4303.ch**.
+Code: `pbx/adb-zentrale/` (Zentrale, Einrichtung: dortiges README), `pbx/api` (Peers, Not-Aus,
+Verlauf), Rosenweg Gerät (`Fernwartung*`), rwtunnel im Repo rosenweg-vm (Telefonseite, Hörmodus).
+
+```
+Telefon (Rosenweg Gerät) ──WireGuard UDP 51832──► adb-zentrale (CT, Netzstapel im Prozess, kein TUN)
+  im Tunnel nur 10.243.44.n:5555 → 127.0.0.1:5555 (adbd)   127.0.0.1:2<ext> nur während einer Sitzung
+            und 10.243.44.n:7000 (wer, wozu – fürs Band)   Technik: ssh adb-zentrale; rw-adb <ext> …
+```
+
+- **Telefon:** Gerät erzeugt einmal ein WireGuard-Schlüsselpaar (privat nur in `noBackupFilesDir`),
+  meldet den öffentlichen Teil (`POST /api/telefon/tunnel`) und wartet. Auf /smartphones steht
+  „neuer Schlüssel … Bestätigen“. Nach dem Bestätigen gibt der Status `fernwartung: {stand: bereit,
+  adresse, gateway, peer_public, endpoint, endpoint_intern, schluessel}`; Gerät startet den Tunnel
+  als Vordergrunddienst (`FernwartungDienst`, stille Benachrichtigung „Fernwartung bereit“), auch
+  nach Neustart und Update. adb bleibt dann **dauerhaft an**, Port 5555 stellt Gerät selbst her.
+- **Band:** Jede adb-Verbindung kommt im Netzstapel des Telefons an. Solange eine offen ist (und
+  10 s danach), zeigt Gerät oben über allem „🛠 Fernwartung aktiv – Technik (Name) seit 14:02“
+  und die Benachrichtigung wird laut. Den Namen meldet die Zentrale auf :7000; fehlt er, steht
+  „unbekannt“ – das Band erscheint trotzdem. Braucht `SYSTEM_ALERT_WINDOW` (Skript).
+- **Not-Aus:** /smartphones „⛔ aus“ je Telefon, oben „⛔ Fernwartung alle aus“. Wirkt zweifach:
+  die pbx-api nimmt den Peer sofort aus der Zentrale (offene Sitzung gekappt, auch wenn das
+  Telefon nicht antwortet), und der Weckanruf 2098 holt den Status `fernwartung: {stand: aus}` –
+  Gerät stoppt den Tunnel und setzt `ADB_ENABLED=0` (kein adbd, auch nicht per USB). „ein“ geht
+  ohne USB. „Verwerfen“ löscht den Schlüssel (Telefon ersetzt oder zurückgesetzt).
+- **Schlüssel:** Die Bedienungshilfe bestätigt „USB-Debugging zulassen?“ nur noch für drei
+  Fingerabdrücke: den eigenen von Gerät, den der Zentrale (`adbz`, `rw-adb schluessel`) und den des
+  Updaters; die beiden letzten stehen im Status (`fernwartung.schluessel`). Eine **fremde** Rückfrage
+  lehnt sie ab („Ablehnen“) und meldet sie (`POST /api/telefon/fernwartung/meldung`, Verlauf, NOC rot
+  für 24 h). Ausnahme **Wartung vor Ort**: Ist auf /smartphones „🛠 1 Std.“ an, bleibt eine fremde
+  Rückfrage stehen (z. B. für den Mac am USB) und wird nur gemeldet.
+- **Zugang für Technik:** nur per SSH auf adb-zentrale (Zugriffsmatrix, Host nur für Technik),
+  dort `rw-adb liste`, `rw-adb 2002`, `rw-adb 2002 shell …`, `rw-adb 2002 logcat …`,
+  `rw-adb 2002 einrichten`, `rw-adb 2002 ende` (sonst nach 30 Min. ohne Verkehr). Der adb-Schlüssel
+  liegt nur bei `adbz` im CT. Jede Sitzung (wer, wozu, Beginn, Ende, Bytes, rw-adb-Befehle) steht im
+  Journal des CT und auf /smartphones unter „Fernwartung: Sitzungen“. `reboot`, `uninstall`,
+  `pm clear` und Ähnliches lehnt rw-adb ab; eine interaktive Shell steht als „shell“ im Protokoll.
+  scrcpy ist erlaubt (Band), läuft aber mangels Bildschirm nicht auf dem CT – mit „nur SSH“ gibt es
+  in Phase 1 keine Bildschirmübertragung.
+- **Ehrliche Grenze:** adbd hört auf Port 5555 auf allen Schnittstellen; ohne Root lässt sich das
+  nicht auf den Tunnel beschränken. Darum zusätzlich die UniFi-Regel unten und „nur bekannte Schlüssel“
+  (`ro.adb.secure=1`, prüft das Skript).
+- **Einrichten eines Telefons:** Gerät ≥ Fernwartungs-Fassung installieren, Skript einmal laufen
+  lassen (`SYSTEM_ALERT_WINDOW`), auf /smartphones bestätigen, dann den Schlüssel der Zentrale
+  zulassen: `rw-adb <ext>` – die Bedienungshilfe bestätigt die Rückfrage (Fingerabdruck steht im
+  Status). Ab da geht jeder Schritt des Skripts über den Tunnel (`rw-adb <ext> einrichten`);
+  `--device-owner` und die allererste Schlüssel-Zulassung bleiben vor Ort (Henne und Ei).
+
+**UniFi: TCP zu den Telefonen sperren (Anleitung, noch nicht umgesetzt).** Erst nach dem Test am
+A15 und wenn der Updater über den Tunnel läuft (bis dahin braucht CT 220 den direkten Weg):
+
+1. UniFi Network → *Client Devices*: die geteilten Telefone (MAC) in eine Gruppe „Geteilte Telefone“
+   (bzw. als Firewall-Gruppe „Adressen“ über die festen DHCP-Reservierungen in RK-Clients und den
+   RW*-Clients-Netzen).
+2. *Settings → Security → Firewall* (Zone-Based: Zonen der Clients-Netze → gleiche Zone und
+   „Internal“): neue Regel **„Geteilte Telefone: kein TCP hinein“**, Aktion *Block*, Protokoll TCP,
+   Ziel = Gruppe „Geteilte Telefone“, alle Ports, Zustand *New* (established/related bleibt erlaubt –
+   SIP, Status, Nextcloud gehen vom Telefon aus).
+3. Darüber eine Ausnahme nur, falls noch nötig: *Allow* TCP 5555 von CT 220 (Rückfall, bis
+   `PBX_ADB_NETZE` entfällt). Danach entfernen.
+4. Prüfen: vom Mac im selben WLAN `nc -vz <telefon> 5555` → keine Verbindung; `rw-adb <ext>
+   shell echo ok` auf adb-zentrale → ok (der Tunnel geht vom Telefon aus, UDP).
 
 ### Eigene Handys von außen: SIP über TLS (25. November 2026)
 

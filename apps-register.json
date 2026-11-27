@@ -40,16 +40,16 @@
       "text": "Die eigenen Angaben im Rosenweg-Portal ansehen und ändern.",
       "fuer": ""
     },
-    "karten": {
-      "name": "Rosenweg Karten",
-      "repo": "Rosenweg/rosenweg-karten",
-      "paket": "ch.rosenweg4303.karten",
-      "logo": "/img/apps/rosenweg-karten.png",
+    "zutritt": {
+      "name": "Rosenweg Zutritt",
+      "repo": "Rosenweg/rosenweg-zutritt",
+      "paket": "ch.rosenweg4303.zutritt",
+      "logo": "/img/apps/rosenweg-zutritt.png",
       "reihenfolge": 50,
-      "text": "Rosenweg-Karten nachschlagen, Personen zuordnen, entziehen und aus dem Bestand löschen; Kartenprotokoll und Karten-Anmeldungen der Apps.",
+      "text": "Türen, Access-Benutzer, Besucher-Pässe und Rosenweg-Karten verwalten (Karte nachschlagen, zuordnen, am UniFi-Leser anlernen); Zutritts- und Kartenprotokoll, Karten-Anmeldungen der Apps. Ersetzt Rosenweg Karten.",
       "fuer": "Für die Technik und den Präsidenten.",
       "technik": true,
-      "_notiz": "Ab 2.0.0 Flutter-App für alle Plattformen (ersetzt die Java-App 1.6.3, gleiche Kennung und Signatur, versionCode 11). Bis 1.6.3 stand sie unter katalog."
+      "_notiz": "Stefan 27.11.2026: Rosenweg Karten wird aufgelöst und geht in Zutritt auf (eigenes Paket, eigenes Repo; kein Update-Pfad über ch.rosenweg4303.karten). Flutter, alle Plattformen."
     }
   },
   "katalog": {
@@ -138,6 +138,13 @@
       "text": "App der geteilten Rosenweg-Telefone: Sperrbildschirm, Anmeldung mit Karte, Telefonie.",
       "nicht_oeffentlich": true,
       "_notiz": "Rosenweg Geraet: nur Katalog der geteilten Telefone, kein oeffentlicher Download."
+    }
+  },
+  "aufgegeben": {
+    "ch.rosenweg4303.karten": {
+      "name": "Rosenweg Karten",
+      "ersetzt_durch": "ch.rosenweg4303.zutritt",
+      "_notiz": "Stefan 27.11.2026: aufgelöst, in Rosenweg Zutritt aufgegangen. /apps zeigt die App nicht mehr, die Anlage nimmt keine Releases von Rosenweg/rosenweg-karten mehr an; auf den zwei Telefonen deinstalliert Stefan sie selbst."
     }
   }
 }
