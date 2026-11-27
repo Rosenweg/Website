@@ -246,7 +246,7 @@ const API = path.join(__dirname, '..');
 const lesen = (f) => fs.readFileSync(path.join(API, f), 'utf8');
 const MOUNTS = {
   'server.js': '', 'routes/ssh-zugang.js': '/api/ssh', 'routes/stations.js': '/api/stations',
-  'routes/stationen-v2.js': '/api/stations/v2', 'routes/sicherungen.js': '/api/sicherungen', 'routes/salz.js': '/api/salz',
+  'routes/stationen-v2.js': '/api/stations/v2', 'routes/sicherungen.js': '/api/sicherungen', 'routes/salz.js': '/api/salz', 'routes/scanner.js': '/api/scanner',
   'routes/app-karte.js': '', 'routes/app-daten.js': '', 'routes/app-tunnel.js': '', 'routes/messenger-zugang.js': '/api/messenger',
 };
 const ROUTEN = [];
@@ -282,7 +282,7 @@ test('Admin-Waechter vermerken nur, sie sperren die Karte nicht', () => {
   const WAECHTER = {
     'middleware/auth.js': ['adminOnly'], 'server.js': ['requireTechnikOrPraesident', 'requireMqttTechnik'],
     'routes/ssh-zugang.js': ['requireTechnik'], 'routes/stations.js': ['nurTechnik'],
-    'routes/stationen-v2.js': ['nurTechnikGruppe'], 'routes/sicherungen.js': ['nurTechnik'],
+    'routes/stationen-v2.js': ['nurTechnikGruppe'], 'routes/sicherungen.js': ['nurTechnik'], 'routes/scanner.js': ['nurTechnik'],
   };
   for (const [datei, namen] of Object.entries(WAECHTER)) {
     const text = lesen(datei);

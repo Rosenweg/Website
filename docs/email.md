@@ -19,7 +19,7 @@ WhatsApp-Gateway) im Überblick: [`sicherheit.md`](sicherheit.md) Abschnitt 4.8.
 | API (IMAP-Abruf) | CT 128 | holt Mails aus Mailcow-Postfächern (unten) |
 | API (Versand) | CT 128 | Mailcow-Submission `MAILCOW_SMTP_HOST:587` (STARTTLS, Zertifikat `mail.rosenweg4303.ch` geprüft), je Funktion ein Gateway-User (unten); ZEV-Mails als `zev@rosenweg9.ch` |
 | WhatsApp-Gateway | CT 116, `100.64.2.39:2525` | Mail → WhatsApp für `*@whatsapp.rosenweg4303.ch`, nur über PMG (siehe [`../whatsapp-bot/README.md`](../whatsapp-bot/README.md)) |
-| Druck-API | CT 111 `cups-server`, `100.64.2.32:8080` | druckt PDFs auf `DruckerR9`/`DruckerR13` |
+| Druck-API | CT 111 `cups-server`, `100.64.2.32:8080` | druckt PDFs auf `DruckerR9`/`DruckerR13`; in der API `api/lib/druckapi.js` (auch für den Scanner-Zettel) |
 
 ## IMAP-Abruf der API
 

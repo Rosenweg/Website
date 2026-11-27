@@ -11,6 +11,7 @@ const sanitizeHtml = require('sanitize-html');
 
 // ─── Ausgelagerte Module (inkrementeller Router-Split) ───────────────
 const { escapeHtml, createSemaphore, normalizePhone, safeId, geheimnisGleich, fehlerFuerClient, hatSteuerzeichen } = require('./lib/utils');
+const druckApi = require('./lib/druckapi'); // Druck-API CT 111 und Gotenberg (Druck per Mail, Scanner-Zettel)
 
 // STWEG-Gruppen-Mapping + pure Klassifizierer -> lib/groups.js
 const { STWEG_GROUPS, parseStweg, getUserStwegs, stwegFolderName, folderStwegNr, isTechnik, isPraesident, getAusschussStwegs, isAusschussForAny, canSeeVerwaltungKontakte } = require('./lib/groups');
@@ -1495,9 +1496,9 @@ app.put('/api/me/wohnung/:id', authMiddleware, async (req, res) => {
 // Change password (sets in both Authentik and AD)
 // Kein Fallback-Geheimnis im Code: ohne AD_PASSWORD_API_SECRET wird das AD nicht
 // mitgesetzt (Authentik schon), die Admin-Funktionen melden es.
-const AD_PASSWORD_API_URL = process.env.AD_PASSWORD_API_URL || 'http://100.64.2.30:8446/';
-const AD_PASSWORD_API_SECRET = process.env.AD_PASSWORD_API_SECRET || '';
-if (!AD_PASSWORD_API_SECRET) console.warn('[ad-password] AD_PASSWORD_API_SECRET fehlt — Passwoerter werden nicht ins AD uebernommen');
+// Passwort-API auf dc1: lib/adpasswort.js (AD_PASSWORD_API_URL, AD_PASSWORD_API_SECRET).
+const adPasswort = require('./lib/adpasswort');
+if (!adPasswort.eingerichtet()) console.warn('[ad-password] AD_PASSWORD_API_SECRET fehlt — Passwoerter werden nicht ins AD uebernommen');
 
 // Passwortwechsel nur aus einer frischen Anmeldung mit dem Rosenweg-Konto: ein
 // gestohlenes Sitzungstoken (oder eine OTP-Sitzung) allein reicht nicht, um das
@@ -1566,30 +1567,14 @@ app.post('/api/change-password', authMiddleware, async (req, res) => {
   }
 
   // Step 2: Set new password in AD
-  if (!AD_PASSWORD_API_SECRET) {
+  if (!adPasswort.eingerichtet()) {
     console.error('[change-password] AD_PASSWORD_API_SECRET fehlt — AD-Passwort nicht gesetzt');
     return res.json({ status: 'ok', message: 'Passwort wurde geändert (Windows-Anmeldung wird nicht mitgeführt)' });
   }
-  try {
-    const adResp = await fetch(AD_PASSWORD_API_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${AD_PASSWORD_API_SECRET}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ username: akUsername, password: new_password }),
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!adResp.ok) {
-      const err = await adResp.text();
-      console.error('AD password change failed:', err);
-      // Don't fail the whole request - Authentik password is already changed
-    } else {
-      console.log(`[change-password] AD password set for ${akUsername}`);
-    }
-  } catch (err) {
-    console.error('AD password sync error:', err.message);
-  }
+  // Scheitert es, bleibt der Wechsel trotzdem gueltig: Authentik ist schon gesetzt.
+  const ad = await adPasswort.setzen(akUsername, new_password);
+  if (ad.ok) console.log(`[change-password] AD password set for ${akUsername}`);
+  else console.error('AD password change failed:', ad.fehler);
 
   res.json({ status: 'ok', message: 'Passwort wurde geändert' });
 });
@@ -5040,10 +5025,9 @@ async function pollGmailForVerteiler() {
             // Normalize: druckerr9+tag@domain → match on druckerr9
             const printerBase = verteilerAddress.split('+')[0].split('@')[0];
             const printer = printerBase === 'druckerr9' ? 'DruckerR9' : 'DruckerR13';
-            const PRINT_API = process.env.PRINT_API_URL || 'http://100.64.2.32:8080';
-            // Kein Fallback-Geheimnis im Code: ohne PRINT_API_SECRET wird nicht gedruckt.
-            const PRINT_TOKEN = process.env.PRINT_API_SECRET || '';
-            if (!PRINT_TOKEN) {
+            // Druck-API auf CT 111 (lib/druckapi.js, PRINT_API_URL). Kein Fallback-Geheimnis
+            // im Code: ohne PRINT_API_SECRET wird nicht gedruckt.
+            if (!druckApi.eingerichtet()) {
               console.error(`[Print] PRINT_API_SECRET fehlt — Druckauftrag an ${verteilerAddress} nicht verarbeitet (UID ${uid})`);
               await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
               continue;
@@ -5347,23 +5331,12 @@ async function pollGmailForVerteiler() {
                     await fs.mkdir(dir, { recursive: true });
                     await fs.writeFile(pathModule.join(dir, `${tag}_${wer}_${jobToken.slice(0, 8)}.pdf`), pdfBuf);
                   } catch (e) { console.error(`[Print] Deckblatt-Ablage fehlgeschlagen: ${e.message}`); }
-                  const coverResp = await fetch(`${PRINT_API}/print/${printer}`, {
-                    method: 'POST',
-                    body: pdfBuf,
-                    headers: { 'Authorization': `Bearer ${PRINT_TOKEN}`, 'X-Filename': 'deckblatt.pdf' },
-                    signal: AbortSignal.timeout(30000),
-                  });
-                  const coverResult = await coverResp.json();
+                  const coverResult = await druckApi.drucken(printer, pdfBuf, 'deckblatt.pdf');
                   console.log(`[Print] Cover page (PDF) → ${printer}: ${coverResult.status}`);
                 } else {
                   // Fallback: print as plain text
                   const fallback = `DRUCKAUFTRAG - ${printer}\n${recipientInfo ? `Für: ${recipientInfo.name}\n${recipientInfo.strasse || ''}\n${recipientInfo.wohnung || ''}` : recipientTag || ''}\nVon: ${senderEmailRaw}\nBetreff: ${parsed.subject}\nDatum: ${now}\nDokumente: ${totalItems}`;
-                  const coverResp = await fetch(`${PRINT_API}/print/${printer}`, {
-                    method: 'POST',
-                    body: Buffer.from(fallback),
-                    headers: { 'Authorization': `Bearer ${PRINT_TOKEN}`, 'X-Filename': 'deckblatt.txt' },
-                    signal: AbortSignal.timeout(30000),
-                  });
+                  await druckApi.drucken(printer, Buffer.from(fallback), 'deckblatt.txt');
                   console.log(`[Print] Cover page (text fallback) → ${printer}`);
                 }
               } catch (e) { console.error(`[Print] Cover failed: ${e.message}`); }
@@ -5373,13 +5346,7 @@ async function pollGmailForVerteiler() {
               if (bodyText.length > 10) {
                 try {
                   const body = Buffer.from(parsed.text || parsed.html || '');
-                  const bodyResp = await fetch(`${PRINT_API}/print/${printer}`, {
-                    method: 'POST',
-                    body: body,
-                    headers: { 'Authorization': `Bearer ${PRINT_TOKEN}`, 'X-Filename': 'email-body.txt' },
-                    signal: AbortSignal.timeout(30000),
-                  });
-                  const bodyResult = await bodyResp.json();
+                  const bodyResult = await druckApi.drucken(printer, body, 'email-body.txt');
                   console.log(`[Print] Email body → ${printer}: ${bodyResult.status}`);
                   printed++;
                 } catch (e) { console.error(`[Print] Body failed: ${e.message}`); }
@@ -5388,13 +5355,7 @@ async function pollGmailForVerteiler() {
               // Print attachments
               for (const att of printableAtts) {
                 try {
-                  const printResp = await fetch(`${PRINT_API}/print/${printer}`, {
-                    method: 'POST',
-                    body: att.content,
-                    headers: { 'Authorization': `Bearer ${PRINT_TOKEN}`, 'X-Filename': att.filename },
-                    signal: AbortSignal.timeout(30000),
-                  });
-                  const result = await printResp.json();
+                  const result = await druckApi.drucken(printer, att.content, att.filename);
                   console.log(`[Print] ${att.filename} → ${printer}: ${result.status} ${result.message || ''}`);
                   printed++;
                 } catch (printErr) {
@@ -10804,15 +10765,9 @@ app.post('/api/admin/users', authMiddleware, requirePermission('bewohner-verwalt
     }
     // Sync password to AD DC – nur fuer das eben NEU angelegte Konto (Kollision
     // oben ausgeschlossen) und nur durch Technik/Praesident.
-    if (isAdmin && password && username && user?.pk && AD_PASSWORD_API_SECRET) {
-      try {
-        await fetch(AD_PASSWORD_API_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${AD_PASSWORD_API_SECRET}` },
-          body: JSON.stringify({ username, password }),
-          signal: AbortSignal.timeout(10000),
-        });
-      } catch (e) { console.error('AD password sync failed:', e.message); }
+    if (isAdmin && password && username && user?.pk && adPasswort.eingerichtet()) {
+      const ad = await adPasswort.setzen(username, password);
+      if (!ad.ok) console.error('AD password sync failed:', ad.fehler);
     }
     res.json(user);
   } catch (err) {
@@ -11115,6 +11070,8 @@ app.use('/api/salz', salz.salzRouter({ rateLimitGuard }));
 // SICHERUNGEN: PBS-Übersicht und PC-Sicherungen per Netzstart -> routes/sicherungen.js (sicherungen.html)
 const sicherungen = require('./routes/sicherungen');
 app.use('/api/sicherungen', sicherungen.sicherungenRouter({ pveAPI }));
+// SCANNER: eigenes AD-Konto je Scanner, Passwort per Zettel auf DruckerR9 -> routes/scanner.js (scanner.html)
+app.use('/api/scanner', require('./routes/scanner').scannerRouter({ gotenbergSemaphore, rateLimitGuard }));
 
 // Rosenweg Messenger auf dem eigenen Handy: Zugang je Geraet -> routes/messenger-zugang.js
 const messengerZugang = require('./routes/messenger-zugang');

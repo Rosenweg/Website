@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scanner - Rosenweg</title>
+    <link rel="icon" href="/logo-rosenweg.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=6"></script>
+    <script src="/js/nav.js?v=3"></script>
+    <style>
+        .knopf { padding:.45rem .8rem; border-radius:.5rem; font-size:.9rem; background:#e2e8f0; white-space:nowrap; }
+        .knopf:hover { background:#cbd5e1; }
+        .knopf.blau { background:#1e3a8a; color:#fff; }
+        .knopf.blau:hover { background:#1e40af; }
+        .knopf:disabled { opacity:.5; cursor:not-allowed; }
+        .marke { display:inline-block; padding:.05rem .5rem; border-radius:999px; font-size:.75rem; white-space:nowrap; }
+        .m-gut { background:#dcfce7; color:#166534; }
+        .m-warn { background:#fef3c7; color:#92400e; }
+        .m-schlecht { background:#fee2e2; color:#991b1b; }
+        .m-grau { background:#f1f5f9; color:#475569; }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800">
+<nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+<script>RosenwegNav.init({ active: 'scanner' });</script>
+
+<main class="max-w-5xl mx-auto px-4 py-6 space-y-5">
+    <div class="flex items-center gap-3">
+        <img src="/logo-rosenweg.png" alt="" class="w-12 h-12">
+        <div>
+            <h1 class="text-2xl font-bold">Scanner</h1>
+            <div class="text-sm text-slate-500">Jeder allgemeine Scanner hat ein eigenes Konto. Das Passwort gibt es nur auf Papier.</div>
+        </div>
+    </div>
+
+    <div id="meldung" class="hidden rounded-lg px-4 py-3 text-sm"></div>
+    <div id="laden" class="text-slate-500 text-sm">Lade …</div>
+    <div id="gate" class="hidden bg-white rounded-xl shadow p-5">
+        <p class="mb-3">Bitte zuerst mit dem Rosenweg-Konto anmelden.</p>
+        <div id="login-container"></div>
+    </div>
+    <div id="keinRecht" class="hidden bg-white rounded-xl shadow p-5 text-sm">Die Scanner-Konten verwaltet nur die Technik.</div>
+
+    <div id="inhalt" class="hidden space-y-5">
+        <div id="fehlt" class="hidden rounded-lg bg-amber-50 text-amber-900 text-sm px-4 py-3"></div>
+
+        <div class="bg-white rounded-xl shadow overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="text-left text-slate-500 border-b">
+                    <tr>
+                        <th class="px-4 py-3 font-medium">Scanner</th>
+                        <th class="px-4 py-3 font-medium">Standort</th>
+                        <th class="px-4 py-3 font-medium">Konto</th>
+                        <th class="px-4 py-3 font-medium">Passwort zuletzt gesetzt</th>
+                        <th class="px-4 py-3"></th>
+                    </tr>
+                </thead>
+                <tbody id="liste"></tbody>
+            </table>
+        </div>
+
+        <div class="bg-white rounded-xl shadow p-5 text-sm space-y-2">
+            <div class="font-medium">So geht es</div>
+            <ol class="list-decimal pl-5 space-y-1 text-slate-700">
+                <li>Beim Scanner auf <strong>«Neues Passwort drucken»</strong> drücken. Der Zettel kommt aus <strong id="druckerName">DruckerR9</strong> (Rosenweg 9).</li>
+                <li>Ab jetzt gilt nur noch das neue Passwort. Die Werte vom Zettel am Gerät eintragen (auf dem Zettel steht, wo).</li>
+                <li>Einen Testscan machen. Er landet im Ordner <code>Scans/&lt;Konto&gt;</code> unter «Dokumente».</li>
+                <li>Den Zettel vernichten.</li>
+            </ol>
+            <p class="text-slate-500">Das Passwort erscheint nie auf dieser Seite und wird nirgends gespeichert. Ist der Zettel weg, einfach ein neues drucken.
+                DruckerR9 (Brother DCP-1612W) selbst kann nicht auf eine Freigabe scannen und steht deshalb nicht in der Liste; mit ihm scannt man an einer Station.</p>
+        </div>
+
+        <details class="bg-white rounded-xl shadow p-5 text-sm">
+            <summary class="cursor-pointer font-medium">Protokoll (letzte 30)</summary>
+            <table class="w-full mt-3">
+                <thead class="text-left text-slate-500 border-b"><tr><th class="py-2 pr-3 font-medium">Wann</th><th class="py-2 pr-3 font-medium">Scanner</th><th class="py-2 pr-3 font-medium">Wer</th><th class="py-2 pr-3 font-medium">Ergebnis</th></tr></thead>
+                <tbody id="protokoll"></tbody>
+            </table>
+        </details>
+    </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const datum = t => t ? new Date(t).toLocaleString('de-CH', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '–';
+const ERGEBNIS = {
+    'ok': '<span class="marke m-gut">gedruckt und gesetzt</span>',
+    'pdf-fehler': '<span class="marke m-grau">nichts geändert (Zettel)</span>',
+    'druck-fehler': '<span class="marke m-grau">nichts geändert (Drucker)</span>',
+    'ad-fehler': '<span class="marke m-schlecht">AD nicht gesetzt</span>',
+    'kein-konto': '<span class="marke m-schlecht">Konto fehlt im AD</span>',
+    'ad-unklar': '<span class="marke m-warn">AD unklar</span>',
+};
+let daten = null;
+
+function melde(text, art) {
+    const m = $('meldung');
+    m.textContent = text;
+    m.className = 'rounded-lg px-4 py-3 text-sm ' + (art === 'fehler' ? 'bg-red-100 text-red-800' : art === 'warn' ? 'bg-amber-100 text-amber-900' : 'bg-green-100 text-green-800');
+}
+async function api(pfad, opts) {
+    const r = await AuthentikAuth.apiFetch('/api/scanner' + pfad, opts);
+    const d = await r.json().catch(() => ({ error: 'Server gerade nicht erreichbar' }));
+    return { ok: r.ok, status: r.status, d };
+}
+
+async function lade() {
+    const { ok, d } = await api('');
+    if (!ok) { melde(d.error || 'Fehler beim Laden', 'fehler'); return; }
+    daten = d;
+    $('druckerName').textContent = d.drucker;
+    $('fehlt').classList.toggle('hidden', !d.fehlt.length);
+    $('fehlt').textContent = d.fehlt.length ? 'Auf dem Server fehlt: ' + d.fehlt.join(', ') + '. Bis dahin lässt sich kein Passwort drucken.' : '';
+    $('liste').innerHTML = d.scanner.map(s => `
+        <tr class="border-b last:border-0">
+            <td class="px-4 py-3"><div class="font-medium">${esc(s.name)}</div><div class="text-xs text-slate-500">${esc(s.modell)} · ${esc(s.ip)}</div></td>
+            <td class="px-4 py-3">${esc(s.standort)}</td>
+            <td class="px-4 py-3 font-mono">${esc(s.konto)}</td>
+            <td class="px-4 py-3">${s.gesetzt ? `${esc(datum(s.gesetzt.zeit))}<div class="text-xs text-slate-500">${esc(s.gesetzt.von)}</div>` : '<span class="marke m-warn">noch nie über diese Seite</span>'}</td>
+            <td class="px-4 py-3 text-right"><button class="knopf blau" id="k-${esc(s.id)}" onclick="drucken('${esc(s.id)}')" ${d.fehlt.length ? 'disabled' : ''}>Neues Passwort drucken</button></td>
+        </tr>`).join('') || '<tr><td class="px-4 py-3 text-slate-500" colspan="5">Keine Scanner eingetragen.</td></tr>';
+    const namen = new Map(d.scanner.map(s => [s.id, s.name]));
+    $('protokoll').innerHTML = d.protokoll.map(z => `
+        <tr class="border-b last:border-0"><td class="py-2 pr-3 whitespace-nowrap">${esc(datum(z.zeit))}</td><td class="py-2 pr-3">${esc(namen.get(z.scanner_id) || z.scanner_id)}</td>
+        <td class="py-2 pr-3">${esc(z.name || z.email || '?')}${z.art && z.art !== 'website' ? ` <span class="marke m-grau">${esc(z.art)}</span>` : ''}</td><td class="py-2 pr-3">${ERGEBNIS[z.ergebnis] || esc(z.ergebnis)}</td></tr>`).join('')
+        || '<tr><td class="py-2 text-slate-500" colspan="4">Noch nichts gedruckt.</td></tr>';
+}
+
+async function drucken(id) {
+    const s = daten.scanner.find(x => x.id === id);
+    if (!confirm(`Neues Passwort für ${s.name} (${s.standort}) drucken?\n\nDer Zettel kommt aus ${daten.drucker}. Das bisherige Passwort gilt danach nicht mehr — ${s.name} scannt erst wieder, wenn das neue am Gerät eingetragen ist.`)) return;
+    const k = $('k-' + id);
+    k.disabled = true; k.textContent = 'Drucke …';
+    try {
+        const { ok, status, d } = await api(`/${encodeURIComponent(id)}/passwort-drucken`, { method: 'POST' });
+        if (status === 202 && d.bestaetigung) melde(d.hinweis, 'warn');            // mit der Karte, falls bestätigt werden muss
+        else if (ok) melde(d.meldung);
+        else melde(d.meldung || d.error || ('Fehler ' + status), d.ergebnis === 'ad-unklar' ? 'warn' : 'fehler');
+    } catch (e) {
+        melde('Keine Antwort vom Server. Im Protokoll nachsehen, ob gedruckt wurde.', 'fehler');
+    }
+    await lade();
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
+    const user = await AuthentikAuth.init({ requireAuth: false });
+    $('laden').classList.add('hidden');
+    if (!user) { $('gate').classList.remove('hidden'); AuthentikAuth.createLoginButton('login-container'); return; }
+    const groups = (user.groups || []).map(g => g.toLowerCase());
+    if (!groups.includes('technik') && !groups.includes('präsident') && !groups.includes('praesident')) {
+        $('keinRecht').classList.remove('hidden'); return;
+    }
+    $('inhalt').classList.remove('hidden');
+    lade();
+});
+</script>
+</body>
+</html>

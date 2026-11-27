@@ -65,7 +65,7 @@ const BEREICHE = [
   ['admin/email-alias', 'E-Mail-Aliase'], ['personen', 'Personen'],
   ['ssh/me/schluessel', 'Eigene SSH-Schlüssel'], ['ssh/me/github', 'SSH-Schlüssel von GitHub'],
   ['ssh/matrix', 'SSH-Zugriffsmatrix'], ['ssh', 'SSH-Zugang'],
-  ['stations/v2', 'Stationen (Befehle)'], ['stations', 'Stationen'], ['sicherungen', 'Sicherungen'],
+  ['stations/v2', 'Stationen (Befehle)'], ['stations', 'Stationen'], ['sicherungen', 'Sicherungen'], ['scanner', 'Scanner-Konten'],
   ['pbx', 'Telefonanlage'], ['whatsapp', 'WhatsApp'], ['isp', 'Internet (ISP)'], ['pve-messages', 'Proxmox-Meldungen'],
   ['access', 'Türen und Zutritt'], ['wasch', 'Waschküche'], ['mqtt', 'MQTT'], ['display', 'Anzeigen'],
   ['mail-approval-config', 'Mail-Freigabe-Regeln'], ['verwaltung-mail-queue', 'Verwaltungs-Mails'],
@@ -82,6 +82,7 @@ const VERBEN = {
   abgleich: 'abgeglichen', reactivate: 'wieder aktiviert', cancel: 'abgebrochen', provision: 'eingerichtet',
   bootstrap: 'eingerichtet', approve: 'genehmigt', reject: 'abgelehnt', befehle: 'Befehl geschickt',
   'add_user': 'Person aufgenommen', 'remove_user': 'Person entfernt',
+  'passwort-drucken': 'neues Passwort gedruckt',
 };
 function aktionText(methode, pfad) {
   const p = pfadNormal(pfad);
