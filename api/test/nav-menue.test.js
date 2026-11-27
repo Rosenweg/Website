@@ -1,0 +1,54 @@
+// node --test api/test/nav-menue.test.js — Menü in js/nav.js (Befunde B6, B9):
+// Seiten im Menü, Verwaltungsmenü nur mit Seitenrecht, Adressen ohne Umlaut.
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const WURZEL = path.join(__dirname, '..', '..');
+const quelle = fs.readFileSync(path.join(WURZEL, 'js', 'nav.js'), 'utf8');
+
+function konstanten() {
+  // Nur die Konstanten oben in nav.js auswerten (wie api/lib/stationapps.js).
+  const kopf = quelle.slice(0, quelle.indexOf('const RosenwegNav'));
+  const sb = {};
+  vm.runInNewContext(kopf + '\nglobalThis.__k = { VERWALTUNG_NAV, VERWALTUNG_NAV_GRUPPE, TELEFON_NAV_GRUPPEN, WASCH_NAV_GRUPPEN };', sb);
+  return sb.__k;
+}
+
+test('Verwaltungsmenü: jede Seite gibt es, Adresse ohne Umlaut, jeder Eintrag mit Seitenrecht', () => {
+  const k = konstanten();
+  assert.equal(k.VERWALTUNG_NAV_GRUPPE, 'verwaltung');
+  assert.ok(k.VERWALTUNG_NAV.length >= 5);
+  for (const v of k.VERWALTUNG_NAV) {
+    assert.match(v.href, /^[a-z0-9-]+\.html$/, v.href);
+    assert.ok(fs.existsSync(path.join(WURZEL, v.href)), v.href + ' fehlt');
+    assert.ok(v.permAny && v.permAny.split(',').every(Boolean), v.label + ' ohne Recht');
+  }
+  const hrefs = k.VERWALTUNG_NAV.map(v => v.href);
+  assert.ok(hrefs.includes('objektverwaltung.html'));
+  assert.ok(hrefs.includes('unterschriftenliste-ruecklaeufe.html'));
+});
+
+test('Bewohner-Menü zeigt Mein Telefon, Smartphones, Apps und Waschküche', () => {
+  for (const seite of ['mein-telefon.html', 'smartphones.html', 'apps.html', 'waschkueche.html']) {
+    const n = quelle.split('${base}' + seite + '"').length - 1;
+    assert.ok(n >= 2, seite + ': Desktop und Handy erwartet, gefunden ' + n);
+  }
+  const k = konstanten();
+  assert.match(k.TELEFON_NAV_GRUPPEN, /bewohner/);
+  assert.match(k.WASCH_NAV_GRUPPEN, /bewohner/);
+});
+
+test('Verwaltungsmenü ist an die Gruppe gebunden (Desktop und Handy)', () => {
+  const n = quelle.split('data-nur-gruppe="${VERWALTUNG_NAV_GRUPPE}"').length - 1;
+  assert.equal(n, 2);
+  assert.match(quelle, /querySelectorAll\('\[data-nur-gruppe\]'\)/);
+});
+
+test('alte Rückläufe-Adresse mit Umlaut leitet auf die neue weiter', () => {
+  const alt = fs.readFileSync(path.join(WURZEL, 'unterschriftenliste-rueckläufe.html'), 'utf8');
+  assert.match(alt, /location\.replace\('\/unterschriftenliste-ruecklaeufe\.html' \+ location\.search/);
+  assert.ok(fs.existsSync(path.join(WURZEL, 'unterschriftenliste-ruecklaeufe.html')));
+});

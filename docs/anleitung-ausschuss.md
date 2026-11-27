@@ -569,7 +569,7 @@ generierte Unterschriftenlisten“** stehen je Liste die Links **Ansehen**, **PD
 Hinweis: Der PDF-Link einer erzeugten Liste ist ohne Anmeldung abrufbar, wenn man
 den 12-stelligen Hash kennt. Links daher nicht öffentlich weitergeben.
 
-### 9.2 Rückläufe erfassen (`unterschriftenliste-rueckläufe.html`)
+### 9.2 Rückläufe erfassen (`unterschriftenliste-ruecklaeufe.html`)
 
 Die Seite hat keinen Menüeintrag; Adresse direkt aufrufen.
 
