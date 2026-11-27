@@ -17,6 +17,13 @@ test('ruft die Anlage mit Geheimnis und kleingeschriebener E-Mail', async () => 
   assert.deepEqual(JSON.parse(gesehen.opts.body), { email: 'anna@example.org' });
 });
 
+test('meldet gescheiterte Schritte der Anlage', async () => {
+  const fetchFn = async () => ({ ok: true, json: async () => ({ ok: false, schritte: { sitzungen: { ok: true }, nextcloud: { ok: false, fehler: 'x' } } }) });
+  const r = await personLoeschen({ url: 'http://pbx', secret: 's', email: 'a@b.ch', fetchFn });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.fehlgeschlagen, ['nextcloud']);
+});
+
 test('Fehler der Anlage brechen die Loeschung nicht ab', async () => {
   assert.equal((await personLoeschen({ url: 'http://pbx', secret: 's', email: 'a@b.ch', fetchFn: async () => ({ ok: false, status: 401 }) })).grund, 'HTTP 401');
   assert.equal((await personLoeschen({ url: 'http://pbx', secret: 's', email: 'a@b.ch', fetchFn: async () => { throw new TypeError('x'); } })).ok, false);

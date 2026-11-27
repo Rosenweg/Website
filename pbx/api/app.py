@@ -3567,19 +3567,130 @@ def telefon_hintergrund():
         conn.close()
 
 
-# Was die Anlage beim Loeschen eines Kontos entfernt (Stefan 27.11.2026: "alles Persoenliche").
-# Nicht hier, weil mit eigenen Ablaeufen (Entscheid offen): telefon_sitzungen (Abmelden),
-# telefon_nextcloud (Widerruf), telefon_sip_person / telefon_sip_privat (SIP-Zugaenge, pjsip neu
-# schreiben), personen_nummern (Nummernplan), telefon_log und calls (Protokoll, Voicemails).
+# Konto geloescht (Stefan 27.11.2026: "alles loeschen, ueber die richtigen Ablaeufe"). Zuerst
+# abmelden und widerrufen, dann loeschen; Anruf- und Anmeldeprotokoll werden anonymisiert (die
+# Zahlen bleiben fuer die Statistik). Jeder Schritt einzeln: scheitert einer, wird er protokolliert
+# und der Rest laeuft weiter. Nicht angefasst: telefon_fernwartung (Konten der Technik).
+GELOESCHT = "gelöscht"
 PERSON_LOESCHEN_TABELLEN = ("telefon_einstellungen", "telefon_pin", "telefon_ausweise")
+
+
+def _loeschen_sitzungen(conn, email, k):
+    exts = [r["ext"] for r in conn.execute("SELECT ext FROM telefon_sitzungen WHERE lower(email) = ?", (email,))]
+    for ext in exts:
+        _telefon_abmelden(conn, ext, "loeschung")
+    conn.commit()
+    return {"abgemeldet": exts}
+
+
+def _loeschen_nextcloud(conn, email, k):
+    exts = [r["ext"] for r in conn.execute("SELECT ext FROM telefon_nextcloud WHERE lower(email) = ?", (email,))]
+    fehler = []
+    for ext in exts:
+        with _nc_sperre(ext):
+            if NC_TOKEN_URL and not _nextcloud_widerruf_senden(email, ext):
+                fehler.append(ext)
+                continue
+            conn.execute("DELETE FROM telefon_nextcloud WHERE ext = ? AND lower(email) = ?", (ext, email))
+            conn.commit()
+    if fehler:
+        raise RuntimeError("Widerruf fehlgeschlagen: " + ", ".join(fehler))
+    return {"widerrufen": exts}
+
+
+def _loeschen_sip(conn, email, k):
+    person = conn.execute("DELETE FROM telefon_sip_person WHERE lower(email) = ?", (email,)).rowcount
+    privat = conn.execute("DELETE FROM telefon_sip_privat WHERE lower(email) = ?", (email,)).rowcount
+    conn.commit()
+    # Immer neu schreiben (auch wenn die Zeilen schon weg sind): ein frueherer Versuch kann nach
+    # dem Loeschen am pjsip-Reload gescheitert sein - so holt ein zweiter Aufruf ihn nach.
+    regenerate_phones_conf(conn)   # schreibt pjsip_phones.conf und laedt pjsip neu
+    return {"sip_person": person, "sip_privat": privat, "pjsip_neu": True}
+
+
+def _loeschen_combox(conn, email, k):
+    dateien = set()
+    for n in k["nummern"]:
+        if os.path.isdir(VM_PERSON_DIR):
+            dateien |= {os.path.join(VM_PERSON_DIR, f) for f in os.listdir(VM_PERSON_DIR) if f.startswith(n + "-")}
+    for r in conn.execute("SELECT voicemail_path FROM calls WHERE lower(ziel_person) = ? AND voicemail_path IS NOT NULL",
+                          (email,)):
+        pfad = os.path.realpath(r["voicemail_path"])
+        if pfad.startswith(os.path.realpath(VM_PERSON_DIR) + "/"):
+            dateien.add(pfad)
+    weg = 0
+    for f in sorted(dateien):
+        if os.path.isfile(f):
+            os.remove(f)
+            weg += 1
+    eintraege = conn.execute(
+        "UPDATE calls SET voicemail_path = NULL, voicemail_transcript = NULL, voicemail_summary = NULL "
+        "WHERE lower(ziel_person) = ? AND (voicemail_path IS NOT NULL OR voicemail_transcript IS NOT NULL "
+        "OR voicemail_summary IS NOT NULL)", (email,)).rowcount
+    conn.commit()
+    return {"dateien": weg, "eintraege": eintraege}
+
+
+def _loeschen_nummern(conn, email, k):
+    n = conn.execute("DELETE FROM personen_nummern WHERE lower(email) = ?", (email,)).rowcount
+    conn.commit()
+    gemeldet = None
+    # Scheitert die Meldung, holt sie der stuendliche Personen-Abgleich nach (meldet die ganze Liste)
+    if n:
+        # Website: PUT /api/pbx/personen/nummern ersetzt das ganze Abbild -> die Nummer ist dort weg
+        gemeldet = personen_nummern_melden(conn)
+        if not gemeldet:
+            raise RuntimeError(f"{n} Nummer(n) freigegeben, Meldung an die Website fehlgeschlagen")
+    return {"nummern": k["nummern"], "website": gemeldet}
+
+
+def _loeschen_daten(conn, email, k):
+    d = {t: conn.execute(f"DELETE FROM {t} WHERE lower(email) = ?", (email,)).rowcount
+         for t in PERSON_LOESCHEN_TABELLEN}
+    d["hintergrund"] = bool(conn.execute("SELECT 1 FROM telefon_hintergrund WHERE lower(email) = ?",
+                                         (email,)).fetchone()) or os.path.isfile(_hintergrund_datei(email))
+    _hintergrund_loeschen(conn, email)
+    conn.commit()
+    return d
+
+
+def _loeschen_calls(conn, email, k):
+    n = conn.execute("UPDATE calls SET person = ? WHERE lower(person) = ?", (GELOESCHT, email)).rowcount
+    n += conn.execute("UPDATE calls SET ziel_person = ? WHERE lower(ziel_person) = ?", (GELOESCHT, email)).rowcount
+    for nr in k["nummern"]:
+        for sp in ("caller_id", "dialed", "ext", "ziel_ext"):
+            n += conn.execute(f"UPDATE calls SET {sp} = ? WHERE {sp} = ? OR {sp} LIKE ? OR {sp} LIKE ?",
+                              (GELOESCHT, nr, nr + "-%", "%<" + nr + ">%")).rowcount
+    conn.commit()
+    return {"felder": n}
+
+
+def _loeschen_log(conn, email, k):
+    n = conn.execute("UPDATE telefon_log SET email = ?, name = ? WHERE lower(email) = ?",
+                     (GELOESCHT, GELOESCHT, email)).rowcount
+    n += conn.execute("UPDATE telefon_log SET durch = ? WHERE lower(durch) = ?", (GELOESCHT, email)).rowcount
+    conn.commit()
+    return {"zeilen": n}
+
+
+PERSON_LOESCHEN_SCHRITTE = (
+    ("sitzungen", _loeschen_sitzungen),     # abmelden (_telefon_abmelden)
+    ("nextcloud", _loeschen_nextcloud),     # App-Passwoerter widerrufen (nc-token /widerrufen)
+    ("sip", _loeschen_sip),                 # SIP-Zugaenge weg, pjsip_phones.conf neu + reload
+    ("combox", _loeschen_combox),           # persoenliche Sprachnachrichten (VM_PERSON_DIR)
+    ("nummern", _loeschen_nummern),         # Nummer freigeben, Website melden
+    ("daten", _loeschen_daten),             # Einstellungen, PIN, Anmelde-QR, Hintergrund
+    ("anrufe", _loeschen_calls),            # anonymisieren
+    ("protokoll", _loeschen_log),           # anonymisieren
+)
 
 
 @app.post("/api/pbx/person/loeschen")
 def pbx_person_loeschen():
     """Haupt-API (X-PBX-Secret) nach dem Loeschen eines Kontos (Loeschungen, processAuthentiKDeletions
-    -> lokalesKontoNachLoeschung): persoenliche Daten der Person auf der Anlage entfernen -
-    Einstellungen der Apps, PIN, offene Anmelde-QR und das Hintergrundbild (Datei + Zeile).
-    {email} -> {ok, hintergrund (bool), entfernt: {tabelle: zeilen}}"""
+    -> lokalesKontoNachLoeschung): alles Persoenliche der Person auf der Anlage, ueber die
+    bestehenden Ablaeufe (siehe PERSON_LOESCHEN_SCHRITTE). {email} ->
+    {ok (alle Schritte ok), hintergrund, schritte: {name: {ok, ..., fehler?}}}"""
     err = require_agi()
     if err:
         return err
@@ -3588,20 +3699,23 @@ def pbx_person_loeschen():
         return jsonify({"error": "email fehlt"}), 400
     conn = db.connect()
     try:
-        entfernt = {}
-        for t in PERSON_LOESCHEN_TABELLEN:
-            entfernt[t] = conn.execute(f"DELETE FROM {t} WHERE lower(email) = ?", (email,)).rowcount
-        hatte = bool(conn.execute("SELECT 1 FROM telefon_hintergrund WHERE lower(email) = ?", (email,)).fetchone()) \
-            or os.path.isfile(_hintergrund_datei(email))
-        entfernt["telefon_hintergrund"] = conn.execute(
-            "DELETE FROM telefon_hintergrund WHERE lower(email) = ?", (email,)).rowcount
-        _hintergrund_loeschen(conn, email)
-        conn.commit()
+        k = {"nummern": [r["nummer"] for r in conn.execute(
+            "SELECT nummer FROM personen_nummern WHERE lower(email) = ? ORDER BY nummer", (email,))]}
+        schritte = {}
+        for name, schritt in PERSON_LOESCHEN_SCHRITTE:
+            try:
+                schritte[name] = {"ok": True, **schritt(conn, email, k)}
+            except Exception as e:  # noqa: BLE001 - weiter mit dem Rest, Schritt einzeln melden
+                conn.rollback()
+                app.logger.warning("Konto-Loeschung, Schritt %s: %s %s", name, type(e).__name__, e)
+                schritte[name] = {"ok": False, "fehler": f"{type(e).__name__}: {e}"[:300]}
     finally:
         conn.close()
-    if any(entfernt.values()) or hatte:
-        app.logger.info("Konto geloescht: persoenliche Daten auf der Anlage entfernt %s", entfernt)
-    return jsonify({"ok": True, "hintergrund": hatte, "entfernt": entfernt})
+    app.logger.info("Konto geloescht: Anlage %s",
+                    {n: ("ok" if s["ok"] else "FEHLER") for n, s in schritte.items()})
+    return jsonify({"ok": all(s["ok"] for s in schritte.values()),
+                    "hintergrund": bool(schritte.get("daten", {}).get("hintergrund")),
+                    "schritte": schritte, "reihenfolge": [n for n, _ in PERSON_LOESCHEN_SCHRITTE]})
 
 
 @app.delete("/api/telefon/ich/hintergrund")
@@ -3716,14 +3830,16 @@ def personen_nummern_melden(conn):
     rows = db.rows_to_dicts(conn.execute(
         "SELECT nummer, email, name, wohnung, haus, aktiv FROM personen_nummern ORDER BY nummer").fetchall())
     if not rows:
-        return
+        return False
     try:
         r = requests.put(f"{MAIN_API_BASE}/api/pbx/personen/nummern", json={"nummern": rows},
                          headers={"X-PBX-Secret": PBX_SHARED_SECRET}, timeout=20)
         if not r.ok:
             app.logger.warning("Nummern an die Website: HTTP %s", r.status_code)
+        return bool(r.ok)
     except requests.RequestException as e:
         app.logger.warning("Nummern an die Website: %s", type(e).__name__)
+        return False
 
 
 def _personen_abgleich_schleife():
@@ -3779,6 +3895,19 @@ def _nc_sperre(ext):
         return _NC_SPERREN.setdefault(ext, threading.Lock())
 
 
+def _nextcloud_widerruf_senden(email, ext):
+    """App-Passwort "Rosenweg Geraet <ext>" der Person bei nc-token widerrufen. -> True wenn ok."""
+    try:
+        r = requests.post(f"{NC_TOKEN_URL}/widerrufen", json={"email": email, "name": _nc_name(ext)},
+                          headers={"X-NC-Token-Secret": NC_TOKEN_SECRET}, timeout=60)
+        if not r.ok:
+            app.logger.warning("Nextcloud-Widerruf %s: HTTP %s", ext, r.status_code)
+        return bool(r.ok)
+    except Exception as e:  # noqa: BLE001
+        app.logger.warning("Nextcloud-Widerruf %s: %s", ext, type(e).__name__)
+        return False
+
+
 def _nextcloud_widerrufen(conn, ext, sofort=False):
     """App-Passwort der Person auf diesem Geraet loeschen (beim Abmelden). Im Hintergrund, unter
     der Sperre der Nebenstelle (sonst koennte es ein gerade neu ausgestelltes treffen);
@@ -3790,11 +3919,7 @@ def _nextcloud_widerrufen(conn, ext, sofort=False):
     email = r["email"]
 
     def widerruf():
-        try:
-            requests.post(f"{NC_TOKEN_URL}/widerrufen", json={"email": email, "name": _nc_name(ext)},
-                          headers={"X-NC-Token-Secret": NC_TOKEN_SECRET}, timeout=60)
-        except Exception as e:
-            app.logger.warning("Nextcloud-Widerruf %s: %s", ext, type(e).__name__)
+        _nextcloud_widerruf_senden(email, ext)
 
     def los():
         with _nc_sperre(ext):

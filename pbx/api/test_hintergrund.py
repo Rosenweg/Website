@@ -178,66 +178,176 @@ class HintergrundTest(_Basis):
         self.assertEqual(r.status_code, 401)
 
 
+class _Ok:
+    def __init__(self, ok=True, status=200):
+        self.ok, self.status_code = ok, status
+
+
 class PersonLoeschenTest(_Basis):
-    """Loeschungen: die Haupt-API meldet ein geloeschtes Konto, die Anlage entfernt das Bild."""
+    """Loeschungen (Stefan 27.11.2026: "alles loeschen, ueber die richtigen Ablaeufe").
+    Attrappen: pjsip (regenerate_phones_conf), nc-token (requests.post), Website (requests.put)."""
+
+    def setUp(self):
+        super().setUp()
+        self.vm = tempfile.mkdtemp()
+        for name, wert in (("PBX_SHARED_SECRET", "pbx-geheim"), ("VM_PERSON_DIR", self.vm),
+                           ("NC_TOKEN_URL", "http://nc-token.test")):
+            p = mock.patch.object(pbx, name, wert)
+            p.start()
+            self.addCleanup(p.stop)
+        self.pjsip = mock.patch.object(pbx, "regenerate_phones_conf")
+        self.pjsip_m = self.pjsip.start()
+        self.addCleanup(self.pjsip.stop)
+        self.nc = mock.patch.object(pbx.requests, "post", return_value=_Ok())
+        self.nc_m = self.nc.start()
+        self.addCleanup(self.nc.stop)
+        self.web = mock.patch.object(pbx.requests, "put", return_value=_Ok())
+        self.web_m = self.web.start()
+        self.addCleanup(self.web.stop)
+        conn = db.connect()
+        try:
+            for t in ("telefon_einstellungen", "telefon_pin", "telefon_ausweise", "telefon_nextcloud",
+                      "telefon_sip_person", "telefon_sip_privat", "personen_nummern", "calls", "telefon_log"):
+                conn.execute(f"DELETE FROM {t}")
+            for wer, nr in ((ANNA, "301011"), (BERT, "302021")):
+                conn.execute("INSERT INTO personen_nummern (nummer, email, name, aktiv) VALUES (?,?,?,1)",
+                             (nr, wer, wer.split("@")[0]))
+                conn.execute("INSERT INTO telefon_einstellungen (email, paket, werte, geaendert) "
+                             "VALUES (?, 'ch.rosenweg4303.home', '{}', 1)", (wer,))
+                conn.execute("INSERT INTO telefon_pin (email, pin_enc) VALUES (?, 'x')", (wer,))
+                conn.execute("INSERT INTO telefon_ausweise (token_hash, email, name, expires_at) "
+                             "VALUES (?, ?, 'X', '2099-01-01T00:00:00Z')", ("h-" + wer, wer))
+                conn.execute("INSERT INTO telefon_sip_privat (nummer, email, passwort) VALUES (?,?, 'pw')", (nr, wer))
+            conn.execute("INSERT INTO telefon_nextcloud (ext, email, benutzer, pw_enc) VALUES ('2201', ?, 'anna', 'x')",
+                         (ANNA,))
+            conn.execute("INSERT INTO telefon_sip_person (ext, nummer, email, passwort) VALUES ('2201', '301011', ?, 'pw')",
+                         (ANNA,))
+            conn.execute("INSERT INTO telefon_log (ext, ereignis, email, name, durch) VALUES ('2201', 'an', ?, 'Anna', ?)",
+                         (ANNA, ANNA))
+            conn.execute("INSERT INTO calls (direction, caller_id, dialed, uniqueid, ext, person, ziel_ext, ziel_person, "
+                         "voicemail_path, voicemail_transcript) VALUES ('internal', '302021', '301011', 'u1', "
+                         "'302021-p1', ?, '301011-2201', ?, ?, 'Hallo Anna')",
+                         (BERT, ANNA, os.path.join(self.vm, "301011-u1.wav")))
+            conn.execute("INSERT INTO calls (direction, caller_id, dialed, uniqueid, person, ziel_person) "
+                         "VALUES ('internal', '302021', '0611234567', 'u2', ?, NULL)", (BERT,))
+            conn.commit()
+        finally:
+            conn.close()
+        for f in ("301011-u1.wav", "301011-u9.wav", "302021-u5.wav"):
+            open(os.path.join(self.vm, f), "wb").close()
+        self.hoch("2201", _jpeg())
 
     def loeschen(self, email, secret="pbx-geheim"):
         return self.c.post("/api/pbx/person/loeschen", json={"email": email},
                            headers={"X-PBX-Secret": secret})
 
-    def test_bild_und_zeile_weg(self):
-        with mock.patch.object(pbx, "PBX_SHARED_SECRET", "pbx-geheim"):
-            self.hoch("2201", _jpeg())
-            self.hoch("2202", _jpeg(fuell=300))
-            r = self.loeschen(ANNA.upper())
-            self.assertEqual(r.status_code, 200)
-            self.assertTrue(r.get_json()["hintergrund"])
-            conn = db.connect()
-            try:
-                self.assertIsNone(conn.execute("SELECT 1 FROM telefon_hintergrund WHERE email = ?", (ANNA,)).fetchone())
-            finally:
-                conn.close()
-            self.assertFalse(os.path.exists(pbx._hintergrund_datei(ANNA)))
-            self.assertTrue(os.path.exists(pbx._hintergrund_datei(BERT)))   # nur die Person
-            self.assertFalse(self.loeschen(ANNA).get_json()["hintergrund"])  # zweimal: ok
-
-    def test_alles_persoenliche_weg(self):
-        """Stefan 27.11.2026: Einstellungen, PIN, offene Anmelde-QR und Hintergrund - nur dieser Person."""
+    def eins(self, sql, *a):
         conn = db.connect()
         try:
-            for wer in (ANNA, BERT):
-                conn.execute("INSERT OR REPLACE INTO telefon_einstellungen (email, paket, werte, geaendert) "
-                             "VALUES (?, 'ch.rosenweg4303.home', '{}', 1)", (wer,))
-                conn.execute("INSERT OR REPLACE INTO telefon_pin (email, pin_enc) VALUES (?, 'x')", (wer,))
-                conn.execute("INSERT OR REPLACE INTO telefon_ausweise (token_hash, email, name, expires_at) "
-                             "VALUES (?, ?, 'X', '2099-01-01T00:00:00Z')", ("h-" + wer, wer))
+            return conn.execute(sql, a).fetchone()
+        finally:
+            conn.close()
+
+    def test_alle_schritte(self):
+        r = self.loeschen(ANNA.upper())
+        self.assertEqual(r.status_code, 200, r.get_json())
+        d = r.get_json()
+        self.assertTrue(d["ok"], d)
+        self.assertEqual(sorted(d["schritte"]), sorted(d["reihenfolge"]))
+        self.assertEqual(d["reihenfolge"], ["sitzungen", "nextcloud", "sip", "combox", "nummern", "daten",
+                                               "anrufe", "protokoll"])
+        st = d["schritte"]
+        # 1. abgemeldet ueber _telefon_abmelden (Sitzung weg, 'ab' im Protokoll)
+        self.assertEqual(st["sitzungen"]["abgemeldet"], ["2201"])
+        self.assertIsNone(self.eins("SELECT 1 FROM telefon_sitzungen WHERE ext = '2201'"))
+        self.assertIsNotNone(self.eins("SELECT 1 FROM telefon_sitzungen WHERE ext = '2202'"))   # Bert bleibt
+        # 2. Nextcloud bei nc-token widerrufen
+        self.assertEqual(st["nextcloud"]["widerrufen"], ["2201"])
+        url, = self.nc_m.call_args.args
+        self.assertEqual(url, "http://nc-token.test/widerrufen")
+        self.assertEqual(self.nc_m.call_args.kwargs["json"], {"email": ANNA, "name": "Rosenweg Geraet 2201"})
+        self.assertIsNone(self.eins("SELECT 1 FROM telefon_nextcloud"))
+        # 3. SIP-Zugaenge weg, pjsip neu geschrieben
+        self.assertEqual((st["sip"]["sip_person"] + 0, st["sip"]["sip_privat"]), (0, 1))   # sip_person ging mit dem Abmelden
+        self.assertTrue(self.pjsip_m.called)
+        self.assertIsNone(self.eins("SELECT 1 FROM telefon_sip_person"))
+        self.assertIsNone(self.eins("SELECT 1 FROM telefon_sip_privat WHERE email = ?", ANNA))
+        self.assertIsNotNone(self.eins("SELECT 1 FROM telefon_sip_privat WHERE email = ?", BERT))
+        # 4. Combox: Annas Sprachnachrichten weg, Berts bleibt
+        self.assertEqual(st["combox"]["dateien"], 2)
+        self.assertEqual(sorted(os.listdir(self.vm)), ["302021-u5.wav"])
+        self.assertIsNone(self.eins("SELECT voicemail_transcript FROM calls WHERE uniqueid = 'u1'")[0])
+        # 5. Nummer freigegeben und der Website gemeldet (ganze Liste ohne Anna)
+        self.assertEqual(st["nummern"], {"ok": True, "nummern": ["301011"], "website": True})
+        self.assertIsNone(self.eins("SELECT 1 FROM personen_nummern WHERE nummer = '301011'"))
+        gemeldet = self.web_m.call_args.kwargs["json"]["nummern"]
+        self.assertEqual([n["nummer"] for n in gemeldet], ["302021"])
+        # 6. Einstellungen, PIN, Anmelde-QR, Hintergrund
+        self.assertEqual(st["daten"], {"ok": True, "telefon_einstellungen": 1, "telefon_pin": 1,
+                                       "telefon_ausweise": 1, "hintergrund": True})
+        self.assertTrue(d["hintergrund"])
+        for t in ("telefon_einstellungen", "telefon_pin", "telefon_ausweise", "telefon_hintergrund"):
+            self.assertIsNone(self.eins(f"SELECT 1 FROM {t} WHERE lower(email) = ?", ANNA), t)
+            self.assertIsNotNone(self.eins(f"SELECT 1 FROM {t} WHERE email = ?", BERT) if t != "telefon_hintergrund"
+                                 else True, t)
+        self.assertFalse(os.path.exists(pbx._hintergrund_datei(ANNA)))
+        # 7. Anrufe anonymisiert (bleiben fuer die Statistik), Berts Seite unveraendert
+        a = self.eins("SELECT * FROM calls WHERE uniqueid = 'u1'")
+        self.assertEqual((a["ziel_person"], a["dialed"], a["ziel_ext"]), ("gelöscht", "gelöscht", "gelöscht"))
+        self.assertEqual((a["person"], a["caller_id"], a["ext"]), (BERT, "302021", "302021-p1"))
+        self.assertEqual(self.eins("SELECT COUNT(*) FROM calls")[0], 2)
+        # 8. Protokoll anonymisiert, Zeilen bleiben
+        self.assertIsNone(self.eins("SELECT 1 FROM telefon_log WHERE lower(email) = ? OR durch = ?", ANNA, ANNA))
+        self.assertEqual(self.eins("SELECT COUNT(*) FROM telefon_log WHERE email = 'gelöscht' AND name = 'gelöscht'")[0], 2)
+
+    def test_fehler_eines_schritts_rest_laeuft(self):
+        self.nc_m.return_value = _Ok(False, 500)
+        self.pjsip_m.side_effect = OSError("asterisk weg")
+        self.web_m.return_value = _Ok(False, 502)
+        d = self.loeschen(ANNA).get_json()
+        self.assertFalse(d["ok"])
+        st = d["schritte"]
+        self.assertFalse(st["nextcloud"]["ok"])
+        self.assertIn("2201", st["nextcloud"]["fehler"])
+        self.assertIsNotNone(self.eins("SELECT 1 FROM telefon_nextcloud WHERE ext = '2201'"))   # nicht widerrufen = bleibt
+        self.assertFalse(st["sip"]["ok"])
+        self.assertIn("asterisk weg", st["sip"]["fehler"])
+        self.assertFalse(st["nummern"]["ok"])
+        self.assertIn("Website", st["nummern"]["fehler"])
+        for n in ("sitzungen", "combox", "daten", "anrufe", "protokoll"):
+            self.assertTrue(st[n]["ok"], n)
+        self.assertIsNone(self.eins("SELECT 1 FROM telefon_pin WHERE email = ?", ANNA))
+        # Nochmals, wenn alles wieder geht: Widerruf und pjsip holen nach
+        self.nc_m.return_value = _Ok()
+        self.pjsip_m.side_effect = None
+        self.web_m.return_value = _Ok()
+        self.pjsip_m.reset_mock()
+        d = self.loeschen(ANNA).get_json()
+        self.assertTrue(d["ok"], d)
+        self.assertTrue(self.pjsip_m.called)
+        self.assertIsNone(self.eins("SELECT 1 FROM telefon_nextcloud"))
+
+    def test_unbekannte_person_alles_ok(self):
+        d = self.loeschen("niemand@example.org").get_json()
+        self.assertTrue(d["ok"], d)
+        self.assertFalse(self.nc_m.called)
+        self.assertFalse(self.web_m.called)
+
+    def test_fernwartung_unberuehrt(self):
+        conn = db.connect()
+        try:
+            conn.execute("INSERT INTO telefon_fernwartung (ext, person, beginn) VALUES ('2201', ?, 1)", (ANNA,))
             conn.commit()
         finally:
             conn.close()
-        with mock.patch.object(pbx, "PBX_SHARED_SECRET", "pbx-geheim"):
-            self.hoch("2201", _jpeg())
-            r = self.loeschen(ANNA.upper())
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.get_json()["entfernt"], {"telefon_einstellungen": 1, "telefon_pin": 1,
-                                                     "telefon_ausweise": 1, "telefon_hintergrund": 1})
-        conn = db.connect()
-        try:
-            for t in ("telefon_einstellungen", "telefon_pin", "telefon_ausweise", "telefon_hintergrund"):
-                self.assertIsNone(conn.execute(f"SELECT 1 FROM {t} WHERE lower(email) = ?", (ANNA,)).fetchone(), t)
-            for t in ("telefon_einstellungen", "telefon_pin", "telefon_ausweise"):
-                self.assertIsNotNone(conn.execute(f"SELECT 1 FROM {t} WHERE email = ?", (BERT,)).fetchone(), t)
-            # Abmelden, SIP-Zugaenge, Nummern haben eigene Ablaeufe: die Sitzung bleibt hier stehen
-            self.assertIsNotNone(conn.execute("SELECT 1 FROM telefon_sitzungen WHERE email = ?", (ANNA,)).fetchone())
-        finally:
-            conn.close()
+        self.loeschen(ANNA)
+        self.assertIsNotNone(self.eins("SELECT 1 FROM telefon_fernwartung WHERE person = ?", ANNA))
 
     def test_nur_mit_geheimnis(self):
-        with mock.patch.object(pbx, "PBX_SHARED_SECRET", "pbx-geheim"):
-            self.hoch("2201", _jpeg())
-            self.assertEqual(self.loeschen(ANNA, secret="falsch").status_code, 401)
-            self.assertEqual(self.c.post("/api/pbx/person/loeschen", json={"email": ANNA}).status_code, 401)
-            self.assertTrue(os.path.exists(pbx._hintergrund_datei(ANNA)))
-            self.assertEqual(self.loeschen("").status_code, 400)
+        self.assertEqual(self.loeschen(ANNA, secret="falsch").status_code, 401)
+        self.assertEqual(self.c.post("/api/pbx/person/loeschen", json={"email": ANNA}).status_code, 401)
+        self.assertTrue(os.path.exists(pbx._hintergrund_datei(ANNA)))
+        self.assertEqual(self.loeschen("").status_code, 400)
         with mock.patch.object(pbx, "PBX_SHARED_SECRET", ""):
             self.assertEqual(self.loeschen(ANNA, secret="").status_code, 401)
 
