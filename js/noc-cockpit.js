@@ -252,6 +252,19 @@
     </div>
     <div data-el="st-liste" class="noc-stationen"><div class="text-xs text-slate-500 font-mono">lade…</div></div>`;
 
+  // Fernwartung der geteilten Telefone (adb-Tunnel, api/lib/nocfernwartung.js):
+  // eine Karte je Telefon, rot und gelb zuerst; blau = Sitzung läuft.
+  const FERNWARTUNG = `
+    <div class="flex items-center justify-between mt-5 mb-2">
+      <div class="flex items-center gap-2">
+        <span class="noc-led led-grau" data-el="led-fw"></span>
+        <span class="text-[11px] font-mono uppercase tracking-wider text-slate-300">Telefone · Fernwartung</span>
+        <span class="text-[10px] text-slate-500 font-mono" data-el="fw-kopf"></span>
+      </div>
+      <span class="text-[10px] text-slate-500 font-mono" data-el="fw-fehler"></span>
+    </div>
+    <div data-el="fw-liste" class="noc-stationen"><div class="text-xs text-slate-500 font-mono">lade…</div></div>`;
+
   // Alter eines Lebenszeichens, kurz: 3 min, 2 h, 4 T.
   const fmtAlter = (min) => {
     if (min === null || min === undefined) return 'nie';
@@ -278,6 +291,15 @@
       <div class="noc-st-was">${esc(ort)}</div>
       ${was ? `<div class="noc-st-was">${esc(was)}</div>` : ''}
       ${tags.length ? `<div class="noc-st-tags">${tags.map((x) => `<span class="noc-tag tag-${esc(x.stufe)}">${esc(x.text)}</span>`).join('')}</div>` : ''}
+    </div>`;
+  }
+
+  function fwKarte(t) {
+    return `<div class="noc-st st-${esc(t.ampel)}" title="${esc([t.name, ...(t.hinweise || [])].join('\n'))}">
+      <div class="noc-st-kopf"><span class="noc-led ${LED[t.ampel] || 'led-grau'}"></span>
+        <span class="noc-st-name">${esc(t.ext)}</span><span class="noc-st-zeit">${esc(t.kontakt || '')}</span></div>
+      <div class="noc-st-was">${esc(t.name)}</div>
+      ${(t.hinweise || []).length ? `<div class="noc-st-tags">${t.hinweise.map((x) => `<span class="noc-tag tag-${t.ampel === 'rot' ? 'rot' : t.ampel === 'blau' ? 'info' : 'gelb'}">${esc(x)}</span>`).join('')}</div>` : ''}
     </div>`;
   }
 
@@ -470,7 +492,7 @@
     }
 
     ziel.className = 'noc-cockpit' + (modus === 'wandbild' ? ' noc-wandbild' : '') + ' sm:rounded-2xl ' + (ziel.className || '');
-    ziel.innerHTML = `<div class="noc-inner">${KOPF(modus)}${MAIL}${UNIFI}${STATIONEN}${SERVER}</div>`;
+    ziel.innerHTML = `<div class="noc-inner">${KOPF(modus)}${MAIL}${UNIFI}${STATIONEN}${FERNWARTUNG}${SERVER}</div>`;
     const el = (n) => ziel.querySelector(`[data-el="${n}"]`);
     const setz = (n, wert, klasse) => { const e = el(n); if (!e) return; e.textContent = wert; if (klasse) e.className = klasse; };
     // Eine Kachel in der Dienste-Leiste: Lampe, Wert, Erklaerung beim Draufzeigen.
@@ -706,6 +728,39 @@
       }
     }
 
+    function malFernwartung(d) {
+      sicher(() => {
+        setz('fw-fehler', '');
+        const z = d.zusammenfassung || {};
+        el('led-fw').className = 'noc-led ' + (LED[z.ampel] || 'led-grau');
+        if (!d.eingerichtet) {
+          setz('fw-kopf', '');
+          el('fw-liste').innerHTML = '<div class="text-xs text-slate-500 font-mono">adb-zentrale noch nicht eingerichtet</div>';
+          return;
+        }
+        setz('fw-kopf', (d.zentrale ? '' : '· Zentrale nicht erreichbar · ') + '· ' + (z.gruen || 0) + ' bereit'
+          + (z.blau ? ' · ' + z.blau + ' in Sitzung' : '') + (z.rot ? ' · ' + z.rot + ' rot' : '') + (z.gelb ? ' · ' + z.gelb + ' gelb' : ''));
+        el('fw-liste').innerHTML = (d.telefone || []).map(fwKarte).join('')
+          || '<div class="text-xs text-slate-500 font-mono">keine geteilten Telefone</div>';
+      }, 'fernwartung');
+    }
+
+    async function fernwartung() {
+      if (document.hidden) return;
+      try {
+        const r = await holen('/api/isp/noc/public/fernwartung');
+        if (!r.ok) {
+          el('led-fw').className = 'noc-led led-red';
+          setz('fw-fehler', 'Fernwartung: HTTP ' + r.status);
+          return;
+        }
+        malFernwartung(await r.json());
+      } catch (e) {
+        el('led-fw').className = 'noc-led led-red';
+        setz('fw-fehler', 'Fernwartung: ' + e.message);
+      }
+    }
+
     function malServer(d) {
       setz('srv-fehler', '');
       sicher(() => {
@@ -791,10 +846,10 @@
       if (el('utc')) setz('utc', now.toISOString().slice(11, 19));
     }
 
-    el('jetzt').addEventListener('click', () => { laden(); ampeln(); stationen(); server(); });
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) { laden(); stationen(); server(); } });
+    el('jetzt').addEventListener('click', () => { laden(); ampeln(); stationen(); fernwartung(); server(); });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { laden(); stationen(); fernwartung(); server(); } });
 
-    uhr(); laden(); ampeln(); stationen(); server();
+    uhr(); laden(); ampeln(); stationen(); fernwartung(); server();
     const t1 = setInterval(uhr, 1000);
     const t2 = setInterval(laden, intervallMs);
     const t3 = setInterval(ampeln, Math.max(intervallMs, 60000));
@@ -802,7 +857,9 @@
     const t4 = setInterval(stationen, Math.max(intervallMs, 15000));
     // Server: die API cached 30 s (SMART 10 min) — oefter fragen bringt nichts.
     const t5 = setInterval(server, Math.max(intervallMs, 30000));
-    return { laden, ampeln, stationen, server, beenden: () => { [t1, t2, t3, t4, t5].forEach(clearInterval); } };
+    // Fernwartung: die API merkt sich die Antwort der Anlage 20 s.
+    const t6 = setInterval(fernwartung, Math.max(intervallMs, 30000));
+    return { laden, ampeln, stationen, fernwartung, server, beenden: () => { [t1, t2, t3, t4, t5, t6].forEach(clearInterval); } };
   }
 
   global.NocCockpit = { starten };

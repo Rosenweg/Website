@@ -1423,6 +1423,10 @@ def telefon_status():
             fp = adb_updater.fingerabdruck()
             if fp:
                 extra["adb_dienst"] = {"fingerabdruck": fp, "bis": int(u["freigabe_bis"])}
+        # fernwartung: dauerhafter adb-Tunnel (pbx/adb-zentrale) - neu | wartet | bereit | aus
+        fw = _fw_status(conn, ext)
+        if fw is not None:
+            extra["fernwartung"] = fw
         return jsonify({"ext": ext, "geraet": geraet["name"] if geraet else ext, "technik": technik,
                         "wlan_debug_bis": bis, **extra, **_sitzung_json(row), **_apps_fuer(conn, row)})
     finally:
@@ -4275,6 +4279,399 @@ def telefon_updater(ext):
     return jsonify({"ok": True, "gestartet": gestartet})
 
 
+# ─── Fernwartung ueber den dauerhaften adb-Tunnel (pbx/adb-zentrale) ─────────
+# Plan adb-tunnel-telefone (Stefan 27.11.2026): Rosenweg Geraet haelt einen WireGuard-Tunnel zur
+# adb-zentrale offen; Technik arbeitet dort per SSH mit rw-adb. Diese API ist die Quelle der
+# Peers (telefon_tunnel), schaltet den Not-Aus und fuehrt den Verlauf (telefon_fernwartung).
+# Ohne PBX_ADB_ZENTRALE_URL bleibt alles beim Alten: der Status nennt keine Fernwartung.
+ADB_ZENTRALE_URL = os.environ.get("PBX_ADB_ZENTRALE_URL", "").rstrip("/")
+ADB_ZENTRALE_TOKEN = os.environ.get("PBX_ADB_ZENTRALE_TOKEN", "")
+FW_NETZ = ipaddress.ip_network(os.environ.get("PBX_ADB_TUNNEL_NETZ", "10.243.44.0/24"))
+_FW_MERK = {"info": (0.0, None), "zustand": (0.0, None)}
+
+
+def _zentrale(methode, pfad, daten=None, timeout=5):
+    """Anfrage an die Steuerung der adb-zentrale (Bearer PBX_ADB_ZENTRALE_TOKEN)."""
+    if not ADB_ZENTRALE_URL or len(ADB_ZENTRALE_TOKEN) < 32:
+        raise RuntimeError("adb-zentrale nicht eingerichtet")
+    r = requests.request(methode, ADB_ZENTRALE_URL + pfad, json=daten, timeout=timeout,
+                         headers={"Authorization": f"Bearer {ADB_ZENTRALE_TOKEN}"})
+    if r.status_code != 200:
+        raise RuntimeError(f"adb-zentrale {pfad.split('?')[0]}: HTTP {r.status_code}")
+    return r.json()
+
+
+def _zentrale_info(neu=False):
+    """{public_key, adb_fingerabdruck, gateway, endpoint_extern, endpoint_intern} (60 s gemerkt) oder None."""
+    zeit, info = _FW_MERK["info"]
+    if not neu and info and time.time() - zeit < 60:
+        return info
+    try:
+        info = _zentrale("GET", "/gesundheit", timeout=3)
+        _FW_MERK["info"] = (time.time(), info)
+    except Exception as e:  # noqa: BLE001 - Anlage laeuft ohne Zentrale weiter
+        if ADB_ZENTRALE_URL:
+            app.logger.warning("adb-zentrale: %s", e)
+        if time.time() - zeit > 3600:
+            info = None   # nach einer Stunde ohne Antwort nichts Altes mehr ausgeben
+    return info
+
+
+def _zentrale_zustand():
+    """{ext: {letzter_handshake, sitzung}} (10 s gemerkt), {} wenn nicht erreichbar."""
+    zeit, z = _FW_MERK["zustand"]
+    if z is not None and time.time() - zeit < 10:
+        return z
+    try:
+        z = {p["ext"]: p for p in _zentrale("GET", "/zustand", timeout=3).get("peers", [])}
+    except Exception:  # noqa: BLE001
+        z = None
+    _FW_MERK["zustand"] = (time.time(), z if z is not None else {})
+    return z if z is not None else {}
+
+
+def _fw_peers(conn):
+    return [{"ext": r["ext"], "public_key": r["pubkey"], "ip": r["ip"]} for r in conn.execute(
+        "SELECT ext, pubkey, ip FROM telefon_tunnel WHERE bestaetigt = 1 AND aus = 0 ORDER BY ext")]
+
+
+def _fw_schieben(conn):
+    """Die ganze Peer-Liste an die Zentrale (sonst holt sie sie spaetestens in 5 Min.)."""
+    try:
+        _zentrale("PUT", "/peers", {"peers": _fw_peers(conn)})
+        _FW_MERK["zustand"] = (0.0, None)
+        return True
+    except Exception as e:  # noqa: BLE001
+        app.logger.warning("Peers an adb-zentrale: %s", e)
+        return False
+
+
+def _fw_wecken(ext):
+    try:
+        ami.originate(f"PJSIP/{ext}", "suchen", "s", callerid='"Wartung" <2098>', timeout_ms=15000)
+        return True
+    except Exception as e:  # noqa: BLE001
+        app.logger.warning("Fernwartung wecken %s: %s", ext, type(e).__name__)
+        return False
+
+
+def _fw_schluessel():
+    """Fingerabdruecke, die Rosenweg Geraet ausser seinem eigenen zulassen darf: Zentrale, Updater."""
+    info = _zentrale_info() or {}
+    return [fp for fp in (info.get("adb_fingerabdruck") or "", adb_updater.fingerabdruck()) if fp]
+
+
+def _fw_status(conn, ext):
+    """Feld "fernwartung" im Status des Telefons, None = nicht nennen (Zentrale nicht eingerichtet)."""
+    if not ADB_ZENTRALE_URL:
+        return None
+    t = conn.execute("SELECT * FROM telefon_tunnel WHERE ext = ?", (ext,)).fetchone()
+    if not t:
+        return {"stand": "neu"}
+    if t["aus"]:
+        return {"stand": "aus"}
+    if not t["bestaetigt"]:
+        return {"stand": "wartet", "pubkey": t["pubkey"]}
+    d = {"stand": "bereit", "pubkey": t["pubkey"], "adresse": t["ip"],
+         "gateway": str(FW_NETZ.network_address + 1), "schluessel": _fw_schluessel()}
+    info = _zentrale_info()
+    if info:
+        d.update({"peer_public": info.get("public_key", ""), "endpoint": info.get("endpoint_extern", ""),
+                  "endpoint_intern": info.get("endpoint_intern", "")})
+    return d
+
+
+def _fw_log(conn, ext, ereignis, name=None, durch=None):
+    conn.execute("INSERT INTO telefon_log (ext, ereignis, name, durch) VALUES (?,?,?,?)", (ext, ereignis, name, durch))
+
+
+@app.post("/api/telefon/tunnel")
+def telefon_tunnel_melden():
+    """Rosenweg Geraet meldet seinen oeffentlichen WireGuard-Schluessel {pubkey}. Neu oder anders
+    als bisher: wartet auf "Bestaetigen" auf /smartphones (ein anderer Schluessel nimmt den alten
+    sofort aus der Zentrale). Antwort wie das Feld "fernwartung" im Status."""
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    if not ADB_ZENTRALE_URL:
+        return jsonify({"error": "Fernwartung nicht eingerichtet"}), 404
+    pub = str((request.get_json(silent=True) or {}).get("pubkey") or "").strip()
+    try:
+        if len(base64.b64decode(pub, validate=True)) != 32:
+            raise ValueError
+    except (ValueError, binascii.Error):
+        return jsonify({"error": "pubkey: 32 Byte Base64"}), 400
+    conn = db.connect()
+    try:
+        t = conn.execute("SELECT * FROM telefon_tunnel WHERE ext = ?", (ext,)).fetchone()
+        schieben = False
+        if not t or not t["pubkey"]:
+            # neu, oder nur ein Not-Aus ohne Schluessel vorgemerkt (der bleibt aus)
+            belegt = {r["ip"] for r in conn.execute("SELECT ip FROM telefon_tunnel")}
+            frei = next((str(a) for a in list(FW_NETZ.hosts())[1:] if str(a) not in belegt), None)
+            if not frei:
+                return jsonify({"error": "keine Tunnel-Adresse mehr frei"}), 409
+            if t:
+                conn.execute("UPDATE telefon_tunnel SET pubkey = ?, ip = ?, gemeldet = ? WHERE ext = ?",
+                             (pub, frei, int(time.time()), ext))
+            else:
+                conn.execute("INSERT INTO telefon_tunnel (ext, pubkey, ip, gemeldet) VALUES (?,?,?,?)",
+                             (ext, pub, frei, int(time.time())))
+            _fw_log(conn, ext, "fernwartung schluessel", durch="Telefon (neu)")
+        elif t["pubkey"] != pub:
+            schieben = bool(t["bestaetigt"])
+            conn.execute("UPDATE telefon_tunnel SET pubkey = ?, bestaetigt = 0, gemeldet = ?, geaendert = datetime('now') "
+                         "WHERE ext = ?", (pub, int(time.time()), ext))
+            _fw_log(conn, ext, "fernwartung schluessel", durch="Telefon (anderer Schluessel)")
+        else:
+            conn.execute("UPDATE telefon_tunnel SET gemeldet = ? WHERE ext = ?", (int(time.time()), ext))
+        conn.commit()
+        if schieben:
+            _fw_schieben(conn)
+        return jsonify(_fw_status(conn, ext))
+    finally:
+        conn.close()
+
+
+@app.post("/api/telefon/fernwartung/meldung")
+def telefon_fernwartung_meldung():
+    """Rosenweg Geraet meldet eine fremde adb-Rueckfrage {art: 'fremder_schluessel', fingerabdruck,
+    abgelehnt}. Steht im Verlauf und macht das NOC rot (24 h)."""
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    b = request.get_json(silent=True) or {}
+    fp = str(b.get("fingerabdruck") or "").upper()
+    if b.get("art") != "fremder_schluessel" or not re.fullmatch(r"([0-9A-F]{2}:){15}[0-9A-F]{2}", fp):
+        return jsonify({"error": "art/fingerabdruck ungueltig"}), 400
+    abgelehnt = 1 if b.get("abgelehnt", True) else 0
+    conn = db.connect()
+    try:
+        # hoechstens eine Meldung je Fingerabdruck und Telefon in 10 Minuten
+        if not conn.execute("SELECT 1 FROM telefon_adb_fremd WHERE ext = ? AND fingerabdruck = ? AND zeit > ?",
+                            (ext, fp, int(time.time()) - 600)).fetchone():
+            conn.execute("INSERT INTO telefon_adb_fremd (ext, fingerabdruck, abgelehnt, zeit) VALUES (?,?,?,?)",
+                         (ext, fp, abgelehnt, int(time.time())))
+            _fw_log(conn, ext, "adb fremd " + ("abgelehnt" if abgelehnt else "offen gelassen"), durch=fp)
+            conn.commit()
+            app.logger.warning("Fremde adb-Rueckfrage an %s: %s (%s)", ext, fp,
+                               "abgelehnt" if abgelehnt else "Wartung vor Ort, offen gelassen")
+    finally:
+        conn.close()
+    return jsonify({"ok": True})
+
+
+@app.post("/api/telefon/<ext>/fernwartung")
+def telefon_fernwartung_schalten(ext):
+    """Technik/Praesident: {aktion: bestaetigen | aus | ein | vergessen}.
+    aus = Not-Aus: Peer sofort aus der Zentrale (offene Sitzung gekappt) und Weckanruf 2098 -
+    Geraet setzt ADB_ENABLED=0 und stoppt den Tunnel. ein: wieder an, ohne USB."""
+    user, deny = require_admin()
+    if deny:
+        return deny
+    if not re.fullmatch(r"[0-9]{2,8}", ext):
+        return jsonify({"error": "Nebenstelle ungueltig"}), 400
+    aktion = str((request.get_json(silent=True) or {}).get("aktion") or "")
+    if aktion not in ("bestaetigen", "aus", "ein", "vergessen"):
+        return jsonify({"error": "aktion: bestaetigen | aus | ein | vergessen"}), 400
+    conn = db.connect()
+    try:
+        if not conn.execute("SELECT 1 FROM sip_extensions WHERE ext = ? AND context = 'geteilt'", (ext,)).fetchone():
+            return jsonify({"error": "Kein geteiltes Telefon"}), 404
+        t = conn.execute("SELECT * FROM telefon_tunnel WHERE ext = ?", (ext,)).fetchone()
+        if aktion in ("bestaetigen", "vergessen") and not t:
+            return jsonify({"error": "Das Telefon hat noch keinen Schluessel gemeldet"}), 409
+        if aktion == "bestaetigen":
+            conn.execute("UPDATE telefon_tunnel SET bestaetigt = 1, durch = ?, geaendert = datetime('now') WHERE ext = ?",
+                         (actor(user), ext))
+        elif aktion == "aus":
+            if t:
+                conn.execute("UPDATE telefon_tunnel SET aus = 1, durch = ?, geaendert = datetime('now') WHERE ext = ?",
+                             (actor(user), ext))
+            else:   # noch kein Schluessel: trotzdem merken, damit der Tunnel gar nicht erst startet
+                conn.execute("INSERT INTO telefon_tunnel (ext, pubkey, ip, aus, durch) VALUES (?, '', ?, 1, ?)",
+                             (ext, f"aus-{ext}", actor(user)))
+        elif aktion == "ein":
+            conn.execute("UPDATE telefon_tunnel SET aus = 0, durch = ?, geaendert = datetime('now') WHERE ext = ?",
+                         (actor(user), ext))
+            conn.execute("DELETE FROM telefon_tunnel WHERE ext = ? AND pubkey = ''", (ext,))
+        else:
+            conn.execute("DELETE FROM telefon_tunnel WHERE ext = ?", (ext,))
+        _fw_log(conn, ext, f"fernwartung {aktion}", durch=actor(user))
+        conn.commit()
+        sofort = True
+        if aktion in ("aus", "vergessen"):
+            try:
+                _zentrale("DELETE", f"/peers/{ext}?durch={requests.utils.quote(actor(user))}")
+            except Exception as e:  # noqa: BLE001
+                sofort = False
+                app.logger.warning("Not-Aus %s an der Zentrale: %s", ext, e)
+        geschoben = _fw_schieben(conn)
+    finally:
+        conn.close()
+    geweckt = _fw_wecken(ext)
+    app.logger.info("Fernwartung %s: %s durch %s", ext, aktion, actor(user))
+    return jsonify({"ok": True, "zentrale": sofort and geschoben, "geweckt": geweckt})
+
+
+@app.post("/api/pbx/fernwartung/alle-aus")
+def fernwartung_alle_aus():
+    """Technik/Praesident: Not-Aus fuer alle geteilten Telefone auf einmal."""
+    user, deny = require_admin()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        exts = [r["ext"] for r in conn.execute("SELECT ext FROM sip_extensions WHERE context = 'geteilt'")]
+        for ext in exts:
+            if conn.execute("SELECT 1 FROM telefon_tunnel WHERE ext = ?", (ext,)).fetchone():
+                conn.execute("UPDATE telefon_tunnel SET aus = 1, durch = ?, geaendert = datetime('now') WHERE ext = ?",
+                             (actor(user), ext))
+            else:
+                conn.execute("INSERT INTO telefon_tunnel (ext, pubkey, ip, aus, durch) VALUES (?, '', ?, 1, ?)",
+                             (ext, f"aus-{ext}", actor(user)))
+            _fw_log(conn, ext, "fernwartung aus (alle)", durch=actor(user))
+        conn.commit()
+        # Erst die Zentrale leeren (wirkt auch, wenn kein Telefon antwortet), dann wecken.
+        geschoben = _fw_schieben(conn)
+        for ext in exts:
+            try:
+                _zentrale("DELETE", f"/peers/{ext}?durch={requests.utils.quote(actor(user))}")
+            except Exception:  # noqa: BLE001
+                pass
+    finally:
+        conn.close()
+    geweckt = sum(1 for ext in exts if _fw_wecken(ext))
+    app.logger.warning("Fernwartung: alle aus durch %s", actor(user))
+    return jsonify({"ok": True, "telefone": len(exts), "zentrale": geschoben, "geweckt": geweckt})
+
+
+def _zentrale_berechtigt():
+    t = _bearer() or ""
+    if len(ADB_ZENTRALE_TOKEN) < 32 or not hmac.compare_digest(t.encode(), ADB_ZENTRALE_TOKEN.encode()):
+        return jsonify({"error": "Unauthorized"}), 401
+    return None
+
+
+@app.get("/api/pbx/fernwartung/peers")
+def fernwartung_peers():
+    """adb-zentrale holt die feste Peer-Liste (beim Start und alle 5 Min.)."""
+    deny = _zentrale_berechtigt()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        return jsonify({"peers": _fw_peers(conn)})
+    finally:
+        conn.close()
+
+
+def _fw_text(v, n):
+    return re.sub(r"[\x00-\x1f\x7f]", "", str(v or ""))[:n]
+
+
+@app.post("/api/pbx/fernwartung/sitzung")
+def fernwartung_sitzung():
+    """adb-zentrale meldet Beginn {art:'auf'} und Ende {art:'zu', bytes, befehle} einer Sitzung."""
+    deny = _zentrale_berechtigt()
+    if deny:
+        return deny
+    b = request.get_json(silent=True) or {}
+    ext = str(b.get("ext") or "")
+    if b.get("art") not in ("auf", "zu") or not re.fullmatch(r"[0-9]{2,8}", ext):
+        return jsonify({"error": "art/ext ungueltig"}), 400
+    person, zweck = _fw_text(b.get("person"), 64), _fw_text(b.get("zweck"), 20)
+    try:
+        beginn = int(b.get("beginn") or 0)
+        ende = int(b.get("ende") or 0)
+        hin, her = int(b.get("bytes_hin") or 0), int(b.get("bytes_her") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Zahlen erwartet"}), 400
+    befehle = [_fw_text(x, 200) for x in (b.get("befehle") or [])[:200]] if isinstance(b.get("befehle"), list) else []
+    conn = db.connect()
+    try:
+        offen = conn.execute("SELECT id FROM telefon_fernwartung WHERE ext = ? AND beginn = ? AND person = ?",
+                             (ext, beginn, person)).fetchone()
+        if b["art"] == "auf":
+            if not offen:
+                conn.execute("INSERT INTO telefon_fernwartung (ext, person, zweck, beginn) VALUES (?,?,?,?)",
+                             (ext, person, zweck, beginn))
+                _fw_log(conn, ext, "fernwartung an", name=person, durch=zweck)
+        else:
+            if offen:
+                conn.execute("UPDATE telefon_fernwartung SET ende = ?, bytes_hin = ?, bytes_her = ?, befehle = ?, grund = ? "
+                             "WHERE id = ?", (ende, hin, her, json.dumps(befehle), _fw_text(b.get("grund"), 80), offen["id"]))
+            else:
+                conn.execute("INSERT INTO telefon_fernwartung (ext, person, zweck, beginn, ende, bytes_hin, bytes_her, "
+                             "befehle, grund) VALUES (?,?,?,?,?,?,?,?,?)",
+                             (ext, person, zweck, beginn, ende, hin, her, json.dumps(befehle), _fw_text(b.get("grund"), 80)))
+            _fw_log(conn, ext, "fernwartung ab", name=person, durch=_fw_text(b.get("grund"), 80) or zweck)
+        conn.commit()
+    finally:
+        conn.close()
+    _FW_MERK["zustand"] = (0.0, None)
+    return jsonify({"ok": True})
+
+
+def _fw_uebersicht(conn, ext, zustand, regs, jetzt):
+    """Spalte "Fernwartung" auf /smartphones und Grundlage fuer das NOC.
+    ampel: gruen (Handshake < 3 Min. oder < 20 Min. und registriert), gelb (laenger still, Telefon
+    lebt aber), rot (still und nicht registriert, Not-Aus, fremde Rueckfrage in 24 h), blau (Sitzung),
+    grau (nicht eingerichtet / wartet auf Bestaetigung)."""
+    t = conn.execute("SELECT * FROM telefon_tunnel WHERE ext = ?", (ext,)).fetchone()
+    fremd = conn.execute("SELECT fingerabdruck, abgelehnt, zeit FROM telefon_adb_fremd WHERE ext = ? AND zeit > ? "
+                         "ORDER BY id DESC LIMIT 1", (ext, int(jetzt) - 86400)).fetchone()
+    z = zustand.get(ext) or {}
+    hs = int(z.get("letzter_handshake") or 0)
+    alter = jetzt - hs if hs else None
+    d = {"stand": "keiner", "adresse": None, "pubkey": None, "letzter_handshake": hs, "sitzung": z.get("sitzung"),
+         "fremd": dict(fremd) if fremd else None, "durch": None, "ampel": "grau"}
+    if t:
+        d.update({"stand": "aus" if t["aus"] else ("bereit" if t["bestaetigt"] else "wartet"),
+                  "adresse": t["ip"] if t["pubkey"] else None, "pubkey": t["pubkey"] or None, "durch": t["durch"]})
+    if d["stand"] == "aus" or fremd:
+        d["ampel"] = "rot"
+    elif d["stand"] == "bereit":
+        if d["sitzung"]:
+            d["ampel"] = "blau"
+        elif alter is not None and (alter < 180 or (alter < 1200 and str(ext) in regs)):
+            d["ampel"] = "gruen"
+        elif str(ext) in regs:
+            d["ampel"] = "gelb"
+        else:
+            d["ampel"] = "rot"
+    return d
+
+
+@app.get("/api/pbx/fernwartung/noc")
+def fernwartung_noc():
+    """Haupt-API (X-PBX-Secret): Fernwartung je geteiltem Telefon fuer das NOC - ohne Personennamen
+    (das NOC haengt an der Wand), ohne Schluessel und Adressen."""
+    err = require_agi()
+    if err:
+        return err
+    try:
+        regs = ami.registered_aors()
+    except Exception:  # noqa: BLE001
+        regs = set()
+    jetzt = time.time()
+    zustand = _zentrale_zustand() if ADB_ZENTRALE_URL else {}
+    conn = db.connect()
+    try:
+        telefone = []
+        for e in conn.execute("SELECT ext, name FROM sip_extensions WHERE context = 'geteilt' AND enabled = 1 ORDER BY ext"):
+            f = _fw_uebersicht(conn, e["ext"], zustand, regs, jetzt)
+            s = f["sitzung"] or {}
+            telefone.append({"ext": e["ext"], "name": e["name"], "stand": f["stand"], "ampel": f["ampel"],
+                             "letzter_handshake": f["letzter_handshake"], "registriert": str(e["ext"]) in regs,
+                             "sitzung": {"zweck": s.get("zweck"), "seit": s.get("beginn")} if s else None,
+                             "fremd": bool(f["fremd"])})
+        return jsonify({"eingerichtet": bool(ADB_ZENTRALE_URL), "zentrale": bool(_zentrale_info()) if ADB_ZENTRALE_URL else False,
+                        "telefone": telefone, "ts": int(jetzt)})
+    finally:
+        conn.close()
+
+
 @app.get("/api/pbx/smartphones")
 def smartphones_uebersicht():
     """Technik/Praesident: alles fuer rosenweg4303.ch/smartphones in einer Antwort, ohne
@@ -4294,6 +4691,7 @@ def smartphones_uebersicht():
         wart = {r["ext"]: r for r in conn.execute("SELECT ext, wlan_debug_bis, durch FROM telefon_wartung")}
         adb = {r["ext"]: r for r in conn.execute("SELECT ext, adresse, port, gemeldet FROM telefon_adb")}
         upd = {r["ext"]: r for r in conn.execute("SELECT * FROM telefon_updater")}
+        zustand = _zentrale_zustand() if ADB_ZENTRALE_URL else {}
         telefone = []
         for e in conn.execute("SELECT ext, name, client, enabled FROM sip_extensions "
                               "WHERE context = 'geteilt' ORDER BY ext"):
@@ -4309,6 +4707,7 @@ def smartphones_uebersicht():
                         if e["ext"] in adb and adb[e["ext"]]["port"] and bis > jetzt
                         and jetzt - int(adb[e["ext"]]["gemeldet"] or 0) < 900 else None),
                 "updater": _updater_json(conn, e["ext"], upd.get(e["ext"]), jetzt),
+                "fernwartung": _fw_uebersicht(conn, e["ext"], zustand, regs, jetzt),
             })
         privat = [{"id": r["id"], "kennung": f"{r['nummer']}-p{r['id']}", "nummer": r["nummer"],
                    "geraet": r["geraet"], "seit": r["created_at"],
@@ -4316,9 +4715,22 @@ def smartphones_uebersicht():
                   for r in conn.execute("SELECT id, nummer, geraet, created_at FROM telefon_sip_privat ORDER BY nummer, id")]
         log = db.rows_to_dicts(conn.execute("SELECT ext, ereignis, name, durch, zeit FROM telefon_log "
                                             "ORDER BY id DESC LIMIT 40").fetchall())
+        verlauf = []
+        for r in conn.execute("SELECT * FROM telefon_fernwartung ORDER BY beginn DESC, id DESC LIMIT 30"):
+            v = dict(r)
+            try:
+                v["befehle"] = json.loads(v["befehle"] or "[]")
+            except ValueError:
+                v["befehle"] = []
+            verlauf.append(v)
+        info = _zentrale_info() if ADB_ZENTRALE_URL else None
         return jsonify({"telefone": telefone, "privat": privat, "log": log,
                         "gruppen": sorted(_telefon_gruppen(conn)),
-                        "updater_fingerabdruck": adb_updater.fingerabdruck()})
+                        "updater_fingerabdruck": adb_updater.fingerabdruck(),
+                        "fernwartung_zentrale": {"eingerichtet": bool(ADB_ZENTRALE_URL), "erreichbar": bool(info),
+                                                 "fingerabdruck": (info or {}).get("adb_fingerabdruck", ""),
+                                                 "endpoint": (info or {}).get("endpoint_extern", "")},
+                        "fernwartung_verlauf": verlauf})
     finally:
         conn.close()
 
