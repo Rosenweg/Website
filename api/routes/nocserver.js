@@ -22,6 +22,9 @@
 //                     Belegung, Snapshots und Jobs, Sys.Audit für die Liste
 //                     fehlgeschlagener Aufgaben. Zertifikat gepinnt.
 //
+// Bewertung (rein, ohne Netz) in lib/nocserver.js — dort auch alsErgebnisse()
+// für die geplanten Prüfmodule (api/lib/noc/, infra.* / backup.*).
+//
 // Zwischengespeichert: Gesamtbild 30 s, Platten (SMART) 10 min, onboot der
 // gestoppten Gäste 5 min, PBS-Gruppen 60 s (Cache von /sicherungen).
 // ═══════════════════════════════════════════════════════════════════
@@ -42,6 +45,8 @@ const SCHWELLEN = {
   speicherGelb: zahlEnv('NOC_SPEICHER_GELB', N.STANDARD.speicherGelb),
   speicherRot: zahlEnv('NOC_SPEICHER_ROT', N.STANDARD.speicherRot),
   sicherungStunden: zahlEnv('NOC_SICHERUNG_STUNDEN', N.STANDARD.sicherungStunden),
+  // Ceph-Altlasten, die die Ampel nicht färben (Präfixe, kommagetrennt).
+  cephStumm: (process.env.NOC_CEPH_STUMM ?? 'AUTH_INSECURE_').split(',').map((x) => x.trim()).filter(Boolean),
 };
 
 // Welcher Knoten zuletzt geantwortet hat — dort zuerst fragen.

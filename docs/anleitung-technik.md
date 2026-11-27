@@ -361,6 +361,10 @@ ops), SSD-Abnutzung der OSDs (SMART „Percentage Used“: ab 80 % gelb, ab 90 %
 `NOC_SSD_GELB`/`NOC_SSD_ROT`), Gäste mit Autostart, die nicht laufen, und der PBS (Belegung, Jobs,
 fehlgeschlagene Aufgaben der letzten 24 h, Gäste mit Sicherung älter als 36 h). Gezeigt werden nur
 Gäste aus `PBS_NOC_NAMESPACES` (Standard `Rosenweg9`); private Namespaces erscheinen nicht.
+Ceph-Meldungen, deren Code mit einem Präfix aus `NOC_CEPH_STUMM` beginnt (Standard `AUTH_INSECURE_`,
+die bekannte Altlast), stehen gedämpft da und färben die Ampel nicht. Die Bewertung steht als reine
+Funktion in `api/lib/nocserver.js`; `alsErgebnisse()` liefert sie in der Form der geplanten
+Prüfmodule (`infra.*`, `backup.*`, Status ok/warn/crit/unbekannt).
 Einrichten (nur lesende Tokens, in `/opt/rosenweg-core/.env` auf CT 128):
 
 - PVE: `pveum user add noc@pve --comment "NOC, nur lesen"`,

@@ -344,7 +344,7 @@
       <div class="noc-label flex items-center gap-2"><span class="noc-led ${LED[c.ampel] || 'led-grau'}"></span><span>Ceph</span></div>
       <div class="noc-mid ${TEXT[c.ampel] || ''}">${esc(c.status ? c.status.replace('HEALTH_', '') : '—')}</div>
       ${c.osd ? `<div class="noc-leise">OSD ${c.osd.up ?? '?'}/${c.osd.gesamt ?? '?'} up · ${c.belegt_prozent ?? '—'} % belegt (${esc(fmtBytes(c.belegt_bytes))} / ${esc(fmtBytes(c.gesamt_bytes))})</div>` : ''}
-      <div class="noc-st-tags">${(c.pruefungen || []).map((x) => `<span class="noc-tag tag-${x.stufe === 'rot' ? 'rot' : 'gelb'}" title="${esc(x.name)}">${esc(x.text || x.name)}</span>`).join('')}</div>
+      <div class="noc-st-tags">${(c.pruefungen || []).map((x) => `<span class="noc-tag ${x.stumm ? '' : 'tag-' + (x.stufe === 'rot' ? 'rot' : 'gelb')}" style="${x.stumm ? 'opacity:.55' : ''}" title="${esc(x.name + (x.stumm ? ' — stumm (Altlast), färbt die Ampel nicht' : ''))}">${esc(x.text || x.name)}${x.stumm ? ' · stumm' : ''}</span>`).join('')}</div>
     </div>`);
 
     const ssd = p.ssd || [];

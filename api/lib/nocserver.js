@@ -26,6 +26,7 @@ const STANDARD = {
   speicherRot: 90,
   vollTageGelb: 60,     // PBS schätzt „voll in n Tagen"
   sicherungStunden: 36, // letzte Sicherung eines Gasts älter -> gelb
+  cephStumm: [],        // Ceph-Prüfcodes (Präfixe), die die Ampel nicht färben
 };
 
 // ─── Proxmox VE ────────────────────────────────────────────────────
@@ -135,14 +136,19 @@ function pveAuswerten(roh, opts = {}) {
       name: kurz(name, 60),
       stufe: c.severity === 'HEALTH_ERR' ? 'rot' : 'gelb',
       text: kurz(c.summary?.message, 160),
-      stumm: Boolean(c.muted),
+      // Stumm: in Ceph gemutet oder bekannte Altlast (cephStumm, Präfixe —
+      // z. B. AUTH_INSECURE_*: Schlüsseltypen aus der Zeit vor Squid). Sie
+      // stehen weiter im NOC, färben die Ampel aber nicht.
+      stumm: Boolean(c.muted) || (o.cephStumm || []).some((p) => p && name.startsWith(p)),
     })).sort((a, b) => RANG[b.stufe] - RANG[a.stufe] || a.name.localeCompare(b.name));
     const pg = roh.ceph.pgmap || {};
     const om = roh.ceph.osdmap || {};
     const belegt = prozent(pg.bytes_used, pg.bytes_total);
     ceph = {
       status: kurz(h.status, 20),
-      ampel: h.status === 'HEALTH_OK' ? 'gruen' : h.status === 'HEALTH_ERR' ? 'rot' : 'gelb',
+      ampel: h.status === 'HEALTH_OK' ? 'gruen'
+        : !pruefungen.length ? (h.status === 'HEALTH_ERR' ? 'rot' : 'gelb')
+        : pruefungen.filter((x) => !x.stumm).reduce((a, x) => schlimmer(a, x.stufe), 'gruen'),
       pruefungen,
       osd: { gesamt: zahl(om.num_osds), up: zahl(om.num_up_osds), in: zahl(om.num_in_osds) },
       belegt_prozent: belegt,
@@ -327,4 +333,78 @@ function serverOeffentlich(out) {
   return o;
 }
 
-module.exports = { pveAuswerten, pbsAuswerten, serverOeffentlich, ssdVerbraucht, aufgabeZiel, STANDARD };
+// ─── Einheitliches Ergebnis (NOC-Prüfmodule, api/lib/noc/) ─────────
+//
+// Dieselbe Bewertung in der Form, die die geplante Prüfstelle erwartet
+// ({id, bereich, titel, status, text, werte}; Status ok|warn|crit|aus|
+// unbekannt). So wird der Abschnitt „Server" später ein Modul `infra.*` /
+// `backup.*`, ohne dass die Bewertung ein zweites Mal geschrieben wird.
+// Rein: nimmt das Ergebnis von pveAuswerten/pbsAuswerten (bzw. die Antwort
+// von GET /api/isp/noc/server) und gibt eine Liste zurück.
+const STATUS = { gruen: 'ok', gelb: 'warn', rot: 'crit', grau: 'unbekannt' };
+
+function alsErgebnisse(server) {
+  const raus = [];
+  const e = (id, bereich, titel, ampel, text, werte = {}) => raus.push({
+    id, bereich, titel, status: STATUS[ampel] || 'unbekannt', text, werte,
+  });
+  const p = server?.pve;
+  if (!p || p.eingerichtet === false) {
+    e('infra.pve', 'infra', 'Proxmox-Cluster', 'grau', 'nicht eingerichtet: ' + (p?.fehlt || []).join(', '));
+  } else if (p.fehler) {
+    e('infra.pve', 'infra', 'Proxmox-Cluster', 'grau', 'Messung gescheitert: ' + p.fehler);
+  } else {
+    const weg = p.knoten.filter((k) => !k.online).map((k) => k.name);
+    const knotenAmpel = p.quorum.quorate === false ? 'rot' : weg.length ? 'gelb' : p.knoten.reduce((a, k) => schlimmer(a, k.ampel), 'gruen');
+    e('infra.knoten', 'infra', 'Proxmox-Knoten und Quorum', knotenAmpel,
+      p.quorum.quorate === false ? 'Quorum verloren' : weg.length ? `${weg.join(', ')} offline`
+        : (p.knoten.flatMap((k) => k.gruende.map((g) => `${k.name}: ${g}`)).join(' · ') || `${p.knoten.length} Knoten online, Quorum OK`),
+      { online: p.quorum.online, knoten: p.quorum.knoten });
+    for (const k of p.knoten) {
+      e(`infra.${k.name}`, 'infra', `Knoten ${k.name}`, k.ampel, k.online ? (k.gruende.join(' · ') || 'online') : 'offline',
+        { cpu: k.cpu, ram: k.ram, last: k.last, uptime_s: k.uptime_s });
+    }
+    e('infra.ha', 'infra', 'HA', p.ha.ampel, p.ha.gruende.join(' · ') || `${p.ha.started}/${p.ha.dienste} started, Master ${p.ha.master || '—'}`,
+      { started: p.ha.started, dienste: p.ha.dienste });
+    const laut = (p.ceph.pruefungen || []).filter((x) => !x.stumm);
+    e('infra.ceph', 'infra', 'Ceph', p.ceph.ampel, p.ceph.status === 'HEALTH_OK' ? 'HEALTH_OK'
+      : (laut.map((x) => x.text || x.name).join(' · ') || `${p.ceph.status || '?'} (nur stumme Meldungen)`),
+      { status: p.ceph.status, osd: p.ceph.osd });
+    if (p.ceph.belegt_prozent !== null && p.ceph.belegt_prozent !== undefined) {
+      const o = { ...STANDARD, ...(server.schwellen || {}) };
+      e('infra.ceph_voll', 'infra', 'Ceph-Belegung',
+        p.ceph.belegt_prozent >= o.speicherRot ? 'rot' : p.ceph.belegt_prozent >= o.speicherGelb ? 'gelb' : 'gruen',
+        `Ceph zu ${p.ceph.belegt_prozent} % voll`, { prozent: p.ceph.belegt_prozent });
+    }
+    const ssdSchlecht = p.ssd.filter((d) => d.ampel !== 'gruen');
+    e('infra.ssd', 'infra', 'SSD-Abnutzung', p.ssd_ampel,
+      ssdSchlecht.map((d) => `${d.knoten} ${d.geraet}${d.osd ? ' (osd.' + d.osd_id + ')' : ''}: ${d.gruende.join(', ')}`).join(' · ') || 'alle SSDs im grünen Bereich',
+      { max: p.ssd.reduce((m, d) => Math.max(m, d.verbraucht ?? 0), 0) });
+    e('infra.autostart', 'infra', 'Gäste mit Autostart', p.gaeste.ampel,
+      p.gaeste.soll_laufen.length ? 'Autostart, aber aus: ' + p.gaeste.soll_laufen.map((g) => [g.vmid, g.name].filter(Boolean).join(' ')).join(', ')
+        : `${p.gaeste.laufend}/${p.gaeste.gesamt} laufen`, { laufend: p.gaeste.laufend, gesamt: p.gaeste.gesamt });
+  }
+  const b = server?.pbs;
+  if (!b || b.eingerichtet === false) {
+    e('backup.pbs', 'backup', 'Backup-Server', 'grau', 'nicht eingerichtet: ' + (b?.fehlt || []).join(', '));
+  } else if (b.fehler) {
+    e('backup.pbs', 'backup', 'Backup-Server', 'grau', 'Messung gescheitert: ' + b.fehler);
+  } else {
+    for (const d of b.datastores) {
+      e(`backup.datastore.${d.name}`, 'backup', `Datastore ${d.name}`, d.ampel, d.gruende.join(' · ') || `${d.belegt_prozent} % belegt`,
+        { prozent: d.belegt_prozent, tage_bis_voll: d.tage_bis_voll });
+    }
+    const jobsSchlecht = b.jobs.filter((j) => j.ampel === 'rot' || j.ampel === 'gelb');
+    e('backup.jobs', 'backup', 'PBS-Jobs', b.jobs.reduce((a, j) => schlimmer(a, j.ampel === 'grau' ? 'gruen' : j.ampel), 'gruen'),
+      jobsSchlecht.map((j) => `${j.art}${j.ns ? ' ' + j.ns : ''}: ${j.zustand}`).join(' · ') || `${b.jobs.length} Jobs OK`, { jobs: b.jobs.length });
+    e('backup.fehlgeschlagen', 'backup', 'Fehlgeschlagene PBS-Aufgaben (24 h)', b.fehlgeschlagen.length ? 'gelb' : 'gruen',
+      b.fehlgeschlagen.length ? b.fehlgeschlagen.slice(0, 5).map((f) => `${f.art}${f.ziel ? ' ' + f.ziel : ''}: ${f.text || '?'}`).join(' · ') : 'keine',
+      { anzahl: b.fehlgeschlagen.length });
+    e('backup.alter', 'backup', 'Letzte Sicherung je Gast', b.sicherungen.ampel,
+      b.sicherungen.zu_alt.length ? b.sicherungen.zu_alt.map((g) => `${g.gast}${g.name ? ' ' + g.name : ''}: ${g.grund}`).join(' · ')
+        : `${b.sicherungen.gaeste} Gäste gesichert`, { gaeste: b.sicherungen.gaeste, zu_alt: b.sicherungen.zu_alt.length });
+  }
+  return raus;
+}
+
+module.exports = { pveAuswerten, pbsAuswerten, serverOeffentlich, alsErgebnisse, ssdVerbraucht, aufgabeZiel, STANDARD };

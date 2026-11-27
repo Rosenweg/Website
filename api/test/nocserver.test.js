@@ -179,3 +179,35 @@ test('öffentliche Sicht: keine Gastnamen, keine Fehlertexte', () => {
   assert.equal(o.pve.gaeste.soll_laufen.length, 1);
   assert.equal(o.pbs.sicherungen.zu_alt.length, 1);
 });
+
+test('Ceph: stumme Altlast färbt die Ampel nicht', () => {
+  const c = { ...ceph, health: { status: 'HEALTH_ERR', checks: {
+    AUTH_INSECURE_SERVICE_TICKETS: { severity: 'HEALTH_ERR', summary: { message: 'insecure tickets' } },
+    BLUESTORE_SLOW_OP_ALERT: ceph.health.checks.BLUESTORE_SLOW_OP_ALERT,
+  } } };
+  assert.equal(N.pveAuswerten({ ...roh, ceph: c }).ceph.ampel, 'rot');
+  const p = N.pveAuswerten({ ...roh, ceph: c }, { cephStumm: ['AUTH_INSECURE_'] });
+  assert.equal(p.ceph.ampel, 'gelb');
+  assert.ok(p.ceph.pruefungen.find((x) => x.name.startsWith('AUTH')).stumm);
+});
+
+test('Ergebnisform für die Prüfmodule (infra.*, backup.*)', () => {
+  const r = N.alsErgebnisse({ pve: { eingerichtet: true, ...N.pveAuswerten(roh) }, pbs: { eingerichtet: true, ...N.pbsAuswerten(pbsRoh) } });
+  const nach = Object.fromEntries(r.map((x) => [x.id, x]));
+  for (const x of r) {
+    assert.ok(['ok', 'warn', 'crit', 'aus', 'unbekannt'].includes(x.status), x.id);
+    assert.ok(x.bereich && x.titel && typeof x.text === 'string', x.id);
+  }
+  assert.equal(nach['infra.knoten'].status, 'ok');
+  assert.equal(nach['infra.ceph'].status, 'warn');
+  assert.match(nach['infra.ceph'].text, /slow operations/);
+  assert.equal(nach['infra.ssd'].status, 'crit');
+  assert.match(nach['infra.ssd'].text, /pve1 nvme0n1 \(osd\.0\): 94 % verbraucht/);
+  assert.equal(nach['infra.autostart'].status, 'warn');
+  assert.equal(nach['backup.alter'].status, 'warn');
+  assert.equal(nach['backup.fehlgeschlagen'].status, 'warn');
+  assert.equal(nach['backup.datastore.storage'].status, 'ok');
+  // nicht eingerichtet = unbekannt, nie ok
+  const leer = N.alsErgebnisse({ pve: { eingerichtet: false, fehlt: ['PVE_AUDIT_TOKEN'] }, pbs: { eingerichtet: false, fehlt: ['PBS_AUDIT_TOKEN'] } });
+  assert.deepEqual(leer.map((x) => x.status), ['unbekannt', 'unbekannt']);
+});
