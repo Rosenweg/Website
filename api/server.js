@@ -23676,6 +23676,12 @@ require('./routes/karten').kartenRoutes(app, {
   accessKartenBesitzerId, accessKartenBesitzerName, accessKartenCacheLeeren,
 });
 
+// Rosenweg Mein Telefon auf geteilten Telefonen: /api/telefonanlage/* reicht an die Telefonanlage
+// weiter, nur mit dem Anlage-Token und nur fuer die Person am Telefon (routes/telefonanlage.js).
+require('./routes/telefonanlage').telefonanlageRoutes(app, {
+  authMiddleware, pbxUrl: PBX_API_URL, pbxGeheimnis: () => PBX_SHARED_SECRET,
+});
+
 app.post('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
   try {
     if (!WG_CONTROL_TOKEN) return res.status(503).json({ error: 'wg-control nicht konfiguriert (WG_CONTROL_TOKEN fehlt)' });
