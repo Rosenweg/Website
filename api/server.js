@@ -20807,8 +20807,9 @@ app.get('/api/technik/mitglieder', authMiddleware, requirePermission('reklamatio
   } catch (e) { console.error('[technik-mitglieder]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 // History/Verlauf einer Reklamation (wer hat wann was gemacht) — best-effort.
-async function logReklEvent(reklId, who, text) {
-  try { await pool.query('INSERT INTO reklamation_events (reklamation_id, who, event) VALUES ($1,$2,$3)', [reklId, String(who || '').slice(0, 200), String(text || '').slice(0, 500)]); } catch (e) { /* best-effort */ }
+// anMelder: der Eintrag ging so an die meldende Person (R1) und steht in ihrem Verlauf.
+async function logReklEvent(reklId, who, text, { anMelder = false } = {}) {
+  try { await pool.query('INSERT INTO reklamation_events (reklamation_id, who, event, an_melder) VALUES ($1,$2,$3,$4)', [reklId, String(who || '').slice(0, 200), String(text || '').slice(0, 500), anMelder === true]); } catch (e) { /* best-effort */ }
 }
 // Persoenliche Benachrichtigung an ein zugewiesenes Technik-Mitglied (per Name aufgeloest):
 // WhatsApp (falls Opt-In) + Web-Push. Gibt true zurueck, wenn ein Technik-User gefunden wurde.
@@ -20855,10 +20856,10 @@ app.get('/api/reklamationen/:id/history', authMiddleware, requirePermission('rek
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
     if (!(await darfReklamation(req.user, id))) return res.status(404).json({ error: 'Nicht gefunden' });
-    const r = await pool.query('SELECT created_at, who, event FROM reklamation_events WHERE reklamation_id = $1 ORDER BY created_at ASC, id ASC', [id]);
+    const r = await pool.query('SELECT created_at, who, event, an_melder FROM reklamation_events WHERE reklamation_id = $1 ORDER BY created_at ASC, id ASC', [id]);
     // Melder (weder Admin noch Ausschuss/Verwaltung) sieht nur Statuswechsel und
-    // Nachrichten an sie, wie /meine/:id/verlauf (lib/reklamation-melder.js, F2-7).
-    const events = reklNurMelder(req.user) ? r.rows.filter(e => reklMelder.melderSiehtEreignis(e.event)) : r.rows;
+    // Nachrichten an sie, wie /meine/:id/verlauf (lib/reklamation-melder.js, F2-7, R1).
+    const events = reklNurMelder(req.user) ? reklMelder.melderVerlauf(r.rows) : r.rows;
     res.json({ events });
   } catch (e) { console.error('[reklamation-history]', e); res.status(500).json({ error: 'Fehler' }); }
 });
@@ -20905,8 +20906,10 @@ app.post('/api/reklamationen/:id/history', authMiddleware, requirePermission('re
     const rk = (await pool.query('SELECT id, person_id, beschreibung FROM reklamationen WHERE id = $1', [id])).rows[0];
     if (!rk) return res.status(404).json({ error: 'Nicht gefunden' });
     const who = req.user.name || req.user.email || 'unbekannt';
-    await logReklEvent(id, who, `🔧 ${text.slice(0, 480)}`);
-    if (rk.person_id) notifyMelderSchritt(rk, text).catch((e) => console.warn('[reklamation-schritt-notify]', e.message));
+    // R1: Der Schritt geht per WhatsApp/Push an die meldende Person -> auch in ihren Verlauf.
+    const anMelder = !!rk.person_id;
+    await logReklEvent(id, who, `🔧 ${text.slice(0, 480)}`, { anMelder });
+    if (anMelder) notifyMelderSchritt(rk, text).catch((e) => console.warn('[reklamation-schritt-notify]', e.message));
     const r = await pool.query('SELECT created_at, who, event FROM reklamation_events WHERE reklamation_id = $1 ORDER BY created_at ASC, id ASC', [id]);
     res.json({ ok: true, events: r.rows });
   } catch (e) { console.error('[reklamation-history-post]', e); res.status(500).json({ error: 'Fehler' }); }
@@ -21169,11 +21172,11 @@ app.get('/api/reklamationen/meine/:id/verlauf', authMiddleware, async (req, res)
       [id, email]);
     if (own.rows.length === 0) return res.status(404).json({ error: 'Nicht deine Meldung' });
     const r = await pool.query(
-      `SELECT created_at, who, event FROM reklamation_events
+      `SELECT created_at, who, event, an_melder FROM reklamation_events
         WHERE reklamation_id = $1
         ORDER BY created_at ASC, id ASC`, [id]);
-    // Nur Erfassung, Statuswechsel und Nachricht an sie (lib/reklamation-melder.js, F2-7)
-    res.json({ events: r.rows.filter(e => reklMelder.melderSiehtEreignis(e.event)) });
+    // Nur Erfassung, Statuswechsel und was an sie ging (lib/reklamation-melder.js, F2-7, R1)
+    res.json({ events: reklMelder.melderVerlauf(r.rows) });
   } catch (e) { console.error('[reklamation-meine-verlauf]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 // Melder-Benachrichtigung bei Status-Wechsel (E-Mail + WhatsApp + Web-Push) — gemeinsam
@@ -29741,6 +29744,8 @@ async function initDB() {
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_rekl_events ON reklamation_events(reklamation_id, created_at);
+      -- R1: Eintrag ging per WhatsApp/Push an die meldende Person -> in ihrem Verlauf
+      ALTER TABLE reklamation_events ADD COLUMN IF NOT EXISTS an_melder BOOLEAN NOT NULL DEFAULT false;
       -- Melde-Orte fuer QR-Code-Sticker: ein fester Ort (z.B. "Aufzug Haus 9")
       -- mit kurzem code im QR-Link -> Meldeformular mit vorausgefuelltem Ort.
       CREATE TABLE IF NOT EXISTS reklamation_orte (
