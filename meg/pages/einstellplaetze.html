@@ -103,43 +103,73 @@
         const r = await fetch('/api/meg/einstellplaetze', { headers: { Authorization: 'Bearer ' + token } });
         if (!r.ok) return;
         const list = await r.json();
+        for (const p of list) STAND[p.id] = { typ: p.typ, status: p.status, zugeordnet_name: p.zugeordnet_name || null, notizen: p.notizen || null };
         document.getElementById('grid').innerHTML = list.map(row).join('');
         document.querySelectorAll('#grid .f-save').forEach(btn => btn.addEventListener('click', save));
     }
 
-    async function save(e) {
-        const tr = e.target.closest('tr');
-        const token = AuthentikAuth.getToken();
-        const body = {
+    // M2: nur geänderte Felder schicken – Mail-Adresse und Wohnung (hier nicht
+    // sichtbar) bleiben so erhalten; der Server führt ebenfalls zusammen.
+    const STAND = {};
+    function felderDerZeile(tr) {
+        return {
             typ: tr.querySelector('.f-typ').value,
             status: tr.querySelector('.f-status').value,
-            zugeordnet_name: tr.querySelector('.f-name').value || null,
-            notizen: tr.querySelector('.f-notiz').value || null,
+            zugeordnet_name: tr.querySelector('.f-name').value.trim() || null,
+            notizen: tr.querySelector('.f-notiz').value.trim() || null,
         };
-        e.target.textContent = '…';
+    }
+    async function save(e) {
+        const btn = e.target;
+        const tr = btn.closest('tr');
+        const alt = STAND[tr.dataset.id] || {};
+        const neu = felderDerZeile(tr);
+        const body = {};
+        for (const k of Object.keys(neu)) if ((alt[k] ?? null) !== neu[k]) body[k] = neu[k];
+        if (!Object.keys(body).length) {
+            btn.textContent = 'unverändert';
+            setTimeout(() => { btn.textContent = 'Speichern'; }, 1500);
+            return;
+        }
+        btn.textContent = '…';
+        const token = AuthentikAuth.getToken();
         const r = await fetch('/api/meg/einstellplaetze/' + tr.dataset.id, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
             body: JSON.stringify(body),
         });
-        e.target.textContent = r.ok ? '✓' : 'Fehler';
-        setTimeout(() => { e.target.textContent = 'Speichern'; }, 1500);
-        if (r.ok) loadVerfuegbar();
+        if (r.ok) {
+            STAND[tr.dataset.id] = { ...alt, ...neu };
+            btn.textContent = '✓';
+            loadVerfuegbar();
+        } else {
+            const d = await r.json().catch(() => ({}));
+            btn.textContent = 'Fehler';
+            alert('Nicht gespeichert: ' + (d.error || ('Fehler ' + r.status)));
+        }
+        setTimeout(() => { btn.textContent = 'Speichern'; }, 1500);
     }
 
     (async () => {
         loadVerfuegbar();
         try {
-            const user = await AuthentikAuth.init();
-            // Wie die API (api/routes/meg.js megManageGate): Admin oder MEG-Ausschuss (Befund W25)
-            if (user && (user.isAdmin || (user.groups || []).some(g => ['meg-ausschuss', 'technik', 'präsident', 'praesident'].includes(String(g).toLowerCase())))) {
-                document.getElementById('admin-wrap').classList.remove('hidden');
-                loadGrid();
-            } else {
+            const user = await AuthentikAuth.init({ requireAuth: false });
+            if (!user) {
+                // Nicht angemeldet: Anmelden kann zur Platz-Verwaltung führen.
                 document.getElementById('login-hint').classList.remove('hidden');
+            } else {
+                // M1/M3: Der Server entscheidet (MEG-Ausschuss, Technik, Präsident).
+                // Angemeldete ohne Recht sehen nur den öffentlichen Teil – kein
+                // Anmelde-Knopf, der nicht weiterhilft.
+                const r = await fetch('/api/meg/einstellplaetze/rechte', { headers: { Authorization: 'Bearer ' + AuthentikAuth.getToken() } });
+                const rechte = r.ok ? await r.json() : {};
+                if (rechte.verwalten === true) {
+                    document.getElementById('admin-wrap').classList.remove('hidden');
+                    loadGrid();
+                }
             }
         } catch {
-            document.getElementById('login-hint').classList.remove('hidden');
+            if (!AuthentikAuth.isLoggedIn()) document.getElementById('login-hint').classList.remove('hidden');
         }
         document.getElementById('login-btn')?.addEventListener('click', () => AuthentikAuth.login());
     })();

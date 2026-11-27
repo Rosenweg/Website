@@ -47,4 +47,109 @@ function zevGotoTargets({ bewohnerEmail, archivMailbox, invoiceEmail }) {
   return [...set];
 }
 
-module.exports = { zevSlug, zevAliasAddress, isValidEmail, zevGotoTargets };
+// ─── Sicht auf die Online-Rechnungen („Meine ZEV-Rechnungen“) ─────────────
+// Bewohnende Partei einer Wohnung: ist ein aktiver Mieter da, sind das Mieter
+// und Bewohner (Eigentuemerin vermietet); sonst Bewohner und Eigentuemer
+// (selbst bewohnt). Verwalter gehoeren nie dazu.
+function zevBewohnendePartei(kontakte) {
+  const rollen = new Set((kontakte || []).map(k => k && k.rolle));
+  return rollen.has('mieter') ? new Set(['mieter', 'bewohner']) : new Set(['bewohner', 'eigentuemer']);
+}
+
+// Darf `email` die Rechnung `rechnung` ({ wohnung_id, bewohner_email }) sehen?
+// `kontakte` = aktive Kontakte der Wohnung (nicht archiviert, gueltig_ab <= heute),
+// `zevAktiv` = ZEV-Modul der STWEG an, `eigentuemerSiehtMieter` = Schalter der STWEG.
+//  1. Eigene Rechnung (Empfaengeradresse = eigene Adresse): immer, auch nach Auszug.
+//  2. Schalter an: Eigentuemerin der Wohnung sieht alle Rechnungen der Wohnung.
+//  3. Sonst nur die bewohnende Partei, und nur Rechnungen, deren Empfaenger
+//     heute selbst zur bewohnenden Partei gehoert (keine Vormieter-Rechnungen,
+//     keine Rechnungen der vermietenden Eigentuemerin an die Mieter).
+function zevDarfRechnungSehen({ email, rechnung, kontakte, zevAktiv, eigentuemerSiehtMieter }) {
+  const me = String(email || '').trim().toLowerCase();
+  if (!me || !rechnung) return false;
+  const empf = String(rechnung.bewohner_email || '').trim().toLowerCase();
+  if (empf && empf === me) return true;
+  if (!zevAktiv || rechnung.wohnung_id == null) return false;
+  const ks = (kontakte || []).filter(k => k && Number(k.wohnung_id) === Number(rechnung.wohnung_id));
+  const meineRollen = ks.filter(k => String(k.email || '').trim().toLowerCase() === me).map(k => k.rolle);
+  if (!meineRollen.length) return false;
+  if (eigentuemerSiehtMieter === true && meineRollen.includes('eigentuemer')) return true;
+  if (!empf) return false;
+  const partei = zevBewohnendePartei(ks);
+  const empfRollen = ks.filter(k => String(k.email || '').trim().toLowerCase() === empf).map(k => k.rolle);
+  return meineRollen.some(r => partei.has(r)) && empfRollen.some(r => partei.has(r));
+}
+
+// ─── STWEG einer nicht zugeordneten Rechnung (Z1) ─────────────────────────
+// Eine Rechnung ohne Alias-Treffer gehoert trotzdem zu der Anlage, deren
+// Adressen sie erreicht hat. Reihenfolge (nur aktive ZEV-Konfigurationen):
+//  1. Empfaenger passt auf `prefix.*@domain` genau einer STWEG,
+//  2. Empfaenger ist das Archiv-Postfach genau einer STWEG,
+//  3. es gibt nur eine aktive ZEV-STWEG (heute STWEG 3 / Haus 9: ein Postfach).
+// Sonst null: dann bleibt die Rechnung bei Technik/Praesident.
+function zevStwegFuerEmpfaenger(recips, cfgs) {
+  const adr = [...new Set((recips || []).map(r => String(r || '').trim().toLowerCase()).filter(Boolean))];
+  const aktiv = (cfgs || []).filter(c => c && c.aktiv !== false && Number.isInteger(Number(c.stweg)));
+  const eindeutig = (liste) => {
+    const set = new Set(liste.map(c => Number(c.stweg)));
+    return set.size === 1 ? [...set][0] : null;
+  };
+  const perAlias = aktiv.filter(c => {
+    const p = String(c.alias_prefix || 'zev').toLowerCase();
+    const d = String(c.alias_domain || '').toLowerCase();
+    if (!ZEV_PREFIX_RE.test(p) || !ZEV_DOMAIN_RE.test(d)) return false;
+    return adr.some(a => a.startsWith(p + '.') && a.endsWith('@' + d));
+  });
+  if (perAlias.length) return eindeutig(perAlias);
+  const perArchiv = aktiv.filter(c => c.archiv_mailbox && adr.includes(String(c.archiv_mailbox).trim().toLowerCase()));
+  if (perArchiv.length) return eindeutig(perArchiv);
+  return eindeutig(aktiv);
+}
+
+// ─── Alias-Domain/-Prefix aus dem Formular (Z2) ──────────────────────────
+// Bestimmen, welche Mailcow-Aliase Sync und Orphan-Cleanup anfassen; aendern
+// duerfen sie nur Technik/Praesident. Andere: bisherige Werte bleiben; schicken
+// sie abweichende Werte, gibt es eine verstaendliche Meldung statt stillem
+// Verwerfen. Rueckgabe { domain, prefix } oder { status, error }.
+function zevAliasAusFormular({ darfAlias, prev, body }) {
+  const t = v => (typeof v === 'string' && v.trim()) ? v.trim().toLowerCase() : null;
+  const alt = { domain: t(prev && prev.alias_domain) || 'rosenweg9.ch', prefix: t(prev && prev.alias_prefix) || 'zev' };
+  const b = body || {};
+  if (!darfAlias) {
+    const geaendert = (t(b.alias_domain) && t(b.alias_domain) !== alt.domain)
+      || (t(b.alias_prefix) && t(b.alias_prefix) !== alt.prefix);
+    if (geaendert) return { status: 403, error: 'Alias-Domain und Alias-Prefix ändern nur Technik oder Präsident. Die übrigen Felder bitte ohne diese Änderung speichern.' };
+    return alt;
+  }
+  const domain = t(b.alias_domain) || 'rosenweg9.ch';
+  const prefix = t(b.alias_prefix) || 'zev';
+  if (!ZEV_DOMAIN_RE.test(domain)) return { status: 400, error: 'Ungültige Alias-Domain (Beispiel: rosenweg9.ch)' };
+  if (!ZEV_PREFIX_RE.test(prefix)) return { status: 400, error: 'Ungültiger Alias-Prefix (Kleinbuchstaben, Ziffern, Bindestrich; Beispiel: zev)' };
+  return { domain, prefix };
+}
+
+// ─── Aktueller Bewohner und Wechsel-Meldung (Z4) ─────────────────────────
+// Aktueller Bewohner einer Wohnung aus ihren aktiven Kontakten: Mieter >
+// Bewohner > Eigentuemer, innerhalb der Rolle nach sort_order, dann id. Nach
+// ihm heisst der ZEV-Alias. Gleiche Regel wie resolveZevForStweg.
+const ZEV_ROLLEN_RANG = { mieter: 1, bewohner: 2, eigentuemer: 3 };
+function zevAktuellerBewohner(kontakte) {
+  const ks = (kontakte || []).filter(k => k && ZEV_ROLLEN_RANG[k.rolle]);
+  const so = k => (k.sort_order == null ? Infinity : Number(k.sort_order));
+  ks.sort((a, b) => (ZEV_ROLLEN_RANG[a.rolle] - ZEV_ROLLEN_RANG[b.rolle]) || (so(a) - so(b)) || (Number(a.id) - Number(b.id)));
+  return ks[0] || null;
+}
+
+// Muss ein neuer Kontakt `k` dem Messdienst gemeldet werden? Mieter/Bewohner
+// wie bisher immer. Eigentuemer nur, wenn er heute der aktuelle Bewohner ist
+// (selbst bewohnte Wohnung, Wechsel nur mit Rolle Eigentuemer) – sonst aendert
+// sich der Alias nicht (vermietete Wohnung verkauft) und es gibt keine Meldung.
+function zevWechselMelden(k, kontakteDerWohnung) {
+  if (!k) return false;
+  if (k.rolle === 'mieter' || k.rolle === 'bewohner') return true;
+  if (k.rolle !== 'eigentuemer') return false;
+  const occ = zevAktuellerBewohner(kontakteDerWohnung);
+  return !!occ && Number(occ.id) === Number(k.id);
+}
+
+module.exports = { zevSlug, zevAliasAddress, isValidEmail, zevGotoTargets, zevBewohnendePartei, zevDarfRechnungSehen, zevStwegFuerEmpfaenger, zevAliasAusFormular, zevAktuellerBewohner, zevWechselMelden };
