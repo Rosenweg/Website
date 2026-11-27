@@ -100,7 +100,7 @@
                 <div id="map" style="height: 60vh; min-height: 300px; max-height: 500px; width: 100%;"></div>
             </div>
             <p class="text-sm text-gray-600 mb-2">
-                💡 <strong>Tipp:</strong> Die Karte zeigt Sammelstellen südlich der Landstraße in Fußreichweite. Klicken Sie auf die Marker für Details.
+                💡 <strong>Tipp:</strong> Die Karte zeigt Sammelstellen südlich der Landstrasse in Fussreichweite. Klicken Sie auf die Marker für Details.
             </p>
             <div class="flex flex-wrap gap-2">
                 <button onclick="map.setView([47.535258, 7.731588], 17)" class="text-xs bg-green-100 text-green-800 px-3 py-1 rounded hover:bg-green-200 transition">
@@ -153,11 +153,11 @@
 
         // Violahof-Parkplatz Sammelstelle (ca. 2 Min zu Fuß)
         L.marker([47.535258, 7.731588], {icon: sammelstellenIcon}).addTo(map)
-            .bindPopup('<b>Sammelstelle Violahof-Parkplatz</b><br>🚶 ca. 2 Min. zu Fuß<br>Glas, Alu, Grüngut, Textilien');
+            .bindPopup('<b>Sammelstelle Violahof-Parkplatz</b><br>🚶 ca. 2 Min. zu Fuss<br>Glas, Alu, Grüngut, Textilien');
 
         // Sammelstelle Coop Parkplatz
         L.marker([47.537851, 7.731470], {icon: sammelstellenIcon}).addTo(map)
-            .bindPopup('<b>Sammelstelle Coop Parkplatz</b><br>🚶 ca. 2 Min. zu Fuß<br>Glas, Alu, Weissblech');
+            .bindPopup('<b>Sammelstelle Coop Parkplatz</b><br>🚶 ca. 2 Min. zu Fuss<br>Glas, Alu, Weissblech');
 
         // Sammelstelle Denner mit dynamischen Öffnungszeiten
         // Quelle: Denner Liebrütistrasse 39, 4303 Kaiseraugst
@@ -203,7 +203,7 @@
 
         const dennerPopupContent = `
             <b>Sammelstelle Denner</b><br>
-            🚶 ca. 2 Min. zu Fuß<br>
+            🚶 ca. 2 Min. zu Fuss<br>
             <strong>PET</strong><br>
             <br>
             ${getDennerOpeningHours()}
@@ -222,7 +222,7 @@
                 <!-- Violahof-Parkplatz -->
                 <div class="bg-white p-5 rounded-lg shadow border-l-4 border-green-500">
                     <h3 class="font-semibold text-lg text-green-700 mb-2">📍 Violahof-Parkplatz</h3>
-                    <p class="text-sm text-gray-600 mb-2">Fußweg vom Rosenweg: ca. 2 Min.</p>
+                    <p class="text-sm text-gray-600 mb-2">Fussweg vom Rosenweg: ca. 2 Min.</p>
                     <div class="flex flex-wrap gap-2">
                         <span class="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">Glas</span>
                         <span class="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Alu</span>
@@ -235,7 +235,7 @@
                 <!-- Coop Parkplatz -->
                 <div class="bg-white p-5 rounded-lg shadow border-l-4 border-blue-500">
                     <h3 class="font-semibold text-lg text-blue-700 mb-2">📍 Coop Parkplatz</h3>
-                    <p class="text-sm text-gray-600 mb-2">Fußweg vom Rosenweg: ca. 2 Min.</p>
+                    <p class="text-sm text-gray-600 mb-2">Fussweg vom Rosenweg: ca. 2 Min.</p>
                     <div class="flex flex-wrap gap-2">
                         <span class="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">Glas</span>
                         <span class="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Alu</span>
@@ -247,7 +247,7 @@
                 <!-- Denner Satellit -->
                 <div class="bg-white p-5 rounded-lg shadow border-l-4 border-purple-500">
                     <h3 class="font-semibold text-lg text-purple-700 mb-2">📍 Denner Satellit</h3>
-                    <p class="text-sm text-gray-600 mb-2">Liebrütistrasse 39 - Fußweg: ca. 2 Min.</p>
+                    <p class="text-sm text-gray-600 mb-2">Liebrütistrasse 39 - Fussweg: ca. 2 Min.</p>
                     <div class="flex flex-wrap gap-2">
                         <span class="text-xs bg-red-100 text-red-800 px-2 py-1 rounded font-semibold">PET</span>
                     </div>
@@ -258,7 +258,7 @@
                 <!-- Weidenweg -->
                 <div class="bg-white p-5 rounded-lg shadow">
                     <h3 class="font-semibold text-lg text-green-700 mb-2">📍 Weidenweg</h3>
-                    <p class="text-sm text-gray-600 mb-2">Fußweg vom Rosenweg: ca. 7 Min.</p>
+                    <p class="text-sm text-gray-600 mb-2">Fussweg vom Rosenweg: ca. 7 Min.</p>
                     <div class="flex flex-wrap gap-2">
                         <span class="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded">Bioklappe</span>
                     </div>
@@ -267,7 +267,7 @@
                 <!-- Im Liner -->
                 <div class="bg-white p-5 rounded-lg shadow">
                     <h3 class="font-semibold text-lg text-green-700 mb-2">📍 Im Liner</h3>
-                    <p class="text-sm text-gray-600 mb-2">Fußweg vom Rosenweg: ca. 10 Min.</p>
+                    <p class="text-sm text-gray-600 mb-2">Fussweg vom Rosenweg: ca. 10 Min.</p>
                     <div class="flex flex-wrap gap-2">
                         <span class="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded">Grüngut</span>
                     </div>
@@ -276,7 +276,7 @@
 
             <!-- Entsorgungsstellen -->
             <div class="bg-blue-50 border-l-4 border-blue-600 p-5 rounded-lg mb-8">
-                <h3 class="font-semibold text-lg text-blue-800 mb-3">🏢 Größere Entsorgungsstellen</h3>
+                <h3 class="font-semibold text-lg text-blue-800 mb-3">🏢 Grössere Entsorgungsstellen</h3>
                 <div class="grid md:grid-cols-3 gap-4">
                     <!-- REWAG -->
                     <div class="bg-white p-4 rounded-lg">
@@ -326,7 +326,7 @@
                     Mo–Fr: 07:00–19:00 Uhr • Sa: 07:00–18:00 Uhr • <span class="text-red-600 font-semibold">Sonn- & Feiertage: VERBOTEN!</span>
                 </p>
                 <p class="text-sm mt-2 text-gray-700">
-                    💡 Diese Liste zeigt nur Sammelstellen südlich der Landstraße in Fußreichweite vom Rosenweg. Weitere Sammelstellen auf <a href="https://www.kaiseraugst.ch/abfallorte" target="_blank" class="text-blue-600 hover:underline font-semibold">kaiseraugst.ch</a>
+                    💡 Diese Liste zeigt nur Sammelstellen südlich der Landstrasse in Fussreichweite vom Rosenweg. Weitere Sammelstellen auf <a href="https://www.kaiseraugst.ch/abfallorte" target="_blank" class="text-blue-600 hover:underline font-semibold">kaiseraugst.ch</a>
                 </p>
             </div>
         </div>
@@ -348,7 +348,7 @@
                         </div>
                         <div>
                             <p class="text-sm font-semibold text-blue-700 mb-1">📅 Abfuhr:</p>
-                            <p class="text-sm text-gray-700"><strong>Freitags & Montags</strong> (außer Feiertage)</p>
+                            <p class="text-sm text-gray-700"><strong>Freitags & Montags</strong> (ausser Feiertage)</p>
                             <p class="text-sm text-gray-600">Bereitstellung bis 07:00 Uhr</p>
                         </div>
                     </div>
@@ -428,7 +428,7 @@
                             <p class="text-sm font-semibold text-blue-700 mb-1">🗑️ Entsorgung:</p>
                             <p class="text-sm text-gray-700 mb-2">• <strong>Grüngutmulden</strong> an Sammelstellen (kostenlos)</p>
                             <p class="text-sm text-gray-700 mb-2">• <strong>GAF-Grüncontainer</strong> (140/240/770 Liter)</p>
-                            <p class="text-sm text-gray-700">• <strong>REWAG</strong> (gegen Gebühr für große Mengen)</p>
+                            <p class="text-sm text-gray-700">• <strong>REWAG</strong> (gegen Gebühr für grosse Mengen)</p>
                         </div>
                     </div>
                 </div>
@@ -439,7 +439,7 @@
                     <div class="grid md:grid-cols-2 gap-4">
                         <div>
                             <p class="text-sm font-semibold text-green-700 mb-1">✓ Gehört hinein:</p>
-                            <p class="text-sm text-gray-700">Rüstabfälle von rohem Obst & Gemüse, Blumensträuße, Eierschalen</p>
+                            <p class="text-sm text-gray-700">Rüstabfälle von rohem Obst & Gemüse, Blumensträusse, Eierschalen</p>
                             <p class="text-sm text-gray-600 mt-2">✓ Nur in vergärbaren Bio-Säckli (EN13432)</p>
                         </div>
                         <div>
@@ -506,7 +506,7 @@
     <!-- REWAG & Werkhof -->
     <section class="py-8 bg-gray-50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <h2 class="text-2xl font-bold text-gray-800 mb-6">🏢 Große Entsorgungsstellen</h2>
+            <h2 class="text-2xl font-bold text-gray-800 mb-6">🏢 Grosse Entsorgungsstellen</h2>
             
             <div class="grid md:grid-cols-3 gap-6">
                 <!-- REWAG -->

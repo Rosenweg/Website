@@ -579,7 +579,7 @@
     const alloc = prefill.allocation || {};
     const allocErr = prefill.allocation_error ? `<p class="text-xs text-red-700">⚠ Subnet-Allokation: ${esc(prefill.allocation_error)}</p>` : '';
     const subnetHelp = kind === 'subnet'
-      ? `<p class="text-xs text-gray-500 mt-0.5">Pool und Größe (${esc(req.gewuenschte_groesse || 'auto /28')}) wurden vorbefüllt.</p>${allocErr}`
+      ? `<p class="text-xs text-gray-500 mt-0.5">Pool und Grösse (${esc(req.gewuenschte_groesse || 'auto /28')}) wurden vorbefüllt.</p>${allocErr}`
       : '<p class="text-xs text-gray-500 mt-0.5">VLAN-only (kind=vlan): User macht Routing/DHCP selbst. Subnet optional.</p>';
     const modal = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
       <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5 max-h-[90vh] overflow-y-auto">

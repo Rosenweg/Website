@@ -32,7 +32,7 @@
         '<div style="margin-top:4px">Oben/unten auf das <strong>⋯-Menü</strong> tippen → <strong>„In Safari öffnen"</strong>. Dort dann Teilen-Symbol → „Zum Home-Bildschirm".</div>' +
         '<button id="pwaCopyLink" style="margin-top:8px;background:#fff;color:#1d4ed8;border:0;border-radius:6px;padding:6px 11px;font-weight:600;cursor:pointer;font-size:13px">🔗 Link kopieren (in Safari einfügen)</button>' +
       '</div>' +
-      '<button id="pwaHintClose" aria-label="Hinweis schließen" style="flex:0 0 auto;background:transparent;border:0;color:#fff;font-size:22px;line-height:1;cursor:pointer;padding:0 4px">&times;</button>';
+      '<button id="pwaHintClose" aria-label="Hinweis schliessen" style="flex:0 0 auto;background:transparent;border:0;color:#fff;font-size:22px;line-height:1;cursor:pointer;padding:0 4px">&times;</button>';
 
     bar.querySelector('#pwaHintClose').addEventListener('click', function () {
       bar.remove();
