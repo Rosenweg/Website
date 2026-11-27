@@ -27,7 +27,7 @@
     <div id="content" class="hidden">
       <div class="mb-4">
         <h1 class="text-2xl font-bold text-gray-900">Mail schreiben</h1>
-        <p class="text-sm text-gray-600 mt-1">Ad-hoc-Brief an externe Empfänger (Anwalt, Bank, Versicherung, …). Wird automatisch in die <a href="/verwaltung-mail-outbox.html" class="text-blue-600 underline">Mail-Outbox</a> gestellt und braucht Freigabe von Technik oder Präsident vor dem Versand. Empfänger kann aus Stammdaten gewählt oder direkt eingegeben werden.</p>
+        <p class="text-sm text-gray-600 mt-1">Ad-hoc-Brief an externe Empfänger (Anwalt, Bank, Versicherung, …). Meist geht die Mail in die <a href="/verwaltung-mail-outbox.html" class="text-blue-600 underline">Mail-Outbox</a> und braucht dort eine Freigabe (Standard: Technik oder Präsident). Nur an einen Stammempfänger mit „Direktversand“ und unveränderten Adressen geht sie sofort raus – das steht unten vor dem Senden. Empfänger kann aus Stammdaten gewählt oder direkt eingegeben werden.</p>
       </div>
 
       <form id="form" class="bg-white rounded-lg shadow p-4 space-y-3 text-sm">
@@ -76,13 +76,13 @@
         </label>
 
         <div class="bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-900">
-          <span id="approval-info">Die Mail wird in die <strong>Outbox</strong> gestellt und braucht Freigabe (Technik / Präsident) vor dem Versand.</span>
+          <span id="approval-info">Die Mail wird in die <strong>Outbox</strong> gestellt und braucht vor dem Versand eine Freigabe (Standard: Technik / Präsident).</span>
         </div>
 
         <div id="form-err" class="text-sm text-red-600 hidden"></div>
         <div class="flex justify-end gap-2 pt-3 border-t mt-3">
           <a href="/verwaltung-mail-outbox.html" class="px-3 py-1.5 text-gray-600 hover:bg-gray-100 rounded">→ zur Outbox</a>
-          <button type="submit" id="btn-send" class="px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700">In Outbox stellen</button>
+          <button type="submit" id="btn-send" class="px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700">Senden</button>
         </div>
       </form>
     </div>
@@ -137,7 +137,7 @@
     document.getElementById('f-cc').value = ccParts.join(', ');
     document.getElementById('f-reply').value = e.default_reply_to || '';
     document.getElementById('approval-info').innerHTML = e.requires_approval !== false
-      ? 'Die Mail wird in die <strong>Outbox</strong> gestellt und braucht Freigabe (Technik / Präsident) vor dem Versand.'
+      ? 'Die Mail wird in die <strong>Outbox</strong> gestellt und braucht vor dem Versand eine Freigabe (Standard: Technik / Präsident).'
       : '✓ Dieser Empfänger ist als <strong>Direktversand</strong> konfiguriert — die Mail geht ohne Freigabe sofort raus, solange An/CC/Antwort-an nur Adressen aus den Stammdaten enthalten. Sonst geht sie in die <strong>Outbox</strong> zur Freigabe.';
   }
 
@@ -186,8 +186,9 @@
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
       if (data.queued) {
-        alert('Mail in die Outbox gestellt. Wartet auf Freigabe.');
-        window.location.href = '/verwaltung-mail-outbox.html';
+        // Die Outbox zeigt eigene Mails mit Stand (W21/W29); dort direkt öffnen
+        alert('Mail in die Outbox gestellt. Sie wird erst nach der Freigabe versendet.');
+        window.location.href = '/verwaltung-mail-outbox.html' + (data.queue_id ? '#' + encodeURIComponent(data.queue_id) : '');
       } else {
         alert('Mail wurde direkt versendet.');
         document.getElementById('form').reset();
