@@ -49,6 +49,11 @@ test('apps-register.json ist gueltig und kennt die bisherigen Apps', () => {
   assert.ok(!daten.apps.zev.technik);
   assert.equal(daten.apps.zev.logo, '/img/apps/rosenweg-zev.png?v=20261128');
   assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.zev.logo.split('?')[0])));
+  // Rosenweg Wetter (Welle 2): Bewohner-App, Logo mit Cache-Zusatz ?v=
+  assert.equal(daten.apps.wetter.paket, 'ch.rosenweg4303.wetter');
+  assert.equal(daten.apps.wetter.repo, 'Rosenweg/rosenweg-wetter');
+  assert.ok(!daten.apps.wetter.technik);
+  assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.wetter.logo.split('?')[0])));
 });
 
 test('pruefen findet Fehler', () => {

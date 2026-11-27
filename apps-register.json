@@ -121,6 +121,17 @@
       "text": "Fernsehen im Rosenweg: alle Sender mit Suche und Programm (Jetzt/Danach, 7 Tage), im Haus direkt, unterwegs über den Streamer; auf dem Fernseher mit der Fernbedienung (Google TV).",
       "fuer": "Für alle Bewohner und Eigentümer mit Rosenweg-Konto. Optional eine PIN je Gerät als Kindersicherung.",
       "_notiz": "Flutter, Linux, Android (inkl. Google TV), Windows, macOS; iOS baut, wird noch nicht verteilt. Kein Replay, keine Aufnahme, kein Casten (Entscheid Stefan 28.11.2026). Web-Seite tv.html bleibt."
+    },
+    "wetter": {
+      "name": "Rosenweg Wetter",
+      "repo": "Rosenweg/rosenweg-wetter",
+      "paket": "ch.rosenweg4303.wetter",
+      "logo": "/img/apps/rosenweg-wetter.png?v=20261128",
+      "reihenfolge": 110,
+      "text": "Wetterstation am Rosenweg 9: aktuelle Werte live, Verlauf bis 7 Tage mit Diagrammen, Sonne und Mond. Liefert die Station nichts, sagt die App das klar statt Nullen zu zeigen.",
+      "fuer": "Für alle Bewohner und Eigentümer. Die Werte sind öffentlich (wie die Web-Seite wetter.html).",
+      "technik": false,
+      "_notiz": "Flutter, alle Plattformen (Welle 2, Pilot fuer die Basis-Bausteine Diagramme und MQTT). Web-Seiten wetter.html und pwa/wetter bleiben. Live ueber den MQTT-Broker (wetter-public), kein ntfy."
     }
   },
   "katalog": {
