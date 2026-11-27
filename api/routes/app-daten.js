@@ -5,7 +5,8 @@
 // Konfliktregel und Grenzen: lib/app-daten.js.
 //
 //   GET /api/me/app-daten/:app?seit=<version>
-//       -> { app, version, person, eintraege: [{art,id,geaendert,geloescht,daten,version}] }
+//       -> { app, version, person: {id, name}, eintraege: [{art,id,geaendert,geloescht,daten,version}] }
+//       (person: wessen Daten das sind - ein geteiltes Telefon merkt so einen Wechsel)
 //       Ohne seit: alles (auch Grabsteine). ETag "v<version>"; If-None-Match -> 304.
 //   PUT /api/me/app-daten/:app   { seit, eintraege: [{art,id,geaendert,geloescht,daten}], geraet? }
 //       Einträge hochladen; je Eintrag gilt die letzte Änderung. Antwort wie GET
@@ -67,15 +68,15 @@ async function seitLesen(q, userId, app, seit) {
 }
 
 /** GET: alles seit [seit]. */
-async function holen({ pool, userId, app, seit }) {
+async function holen({ pool, userId, app, seit, name = null }) {
   await ensureSchema(pool);
   const { version } = await stand(pool, userId, app);
   const zeilen = seit >= version ? [] : await seitLesen(pool, userId, app, seit);
-  return { app, version, person: { id: userId }, eintraege: ad.antwortEintraege(zeilen) };
+  return { app, version, person: { id: userId, name }, eintraege: ad.antwortEintraege(zeilen) };
 }
 
 /** PUT: Einträge zusammenführen. -> { status, json } */
-async function abgleichen({ pool, userId, app, body, jetzt = Date.now() }) {
+async function abgleichen({ pool, userId, app, body, name = null, jetzt = Date.now() }) {
   const b = body && typeof body === 'object' ? body : {};
   const p = ad.eintraegePruefen(b.eintraege ?? [], jetzt);
   if (p.fehler) return { status: 400, json: { error: p.fehler } };
@@ -133,7 +134,7 @@ async function abgleichen({ pool, userId, app, body, jetzt = Date.now() }) {
     return {
       status: 200,
       json: {
-        app, version, person: { id: userId }, eintraege: ad.antwortEintraege(zeilen, abgelehnt),
+        app, version, person: { id: userId, name }, eintraege: ad.antwortEintraege(zeilen, abgelehnt),
         uebernommen: schreiben.length, abgelehnt: abgelehnt.length,
       },
     };
@@ -165,7 +166,7 @@ function appDatenRoutes(app, { pool, authMiddleware }) {
     const name = pruefen(req, res);
     if (!name) return;
     try {
-      const a = await holen({ pool, userId: ad.benutzerId(req), app: name, seit: ad.seitAus(req.query.seit) });
+      const a = await holen({ pool, userId: ad.benutzerId(req), app: name, seit: ad.seitAus(req.query.seit), name: req.user.name || null });
       const etag = `"v${a.version}"`;
       res.set('ETag', etag);
       if (req.headers['if-none-match'] === etag) return res.status(304).end();
@@ -180,7 +181,7 @@ function appDatenRoutes(app, { pool, authMiddleware }) {
     const name = pruefen(req, res);
     if (!name) return;
     try {
-      const r = await abgleichen({ pool, userId: ad.benutzerId(req), app: name, body: req.body });
+      const r = await abgleichen({ pool, userId: ad.benutzerId(req), app: name, body: req.body, name: req.user.name || null });
       if (r.status === 200) res.set('ETag', `"v${r.json.version}"`);
       res.status(r.status).json(r.json);
     } catch (e) {

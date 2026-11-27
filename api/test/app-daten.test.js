@@ -92,7 +92,7 @@ test('Abgleich: zwei Geraete, Versionen, Grabstein, abgelehnte Aenderung kommt z
   assert.equal(a.json.version, 1);
   assert.equal(a.json.uebernommen, 2);
   assert.deepEqual(a.json.eintraege.map(e => e.id), ['w1', 'w2']);
-  assert.deepEqual(a.json.person, { id: 7 });
+  assert.deepEqual(a.json.person, { id: 7, name: null });
 
   // Handy B holt alles
   const b = await holen({ pool, userId: 7, app: UHR, seit: 0 });
