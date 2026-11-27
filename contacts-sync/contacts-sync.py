@@ -39,6 +39,9 @@ def tls_kontext():
 # Erst per Compose-Label suchen (unabhaengig vom Namensschema), Name nur als
 # Rueckfall. PG_CONTAINER in der env-Datei ueberschreibt alles.
 def finde_pg_container():
+    # Ueber das Netz (CT 201 'sync', seit 27.11.2026): PG_HOST gesetzt -> kein Docker noetig.
+    if ENV.get("PG_HOST"):
+        return None
     if ENV.get("PG_CONTAINER"):
         return ENV["PG_CONTAINER"]
     for filt in (["label=com.docker.compose.project=rosenweg-core", "label=com.docker.compose.service=postgres"],
@@ -54,6 +57,12 @@ def finde_pg_container():
 
 
 def psql(pgc, sql):
+    if pgc is None:
+        # Netzzugang: eigener Nur-Lese-Benutzer (PG_USER/PG_PASSWORD), Passwort nur per Umgebung an psql
+        umg = dict(os.environ, PGPASSWORD=ENV.get("PG_PASSWORD", ""), PGSSLMODE=ENV.get("PG_SSLMODE", "prefer"))
+        return subprocess.check_output(
+            ["psql", "-h", ENV["PG_HOST"], "-p", ENV.get("PG_PORT", "5432"), "-U", ENV.get("PG_USER", "contacts_sync"),
+             "-d", ENV.get("PG_DB", "rosenweg"), "-t", "-A", "-v", "ON_ERROR_STOP=1", "-c", sql], env=umg).decode().strip()
     return subprocess.check_output(["docker", "exec", pgc, "sh", "-c", "psql -U $POSTGRES_USER -d $POSTGRES_DB -t -A -c \"" + sql + "\""]).decode().strip()
 
 
