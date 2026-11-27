@@ -689,4 +689,6 @@ function sicherungenRouter(deps = {}) {
   return router;
 }
 
-module.exports = { sicherungenRouter, ensureSchema, starteNachfuehren };
+// pbsHolen/pbsUebersichtGecacht/einrichtung: auch fürs NOC (routes/nocserver.js) —
+// derselbe Zugang, derselbe Cache, kein zweiter PBS-Client.
+module.exports = { sicherungenRouter, ensureSchema, starteNachfuehren, pbsHolen, pbsUebersichtGecacht, einrichtung };

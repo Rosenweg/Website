@@ -21283,6 +21283,17 @@ app.get('/api/isp/noc/public/stationen', async (req, res) => {
 });
 app.get('/api/isp/noc/stationen', authMiddleware, requireTechnikOrPraesident, nocStationenHandler);
 
+// Server im NOC: Proxmox-Cluster und PBS, nur lesend mit eigenen Audit-Tokens
+// (routes/nocserver.js). Der PBS-Zugang ist derselbe wie für /sicherungen.
+const nocServerHandler = require('./routes/nocserver').nocServer(sicherungen);
+app.get('/api/isp/noc/public/server', async (req, res) => {
+  const zugang = checkNocToken(req, res);
+  if (!zugang) return;
+  req.nocOffen = zugang === 'offen';
+  return nocServerHandler(req, res);
+});
+app.get('/api/isp/noc/server', authMiddleware, requireTechnikOrPraesident, nocServerHandler);
+
 // Ob ein Container laeuft, sagt wenig. Am 1. September 2026 stand
 // Nextcloud wochenlang im Wartungsmodus — CT 104 lief die ganze Zeit,
 // das NOC zeigte "web: gruen", und unbenutzbar war es trotzdem. Darum

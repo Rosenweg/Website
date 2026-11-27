@@ -354,7 +354,25 @@ und Netzwerkzustand. Darunter steht der Abschnitt **Stationen**: je Gerät eine 
 rot und gelb zuerst. Rot = Anschluss-Abweichung, doppelt, Anzeige aus, Arbeitsplatz über drei
 Tage still; gelb = gesperrt, Arbeitsplatz aus, Wartung steht still; blau = Update/SSH-Wartung
 läuft; grau = darf aus sein (Laptop, Kiosk-TV, Chromecast) oder Windows ohne Agent. Online heisst:
-Lebenszeichen jünger als 15 min (Kiosk, Chromecast: 5 min). Wer angemeldet ist, zeigt das NOC nicht. Es hat drei Betriebsarten:
+Lebenszeichen jünger als 15 min (Kiosk, Chromecast: 5 min). Wer angemeldet ist, zeigt das NOC nicht.
+
+Ganz unten der Abschnitt **Server**: Proxmox-Knoten, Quorum, HA, Ceph (mit Gründen, z. B. slow
+ops), SSD-Abnutzung der OSDs (SMART „Percentage Used“: ab 80 % gelb, ab 90 % rot; verstellbar mit
+`NOC_SSD_GELB`/`NOC_SSD_ROT`), Gäste mit Autostart, die nicht laufen, und der PBS (Belegung, Jobs,
+fehlgeschlagene Aufgaben der letzten 24 h, Gäste mit Sicherung älter als 36 h). Gezeigt werden nur
+Gäste aus `PBS_NOC_NAMESPACES` (Standard `Rosenweg9`); private Namespaces erscheinen nicht.
+Einrichten (nur lesende Tokens, in `/opt/rosenweg-core/.env` auf CT 128):
+
+- PVE: `pveum user add noc@pve --comment "NOC, nur lesen"`,
+  `pveum user token add noc@pve audit --privsep 1`,
+  `pveum acl modify / --users noc@pve --roles PVEAuditor`,
+  `pveum acl modify / --tokens 'noc@pve!audit' --roles PVEAuditor` →
+  `PVE_AUDIT_TOKEN=noc@pve!audit=<geheimnis>`
+- PBS: `proxmox-backup-manager user create audit@pbs --comment "NOC/Sicherungen, nur lesen"`,
+  `proxmox-backup-manager user generate-token audit@pbs api`,
+  `proxmox-backup-manager acl update / Audit --auth-id 'audit@pbs!api'` →
+  `PBS_AUDIT_TOKEN=audit@pbs!api:<geheimnis>` und `PBS_FINGERPRINT=<sha256 aus proxmox-backup-manager cert info>`
+  (schaltet zugleich `/sicherungen` frei). Es hat drei Betriebsarten:
 
 | Aufruf | Sicht |
 |---|---|
