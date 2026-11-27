@@ -8767,7 +8767,9 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
     const canonical = JSON.stringify(snapshotData, Object.keys(snapshotData).sort());
     hash = crypto.createHash('sha256').update(canonical).digest('hex').substring(0, 12).toUpperCase();
     generatedAt = new Date().toLocaleString('de-CH', { timeZone: 'Europe/Zurich' });
-    try {
+    // Vorschau (Befund V5): nichts speichern – kein Snapshot, keine Ruecklauf-
+    // Zeilen, kein PDF. Erst „PDF herunterladen“ legt die Liste an.
+    if (!opts.vorschau) try {
       await pool.query(`
         INSERT INTO unterschriftenliste_snapshots (hash, stweg, datum, anlass_titel, snapshot_data, generated_by)
         VALUES ($1, $2, $3, $4, $5::jsonb, $6)
@@ -8798,8 +8800,10 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
         );
       }
     } catch (e) { console.error('[Unterschriftenliste] Snapshot-Save error:', e.message); }
-    // Hash für PDF-Speicherung im Endpoint zurückgeben
-    opts._hash = hash;
+    // Hash für PDF-Speicherung im Endpoint zurückgeben (nicht bei der Vorschau)
+    if (!opts.vorschau) opts._hash = hash;
+    // Vorschau traegt keinen pruefbaren Hash: so wird sie nicht aus Versehen verschickt.
+    if (opts.vorschau) hash = 'VORSCHAU';
   }
 
   // Öffentliche Echtheitsprüfungs-Seite — Hash aus der Fusszeile dort eingeben
@@ -9341,6 +9345,7 @@ app.get('/api/unterschriftenliste/:stweg.pdf', authMiddleware, requirePermission
       zeichnungsberechtigte: zeichner,
       kollektiv_text: req.query.kollektiv_text || '',
       haus_filter: hausFilter,
+      vorschau: req.query.preview === '1',
     };
     opts.generated_by = req.user?.email || req.user?.name || null;
     const html = await buildUnterschriftenlisteHTML(stweg, opts);
