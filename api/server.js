@@ -21875,6 +21875,25 @@ app.get('/api/isp/noc/public/server', async (req, res) => {
 });
 app.get('/api/isp/noc/server', authMiddleware, requireTechnikOrPraesident, nocServerHandler);
 
+// Android-Dauertest (CT 149, noc/android-dauertest): Läufe annehmen, NOC-Kachel, Meldungen
+// an die Technik (routes/android-dauertest.js). POST nur mit X-Dauertest-Token von CT 149.
+const androidDauertest = require('./routes/android-dauertest');
+app.post('/api/isp/noc/android-dauertest', androidDauertest.annehmen);
+app.get('/api/isp/noc/public/android-dauertest', (req, res) => {
+  const zugang = checkNocToken(req, res);
+  if (!zugang) return;
+  req.nocOffen = zugang === 'offen';
+  return androidDauertest.lesen(req, res);
+});
+app.get('/api/isp/noc/android-dauertest', authMiddleware, requireTechnikOrPraesident, androidDauertest.lesen);
+app.get('/api/isp/noc/public/android-dauertest/:kennung/schirmbild', (req, res) => {
+  const zugang = checkNocToken(req, res);
+  if (!zugang) return;
+  req.nocOffen = zugang === 'offen';
+  return androidDauertest.schirmbild(req, res);
+});
+app.get('/api/isp/noc/android-dauertest/:kennung/schirmbild', authMiddleware, requireTechnikOrPraesident, androidDauertest.schirmbild);
+
 // Fernwartung der geteilten Telefone im NOC (Prüfmodul telefone.fernwartung, lib/nocfernwartung.js):
 // die pbx-api auf CT 220 kennt Tunnel, Not-Aus und fremde adb-Rückfragen und holt den Handshake
 // bei der adb-zentrale. Gefragt mit dem PBX-Geheimnis, 20 s gemerkt.
@@ -31304,6 +31323,8 @@ initDB()
       // Sicherungen: laufende PC-Sicherungen alle 20 s nachführen (auch ohne offene Seite)
       sicherungen.ensureSchema().then(() => sicherungen.starteNachfuehren(activeIntervals))
         .catch(e => console.error('[sicherungen] Schema:', e.message));
+      // Android-Dauertest: Tabelle, und alle 15 min prüfen, ob CT 149 noch Läufe schickt
+      androidDauertest.starten(activeIntervals);
       // Mitgelieferte Dokumente (Beispielmappe) in die Ablage, siehe lib/ablage.js
       setTimeout(() => require('./lib/ablage').ablageAbgleichen(), 20 * 1000);
       // Cleanup expired sessions every hour

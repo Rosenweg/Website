@@ -1,4 +1,4 @@
-# Ein Lauf des Android-Dauertests (CT 149). NICHT aktiviert - Stefan entscheidet.
+# Ein Lauf des Android-Dauertests (CT 149).
 [Unit]
 Description=Android-Dauertest der Rosenweg-Apps
 After=network-online.target

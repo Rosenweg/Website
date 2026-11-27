@@ -1,4 +1,4 @@
-# Nach einem neuen Release: alle 5 Minuten den /apps-Index vergleichen, nur bei Aenderung testen.
+# Nach einem neuen Release: alle 5 Minuten /apps-Index und GitHub-Releases vergleichen, nur bei Aenderung testen.
 [Unit]
 Description=Android-Dauertest nach neuem Release
 After=network-online.target
