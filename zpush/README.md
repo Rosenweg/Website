@@ -147,6 +147,23 @@ echo | openssl s_client -connect contacts.rosenweg4303.ch:443 -servername contac
 ssh root@100.64.2.22 'pct exec 115 -- sh -c "ls -ld /var/lib/z-push/rw-logon; grep -h BackendRosenweg /var/log/z-push/*.log | tail -n 20"'
 ```
 
+Ohne Zugangsdaten antwortet Z-Push auch auf `OPTIONS` mit **401** und
+`WWW-Authenticate: Basic realm="ZPush"` (Z-Push authentifiziert vor OPTIONS).
+Die Kopfzeilen `MS-Server-ActiveSync`/`MS-ASProtocolVersions` kommen erst mit
+gültiger Anmeldung. Ein 401 mit `realm="ZPush"` plus eine Zeile
+`Please send authorisation information` in `z-push-error.log` beweist also den
+ganzen Weg Edge → CT 115 → PHP. Für die Aussensicht vom Relay-VPS testen (Mac
+und Hausnetz gehen über die eigene öffentliche Adresse hinein).
+
+Kommt von einem Telefon gar nichts an (weder im Edge-Log
+`/var/log/traefik/access.log` auf CT 245 noch in `/var/log/nginx/access.log`
+auf CT 115), liegt der Fehler auf dem Telefon: Nach dem abgelaufenen Zertifikat
+(16.09.–18.11.2026) haben Konten den Abgleich eingestellt – Konto öffnen und
+manuell synchronisieren, notfalls Konto entfernen und neu anlegen.
+Autodiscover hilft nicht: `autodiscover.rosenweg4303.ch` und
+`_autodiscover._tcp` zeigen auf Mailcow, darum Server immer **manuell**
+eintragen.
+
 Sperre testen (mit einem Testkonto, nie mit einem echten): sechsmal mit falschem
 Passwort anmelden, dann mit richtigem – die sechste und die richtige Anmeldung
 müssen abgelehnt werden.
