@@ -16,12 +16,12 @@ test('Kennung: nur 64 Hex, Grossbuchstaben werden klein', () => {
 });
 
 test('Gruppe: je Person verschieden, E-Mail ohne Gross/Klein, ohne Kennung null', () => {
-  const a = gg.gruppe('Stefan@Example.ch', k);
+  const a = gg.gruppe('Erika@Example.ch', k);
   assert.match(a, /^[0-9a-f]{16}$/);
-  assert.equal(a, gg.gruppe('stefan@example.ch ', k));
+  assert.equal(a, gg.gruppe('erika@example.ch ', k));
   assert.notEqual(a, gg.gruppe('andere@example.ch', k));
-  assert.equal(gg.gruppe('stefan@example.ch', ''), null);
-  assert.equal(gg.gruppe('stefan@example.ch', null), null);
+  assert.equal(gg.gruppe('erika@example.ch', ''), null);
+  assert.equal(gg.gruppe('erika@example.ch', null), null);
 });
 
 test('Gruppe: gleiche Formel wie pbx/api/app.py _geraet_gruppe', () => {

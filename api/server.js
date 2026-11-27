@@ -28884,7 +28884,7 @@ async function initDB() {
       -- verknuepften wohnungen_kontakte-Zeilen.
       CREATE TABLE IF NOT EXISTS personen (
         id SERIAL PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,           -- Anzeigename (z.B. "Stefan Mueller")
+        name VARCHAR(255) NOT NULL,           -- Anzeigename (z.B. "Erika Muster")
         vorname VARCHAR(120),                  -- optional, für strukturierte Anzeige
         nachname VARCHAR(120),                 -- optional
         email VARCHAR(255),
