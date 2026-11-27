@@ -212,6 +212,7 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `GET /api/unterschriftenliste/verify-json`, `verify`, `snapshot/:hash.pdf` | Echtheitsprüfung (30 / 10 Min. je Client) |
 | `GET /api/display/pdf/:name`, `pdfbild/:name`, `geraetedatei/…`, `rss` | Anzeigen im Treppenhaus |
 | `GET /api/isp/noc/public/*`, `/api/isp/status-summary`, `/api/isp/maintenance/public` | NOC-Wandbild (gekürzt), Störungen |
+| `GET /api/isp/noc/public/stationen` (Token) bzw. `/api/isp/noc/stationen` (Technik/Präsident) | Stationen im NOC: Zusammenfassung + je Gerät Kennung, Rolle, Haus, Standort, Ampel, OS/Agent — **ohne** Personen, IPs, Overrides (`api/lib/nocstationen.js`, 15 s Cache); anonym (`NOC_PUBLIC_OPEN`) nur „Station n“ |
 | `GET /api/meg/einstellplaetze/verfuegbar` | freie Einstellplätze (ohne Personendaten) |
 | `GET /api/tv/playlist.m3u`, `/api/tv/epg.xml` | TV-Senderliste |
 | `GET /api/wetter/:station/history`, `GET /api/push/vapid-public-key`, `GET /api/nav/audience-map` | Wetter, Push-Schlüssel, Menü-Zuordnung |

@@ -21231,6 +21231,58 @@ app.get('/api/isp/noc/public/unifi', async (req, res) => {
   return nocUnifiHandler(req, res);
 });
 
+// Stationen im NOC (Abschnitt „Stationen" in js/noc-cockpit.js): schmale
+// Auswahl aus der Tabelle stations, Ampel je Station in lib/nocstationen.js.
+// Ohne Personen (wer angemeldet ist, wer registriert hat), ohne IPs, ohne
+// Overrides — /api/stations/admin/list bleibt der Verwaltung vorbehalten.
+// Kurzer Cache: das Wandbild fragt alle fünf Sekunden.
+const nocStationen = require('./lib/nocstationen');
+let _nocStationen = null, _nocStationenT = 0;
+async function nocStationenHandler(req, res) {
+  try {
+    if (!_nocStationen || Date.now() - _nocStationenT > 15000) {
+      await stationsRouter.ensureSchema();
+      const r = await pool.query(`
+        SELECT s.id, s.role, s.haus, s.standort, s.status, s.revoked_at, s.last_seen_at,
+               jsonb_build_object('os_version', s.last_state->'os_version', 'android', s.last_state->'android',
+                                  'app_version', s.last_state->'app_version') AS last_state,
+               s.update_angefordert, s.zuruecksetzen_angefordert, s.ad_betriebssystem,
+               s.anschluss_abweichung IS NOT NULL AS anschluss_abweichung,
+               s.doppelt IS NOT NULL AS doppelt,
+               s.agent_protokoll, s.agent_version, s.agent_modus,
+               jsonb_build_object('betriebssystem', s.agent_inventar->'betriebssystem',
+                                  'updates', jsonb_build_object('neustart_ausstehend',
+                                    s.agent_inventar->'updates'->'neustart_ausstehend')) AS agent_inventar,
+               w.bis AS ssh_wartung_bis,
+               COALESCE(e.liste, '[]'::json) AS ereignisse
+          FROM stations s
+          LEFT JOIN LATERAL (
+            SELECT bis FROM station_ssh_wartung
+             WHERE station_id = s.id AND beendet_am IS NULL AND bis > NOW()
+             ORDER BY bis DESC LIMIT 1) w ON true
+          LEFT JOIN LATERAL (
+            SELECT json_agg(json_build_object('art', art, 'erstellt', erstellt)) AS liste
+              FROM station_events
+             WHERE station_id = s.id AND erstellt > NOW() - INTERVAL '1 hour'
+               AND art IN ('update-abgeholt', 'wartung-dauert-lange')) e ON true
+         WHERE s.revoked_at IS NULL`);
+      _nocStationen = { ...nocStationen.stationenFuerNoc(r.rows), ts: Date.now() };
+      _nocStationenT = Date.now();
+    }
+    res.json(req.nocOffen ? nocStationen.stationenOeffentlich(_nocStationen) : _nocStationen);
+  } catch (e) {
+    console.warn('[noc] Stationen:', e.message);
+    res.status(500).json({ error: 'Stationen nicht lesbar' });
+  }
+}
+app.get('/api/isp/noc/public/stationen', async (req, res) => {
+  const zugang = checkNocToken(req, res);
+  if (!zugang) return;
+  req.nocOffen = zugang === 'offen';
+  return nocStationenHandler(req, res);
+});
+app.get('/api/isp/noc/stationen', authMiddleware, requireTechnikOrPraesident, nocStationenHandler);
+
 // Ob ein Container laeuft, sagt wenig. Am 1. September 2026 stand
 // Nextcloud wochenlang im Wartungsmodus — CT 104 lief die ganze Zeit,
 // das NOC zeigte "web: gruen", und unbenutzbar war es trotzdem. Darum
