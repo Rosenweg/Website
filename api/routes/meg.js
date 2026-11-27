@@ -5,7 +5,7 @@
 const express = require('express');
 const { pool } = require('../lib/db');
 const { authMiddleware } = require('../middleware/auth');
-const { darfMegPlaetzeVerwalten } = require('../lib/meg');
+const { darfMegPlaetzeVerwalten, megPlatzAenderung } = require('../lib/meg');
 
 const router = express.Router();
 
@@ -60,16 +60,19 @@ router.post('/einstellplaetze', authMiddleware, megManageGate, async (req, res) 
   } catch (err) { res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' }); }
 });
 
+// M2: nur mitgeschickte Felder aendern (megPlatzAenderung). Vorher setzte jedes
+// Speichern der Seite zugeordnet_email und wohnung_id auf NULL.
 router.put('/einstellplaetze/:id', authMiddleware, megManageGate, async (req, res) => {
-  const { platz_nr, typ, status, zugeordnet_name, zugeordnet_email, wohnung_id, notizen } = req.body;
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige Platz-ID' });
+  const aend = megPlatzAenderung(req.body);
+  if (aend.error) return res.status(400).json({ error: aend.error });
   try {
+    const sets = aend.felder.map((f, i) => `${f}=$${i + 2}`);
+    sets.push('updated_at=NOW()');
     const r = await pool.query(
-      `UPDATE meg_einstellplaetze SET
-         platz_nr=COALESCE($2,platz_nr), typ=COALESCE($3,typ), status=COALESCE($4,status),
-         zugeordnet_name=$5, zugeordnet_email=$6, wohnung_id=$7, notizen=$8, updated_at=NOW()
-       WHERE id=$1 RETURNING *`,
-      [req.params.id, platz_nr, typ, status, zugeordnet_name || null,
-       zugeordnet_email || null, wohnung_id || null, notizen || null]);
+      `UPDATE meg_einstellplaetze SET ${sets.join(', ')} WHERE id=$1 RETURNING *`,
+      [id, ...aend.werte]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Platz nicht gefunden' });
     res.json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' }); }

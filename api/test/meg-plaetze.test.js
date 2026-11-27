@@ -37,3 +37,27 @@ test('Anmelde-Hinweis nur ohne Anmeldung (führt sonst nicht zum Ziel)', () => {
   assert.ok(i > 0);
   assert.match(html.slice(i, i + 200), /login-hint/);
 });
+
+test('M2: nur mitgeschickte Felder ändern – Mail und Wohnung bleiben', () => {
+  const a = meg.megPlatzAenderung({ status: 'vermietet', zugeordnet_name: 'Mia Beispiel', notizen: null });
+  assert.deepEqual(a.felder, ['status', 'zugeordnet_name', 'notizen']);
+  assert.deepEqual(a.werte, ['vermietet', 'Mia Beispiel', null]);
+  assert.ok(!a.felder.includes('zugeordnet_email'));
+  assert.ok(!a.felder.includes('wohnung_id'));
+});
+
+test('M2: bewusst leeren geht, Pflichtfelder bleiben, Prüfung von Typ/Status/Wohnung', () => {
+  assert.deepEqual(meg.megPlatzAenderung({ zugeordnet_email: '' }), { felder: ['zugeordnet_email'], werte: [null] });
+  assert.deepEqual(meg.megPlatzAenderung({ typ: '', status: null }), { felder: [], werte: [] });
+  assert.deepEqual(meg.megPlatzAenderung({ wohnung_id: '12' }), { felder: ['wohnung_id'], werte: [12] });
+  assert.ok(meg.megPlatzAenderung({ typ: 'lkw' }).error);
+  assert.ok(meg.megPlatzAenderung({ status: 'weg' }).error);
+  assert.ok(meg.megPlatzAenderung({ wohnung_id: 'x' }).error);
+  assert.deepEqual(meg.megPlatzAenderung({ unbekannt: 1 }), { felder: [], werte: [] });
+});
+
+test('M2: Route und Seite führen zusammen', () => {
+  assert.match(route, /megPlatzAenderung\(req\.body\)/);
+  assert.ok(!/zugeordnet_email=\$6, wohnung_id=\$7/.test(route), 'altes Überschreiben entfernt');
+  assert.match(html, /if \(\(alt\[k\] \?\? null\) !== neu\[k\]\) body\[k\] = neu\[k\]/);
+});
