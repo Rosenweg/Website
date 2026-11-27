@@ -20,6 +20,7 @@ const { nummernKanal, darfEchteNummernSehen, istTechnikOderPraesident, interneNu
 const { zevAliasAddress, zevGotoTargets } = require('./lib/zev');
 const reklMelder = require('./lib/reklamation-melder');
 const vollmachtRechte = require('./lib/vollmacht-rechte');
+const projekteRechte = require('./lib/projekte-rechte');
 const stwegSichtLib = require('./lib/stweg-sicht');
 const verteilerVerwaltung = require('./lib/verteiler-verwaltung');
 
@@ -4518,7 +4519,21 @@ app.get('/api/verteiler/by-stweg/:stweg', async (req, res) => {
 });
 
 const verteilerSendLog = new Map(); // userId → [timestamps]
-app.post('/api/verteiler/send', authMiddleware, adminOnly, async (req, res) => {
+app.post('/api/verteiler/send', authMiddleware, async (req, res) => {
+  // T/P (isAdmin) wie bisher; die Verwaltung nur an aktive Verteiler ihrer
+  // STWEG(s), nur per verteiler_id (Befund V2, lib/verteiler-verwaltung.js).
+  if (!req.user?.isAdmin) {
+    const vid = parseInt(req.body?.verteiler_id, 10);
+    if (!Number.isFinite(vid) || (Array.isArray(req.body?.recipients) && req.body.recipients.length)) {
+      return res.status(403).json({ error: 'Admin-Rechte erforderlich' });
+    }
+    try {
+      const { rows: [vt] } = await pool.query('SELECT id, stweg, active FROM email_verteiler WHERE id = $1', [vid]);
+      if (!vt || !verteilerVerwaltung.portalDarfSenden(req.user?.groups || [], await verteilerPortalPerm(req), vt)) {
+        return res.status(403).json({ error: 'Nur an Verteiler der eigenen STWEG' });
+      }
+    } catch (e) { return res.status(500).json({ error: 'Fehler' }); }
+  }
   // Rate limit: max 10 sends per 10 minutes per user
   const uid = req.user.user_id || req.user.id;
   const now = Date.now();
@@ -9810,15 +9825,26 @@ app.post('/api/wohnungen/:stweg/import', authMiddleware, requirePermission('wohn
 
 // ─── Verteiler CRUD (admin only) ────────────────────────────────────
 
-// List all Verteiler
-app.get('/api/verteiler', authMiddleware, adminOnly, async (req, res) => {
+// Seitenrecht „email-verteiler“ der Verwaltung (Befund V2, lib/verteiler-verwaltung.js)
+async function verteilerPortalPerm(req) {
+  try { return (await getUserPermissions(req.user?.groups || []))['email-verteiler']; } catch { return undefined; }
+}
+
+// List all Verteiler (T/P alle; Verwaltung nur ihre STWEG(s), ohne Mitglieder)
+app.get('/api/verteiler', authMiddleware, async (req, res) => {
   try {
+    let verwStwegs = null;
+    if (!req.user?.isAdmin) {
+      verwStwegs = [...verteilerVerwaltung.portalVerteilerStwegs(req.user?.groups || [], await verteilerPortalPerm(req))];
+      if (!verwStwegs.length) return res.status(403).json({ error: 'Admin-Rechte erforderlich' });
+    }
     const result = await pool.query(
       `SELECT id, stweg, name, email_address, members, active,
               reply_to, subject_prefix, group_name, group_names, created_at,
               whatsapp_group_id, whatsapp_group_name, external_allowed,
               jsonb_array_length(COALESCE(members, '[]'::jsonb)) as member_count
-       FROM email_verteiler ORDER BY stweg, name`
+       FROM email_verteiler ${verwStwegs ? 'WHERE active = true AND stweg = ANY($1::int[])' : ''} ORDER BY stweg, name`,
+      verwStwegs ? [verwStwegs] : []
     );
     // For group-based verteiler, resolve actual member count.
     // War ~22s: jede Authentik-Gruppe loeste 2 Full-List-Calls (/core/groups,
@@ -9857,6 +9883,7 @@ app.get('/api/verteiler', authMiddleware, adminOnly, async (req, res) => {
       v.member_count = allEmails.size;
       v.resolved_emails = [...allEmails];
     }));
+    if (verwStwegs) return res.json({ verteiler: rows.map(verteilerVerwaltung.fuerVerwaltung), nur_lesen: true });
     res.json({ verteiler: rows });
   } catch (err) {
     res.status(500).json({ error: 'Fehler beim Laden der Verteiler' });
@@ -11970,6 +11997,17 @@ function requireEigentuemer(req, res, next) {
   res.status(403).json({ error: 'Nur für Eigentümer' });
 }
 
+/** Middleware: Projekte lesen (Eigentuemer, Technik/Praesident, Verwaltung mit Recht projekte; lib/projekte-rechte.js) */
+async function requireProjekteLesen(req, res, next) {
+  const groups = req.user?.groups || [];
+  let perm;
+  if (!projekteRechte.projekteLesen(groups, undefined)) {
+    try { perm = (await getUserPermissions(groups))['projekte']; } catch { perm = undefined; }
+  }
+  if (projekteRechte.projekteLesen(groups, perm)) return next();
+  res.status(403).json({ error: 'Nur für Eigentümer oder die Verwaltung (Recht Projekte)' });
+}
+
 /** Middleware: require ausschuss or technik for editing */
 function requireAusschussOrTechnik(req, res, next) {
   const groups = req.user?.groups || [];
@@ -12197,7 +12235,7 @@ app.put('/api/projects/:slug/budget', authMiddleware, requireAusschussOrTechnik,
 });
 
 // GET /api/projects - List projects
-app.get('/api/projects', authMiddleware, requireEigentuemer, async (req, res) => {
+app.get('/api/projects', authMiddleware, requireProjekteLesen, async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT * FROM projects ORDER BY created_at DESC');
     res.json(rows);
@@ -12207,7 +12245,7 @@ app.get('/api/projects', authMiddleware, requireEigentuemer, async (req, res) =>
 });
 
 // GET /api/projects/:slug - Get project with all data
-app.get('/api/projects/:slug', authMiddleware, requireEigentuemer, async (req, res) => {
+app.get('/api/projects/:slug', authMiddleware, requireProjekteLesen, async (req, res) => {
   try {
     const { rows: [project] } = await pool.query('SELECT * FROM projects WHERE slug = $1', [req.params.slug]);
     if (!project) return res.status(404).json({ error: 'Projekt nicht gefunden' });
@@ -12216,11 +12254,17 @@ app.get('/api/projects/:slug', authMiddleware, requireEigentuemer, async (req, r
       pool.query('SELECT * FROM project_timeline WHERE project_id = $1 ORDER BY datum', [project.id]),
       pool.query('SELECT * FROM project_comments WHERE project_id = $1 ORDER BY created_at DESC', [project.id]),
       pool.query('SELECT * FROM project_attachments WHERE project_slug = $1 ORDER BY created_at', [req.params.slug]),
-      pool.query(
-        `SELECT status, COUNT(*)::int AS n, COALESCE(SUM(betrag_chf), 0)::numeric AS summe
-           FROM auslagen WHERE projekt_slug = $1 GROUP BY status`,
-        [req.params.slug],
-      ),
+      (() => {
+        // Verwaltung: nur Auslagen ihrer STWEG(s) (lib/projekte-rechte.js)
+        const params = [req.params.slug];
+        const sicht = projekteRechte.projektAuslagenSicht(req.user?.groups || []);
+        const filter = sicht ? ` AND ${stwegSichtLib.sichtSql(sicht, 'stweg', params)}` : '';
+        return pool.query(
+          `SELECT status, COUNT(*)::int AS n, COALESCE(SUM(betrag_chf), 0)::numeric AS summe
+             FROM auslagen WHERE projekt_slug = $1${filter} GROUP BY status`,
+          params,
+        );
+      })(),
     ]);
     const auslagenStat = { total_count: 0, total_chf: 0, by_status: {} };
     for (const r of auslagenSumme.rows) {
@@ -12232,6 +12276,7 @@ app.get('/api/projects/:slug', authMiddleware, requireEigentuemer, async (req, r
       ...project,
       candidates: candidates.rows, timeline: timeline.rows, comments: comments.rows, attachments: attachments.rows,
       auslagen_stat: auslagenStat,
+      darf_kommentieren: projekteRechte.projekteKommentieren(req.user?.groups || []),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -12239,19 +12284,23 @@ app.get('/api/projects/:slug', authMiddleware, requireEigentuemer, async (req, r
 });
 
 // GET /api/projects/:slug/auslagen — alle Auslagen eines Projekts mit Summen
-app.get('/api/projects/:slug/auslagen', authMiddleware, requireEigentuemer, async (req, res) => {
+app.get('/api/projects/:slug/auslagen', authMiddleware, requireProjekteLesen, async (req, res) => {
   try {
+    // Verwaltung: nur Auslagen ihrer STWEG(s) (lib/projekte-rechte.js)
+    const params = [req.params.slug];
+    const sicht = projekteRechte.projektAuslagenSicht(req.user?.groups || []);
+    const filter = sicht ? ` AND ${stwegSichtLib.sichtSql(sicht, 'stweg', params)}` : '';
     const r = await pool.query(
       `SELECT a.id, a.user_email, a.user_name, a.stweg, a.datum, a.kategorie, a.beschreibung,
               a.betrag_chf, a.status, a.bearbeitet_am, a.ausbezahlt_am, a.created_at
-         FROM auslagen a WHERE a.projekt_slug = $1
+         FROM auslagen a WHERE a.projekt_slug = $1${filter.replace(/\bstweg\b/g, 'a.stweg')}
         ORDER BY a.created_at DESC`,
-      [req.params.slug],
+      params,
     );
     const summe = await pool.query(
       `SELECT status, COUNT(*)::int AS n, COALESCE(SUM(betrag_chf), 0)::numeric AS s
-         FROM auslagen WHERE projekt_slug = $1 GROUP BY status`,
-      [req.params.slug],
+         FROM auslagen WHERE projekt_slug = $1${filter} GROUP BY status`,
+      params,
     );
     const by_status = {};
     for (const row of summe.rows) by_status[row.status] = { count: row.n, summe: Number(row.s) };
@@ -20283,8 +20332,9 @@ app.get('/api/reklamationen/:id/history', authMiddleware, requirePermission('rek
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
     if (!(await darfReklamation(req.user, id))) return res.status(404).json({ error: 'Nicht gefunden' });
     const r = await pool.query('SELECT created_at, who, event FROM reklamation_events WHERE reklamation_id = $1 ORDER BY created_at ASC, id ASC', [id]);
-    // Melder (weder Admin noch Ausschuss) sieht keine Eintraege zur internen Notiz.
-    const events = reklNurMelder(req.user) ? r.rows.filter(e => !/^Notiz geändert/i.test(e.event || '')) : r.rows;
+    // Melder (weder Admin noch Ausschuss/Verwaltung) sieht nur Statuswechsel und
+    // Nachrichten an sie, wie /meine/:id/verlauf (lib/reklamation-melder.js, F2-7).
+    const events = reklNurMelder(req.user) ? r.rows.filter(e => reklMelder.melderSiehtEreignis(e.event)) : r.rows;
     res.json({ events });
   } catch (e) { console.error('[reklamation-history]', e); res.status(500).json({ error: 'Fehler' }); }
 });
@@ -20571,7 +20621,7 @@ app.get('/api/reklamationen/meine/:id/foto', authMiddleware, async (req, res) =>
     return sendeReklamationsFoto(res, p);
   } catch (e) { console.error('[reklamation-meine-foto]', e); if (!res.headersSent) res.status(500).end(); }
 });
-// Owner-Zugriff: Verlauf/Arbeitsschritte der EIGENEN Meldung (interne Notizen/Benachrichtigungen gefiltert).
+// Owner-Zugriff: Verlauf der EIGENEN Meldung – nur Statuswechsel und Nachrichten an die meldende Person.
 app.get('/api/reklamationen/meine/:id/verlauf', authMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
@@ -20584,11 +20634,9 @@ app.get('/api/reklamationen/meine/:id/verlauf', authMiddleware, async (req, res)
     const r = await pool.query(
       `SELECT created_at, who, event FROM reklamation_events
         WHERE reklamation_id = $1
-          AND event NOT ILIKE 'Notiz geändert%'
-          AND event NOT ILIKE '%benachrichtigt%'
-          AND event NOT ILIKE 'Kategorie korrigiert%'
         ORDER BY created_at ASC, id ASC`, [id]);
-    res.json({ events: r.rows });
+    // Nur Erfassung, Statuswechsel und Nachricht an sie (lib/reklamation-melder.js, F2-7)
+    res.json({ events: r.rows.filter(e => reklMelder.melderSiehtEreignis(e.event)) });
   } catch (e) { console.error('[reklamation-meine-verlauf]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 // Melder-Benachrichtigung bei Status-Wechsel (E-Mail + WhatsApp + Web-Push) — gemeinsam
@@ -27330,7 +27378,9 @@ app.post('/api/vollmachten', authMiddleware, async (req, res) => {
     if (!b.vollmachtgeber_name || !b.bevollmaechtigter_name || !b.bevollmaechtigter_typ || !b.art) {
       return res.status(400).json({ error: 'Pflichtfelder: vollmachtgeber_name, bevollmaechtigter_name, bevollmaechtigter_typ, art' });
     }
-    if (!['eigentuemer','verwaltung','mieter','extern'].includes(b.bevollmaechtigter_typ)) {
+    // 'person' (Formular, Name von Hand) -> extern (lib/vollmacht-rechte.js bvTyp)
+    b.bevollmaechtigter_typ = vollmachtRechte.bvTyp(b.bevollmaechtigter_typ);
+    if (!b.bevollmaechtigter_typ) {
       return res.status(400).json({ error: 'Ungueltiger bevollmaechtigter_typ' });
     }
     if (!['generell','spezifisch','auskunft'].includes(b.art)) {
@@ -27414,6 +27464,10 @@ app.put('/api/vollmachten/:id', authMiddleware, async (req, res) => {
       'SELECT 1 FROM vollmachten_vollmachtgeber WHERE vollmacht_id = $1 AND signed_at IS NOT NULL LIMIT 1', [id]);
     if (signiert.rows.length > 0) {
       return res.status(409).json({ error: 'Bereits teilweise signiert — Änderungen nicht mehr möglich. Entwurf löschen und neu erfassen.' });
+    }
+    if (b.bevollmaechtigter_typ !== undefined) {
+      b.bevollmaechtigter_typ = vollmachtRechte.bvTyp(b.bevollmaechtigter_typ);
+      if (!b.bevollmaechtigter_typ) return res.status(400).json({ error: 'Ungueltiger bevollmaechtigter_typ' });
     }
     const vgFehler = vmGeberListeFehler(b.vollmachtgeber);
     if (vgFehler) return res.status(400).json({ error: vgFehler });

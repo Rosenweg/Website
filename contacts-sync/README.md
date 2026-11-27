@@ -85,6 +85,22 @@ bleiben in der Personenverwaltung des Portals (`api/lib/nummernsicht.js`).
 
 Tests: `python3 -m unittest discover -s contacts-sync` (auch in der CI).
 
+## Z-Push je Konto (seit Befund F1-7)
+
+Nach Z-Push gehen nicht mehr alle Karten in einen Ordner, sondern Sammlungen:
+`alle/` (wie bisher), `keine/` (Telefonzentrale + Verwaltungen) und `s1/` …
+`s8/` (Personen mit aktivem Wohnungskontakt in dieser STWEG, gleiche Quelle wie
+das Portal-Telefonbuch), zuletzt `STAND` (Prüfsumme, erst nach erfolgreichem
+rsync). Das Z-Push-Backend (`../zpush/sicht.php`) setzt daraus je Konto das
+Verzeichnis zusammen. Dafür braucht der Datenbank-Benutzer zusätzlich:
+
+```sql
+GRANT SELECT ON wohnungen, wohnungen_kontakte TO contacts_sync;
+```
+
+Nextcloud (`kontakte/rosenweg`) und SOGo inbox@ bekommen weiter das ganze
+Verzeichnis (nur interne Nummern).
+
 ## Logik
 
 - UIDs **deterministisch**: `uuid5(name)` für Personen, `rosenweg-pbx`,

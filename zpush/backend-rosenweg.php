@@ -1,7 +1,103 @@
 <?php
 require_once("backend/vcarddir/vcarddir.php");
-// Rosenweg: vcarddir-Inhalt (gemeinsamer read-only Ordner) + LDAP-Auth gegen Authentik
+require_once(__DIR__ . "/sicht.php");
+// Rosenweg: vcarddir-Inhalt (read-only) + LDAP-Auth gegen Authentik.
+//
+// Verzeichnis je Konto (Befund F1-7, 27.11.2026): jede Person sieht, was sie im
+// Portal-Telefonbuch sieht (Regel in sicht.php). contacts-sync legt unter
+// /var/lib/zpush-contacts/ die Sammlungen alle/, keine/ (nur Verwaltungen,
+// Telefonzentrale) und s1/ … s8/ (Personen je STWEG) ab, dazu STAND (Pruefsumme).
+// Nach dem LDAP-Bind liest Logon() die Gruppen des Kontos (memberOf), Setup()
+// waehlt die Sicht ('alle', 's3', 's3-5', 'keine') und baut sie bei Bedarf als
+// Ordner mit Verweisen unter STATE_DIR/rw-sicht/<sicht>/ (VCARDDIR_DIR muss
+// '<STATE_DIR>/rw-sicht/%u' sein). Ohne lesbare Gruppen: 'keine', nie 'alle'.
 class BackendRosenweg extends BackendVCardDir {
+    const QUELLE = '/var/lib/zpush-contacts';
+    private $rwSicht = 'keine';
+
+    private function sichtBasis() {
+        return (defined('STATE_DIR') ? rtrim(STATE_DIR, '/') : '/var/lib/z-push') . '/rw-sicht';
+    }
+    private static function ordnerLeeren($d) {
+        if (!is_dir($d) || is_link($d)) return;
+        foreach (scandir($d) as $f) { if ($f !== '.' && $f !== '..') @unlink($d . '/' . $f); }
+        @rmdir($d);
+    }
+    // Sicht-Ordner bauen, wenn er fehlt oder contacts-sync seither neu geschrieben hat.
+    private function sichtBereitstellen($sicht) {
+        $basis = $this->sichtBasis();
+        if (!is_dir($basis)) @mkdir($basis, 0700, true);
+        $ziel = $basis . '/' . $sicht;
+        $standDatei = $basis . '/' . $sicht . '.stand';
+        $stand = trim((string)@file_get_contents(self::QUELLE . '/STAND'));
+        $aktuell = function () use ($ziel, $standDatei, $stand) {
+            return is_dir($ziel) && $stand !== '' && trim((string)@file_get_contents($standDatei)) === $stand;
+        };
+        if ($aktuell()) return true;
+        $lock = @fopen($basis . '/' . $sicht . '.lock', 'c');
+        if (!$lock || !flock($lock, LOCK_EX)) {
+            ZLog::Write(LOGLEVEL_ERROR, "BackendRosenweg: Sicht $sicht nicht sperrbar");
+            if ($lock) fclose($lock);
+            return is_dir($ziel);
+        }
+        try {
+            if ($aktuell()) return true;
+            $neu = $ziel . '.neu';
+            self::ordnerLeeren($neu);
+            if (!@mkdir($neu, 0700)) { ZLog::Write(LOGLEVEL_ERROR, "BackendRosenweg: $neu nicht anlegbar"); return is_dir($ziel); }
+            foreach (rw_sicht_sammlungen($sicht) as $s) {
+                $q = self::QUELLE . '/' . $s;
+                if (!is_dir($q)) continue;
+                foreach (scandir($q) as $f) {
+                    if (!preg_match('/^[A-Za-z0-9._-]+\.vcf$/', $f) || file_exists($neu . '/' . $f)) continue;
+                    @symlink($q . '/' . $f, $neu . '/' . $f);
+                }
+            }
+            $alt = $ziel . '.alt';
+            self::ordnerLeeren($alt);
+            if (is_dir($ziel)) @rename($ziel, $alt);
+            if (!@rename($neu, $ziel)) { ZLog::Write(LOGLEVEL_ERROR, "BackendRosenweg: Sicht $sicht nicht umbenennbar"); return false; }
+            self::ordnerLeeren($alt);
+            @file_put_contents($standDatei, $stand);
+            return true;
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+    }
+    // Gruppen des Kontos aus dem Authentik-Outpost (memberOf). Gesucht wird mit dem
+    // eben gebundenen Konto (Authentik zeigt jedem den eigenen Eintrag) oder, falls
+    // gesetzt, mit einem Lesekonto RW_LDAP_SUCHE_DN/RW_LDAP_SUCHE_PW. null = unbekannt.
+    private function gruppenLesen($conn, $username) {
+        $dn = getenv('RW_LDAP_SUCHE_DN');
+        if ($dn && !@ldap_bind($conn, $dn, (string)getenv('RW_LDAP_SUCHE_PW'))) {
+            ZLog::Write(LOGLEVEL_ERROR, "BackendRosenweg: Lesekonto-Bind fehlgeschlagen");
+            return null;
+        }
+        $filter = '(cn=' . ldap_escape($username, '', LDAP_ESCAPE_FILTER) . ')';
+        $sr = @ldap_search($conn, 'ou=users,dc=rosenweg4303,dc=ch', $filter, array('memberOf'));
+        if (!$sr) return null;
+        $e = @ldap_get_entries($conn, $sr);
+        if (!$e || ($e['count'] ?? 0) < 1) return null;
+        $m = $e[0]['memberof'] ?? array('count' => 0);
+        $g = array();
+        for ($i = 0; $i < ($m['count'] ?? 0); $i++) { $n = rw_dn_cn($m[$i]); if ($n !== null) $g[] = $n; }
+        return $g;
+    }
+    public function Setup($store, $checkACLonly = false, $folderid = false, $readonly = false) {
+        if ($store === 'SYSTEM') return parent::Setup($store, $checkACLonly, $folderid, $readonly);
+        if (!$this->sichtBereitstellen($this->rwSicht)) {
+            ZLog::Write(LOGLEVEL_ERROR, "BackendRosenweg: Sicht " . $this->rwSicht . " nicht bereit");
+            return false;
+        }
+        return parent::Setup($this->rwSicht, $checkACLonly, $folderid, $readonly);
+    }
+    // Nur lesend (hilfe.html): Aenderungen vom Handy wuerden sonst ueber die
+    // Verweise in die gemeinsame Quelle schreiben.
+    public function ChangeMessage($folderid, $id, $message, $contentParameters) { return false; }
+    public function DeleteMessage($folderid, $id, $contentParameters) { return false; }
+    public function MoveMessage($folderid, $id, $newfolderid, $contentParameters) { return false; }
+
     // Fehlversuchs-Sperre je Benutzername (D-7, 17.11.2026): jeder Request war
     // ein LDAP-Bind ohne Limit -> Passwortraten gegen Authentik-Konten. Die
     // Quell-IP hilft hier nicht (edge-traefik reicht TCP durch, alle Clients
@@ -110,6 +206,7 @@ class BackendRosenweg extends BackendVCardDir {
         $esc = str_replace(array('\\',',','+','"','<','>',';','='), array('\\\\','\\,','\\+','\\"','\\<','\\>','\;','\\='), $username);
         $dn = "cn=".$esc.",ou=users,dc=rosenweg4303,dc=ch";
         $ok = @ldap_bind($conn, $dn, $password);
+        $gruppen = $ok ? $this->gruppenLesen($conn, $username) : null;
         @ldap_unbind($conn);
         if (!$ok) {
             // Versuch wurde schon vor dem Bind gezaehlt.
@@ -117,7 +214,9 @@ class BackendRosenweg extends BackendVCardDir {
             return false;
         }
         $this->versuchZurueckgeben($username);
-        ZLog::Write(LOGLEVEL_INFO, "BackendRosenweg: LDAP OK ".$username);
+        $this->rwSicht = $gruppen === null ? 'keine' : rw_sicht_schluessel($gruppen);
+        if ($gruppen === null) ZLog::Write(LOGLEVEL_WARN, "BackendRosenweg: Gruppen von ".$username." nicht lesbar - nur Verwaltungen");
+        ZLog::Write(LOGLEVEL_INFO, "BackendRosenweg: LDAP OK ".$username." Sicht ".$this->rwSicht);
         return parent::Logon($username, $domain, $password);
     }
     public function GetSupportedASVersion() {

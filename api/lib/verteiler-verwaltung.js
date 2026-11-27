@@ -8,7 +8,7 @@
 // Senden: An einen geschuetzten Verteiler (allowed_sender_groups) darf die
 // Verwaltung nur, wenn sie die STWEG des Verteilers verwaltet – nicht mehr an
 // jeden Verteiler aller STWEGs.
-const { STWEG_GROUPS, VERWALTUNG_GROUPS, verwaltungGruppenStwegs } = require('./groups');
+const { STWEG_GROUPS, VERWALTUNG_GROUPS, verwaltungGruppenStwegs, verwaltungStwegs } = require('./groups');
 
 function verteilerStweg(verteiler) {
   const n = parseInt(verteiler && verteiler.stweg, 10);
@@ -51,4 +51,36 @@ function verwaltungsGruppeDarfSenden(userGroupNames, verteiler) {
   return !!nr && verwaltungGruppenStwegs(userGroupNames || []).has(nr);
 }
 
-module.exports = { istBewohnerRundmail, verwaltungsGruppeFuerVerteiler, verwaltungsGruppeDarfSenden, verteilerStweg };
+// ─── Portal: Seite email-verteiler.html fuer die Verwaltung (Befund V2) ───
+// Entscheid Stefan: Die Verwaltung bekommt die Rundmails ihrer STWEG und darf an
+// deren Verteiler senden (per Mail an die Adresse geht das schon, s. oben).
+// Im Portal sieht sie mit Seitenrecht „email-verteiler“ (ab lesen) nur die
+// Verteiler ihrer STWEG(s) – Name, Adresse, Anzahl Empfaenger, ohne
+// Mitgliederliste – und kann an diese ueber das Formular senden. Verwalten,
+// Testversand und Versand-Protokoll bleiben bei Technik/Praesident.
+const STUFE = { read: 1, write: 2 };
+
+/** STWEGs, deren Verteiler die Verwaltung im Portal sieht (leer = keine). */
+function portalVerteilerStwegs(groups, perm) {
+  if ((STUFE[perm] || 0) < 1) return new Set();
+  return verwaltungStwegs(groups || []);
+}
+
+/** Darf die Verwaltung im Portal an diesen Verteiler senden? */
+function portalDarfSenden(groups, perm, verteiler) {
+  const nr = verteilerStweg(verteiler);
+  return !!nr && !!(verteiler && verteiler.active !== false) && portalVerteilerStwegs(groups, perm).has(nr);
+}
+
+/** Felder eines Verteilers fuer die Verwaltung (ohne Mitglieder/Gruppen). */
+function fuerVerwaltung(v) {
+  return {
+    id: v.id, stweg: v.stweg, name: v.name, email_address: v.email_address,
+    active: v.active, member_count: v.member_count,
+  };
+}
+
+module.exports = {
+  istBewohnerRundmail, verwaltungsGruppeFuerVerteiler, verwaltungsGruppeDarfSenden, verteilerStweg,
+  portalVerteilerStwegs, portalDarfSenden, fuerVerwaltung,
+};

@@ -80,7 +80,7 @@
                     E-Mail senden
                 </button>
                 <button onclick="switchTab('log')" id="tab-log"
-                    class="flex-1 min-w-[120px] px-4 sm:px-6 py-3 text-sm font-medium text-center border-b-2 border-transparent text-gray-500 hover:text-gray-700 whitespace-nowrap">
+                    class="hidden flex-1 min-w-[120px] px-4 sm:px-6 py-3 text-sm font-medium text-center border-b-2 border-transparent text-gray-500 hover:text-gray-700 whitespace-nowrap">
                     Versand-Protokoll
                 </button>
                 <button onclick="switchTab('admin')" id="tab-admin"
@@ -102,6 +102,12 @@
                         class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition text-sm">
                         Abmelden
                     </button>
+                </div>
+
+                <!-- Hausverwaltung: nur die Verteiler der eigenen STWEG(s) (Befund V2) -->
+                <div id="verwaltungHinweis" class="hidden mb-6 bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-900">
+                    Sie sehen die Verteiler der STWEG, die Sie verwalten. Antworten gehen an Ihre Adresse.
+                    Sie können auch direkt aus Ihrem Mailprogramm an die Verteiler-Adresse schreiben.
                 </div>
 
                 <form id="emailVerteilerForm">
@@ -352,12 +358,13 @@
                         document.getElementById('loggedInEmail').textContent = user.name || currentEmail;
                         loadVerteilerDropdown();
 
-                        // Show admin tab for Technik group
+                        // Verwalten und Versand-Protokoll nur fuer Technik (API: adminOnly)
                         const groups = user.groups || [];
                         if (groups.includes('Technik') || groups.includes('technik')) {
                             document.getElementById('tab-admin').classList.remove('hidden');
                             loadEmailQuota();
                         }
+                        if (user.isAdmin === true) document.getElementById('tab-log').classList.remove('hidden');
                     },
                 });
 
@@ -382,6 +389,10 @@
                 const res = await AuthentikAuth.apiFetch('/api/verteiler');
                 const data = await res.json();
                 verteilerList = data.verteiler || [];
+                document.getElementById('verwaltungHinweis').classList.toggle('hidden', !data.nur_lesen);
+                if (!res.ok) {
+                    document.getElementById('verteilerInfo').textContent = 'Keine Verteiler freigegeben.';
+                }
 
                 const select = document.getElementById('verteilerSelect');
                 select.innerHTML = '<option value="">-- Bitte wählen --</option>';
@@ -437,7 +448,7 @@
                 if (!res.ok || !result.success) throw new Error(result.error || 'Fehler beim Senden');
 
                 successDiv.classList.remove('hidden');
-                successDiv.querySelector('p').textContent = `E-Mail erfolgreich an ${result.recipients_count} Empfänger gesendet!`;
+                successDiv.querySelector('p').textContent = `E-Mail erfolgreich an ${result.sent} Empfänger gesendet!`;
                 document.getElementById('emailVerteilerForm').reset();
                 setTimeout(() => successDiv.classList.add('hidden'), 5000);
             } catch (error) {

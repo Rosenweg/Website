@@ -812,8 +812,11 @@
     if (!a) return;
     REVIEW_ID = id;
     const stwegLabel = a.stweg ? `STWEG ${a.stweg}` : 'STWEG-übergreifend';
-    const beleg = a.beleg_path
-      ? `<a href="/api/auslagen/${a.id}/beleg" target="_blank" class="text-blue-600 hover:underline">${esc(a.beleg_filename || 'öffnen')}</a>`
+    // Belege liegen seit dem Mehrfach-Upload in auslagen_belege; beleg_path ist
+    // nur die alte Einzelspalte. Massgeblich ist belege_count aus der Liste,
+    // die Dateinamen laedt reviewBelegeLaden() nach (Befund V3).
+    const beleg = Number(a.belege_count || 0) > 0
+      ? `<span id="review-belege" class="text-gray-400">${Number(a.belege_count)} Beleg(e) – lädt…</span>`
       : '<span class="text-gray-400">kein Beleg</span>';
     document.getElementById('review-detail').innerHTML = `
       <div><span class="text-gray-500">Eingereicht von:</span> <span class="font-medium">${esc(a.user_name)}</span> &lt;${esc(a.user_email)}&gt;</div>
@@ -868,6 +871,25 @@
     });
 
     document.getElementById('modal-review').classList.remove('hidden');
+    if (Number(a.belege_count || 0) > 0) reviewBelegeLaden(a);
+  }
+
+  async function reviewBelegeLaden(a) {
+    const el = document.getElementById('review-belege');
+    if (!el) return;
+    const legacy = `<a href="/api/auslagen/${a.id}/beleg" target="_blank" class="text-blue-600 hover:underline">${esc(a.beleg_filename || 'Beleg öffnen')}</a>`;
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/auslagen/${a.id}/belege`);
+      const d = r.ok ? await r.json() : { belege: [] };
+      const liste = d.belege || [];
+      if (REVIEW_ID !== a.id) return; // inzwischen andere Auslage offen
+      el.className = '';
+      el.innerHTML = liste.length
+        ? liste.map(b => `<a href="/api/auslagen/${a.id}/belege/${b.id}" target="_blank" class="text-blue-600 hover:underline">📎 ${esc(b.beleg_filename || 'Beleg')}</a>`).join(' · ')
+        : legacy;
+    } catch {
+      if (REVIEW_ID === a.id) { el.className = ''; el.innerHTML = legacy; }
+    }
   }
 
   function closeReview() {

@@ -56,3 +56,21 @@ test('alte Rückläufe-Adresse mit Umlaut leitet auf die neue weiter', () => {
   assert.match(alt, /location\.replace\('\/unterschriftenliste-ruecklaeufe\.html' \+ location\.search/);
   assert.ok(fs.existsSync(path.join(WURZEL, 'unterschriftenliste-ruecklaeufe.html')));
 });
+
+test('F5-3: PBX-Admin steht unter „Betrieb & Admin“ und im Admin-Menü, nur mit Recht pbx-admin', () => {
+  const kopf = quelle.slice(0, quelle.indexOf('const RosenwegNav'));
+  const sb = {};
+  vm.runInNewContext(kopf + '\nglobalThis.__g = SERVICES_GROUPS;', sb);
+  const betrieb = sb.__g.find(g => g.title === 'Betrieb & Admin');
+  const pbx = betrieb.items.filter(i => /pbx\.rosenweg4303\.ch/.test(i.href));
+  assert.equal(pbx.length, 1);
+  assert.equal(pbx[0].perm, 'pbx-admin');
+  // nicht doppelt in einer anderen Gruppe
+  const alle = sb.__g.flatMap(g => g.items).filter(i => /pbx\.rosenweg4303\.ch/.test(i.href));
+  assert.equal(alle.length, 1);
+  // Admin-Bereich (admin.rosenweg4303.ch): Eintrag nur für die Audience admin
+  assert.match(quelle, /href: 'https:\/\/pbx\.rosenweg4303\.ch\/', label: 'PBX-Admin \(Telefonanlage\)', group: 'Infrastruktur', perm: 'pbx-admin', aud: \['admin'\]/);
+  // Recht pbx-admin ist nur für Technik und Präsident angelegt
+  const server = fs.readFileSync(path.join(WURZEL, 'api', 'server.js'), 'utf8');
+  assert.match(server, /\('technik', 'pbx-admin', 'write'\),\s*\('Präsident', 'pbx-admin', 'write'\)/);
+});

@@ -10,7 +10,8 @@
 // Die Druckvorlagen liegen hier im API-Image (api/vorlagen/aushaenge/) und
 // werden nur angemeldeten Personen mit Reklamations-Rechten ausgegeben –
 // das Repo ist oeffentlich, Tokens duerfen daher nie in Dateien stehen.
-// Rechte wie bei den Melde-Orten (requirePermission('reklamationen', …)).
+// Rechte wie bei den Melde-Orten (requirePermission('reklamationen', …)), dazu
+// je Raum die STWEG-Grenze wie bei den Reklamationen (lib/raum-stweg.js, Befund V4).
 const express = require('express');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -21,6 +22,7 @@ const { authMiddleware, requirePermission } = require('../middleware/auth');
 const { SITE_URL } = require('../lib/config');
 const { authentikAPI } = require('../lib/auth');
 const { interneNummernLaden, interneNummerFinden, AMTSNUMMER } = require('../lib/nummernsicht');
+const raumStweg = require('../lib/raum-stweg');
 
 const router = express.Router();
 const VORLAGEN_DIR = path.join(__dirname, '..', 'vorlagen', 'aushaenge');
@@ -181,6 +183,9 @@ function tabelle() {
 }
 
 const slugVon = o => `${o.typ}-${o.kurz}`;
+// Raum ausserhalb der eigenen STWEG(s): Zugriff verweigern (lib/raum-stweg.js).
+const NICHT_EIGENE = 'Nur Räume der eigenen STWEG';
+const darf = (req, o) => raumStweg.raumErlaubt(req.user?.groups || [], o);
 const gruppeVon = o => `schluessel-${slugVon(o)}`;
 
 async function ortById(id) {
@@ -292,7 +297,7 @@ function inhaltSkript(felder, bearbeiten, info) {
   var l=document.createElement('div'); l.id='rw-leiste';
   l.innerHTML='<span>✏️ Bearbeiten: '+M.raum+' – rot umrandete Texte anklicken; in Listen erzeugt Enter einen neuen Punkt.'+(M.eigen?' <b>(eigene Texte aktiv)</b>':'')+'</span>'
     +'<button id="rw-ort" style="background:#c41e1e;color:#fff">Für diesen Raum speichern</button>'
-    +'<button id="rw-typ" style="background:#fff;color:#111">Als Vorgabe für alle '+M.typ+'</button>'
+    +(M.vorgabe?'<button id="rw-typ" style="background:#fff;color:#111">Als Vorgabe für alle '+M.typ+'</button>':'')
     +'<button id="rw-reset" style="background:#4b5563;color:#fff">Eigene Texte entfernen</button>'
     +'<button id="rw-druck" style="background:#4b5563;color:#fff">🖨 Drucken</button>';
   document.body.prepend(l);
@@ -315,7 +320,7 @@ function inhaltSkript(felder, bearbeiten, info) {
   function senden(ebene){ if(!window.opener||!window.opener.rwInhaltSpeichern){ alert('Bitte aus der Seite «Türschilder & Aushänge» heraus öffnen.'); return; }
     window.opener.rwInhaltSpeichern(M.id, M.vorlage, ebene, ebene==='weg'?null:sammeln()).then(function(ok){ if(ok) alert('Gespeichert.'); }); }
   document.getElementById('rw-ort').onclick=function(){ senden('ort'); };
-  document.getElementById('rw-typ').onclick=function(){ if(confirm('Diese Texte als Vorgabe für alle Räume dieses Typs speichern? Dieser Raum übernimmt die Vorgabe; andere Räume mit eigenen Texten behalten ihre.')) senden('typ'); };
+  if(M.vorgabe) document.getElementById('rw-typ').onclick=function(){ if(confirm('Diese Texte als Vorgabe für alle Räume dieses Typs speichern? Dieser Raum übernimmt die Vorgabe; andere Räume mit eigenen Texten behalten ihre.')) senden('typ'); };
   document.getElementById('rw-reset').onclick=function(){ if(confirm('Eigene Texte dieses Raums entfernen? Danach gilt wieder die Vorgabe.')) senden('weg'); };
   document.getElementById('rw-druck').onclick=function(){ window.print(); };
 })();</script>`;
@@ -425,7 +430,8 @@ router.get('/', authMiddleware, requirePermission('reklamationen', 'read'), asyn
         FROM raum_orte o WHERE o.aktiv ORDER BY o.typ, o.standort`);
     res.json({
       typen: Object.entries(TYPEN).map(([k, v]) => ({ typ: k, titel: v.titel })),
-      raeume: r.rows.map(o => ({ ...o, titel: TYPEN[o.typ]?.titel || o.typ, gruppe: gruppeVon(o) })),
+      raeume: r.rows.filter(o => darf(req, o)).map(o => ({ ...o, titel: TYPEN[o.typ]?.titel || o.typ, gruppe: gruppeVon(o), stweg: raumStweg.stwegVonKurz(o.kurz) })),
+      darf_vorgabe: raumStweg.typVorgabeErlaubt(req.user?.groups || []),
       vorlagen: Object.entries(VORLAGEN).map(([k, v]) => ({ vorlage: k, ...v })),
     });
   } catch (e) { console.error('[raum-qr-list]', e); res.status(500).json({ error: 'Fehler' }); }
@@ -441,6 +447,7 @@ router.post('/orte', authMiddleware, requirePermission('reklamationen', 'write')
     if (!TYPEN[typ]) return res.status(400).json({ error: 'Unbekannter Typ' });
     if (!/^[a-z0-9]{1,12}$/.test(kurz)) return res.status(400).json({ error: 'Kurzname: 1–12 Kleinbuchstaben/Ziffern, z. B. r9' });
     if (!standort) return res.status(400).json({ error: 'Standort erforderlich' });
+    if (!darf(req, { kurz })) return res.status(403).json({ error: `${NICHT_EIGENE}: Kurzname des Hauses, z. B. r9` });
     await tabelle();
     const ex = await pool.query('SELECT 1 FROM raum_orte WHERE typ=$1 AND kurz=$2 AND aktiv', [typ, kurz]);
     if (ex.rows.length) return res.status(409).json({ error: `Raum ${typ}-${kurz} gibt es schon` });
@@ -455,6 +462,7 @@ router.delete('/orte/:id', authMiddleware, requirePermission('reklamationen', 'w
   try {
     const o = await ortById(req.params.id);
     if (!o) return res.status(404).json({ error: 'Unbekannter Raum' });
+    if (!darf(req, o)) return res.status(403).json({ error: NICHT_EIGENE });
     await pool.query('UPDATE raum_qr SET aktiv = false, deaktiviert_at = NOW() WHERE raum = $1 AND aktiv', [slugVon(o)]);
     await pool.query('UPDATE raum_orte SET aktiv = false WHERE id = $1', [o.id]);
     res.json({ ok: true });
@@ -466,6 +474,7 @@ router.post('/orte/:id/erneuern', authMiddleware, requirePermission('reklamation
   try {
     const o = await ortById(req.params.id);
     if (!o) return res.status(404).json({ error: 'Unbekannter Raum' });
+    if (!darf(req, o)) return res.status(403).json({ error: NICHT_EIGENE });
     await pool.query('UPDATE raum_qr SET aktiv = false, deaktiviert_at = NOW() WHERE raum = $1 AND aktiv', [slugVon(o)]);
     await tokensFuer(o, req.user?.email);
     res.json({ ok: true });
@@ -478,6 +487,7 @@ router.get('/druck/:id/:vorlage', authMiddleware, requirePermission('reklamation
     const o = await ortById(req.params.id);
     const v = VORLAGEN[req.params.vorlage];
     if (!o || !v || v.typ !== o.typ) return res.status(404).json({ error: 'Unbekannter Raum oder Vorlage' });
+    if (!darf(req, o)) return res.status(403).json({ error: NICHT_EIGENE });
     let html = fs.readFileSync(path.join(VORLAGEN_DIR, `${req.params.vorlage}.html`), 'utf-8');
     const tokens = await tokensFuer(o, req.user?.email);
     const qr = {};
@@ -492,7 +502,8 @@ router.get('/druck/:id/:vorlage', authMiddleware, requirePermission('reklamation
     if (bearbeiten || Object.keys(inhalt.wirksam).length) {
       const skript = inhaltSkript(inhalt.wirksam, bearbeiten,
         { id: o.id, vorlage: req.params.vorlage, raum: `${TYPEN[o.typ].titel.replace(/^\S+\s/, '')} ${o.standort}`, typ: TYPEN[o.typ].titel.replace(/^\S+\s/, ''), eigen: inhalt.eigen.length > 0,
-          gemeinschaften: GEMEINSCHAFTEN, logos: WAPPEN, standardLogo: ROSENWEG_LOGO });
+          gemeinschaften: GEMEINSCHAFTEN, logos: WAPPEN, standardLogo: ROSENWEG_LOGO,
+          vorgabe: raumStweg.typVorgabeErlaubt(req.user?.groups || []) });
       html = html.includes('</body>') ? html.replace('</body>', skript + '</body>') : html + skript;
     }
     // <base>, damit relative Pfade (Logo) auch im Druckfenster laden.
@@ -516,6 +527,11 @@ router.put('/inhalt', authMiddleware, requirePermission('reklamationen', 'write'
     const v = VORLAGEN[b.vorlage];
     if (!o || !v || v.typ !== o.typ) return res.status(404).json({ error: 'Unbekannter Raum oder Vorlage' });
     if (!['ort', 'typ'].includes(b.ebene)) return res.status(400).json({ error: 'Ebene ort oder typ' });
+    if (!darf(req, o)) return res.status(403).json({ error: NICHT_EIGENE });
+    // Die Vorgabe je Typ gilt in allen Haeusern (auch fremden STWEGs).
+    if (b.ebene === 'typ' && !raumStweg.typVorgabeErlaubt(req.user?.groups || [])) {
+      return res.status(403).json({ error: 'Vorgabe für alle Räume nur Technik/Präsident, Ausschuss oder Verwaltung aller STWEGs' });
+    }
     const felder = saeubereFelder(b.felder);
     if ('kopf-name' in felder && !GEMEINSCHAFTEN.includes(felder['kopf-name'].replace(/&amp;/g, '&'))) {
       return res.status(400).json({ error: 'Gemeinschaft bitte aus der Liste wählen' });
@@ -541,6 +557,7 @@ router.delete('/inhalt', authMiddleware, requirePermission('reklamationen', 'wri
     const b = req.body || {};
     const o = await ortById(b.ort_id);
     if (!o || !VORLAGEN[b.vorlage]) return res.status(404).json({ error: 'Unbekannter Raum oder Vorlage' });
+    if (!darf(req, o)) return res.status(403).json({ error: NICHT_EIGENE });
     await pool.query(`DELETE FROM raum_inhalt WHERE ebene = 'ort' AND ziel = $1 AND vorlage = $2`, [String(o.id), b.vorlage]);
     res.json({ ok: true });
   } catch (e) { console.error('[raum-qr-inhalt-weg]', e); res.status(500).json({ error: 'Fehler' }); }

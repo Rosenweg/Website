@@ -5,8 +5,9 @@ Stand: 17.11.2026. Sicherheitsregeln im Überblick:
 Variablen Abschnitt 6.3).
 
 Bewohner fügen auf dem Telefon **ein** Exchange/ActiveSync-Konto hinzu
-(Authentik-Login) → das gemeinsame Rosenweg-Verzeichnis erscheint im
-Telefonbuch, ohne Zusatz-App und ohne Postfach. Für alle mit Authentik-Konto.
+(Authentik-Login) → das Rosenweg-Verzeichnis erscheint im Telefonbuch, ohne
+Zusatz-App und ohne Postfach. Für alle mit Authentik-Konto; **jede Person sieht
+nur, was sie im Portal-Telefonbuch sieht** (seit Befund F1-7, siehe unten).
 
 ## Host
 
@@ -26,8 +27,29 @@ Das Backend erbt `BackendVCardDir`, überschreibt `Logon()` mit einem
 **LDAP-Bind gegen den Authentik-Outpost** (Standard `ldap://100.64.2.37:389`,
 DN `cn=<user>,ou=users,dc=rosenweg4303,dc=ch`) und `GetSupportedASVersion()` →
 `ASV_141`. Konfiguration: `config.php` mit `BACKEND_PROVIDER='BackendRosenweg'`,
-`backend/vcarddir/config.php` mit `VCARDDIR_DIR='/var/lib/zpush-contacts'`
-(gemeinsam für alle, kein `%u`).
+`backend/vcarddir/config.php` mit `VCARDDIR_DIR='/var/lib/z-push/rw-sicht/%u'`
+(`%u` ist hier die Sicht, nicht der Benutzername, siehe nächster Abschnitt).
+Nur lesend: `ChangeMessage`/`DeleteMessage`/`MoveMessage` lehnen ab.
+
+## Verzeichnis je Konto (Befund F1-7)
+
+Regel wie das Portal-Telefonbuch (`GET /api/telefonbuch`), umgesetzt in
+`sicht.php` (im Container `backend/rosenweg/sicht.php`):
+
+| Sicht | wer | Inhalt |
+|---|---|---|
+| `alle` | Technik, Präsident, Ausschuss jeder STWEG, Verwaltung aller STWEGs (oder Übergangsgruppe „Verwaltung“), `wohnungsverwaltung`, `bewohner-verwaltung` | ganzes Verzeichnis |
+| `s3`, `s3-5` … | Bewohner-/Eigentümer-/Ausschussgruppe einer STWEG oder `stwegN-verwaltung` | Personen dieser STWEG(s) + Verwaltungen + Telefonzentrale |
+| `keine` | kein Treffer, Gruppen nicht lesbar | nur Verwaltungen + Telefonzentrale (**nie** `alle`) |
+
+Ablauf: `contacts-sync` legt unter `/var/lib/zpush-contacts/` die Sammlungen
+`alle/`, `keine/`, `s1/` … `s8/` und zuletzt `STAND` (Prüfsumme) ab, Eigentümer
+root, für www-data nur lesbar. `Logon()` liest nach dem Bind die Gruppen
+(`memberOf`) – mit dem eben gebundenen Konto oder, falls gesetzt, mit einem
+Lesekonto `RW_LDAP_SUCHE_DN`/`RW_LDAP_SUCHE_PW` (php-fpm-Pool). `Setup()` baut die
+Sicht bei Bedarf als Ordner mit Verweisen unter `/var/lib/z-push/rw-sicht/<sicht>/`
+neu (wenn `STAND` sich geändert hat) und gibt Z-Push diesen Ordner. Im Log:
+`BackendRosenweg: LDAP OK <name> Sicht s3`.
 
 ## Anmeldung und Schutz gegen Passwortraten (seit 17.11.2026)
 
@@ -95,13 +117,23 @@ Outpost. Dann muss dessen Zertifikat gültig und in `/etc/ldap/ldap.conf`
 ## Ausrollen
 
 ```bash
-scp zpush/backend-rosenweg.php zpush/nginx-zpush.conf root@100.64.2.22:/tmp/
+scp zpush/backend-rosenweg.php zpush/sicht.php zpush/nginx-zpush.conf root@100.64.2.22:/tmp/
 ssh root@100.64.2.22 '
   pct push 115 /tmp/backend-rosenweg.php /usr/share/z-push/src/backend/rosenweg/rosenweg.php
+  pct push 115 /tmp/sicht.php /usr/share/z-push/src/backend/rosenweg/sicht.php
   pct push 115 /tmp/nginx-zpush.conf /etc/nginx/sites-enabled/zpush.conf
   pct exec 115 -- sh -c "php -l /usr/share/z-push/src/backend/rosenweg/rosenweg.php && nginx -t && systemctl reload nginx php8.4-fpm"
-  pct exec 115 -- sh -c "install -d -o www-data -g www-data -m 0700 /var/lib/z-push/rw-logon"'
+  pct exec 115 -- sh -c "install -d -o www-data -g www-data -m 0700 /var/lib/z-push/rw-logon /var/lib/z-push/rw-sicht"'
 ```
+
+Seit F1-7 zusätzlich einmalig in `backend/vcarddir/config.php`:
+`define('VCARDDIR_DIR', '/var/lib/z-push/rw-sicht/%u');`. Reihenfolge: erst
+Backend + config, dann `contacts-sync` mit Sammlungen laufen lassen (das alte
+Skript schrieb die Karten flach nach `/var/lib/zpush-contacts/`). Gruppen-Lesen
+vorher mit einem Testkonto prüfen:
+`ldapsearch -H ldap://100.64.2.37 -D cn=<test>,ou=users,dc=rosenweg4303,dc=ch -W -b ou=users,dc=rosenweg4303,dc=ch '(cn=<test>)' memberOf`
+– kommt kein `memberOf`, Lesekonto `RW_LDAP_SUCHE_DN`/`_PW` setzen, sonst sehen
+alle nur `keine`.
 
 Den Dateinamen in `sites-enabled/` vorher mit `ls /etc/nginx/sites-enabled/`
 prüfen und den vorhandenen überschreiben (nicht eine zweite Datei daneben
