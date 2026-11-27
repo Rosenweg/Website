@@ -130,6 +130,31 @@ Im pbx-Admin unter „Geteilte Telefone“:
   funktionsfähig, der Rosenweg Launcher zeigt es nicht. Für alles aus Punkt 1
   und 2 oben.
 
+## Flutter-Apps aus dem Register im Katalog (27.11.2026)
+
+Apps aus `apps-register.json`, Abschnitt `apps` (Flutter, eigenes Repo), dürfen in den
+Katalog. Ein eigener Eintrag unter `katalog` ist dafür **nicht** nötig: Steht ihr Paketname
+in `telefon_apps` (art `apk`), kopiert jedes Release (`/api/apps/release`) dieselbe APK auch
+in den Katalog und stösst den adb-Updater an. Die Gruppen und „aktiv“ bleiben dabei, wie die
+Technik sie auf /smartphones gesetzt hat. Erster Eintrag also: Zeile auf /smartphones anlegen
+(oder in `telefon_apps`) und die aktuelle APK einmal hochladen bzw. aus `apps/dateien/` kopieren.
+
+| App | Paket | Gruppen | Stand |
+|---|---|---|---|
+| Rosenweg Profil | `ch.rosenweg4303.profil` | leer = alle, die sich anmelden dürfen (`telefon_gruppen`) | aktiv |
+| Rosenweg Salz | `ch.rosenweg4303.salz` | `technik,präsident,praesident` + die `bewohner_gruppen` der Salzlager | aktiv |
+| Rosenweg Virtuelle Computer | `ch.rosenweg4303.vm` | `technik,präsident,praesident,vm` | aktiv |
+| Rosenweg Zutritt | `ch.rosenweg4303.zutritt` | `technik,präsident,praesident` | vorbereitet, **inaktiv** bis zum ersten Release |
+
+- **Salz:** Eine Hauswart-Gruppe gibt es nicht; der Hauswart steht je Lager als Mailadresse
+  (`salz_lager.hauswart_emails`). Die Gruppen im Katalog entsprechen `buchungsGruppen()` in
+  `api/routes/salz.js`. Kommt ein Lager oder eine Gruppe dazu, hier nachziehen.
+- **Virtuelle Computer:** Die Rechte selbst kommen aus Proxmox (ACL je VM). Die
+  Authentik-Gruppe `vm` steuert nur, wem das Telefon die App zeigt: wer in Proxmox eine VM
+  bekommt, gehört auch in `vm`.
+- **Zutritt:** Die Zeile steht schon (inaktiv, ohne APK). Das erste Release legt die APK
+  von selbst hinein; danach auf /smartphones „aktiv“ setzen.
+
 ## Wartung per USB
 
 Nur die adb-Shell darf das (geschützt durch die Systemberechtigung `DUMP`):
