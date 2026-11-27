@@ -165,6 +165,9 @@ function appTunnelRoutes(app, { pool, rateLimitGuard }) {
       }
       const { status, daten } = await gatewayRuf('POST', '/peers', req.personToken, { geraet, schluessel });
       if (status !== 200) {
+        // Jede Ablehnung ins Log (27.11.2026: ein alter Gateway wies rw_app_-
+        // Tokens mit 401 ab, im API-Log stand dazu nichts). Ohne Token, nur Art.
+        console.warn(`[app-tunnel] ${email}: Gateway ${status}${req.personToken.startsWith('rw_app_') ? ' (App-Anmeldung)' : ''}: ${daten.error || '-'}`);
         // Fehlertexte des Gateways sind für Menschen geschrieben (z. B.
         // „höchstens 5 Geräte“); 5xx nicht weiterreichen.
         if (status >= 500) return res.status(502).json({ error: 'Verbindung ins Haus nicht möglich' });
