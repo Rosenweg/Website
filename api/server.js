@@ -18313,6 +18313,67 @@ app.get('/api/verwaltung-mail-queue/pending-count', authMiddleware, async (req, 
   }
 });
 
+// Mails, die auf MEINE Freigabe warten (Rosenweg Mail-Freigabe, App und
+// Benachrichtigung „Neue Mail wartet auf Freigabe“). Dieselbe Pruefung wie
+// POST /:id/freigeben: Status pending, eine Gruppe aus der Regel der Mail
+// (required_groups), noch nicht selbst freigegeben (4-Augen-Prinzip). Mit
+// kurzer Vorschau, damit die App ohne Detail-Abfrage benachrichtigen kann.
+//   ?seit=<ISO-Zeit>  nur Mails, die seitdem eingestellt oder bearbeitet wurden
+//                     (Bearbeiten setzt die Freigaben zurueck = wartet neu)
+// Antwort: { mails, anzahl (alle offenen fuer mich, ohne seit), jetzt }
+async function mailsZurFreigabe(user, seit) {
+  const r = await pool.query(
+    `SELECT q.id, q.source_type, q.source_id, q.mail_to, q.mail_cc, q.mail_reply_to,
+            CASE WHEN q.mail_bcc IS NULL OR q.mail_bcc = '' THEN 0
+                 ELSE array_length(string_to_array(q.mail_bcc, ','), 1) END AS bcc_count,
+            q.subject, q.created_by, q.created_at, q.edited_by, q.edited_at,
+            LEFT(COALESCE(q.body_text, ''), 280) AS vorschau,
+            COALESCE((SELECT COUNT(*) FROM verwaltung_mail_attachments a WHERE a.queue_id = q.id),
+                     jsonb_array_length(COALESCE(q.attachments, '[]'::jsonb))) AS attachment_count,
+            (SELECT COUNT(*) FROM mail_approval_log l WHERE l.queue_id = q.id) AS freigaben,
+            EXISTS (SELECT 1 FROM mail_approval_log l WHERE l.queue_id = q.id AND l.approver_email = $1) AS von_mir
+       FROM verwaltung_mail_queue q
+      WHERE q.status = 'pending'
+      ORDER BY q.created_at
+      LIMIT 500`,
+    [user?.email || ''],
+  );
+  const alle = [];
+  for (const m of r.rows) {
+    if (m.von_mir) continue;
+    const rule = await getApprovalRuleForQueueItem(m);
+    if (!userHasAnyGroup(user, rule.required_groups)) continue;
+    const { von_mir, ...rest } = m;
+    alle.push({
+      ...rest,
+      attachment_count: Number(m.attachment_count) || 0,
+      freigaben: Number(m.freigaben) || 0,
+      noetig: rule.min_approvers || 1,
+      gruppen: rule.required_groups,
+    });
+  }
+  const mails = seit
+    ? alle.filter(m => new Date(m.edited_at || m.created_at).getTime() > seit.getTime())
+    : alle;
+  return { mails, anzahl: alle.length };
+}
+
+app.get('/api/verwaltung-mail-queue/zur-freigabe', authMiddleware, async (req, res) => {
+  try {
+    let seit = null;
+    if (req.query.seit !== undefined && req.query.seit !== '') {
+      seit = new Date(String(req.query.seit));
+      if (Number.isNaN(seit.getTime())) return res.status(400).json({ error: 'seit: ungültige Zeit (ISO 8601)' });
+    }
+    const jetzt = new Date().toISOString();
+    const { mails, anzahl } = await mailsZurFreigabe(req.user, seit);
+    res.json({ mails, anzahl, jetzt });
+  } catch (err) {
+    console.error('Mail-Queue zur-freigabe error:', err);
+    res.status(500).json({ error: 'Fehler beim Laden' });
+  }
+});
+
 // Detail (volle Mail inkl. body_text + Approval-Info)
 app.get('/api/verwaltung-mail-queue/:id', authMiddleware, async (req, res) => {
   try {
