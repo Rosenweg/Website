@@ -78,6 +78,9 @@ Wird aufgerufen von:
 - API (`POST /api/admin/users`) — Anfangspasswort, **nur** für das eben neu
   angelegte Konto und nur, wenn Technik/Präsident es anlegt. Konten, die
   Ausschuss/Verwaltung anlegen, bekommen kein Passwort und keinen AD-Abgleich.
+- API (`POST /api/scanner/:id/passwort-drucken`, Seite `scanner.html`) —
+  Passwort der Scanner-Konten `scan-<name>`; nur Konten aus der festen Liste
+  in `api/lib/scanner.js`, nie ein Name aus der Anfrage.
 - Fileserver-Webhook — SMB-Passwort-Weiterleitung (alt, Stand unbekannt)
 
 Fehlt `AD_PASSWORD_API_SECRET` in der API, wird nur Authentik gesetzt; im Log
@@ -95,7 +98,7 @@ steht `AD_PASSWORD_API_SECRET fehlt — AD-Passwort nicht gesetzt`.
 |-------|------|---------|-------------|
 | `dokumente` | `/srv/documents` | @rosenweg (Gruppe) | Alle Dokumente, Papierkorb |
 | `api` | `/srv/documents` | ROSENWEG\api-svc | API Docker-Zugriff |
-| `scans` | `/srv/documents/Scans` | ROSENWEG\scanner | Scanner-Upload |
+| `scans` | `/mnt/cephfs-stage/Scans/%u` | @scanner-geraete (je Scanner ein Konto `scan-<name>`) | Scanner-Ablage; geplant, Stand und Einrichtung in [`../fileserver-lxc/scans/README.md`](../fileserver-lxc/scans/README.md). Bis dahin noch `Scans` mit `ROSENWEG\scanner` (deaktiviert seit 27.11.2026) |
 
 ### FTP (vsftpd)
 
@@ -103,7 +106,7 @@ steht `AD_PASSWORD_API_SECRET fehlt — AD-Passwort nicht gesetzt`.
 - **Auth**: Nur lokal (kein Winbind) — eigene PAM-Config `/etc/pam.d/vsftpd`
 - **User**: `scanner` (lokaler User)
 - **Passwort**: `<im Passwortmanager>`
-- **Chroot**: `/srv/documents`
+- **Chroot**: `/srv/documents` (`local_root=/srv/documents/Scans` — gibt es seit dem Umzug auf CephFS nicht mehr; letzter Eintrag im FTP-Log Juni 2026; abschalten, siehe `fileserver-lxc/scans/README.md`)
 - **PASV Ports**: 30000-30100
 
 ### Samba Konfiguration

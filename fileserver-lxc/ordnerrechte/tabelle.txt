@@ -27,14 +27,22 @@ NIE   | _acltest
 
 # Wurzel: alle duerfen hinein und die Dateien der obersten Ebene lesen
 # (Website wertet sie als 'allgemein'). Schreiben nur ADMIN.
-# u:scanner braucht den Durchgang fuer die Freigabe [scans].
-/          | g:rosenweg,u:scanner | -
+# u:scanner und g:scanner-geraete brauchen den Durchgang fuer die Freigabe
+# [scans] (force group = rosenweg ist auf CT 106 die LOKALE gid 1000 und
+# passt deshalb nicht auf g:rosenweg). u:scanner ist seit 27.11.2026
+# deaktiviert und faellt weg, sobald alle Geraete eigene Konten haben.
+/          | g:rosenweg,u:scanner,g:scanner-geraete | -
 
 # allgemein: lesen alle, schreiben jeder Ausschuss
 allgemein  | g:rosenweg | stweg1-ausschuss,stweg2-ausschuss,stweg3-ausschuss,stweg4-ausschuss,stweg5-ausschuss,stweg6-ausschuss,stweg7-ausschuss,meg-ausschuss,stweg8-ausschuss
 
-# Scans: lesen alle, schreiben nur der Scanner (und ADMIN)
-Scans      | g:rosenweg | u:scanner
+# Scans: lesen alle, schreiben nur der Scanner (und ADMIN).
+# Je Scanner ein Konto scan-<name> und ein Ordner Scans/scan-<name>, in den
+# nur dieses Konto schreibt (Freigabe [scans] mit path = .../Scans/%u, siehe
+# fileserver-lxc/scans/README.md). g:scanner-geraete auf Scans nur fuer den
+# Durchgang; ueber die Freigabe sieht jedes Geraet nur seinen eigenen Ordner.
+Scans      | g:rosenweg,g:scanner-geraete | u:scanner
+~scan-r13  | g:rosenweg | u:scan-r13
 
 # projekte: lesen alle Eigentuemer, schreiben jeder Ausschuss
 # (gibt es heute noch nicht, das Skript ueberspringt fehlende Ordner)

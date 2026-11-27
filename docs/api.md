@@ -333,6 +333,7 @@ Kurzfassung (Details [`energie-api.md`](energie-api.md)):
 | MQTT eigen | `POST /api/mqtt/token`, `GET /api/mqtt/my-access`, `/api/mqtt/my-app-passwords` | angemeldet (App-Passwörter nur Browser) |
 | SSH | `/api/ssh/me*` (Browser), `/api/ssh/sitzungen`, `hosts`, `matrix`, `dienste` (GET) | eigene Schlüssel angemeldet; Verwaltung T/P |
 | Stationen | `/api/stations/admin/*` (darin `POST admin/windows`: Windows-Rechner von Hand eintragen; `POST admin/ad-abgleich`: Windows-Rechner jetzt aus dem AD lesen; `POST admin/:id/anschluss-uebernehmen`: Anschluss-Wächter — neuen Switch-Port/AP übernehmen und, falls der Wächter gesperrt hat, freigeben; `POST admin/:id/anschluss-vergessen`: nächsten Anschluss ohne Sperre lernen; `DELETE admin/:id/doppelt`: Meldung „doppelte Station“ erledigt) | T/P |
+| Scanner | `GET /api/scanner` (Geräte, wann zuletzt gesetzt, Protokoll), `POST /api/scanner/:id/passwort-drucken` (neues Passwort: Zettel auf DruckerR9, dann im AD; Passwort nie in Antwort, DB oder Log); Seite `scanner.html`, siehe `fileserver-lxc/scans/README.md` | T/P |
 | Sicherungen | `GET /api/sicherungen/pbs` (PBS-Übersicht, nur lesend), `GET /api/sicherungen/pcs`, `PUT /api/sicherungen/pcs/:id` (MAC, Adresse), `POST/DELETE /api/sicherungen/pcs/:id/vormerkung` (CT 135), `POST /api/sicherungen/pcs/:id/start` (`sichern` im Sicherungs-System); Seite `sicherungen.html` | T/P |
 | TV | `/api/tv/channels`, `stream-url`, `extern/token*` | angemeldet |
 | Push | `/api/push/subscribe`, `unsubscribe`, `test` (5 / 10 Min.) | angemeldet |
