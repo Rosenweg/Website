@@ -26,6 +26,7 @@ const kontaktformular = require('./lib/kontaktformular');
 const stwegSichtLib = require('./lib/stweg-sicht');
 const { waschAdminErlaubt, waschRaumAenderbar } = require('./lib/wasch-admin');
 const adminProtokoll = require('./lib/admin-protokoll');
+const { taeglichUm } = require('./lib/tageszeit');
 const verteilerVerwaltung = require('./lib/verteiler-verwaltung');
 
 const app = express();
@@ -7141,7 +7142,8 @@ async function processAuthentiKDeletions() {
   }
 }
 
-// Run deletion processor daily (every 24h) with guard
+// Kontolöschung täglich um 02:00 Schweizer Zeit (Befund W27: vorher alle 24 h ab
+// Prozessstart, nach einem Neustart am Tag also tagsüber), mit Sperre gegen Doppellauf
 let isDeletionRunning = false;
 let deletionInterval;
 async function guardedProcessDeletions() {
@@ -7149,7 +7151,7 @@ async function guardedProcessDeletions() {
   isDeletionRunning = true;
   try { await processAuthentiKDeletions(); } finally { isDeletionRunning = false; }
 }
-deletionInterval = setInterval(guardedProcessDeletions, 24 * 60 * 60 * 1000);
+deletionInterval = taeglichUm(2, 0, guardedProcessDeletions, { name: 'Authentik-Loeschung' });
 // Also run once 60s after startup
 setTimeout(guardedProcessDeletions, 60 * 1000);
 
@@ -7405,9 +7407,9 @@ async function syncAuthentikDeactivations() {
   }
 }
 
-// Beide Jobs täglich um ~03:00 (deletion läuft 02:00 implizit)
-setInterval(checkStaleDruckerTags, 24 * 60 * 60 * 1000);
-setInterval(syncAuthentikDeactivations, 24 * 60 * 60 * 1000);
+// Beide Jobs täglich um 03:00 Schweizer Zeit (nach der Kontolöschung um 02:00)
+taeglichUm(3, 0, checkStaleDruckerTags, { name: 'Drucker-Tags' });
+taeglichUm(3, 5, syncAuthentikDeactivations, { name: 'InverseSync' });
 setTimeout(() => { checkStaleDruckerTags(); syncAuthentikDeactivations(); }, 5 * 60 * 1000);
 
 // ─── Pickup-Reminder für ungeholte Druckaufträge ───────────────────
@@ -31184,7 +31186,7 @@ async function gracefulShutdown(signal) {
 
   // Clear all intervals
   activeIntervals.forEach(id => clearInterval(id));
-  if (deletionInterval) clearInterval(deletionInterval);
+  deletionInterval?.stop?.();
 
   // Close database pools
   try {
