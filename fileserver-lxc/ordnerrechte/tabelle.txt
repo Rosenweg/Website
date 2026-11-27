@@ -44,9 +44,10 @@ allgemein  | g:rosenweg | stweg1-ausschuss,stweg2-ausschuss,stweg3-ausschuss,stw
 Scans      | g:rosenweg,g:scanner-geraete | u:scanner
 ~scan-r13  | g:rosenweg | u:scan-r13
 
-# projekte: lesen alle Eigentuemer, schreiben jeder Ausschuss
-# (gibt es heute noch nicht, das Skript ueberspringt fehlende Ordner)
-projekte   | eigentuemer,stweg1-eigentuemer,stweg2-eigentuemer,r9-eigentuemer,stweg4-eigentuemer,stweg5-eigentuemer,r1-eigentuemer,stweg7-eigentuemer,meg-eigentuemer | stweg1-ausschuss,stweg2-ausschuss,stweg3-ausschuss,stweg4-ausschuss,stweg5-ausschuss,stweg6-ausschuss,stweg7-ausschuss,meg-ausschuss,stweg8-ausschuss
+# projekte: lesen alle Eigentuemer und jede Hausverwaltung (stwegN-verwaltung,
+# meg-verwaltung; UEBERGANG: "verwaltung" wie bei den STWEG-Ordnern), schreiben
+# jeder Ausschuss (gibt es heute noch nicht, das Skript ueberspringt fehlende Ordner)
+projekte   | eigentuemer,stweg1-eigentuemer,stweg2-eigentuemer,r9-eigentuemer,stweg4-eigentuemer,stweg5-eigentuemer,r1-eigentuemer,stweg7-eigentuemer,meg-eigentuemer,stweg1-verwaltung,stweg2-verwaltung,stweg3-verwaltung,stweg4-verwaltung,stweg5-verwaltung,stweg6-verwaltung,stweg7-verwaltung,meg-verwaltung,verwaltung | stweg1-ausschuss,stweg2-ausschuss,stweg3-ausschuss,stweg4-ausschuss,stweg5-ausschuss,stweg6-ausschuss,stweg7-ausschuss,meg-ausschuss,stweg8-ausschuss
 
 # STWEG-Ordner: lesen Bewohner+Eigentuemer+Ausschuss der STWEG und deren
 # Hausverwaltung (stwegN-verwaltung, STWEG 8 = meg-verwaltung; isDocPathAllowed
