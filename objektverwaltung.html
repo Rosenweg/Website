@@ -545,9 +545,19 @@
             currentUser = user;
             const groups = user.groups || [];
             const isTechnik = groups.some(g => { const gl = g.toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident'; });
-            const isVerwaltung = groups.some(g => g.toLowerCase() === 'verwaltung');
+            // Hausverwaltung je STWEG: stwegN-verwaltung / meg-verwaltung (api/lib/groups.js
+            // VERWALTUNG_GROUPS). ÜBERGANG: alte Gruppe „Verwaltung“ = alle STWEGs.
+            const lgAlle = groups.map(g => String(g).toLowerCase());
+            const verwaltungUebergang = lgAlle.includes('verwaltung');
+            const verwaltungGruppe = (nr) => Number(nr) === 8 ? 'meg-verwaltung' : `stweg${nr}-verwaltung`;
+            const istVerwaltungFuer = (nr) => verwaltungUebergang || lgAlle.includes(verwaltungGruppe(nr));
+            const isVerwaltung = verwaltungUebergang || lgAlle.some(g => /^(stweg[1-7]|meg)-verwaltung$/.test(g));
             const isAusschuss = groups.some(g => g.toLowerCase().endsWith('-ausschuss'));
             window.canViewHistorie = isTechnik || isVerwaltung || isAusschuss;
+            // B20: Die Kontenliste (GET /api/admin/users) gibt der Server nur Technik/
+            // Präsident und dem Ausschuss – der Verwaltung nicht. Den Reiter „Bewohner“
+            // darum nur dann zeigen (gleiche Regel wie der Server).
+            const darfKontenliste = isTechnik || isAusschuss;
 
             // Check permissions for both areas
             const accessWohnungen = AuthentikAuth.getPermission('wohnungsverwaltung');
@@ -555,7 +565,7 @@
             const accessVerwaltung = AuthentikAuth.getPermission('verwaltung');
 
             hasWohnungenAccess = accessWohnungen !== 'none';
-            hasBewohnerAccess = accessBewohner !== 'none' || accessVerwaltung !== 'none';
+            hasBewohnerAccess = darfKontenliste && (accessBewohner !== 'none' || accessVerwaltung !== 'none');
 
             if (!hasWohnungenAccess && !hasBewohnerAccess) {
                 document.getElementById('auth-gate').innerHTML = `
@@ -570,7 +580,7 @@
 
             canWriteWohnungen = accessWohnungen === 'write';
             canWriteBewohner = accessBewohner === 'write' || accessVerwaltung === 'write';
-            seesAll = isTechnik || isVerwaltung;
+            seesAll = isTechnik;
 
             istGruppenAdmin = isTechnik;
 
@@ -617,6 +627,8 @@
                 const accessibleStwegs = [];
                 for (const s of stwegList) {
                     if (isTechnik) { accessibleStwegs.push(s); continue; }
+                    // Verwaltung: nur die STWEG(s) ihrer Verwaltungsgruppen (kein Bewohner nötig)
+                    if (istVerwaltungFuer(s.nr)) { accessibleStwegs.push(s); continue; }
                     const sGroups = s.groups ? Object.values(s.groups).map(g => g.toLowerCase()) : [];
                     if (groups.some(g => sGroups.includes(g.toLowerCase()))) accessibleStwegs.push(s);
                 }
@@ -1602,6 +1614,12 @@
             loading.classList.remove('hidden');
             try {
                 const res = await AuthentikAuth.apiFetch('/api/admin/users');
+                if (res.status === 403) {
+                    loading.classList.add('hidden');
+                    ['main-tab-bewohner', 'main-tab-gruppen'].forEach(id => document.getElementById(id)?.classList.add('hidden'));
+                    if (hasWohnungenAccess) switchMainTab('wohnungen');
+                    return;
+                }
                 const data = await res.json();
                 allUsers = (Array.isArray(data) ? data : (data.results || []))
                     .filter(u => u.is_active && !u.username.startsWith('ak-') && u.username !== 'akadmin' && u.username !== 'ldap-service')

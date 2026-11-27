@@ -10,7 +10,7 @@ Hinweis: Früher hiess diese Seite `verwaltung.html`. Unter `verwaltung.html` st
 heute die öffentliche Seite **Hausverwaltung** mit den Kontaktdaten der
 Liegenschaftsverwaltungen (Kontaktpersonen nur nach Anmeldung).
 
-Erreichbar: Hausverwaltung (Gruppe `Verwaltung`) über das Menü **„Verwaltung“** auf
+Erreichbar: Hausverwaltung (Gruppe `stwegN-verwaltung` bzw. `meg-verwaltung` je betreuter STWEG; im Übergang noch `Verwaltung` = alle STWEGs) über das Menü **„Verwaltung“** auf
 www (dort auch Rückläufe, Reklamationen, Handwerker, Vollmachten, Auslagen, Projekte,
 Zähler, Energie-Monitor, E-Mail-Verteiler – je nur mit dem Seitenrecht); Ausschuss
 über **„Ausschuss ↗“**, Technik/Präsident über **„Admin ↗“**.
@@ -22,10 +22,10 @@ Seitenrechten (`rechteverwaltung.html`):
 
 | Reiter | sichtbar mit | schreiben |
 |---|---|---|
-| Wohnungen | Recht „Wohnungsverwaltung“ ≥ read; nur STWEGs, in denen das Konto eine Gruppe hat (Technik/Präsident: alle) | Recht „Wohnungsverwaltung“ = write **und** Ausschuss dieser STWEG, Verwaltung mit Gruppe dieser STWEG, Technik, Präsident |
+| Wohnungen | Recht „Wohnungsverwaltung“ ≥ read; nur STWEGs, in denen das Konto eine Gruppe hat, bei der Verwaltung die STWEGs ihrer Verwaltungsgruppen (Technik/Präsident: alle) | Recht „Wohnungsverwaltung“ = write **und** Ausschuss dieser STWEG, Verwaltung dieser STWEG, Technik, Präsident |
 | Eigentümer & Verwalter | wie Wohnungen | nur lesen |
 | Unterschriftenlisten | wie Wohnungen | PDF erzeugen wie „schreiben“ bei Wohnungen |
-| Bewohner | Recht „Bewohner-Verwaltung“ oder „Verwaltung“ ≥ read; Liste nur für Ausschuss, Technik, Präsident | anlegen: Ausschuss mit Recht „Bewohner-Verwaltung“ = write; ändern, löschen: Technik/Präsident |
+| Bewohner | Recht „Bewohner-Verwaltung“ oder „Verwaltung“ ≥ read **und** Ausschuss, Technik oder Präsident (nur sie bekommen die Kontenliste; der Verwaltung zeigt die Seite den Reiter nicht) | anlegen: Ausschuss mit Recht „Bewohner-Verwaltung“ = write; ändern, löschen: Technik/Präsident |
 | Gruppen | Recht „Bewohner-Verwaltung“ = write | Technik/Präsident |
 
 Standardmässig haben alle Ausschuss-Gruppen „Wohnungsverwaltung“ = write.

@@ -20,7 +20,7 @@ Nicht neu erfunden, sondern aus der Website abgeschrieben:
 |---|---|---|
 | Wurzel und Dateien darin | alle (`rosenweg`) | nur Technik/Präsident |
 | `allgemein`, `Scans` | alle | jeder Ausschuss bzw. der Scanner |
-| `stwegN`, `meg` | Bewohner, Eigentümer, Ausschuss der STWEG | Ausschuss der STWEG |
+| `stwegN`, `meg` | Bewohner, Eigentümer, Ausschuss und Hausverwaltung (`stwegN-verwaltung`, `meg-verwaltung`) der STWEG | Ausschuss der STWEG |
 | `projekte` (gibt es noch nicht) | alle Eigentümer | jeder Ausschuss |
 | Sperrordner (`auslagen`, `anzeigen`, `reklamationen`, `unterschriftenlisten`, `grundbuch-bilder`, `druckauftraege`) auf Ebene 1 oder 2 | nur Technik/Präsident | dito |
 | `fotos_von_versendeten_briefen` | Ausschuss | Ausschuss |

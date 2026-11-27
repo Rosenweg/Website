@@ -24,7 +24,7 @@ const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/ser
 const { z } = require('zod');
 const { authMiddleware, scopeErlaubt } = require('../middleware/auth');
 const { pool } = require('../lib/db');
-const { isTechnik, isPraesident, isAusschussForAny } = require('../lib/groups');
+const { isTechnik, isPraesident, isAusschussForAny, isVerwaltungForAny } = require('../lib/groups');
 const { WERKZEUGE_VERWALTUNG } = require('./werkzeuge-verwaltung');
 const { registriereRessourcen, registrierePrompts, docsListe, PROMPTS } = require('./erweiterungen');
 
@@ -281,7 +281,7 @@ function rolleErlaubt(rolle, gruppen) {
   if (!rolle) return true;
   const g = (gruppen || []).map(x => String(x).toLowerCase());
   const technik = isTechnik(g), praesident = isPraesident(g);
-  const ausschuss = technik || praesident || isAusschussForAny(g) || g.includes('verwaltung');
+  const ausschuss = technik || praesident || isAusschussForAny(g) || isVerwaltungForAny(g);
   const eigentuemer = ausschuss || g.some(x => x === 'eigentuemer' || x.endsWith('-eigentuemer'));
   return rolle === 'technik' ? technik : rolle === 'ausschuss' ? ausschuss : rolle === 'eigentuemer' ? eigentuemer : true;
 }

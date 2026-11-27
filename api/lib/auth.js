@@ -320,6 +320,9 @@ const MANAGED_PAGES = [
   { id: 'auslagen-stundensatz', label: 'Auslagen-Stundensatz' },
   { id: 'whatsapp-bot', label: 'WhatsApp-Bot' },
   { id: 'reklamationen', label: 'Reklamationen' },
+  // Seit B19 prueft die API das Recht (lib/vollmacht-rechte.js): lesen = Vollmachten
+  // der verwalteten STWEG(s) sehen, schreiben = fuer Dritte erfassen, Papier aktivieren.
+  { id: 'vollmachten', label: 'Vollmachten (Verwaltung)' },
 ];
 
 const ACCESS_LEVELS = { none: 0, read: 1, write: 2 };

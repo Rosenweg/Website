@@ -488,7 +488,7 @@
                     'verwaltung': 'bg-green-100 text-green-700',
                 };
                 groupsEl.innerHTML = groups.map(g => {
-                    const color = groupColors[g] || 'bg-gray-100 text-gray-700';
+                    const color = groupColors[g] || (/^(stweg\d|meg)-verwaltung$/i.test(g) ? groupColors.verwaltung : 'bg-gray-100 text-gray-700');
                     return `<span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${color}">${escapeHtml(g)}</span>`;
                 }).join('');
             }

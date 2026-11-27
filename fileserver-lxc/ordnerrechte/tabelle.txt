@@ -48,17 +48,21 @@ Scans      | g:rosenweg,g:scanner-geraete | u:scanner
 # (gibt es heute noch nicht, das Skript ueberspringt fehlende Ordner)
 projekte   | eigentuemer,stweg1-eigentuemer,stweg2-eigentuemer,r9-eigentuemer,stweg4-eigentuemer,stweg5-eigentuemer,r1-eigentuemer,stweg7-eigentuemer,meg-eigentuemer | stweg1-ausschuss,stweg2-ausschuss,stweg3-ausschuss,stweg4-ausschuss,stweg5-ausschuss,stweg6-ausschuss,stweg7-ausschuss,meg-ausschuss,stweg8-ausschuss
 
-# STWEG-Ordner: lesen Bewohner+Eigentuemer+Ausschuss der STWEG,
-# schreiben nur deren Ausschuss. STWEG 3 = r9-*, STWEG 6 = r1-*, STWEG 8 = meg-*.
-stweg1     | stweg1-bewohner,stweg1-eigentuemer | stweg1-ausschuss
-stweg2     | stweg2-bewohner,stweg2-eigentuemer | stweg2-ausschuss
-stweg3     | r9-bewohner,r9-eigentuemer         | stweg3-ausschuss
-stweg4     | stweg4-bewohner,stweg4-eigentuemer | stweg4-ausschuss
-stweg5     | stweg5-bewohner,stweg5-eigentuemer | stweg5-ausschuss
-stweg6     | r1-bewohner,r1-eigentuemer         | stweg6-ausschuss
-stweg7     | stweg7-bewohner,stweg7-eigentuemer | stweg7-ausschuss
-meg        | meg-bewohner,meg-eigentuemer       | meg-ausschuss
-stweg8     | meg-bewohner,meg-eigentuemer       | meg-ausschuss
+# STWEG-Ordner: lesen Bewohner+Eigentuemer+Ausschuss der STWEG und deren
+# Hausverwaltung (stwegN-verwaltung, STWEG 8 = meg-verwaltung; isDocPathAllowed
+# mit getStwegsMitVerwaltung), schreiben nur deren Ausschuss.
+# STWEG 3 = r9-*, STWEG 6 = r1-*, STWEG 8 = meg-*.
+# ÜBERGANG: "verwaltung" (alte globale Gruppe = alle STWEGs) streichen, sobald
+# niemand mehr darin steht (api/lib/groups.js).
+stweg1     | stweg1-bewohner,stweg1-eigentuemer,stweg1-verwaltung,verwaltung | stweg1-ausschuss
+stweg2     | stweg2-bewohner,stweg2-eigentuemer,stweg2-verwaltung,verwaltung | stweg2-ausschuss
+stweg3     | r9-bewohner,r9-eigentuemer,stweg3-verwaltung,verwaltung         | stweg3-ausschuss
+stweg4     | stweg4-bewohner,stweg4-eigentuemer,stweg4-verwaltung,verwaltung | stweg4-ausschuss
+stweg5     | stweg5-bewohner,stweg5-eigentuemer,stweg5-verwaltung,verwaltung | stweg5-ausschuss
+stweg6     | r1-bewohner,r1-eigentuemer,stweg6-verwaltung,verwaltung         | stweg6-ausschuss
+stweg7     | stweg7-bewohner,stweg7-eigentuemer,stweg7-verwaltung,verwaltung | stweg7-ausschuss
+meg        | meg-bewohner,meg-eigentuemer,meg-verwaltung,verwaltung          | meg-ausschuss
+stweg8     | meg-bewohner,meg-eigentuemer,meg-verwaltung,verwaltung          | meg-ausschuss
 
 # Ordner der obersten Ebene ohne STWEG-Bezug: auf der Website nur fuer
 # Technik/Praesident (isDocPathAllowed kennt sie nicht). Waeren auch ohne
