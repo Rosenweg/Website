@@ -67,7 +67,7 @@ const BEREICHE = [
   ['ssh/matrix', 'SSH-Zugriffsmatrix'], ['ssh', 'SSH-Zugang'],
   ['stations/v2', 'Stationen (Befehle)'], ['stations', 'Stationen'], ['sicherungen', 'Sicherungen'], ['scanner', 'Scanner-Konten'],
   ['pbx', 'Telefonanlage'], ['whatsapp', 'WhatsApp'], ['isp', 'Internet (ISP)'], ['pve-messages', 'Proxmox-Meldungen'],
-  ['access', 'Türen und Zutritt'], ['wasch', 'Waschküche'], ['mqtt', 'MQTT'], ['display', 'Anzeigen'],
+  ['access', 'Türen und Zutritt'], ['karten', 'Rosenweg-Karten'], ['apps/sitzungen', 'Anmeldungen der Apps'], ['wasch', 'Waschküche'], ['mqtt', 'MQTT'], ['display', 'Anzeigen'],
   ['mail-approval-config', 'Mail-Freigabe-Regeln'], ['verwaltung-mail-queue', 'Verwaltungs-Mails'],
   ['mail-templates', 'Mail-Vorlagen'], ['verteiler', 'Verteiler'], ['email', 'E-Mail-Versand'],
   ['kontakte', 'Kontakte'], ['stweg', 'STWEG-Termine'], ['alarmpanel', 'Alarmanlage'],
@@ -83,6 +83,8 @@ const VERBEN = {
   bootstrap: 'eingerichtet', approve: 'genehmigt', reject: 'abgelehnt', befehle: 'Befehl geschickt',
   'add_user': 'Person aufgenommen', 'remove_user': 'Person entfernt',
   'passwort-drucken': 'neues Passwort gedruckt',
+  zuordnen: 'Karte zugeordnet', entziehen: 'Karte entzogen', loeschen: 'Karte gelöscht',
+  'alle-abmelden': 'alle Anmeldungen abgemeldet',
 };
 function aktionText(methode, pfad) {
   const p = pfadNormal(pfad);
