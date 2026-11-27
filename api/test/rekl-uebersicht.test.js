@@ -37,3 +37,31 @@ test('Seiten übergeben ihre STWEG und zeigen den Servertext', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   assert.match(src, /uebersichtStwegs\(req\.user\.groups \|\| \[\], req\.query\.stweg\)/);
 });
+
+// Rosenweg Reparatur: GET /api/reklamationen/rechte
+const { reparaturRechte, stwegSchreibbar } = require('../lib/rekl-uebersicht');
+
+test('Reparatur-Rechte: Bewohner sieht seine STWEG, aendert keine Auto-Zuweisung', () => {
+  assert.deepEqual(reparaturRechte(['r9-bewohner']), { eigene_stwegs: [3], uebersicht_stwegs: [3], auto_assign_stwegs: [] });
+});
+
+test('Reparatur-Rechte: Verwaltung nur ihre STWEG, ohne eigene Wohnung', () => {
+  assert.deepEqual(reparaturRechte(['stweg5-verwaltung']), { eigene_stwegs: [], uebersicht_stwegs: [5], auto_assign_stwegs: [5] });
+  assert.deepEqual(reparaturRechte(['meg-verwaltung']).auto_assign_stwegs, [8]);
+});
+
+test('Reparatur-Rechte: Ausschuss aendert seine STWEG; Technik alles inkl. 0 = alle', () => {
+  assert.deepEqual(reparaturRechte(['r9-eigentuemer', 'stweg3-ausschuss']).auto_assign_stwegs, [3]);
+  const t = reparaturRechte(['technik']);
+  assert.deepEqual(t.uebersicht_stwegs, [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.deepEqual(t.auto_assign_stwegs, [0, 1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.equal(stwegSchreibbar(['stweg3-ausschuss'], 0), false);
+  assert.equal(stwegSchreibbar(['stweg3-ausschuss'], null), false);
+  assert.equal(stwegSchreibbar(['praesident'], 0), true);
+});
+
+test('Route /api/reklamationen/rechte ist angemeldet und nutzt die Bibliothek', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(src, /app\.get\('\/api\/reklamationen\/rechte', authMiddleware,/);
+  assert.match(src, /const reklStwegSchreibbar = require\('\.\/lib\/rekl-uebersicht'\)\.stwegSchreibbar;/);
+});

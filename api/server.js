@@ -20539,15 +20539,8 @@ app.get('/api/reklamationen/auto-assign', authMiddleware, requirePermission('rek
   } catch (e) { console.error('[rekl-auto-assign-get]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 // STWEG-Trennung fuer Reklamations-Stammdaten (Auto-Zuweisung, Melde-Orte):
-// Technik/Praesident alles; sonst nur STWEGs, in deren Ausschuss man sitzt
-// oder die man als Hausverwaltung betreut (stwegN-verwaltung).
-// stweg 0/NULL gilt fuer alle STWEGs -> nur Technik/Praesident.
-function reklStwegSchreibbar(groups, stweg) {
-  const g = groups || [];
-  if (isTechnik(g) || isPraesident(g)) return true;
-  const n = parseInt(stweg, 10);
-  return Number.isFinite(n) && n > 0 && (getAusschussStwegs(g).has(n) || isVerwaltungFor(g, n));
-}
+// Regel in lib/rekl-uebersicht.js (auch fuer GET /api/reklamationen/rechte).
+const reklStwegSchreibbar = require('./lib/rekl-uebersicht').stwegSchreibbar;
 // Regeln komplett setzen (Upsert pro Kategorie; leeres Ziel = Regel loeschen).
 app.put('/api/reklamationen/auto-assign', authMiddleware, requirePermission('reklamationen', 'write'), async (req, res) => {
   const rules = Array.isArray(req.body?.rules) ? req.body.rules : [];
@@ -20948,6 +20941,13 @@ app.get('/api/melde-ort/:code', async (req, res) => {
     if (r.rows.length === 0) return res.status(404).json({ error: 'Ort nicht gefunden' });
     res.json({ ort: r.rows[0] });
   } catch (e) { console.error('[melde-ort]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
+// Rosenweg Reparatur: welche STWEGs das Konto vorschlagen, ansehen und bei der
+// Auto-Zuweisung aendern darf (lib/rekl-uebersicht.js). Nur Auskunft; jede Route
+// prueft selbst. Jede Anmeldung (auch Karte), wie /uebersicht.
+app.get('/api/reklamationen/rechte', authMiddleware, (req, res) => {
+  res.json(require('./lib/rekl-uebersicht').reparaturRechte(req.user.groups || []));
 });
 
 // Bewohner-Uebersicht: Reklamationen der eigenen STWEG(s) + uebergreifende (stweg NULL),

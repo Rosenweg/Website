@@ -7,7 +7,11 @@
 // Bewohner/Eigentuemer/Ausschuss und Hausverwaltung dieser STWEG. Wer nicht
 // darf, bekommt 403 mit einer klaren Meldung statt still der eigenen STWEG.
 // Meldungen ohne STWEG (uebergreifend) zeigt die Seite immer mit.
-const { getUserStwegs, getStwegsMitVerwaltung, isTechnik, isPraesident } = require('./groups');
+const {
+  getUserStwegs, getStwegsMitVerwaltung, isTechnik, isPraesident, getAusschussStwegs, isVerwaltungFor,
+} = require('./groups');
+
+const ALLE = [1, 2, 3, 4, 5, 6, 7, 8];
 
 function stwegName(n) {
   return n === 8 ? 'MEG' : `STWEG ${n}`;
@@ -30,4 +34,30 @@ function uebersichtStwegs(groups, angefragt) {
   };
 }
 
-module.exports = { uebersichtStwegs };
+// STWEG-Trennung fuer Reklamations-Stammdaten (Auto-Zuweisung, Melde-Orte):
+// Technik/Praesident alles; sonst nur STWEGs, in deren Ausschuss man sitzt
+// oder die man als Hausverwaltung betreut (stwegN-verwaltung).
+// stweg 0/NULL gilt fuer alle STWEGs -> nur Technik/Praesident.
+function stwegSchreibbar(groups, stweg) {
+  const g = groups || [];
+  if (isTechnik(g) || isPraesident(g)) return true;
+  const n = parseInt(stweg, 10);
+  return Number.isFinite(n) && n > 0 && (getAusschussStwegs(g).has(n) || isVerwaltungFor(g, n));
+}
+
+// GET /api/reklamationen/rechte (Rosenweg Reparatur): welche STWEGs das Konto
+// in der App vorschlagen, ansehen und bei der Auto-Zuweisung aendern darf –
+// dieselben Regeln wie uebersichtStwegs und stwegSchreibbar, damit die App
+// keine Gruppennamen kennen muss. Sperrt nichts; die Routen pruefen selbst.
+function reparaturRechte(groups) {
+  const g = groups || [];
+  const alle = isTechnik(g) || isPraesident(g);
+  const sortiert = (s) => [...s].sort((a, b) => a - b);
+  return {
+    eigene_stwegs: sortiert(getUserStwegs(g)),
+    uebersicht_stwegs: alle ? ALLE : sortiert(getStwegsMitVerwaltung(g)),
+    auto_assign_stwegs: alle ? [0, ...ALLE] : ALLE.filter((n) => stwegSchreibbar(g, n)),
+  };
+}
+
+module.exports = { uebersichtStwegs, stwegSchreibbar, reparaturRechte };

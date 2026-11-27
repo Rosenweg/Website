@@ -240,7 +240,10 @@ test('Server: Verwaltungs-Absender nur für die STWEG des Verteilers, Ordner les
 
 test('Reklamations-Stammdaten und ZEV: Verwaltung der STWEG', () => {
   const s = lies('api/server.js');
-  const rekl = s.slice(s.indexOf('function reklStwegSchreibbar'), s.indexOf('function reklStwegSchreibbar') + 400);
+  // Regel liegt in lib/rekl-uebersicht.js (stwegSchreibbar), server.js nutzt sie
+  assert.match(s, /const reklStwegSchreibbar = require\('\.\/lib\/rekl-uebersicht'\)\.stwegSchreibbar;/);
+  const l = lies('api/lib/rekl-uebersicht.js');
+  const rekl = l.slice(l.indexOf('function stwegSchreibbar'), l.indexOf('function stwegSchreibbar') + 400);
   assert.match(rekl, /isVerwaltungFor\(g, n\)/);
   assert.match(s, /const zevStwegs = \[\.\.\.new Set\(\[\.\.\.getAusschussStwegs\(g\), \.\.\.verwaltungStwegs\(g\)\]\)\]/);
 });
