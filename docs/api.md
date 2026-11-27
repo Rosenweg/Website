@@ -266,7 +266,8 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `GET/POST/PUT/DELETE /api/verwaltungen…` | Ausschuss/T/P; Ausschuss liest eigene + STWEG-übergreifende, ändert nur eigene |
 | `GET /api/verwaltungen/kontakte` | angemeldet, gefiltert nach Sichtbarkeitsstufe und STWEG |
 | `POST /api/stweg-modules`, `/api/stweg-content/:stweg`, `/api/stweg-sections/:stweg/:section` | A🅢 oder T/P; Inhalte nur, wenn das Modul Seiten-Editor aktiv ist |
-| `GET /api/stweg/:stweg/events` | Gruppe dieser STWEG; `POST/DELETE` nur T/P |
+| `GET /api/stweg/:stweg/events` | Gruppe dieser STWEG; `POST`, `PUT /:id`, `DELETE /:id`: T/P oder Recht `stweg-termine` schreiben + Ausschuss/Verwaltung dieser STWEG (`lib/termine.js`), Fehler am Feld `{error, feld}` |
+| `GET /api/termine?stweg=` | Rosenweg Termine: Termine der eigenen STWEG(s) in einer Liste (`stwegs` je Termin), `stwegs` mit `schreiben` und `kalender` (Nextcloud-Kalender aus `TERMINE_NEXTCLOUD_KALENDER`, sonst null); `stweg=3,5` oder `alle` (T/P alle, sonst nur sichtbare → 403) |
 | `GET/POST /api/meg/einstellplaetze` | lesen angemeldet (fremde Plätze ohne Personendaten), schreiben MEG-Ausschuss oder T/P |
 | `/api/grundbuch/*` | angemeldet; Namen/Adressen nur Ausschuss/T/P oder wer erfasst hat; verifizieren Ausschuss/T/P; OCR 30 / Std. |
 | `/api/vollmachten*` | angemeldet: eigene; Ausschuss sieht seine STWEG; T/P/Verwaltung alle und für andere; Admin-Upload für alle Geber nur T/P mit `?als=admin` |

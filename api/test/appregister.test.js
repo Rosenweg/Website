@@ -37,6 +37,12 @@ test('apps-register.json ist gueltig und kennt die bisherigen Apps', () => {
   assert.equal(daten.apps.waschkueche.repo, 'Rosenweg/rosenweg-waschkueche');
   assert.ok(!daten.apps.waschkueche.technik);
   assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.waschkueche.logo)));
+  // Rosenweg Termine (Welle 2): Bewohner-App, Logo mit Cache-Marke
+  assert.equal(daten.apps.termine.paket, 'ch.rosenweg4303.termine');
+  assert.equal(daten.apps.termine.repo, 'Rosenweg/rosenweg-termine');
+  assert.ok(!daten.apps.termine.technik);
+  assert.equal(daten.apps.termine.logo, '/img/apps/rosenweg-termine.png?v=20261128');
+  assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.termine.logo.split('?')[0])));
 });
 
 test('pruefen findet Fehler', () => {

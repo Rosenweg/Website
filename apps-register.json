@@ -92,6 +92,15 @@
       "text": "Waschküche reservieren: Belegung als Wochenraster, freie Zeit antippen, einmal oder jede Woche; eigene Termine stornieren, Erinnerung beim Öffnen. Für den Ausschuss STWEG 3: Räume, Nutzungen, Abrechnung und Preis.",
       "fuer": "Für die Bewohnerinnen und Bewohner einer STWEG mit Waschküche (heute STWEG 3, Rosenweg 9). Verwalten mit dem Recht „Waschküche-Admin“.",
       "_notiz": "Flutter, alle Plattformen (Welle 1). Web-Seiten waschkueche.html und stweg3/pages/waschkueche-*.html bleiben. Erinnerung ohne Push (Entscheid Stefan 27.11.2026: kein ntfy)."
+    },
+    "termine": {
+      "name": "Rosenweg Termine",
+      "repo": "Rosenweg/rosenweg-termine",
+      "paket": "ch.rosenweg4303.termine",
+      "logo": "/img/apps/rosenweg-termine.png?v=20261128",
+      "reihenfolge": 80,
+      "text": "Versammlungen, Sitzungen, Wartungen und weitere Termine deiner STWEG an einem Ort: in den eigenen Kalender übernehmen und rechtzeitig erinnern lassen.",
+      "fuer": "Für alle Bewohner und Eigentümer (Termine ihrer STWEG). Eintragen und ändern: Ausschuss und Verwaltung für ihre STWEG, Technik und Präsident."
     }
   },
   "katalog": {

@@ -330,6 +330,8 @@ const MANAGED_PAGES = [
   { id: 'loeschungen', label: 'Konto-Löschungen' },
   { id: 'pbx-admin', label: 'Telefonanlage (PBX-Admin)' },
   { id: 'echtheitspruefung', label: 'Echtheitsprüfung' },
+  // STWEG-Termine schreiben; die API bindet es an die eigene STWEG (lib/termine.js)
+  { id: 'stweg-termine', label: 'STWEG-Termine' },
 ];
 
 // Spalten der Rechteverwaltung: MANAGED_PAGES plus jeder weitere Schluessel aus
