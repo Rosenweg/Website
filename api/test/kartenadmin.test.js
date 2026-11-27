@@ -52,7 +52,7 @@ function umgebung(extra = {}) {
 function anfrage(art, methode = 'PUT', url = '/api/permissions', body = { permissions: [] }) {
   return {
     method: methode, originalUrl: url, baseUrl: '', path: url, body, auth: anmeldung(art),
-    user: { id: 7, email: 'Stefan@Example.org', name: 'Stefan' },
+    user: { id: 7, email: 'Erika@Example.org', name: 'Erika' },
     appKarte: ['karte', 'qr', 'handy'].includes(art) ? { id: 'ks_' + '1'.repeat(32), app: 'ch.rosenweg4303.profil', app_name: 'Rosenweg Profil', geraet: 'Galaxy A15', karte: '1234-5678' } : undefined,
     absenderIp: '203.0.113.9',
   };
@@ -85,11 +85,11 @@ test('Karte darf Admin-Aktionen; schreibende werden protokolliert und quittiert'
   assert.equal(u.protokoll.length, 1);
   const p = u.protokoll[0];
   assert.equal(p.aktion, 'admin-mit-karte');
-  assert.equal(p.email, 'stefan@example.org');
+  assert.equal(p.email, 'erika@example.org');
   assert.equal(p.durch, 'karte:ks_' + '1'.repeat(32));
   assert.equal(p.displayId, '1234-5678');
   assert.match(p.detail, /Stationen: gesperrt · POST \/api\/stations\/admin\/abc\/block · 200 · App Rosenweg Profil, Gerät Galaxy A15, IP 203\.0\.113\.9/);
-  assert.equal(ka._quittung()._offen('stefan@example.org'), 1);
+  assert.equal(ka._quittung()._offen('erika@example.org'), 1);
   // einmal je Anfrage, auch wenn Waechter und Route beide vermerken
   assert.equal(ka.vermerken(req, res), false);
 });
@@ -138,9 +138,9 @@ test('Heikle Aktion mit der Karte: 202, Mail mit Link, Eintrag; nichts ausgefueh
   assert.match(res.body.id, /^kb_[0-9a-f]{24}$/);
   assert.ok(Date.parse(res.body.ablauf) > Date.now());
   assert.match(res.body.hinweis, /Bitte bestätige in der E-Mail/);
-  assert.equal(res.body.email, 's…@example.org');
+  assert.equal(res.body.email, 'e…@example.org');
   assert.equal(u.mails.length, 1);
-  assert.equal(u.mails[0].to, 'stefan@example.org');
+  assert.equal(u.mails[0].to, 'erika@example.org');
   assert.equal(u.mails[0].trigger, 'karten-bestaetigung');
   assert.match(u.mails[0].subject, /Bitte bestätigen: Rechteverwaltung: geändert/);
   assert.match(u.mails[0].text, /App Rosenweg Profil, Gerät Galaxy A15, IP 203\.0\.113\.9/);
@@ -175,7 +175,7 @@ test('Bestaetigen fuehrt aus — genau einmal; fremdes Token und zweiter Klick s
   const { e, a } = u.ausgefuehrt[0];
   assert.equal(e.methode, 'POST');
   assert.deepEqual(e.body, { host: 'h', login: 'l' });
-  assert.equal(a.email, 'stefan@example.org');
+  assert.equal(a.email, 'erika@example.org');
   assert.deepEqual(a.groups, ['technik']);           // Rechte zum Ausfuehrungszeitpunkt
   assert.equal(u.protokoll.some(p => p.aktion === 'bestaetigt' && p.erfolg), true);
   const zweit = await ka.bestaetigen(token);
@@ -215,7 +215,7 @@ test('Ablehnen: verworfen, Sitzung abgemeldet, Technik gemeldet; danach alle abm
   assert.equal(u.ausgefuehrt.length, 0);
   const alle = await ka.alleAbmelden(token);
   assert.equal(alle.ok, true);
-  assert.deepEqual(u.widerrufen[1].wo, { email: 'stefan@example.org' });
+  assert.deepEqual(u.widerrufen[1].wo, { email: 'erika@example.org' });
 });
 
 test('Einmal-Ausweis: nur diese Methode, dieser Pfad, einmal, 60 s', () => {

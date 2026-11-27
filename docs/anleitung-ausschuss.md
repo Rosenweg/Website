@@ -353,7 +353,10 @@ anderer STWEGs erscheinen nicht; ein direkter Aufruf ergibt „Nicht gefunden“
      Netzwerk, Salz, Sonstiges.
    - **Zuweisung:** ein Technik-Mitglied oder ein Handwerker aus dem
      Handwerker-Verzeichnis.
-   - **Notiz (intern)**.
+   - **Notiz (intern):** nur für Technik und Ausschuss, geht nie an die meldende Person.
+   - **Nachricht an die meldende Person (optional):** erscheint erst, wenn der Status
+     wechselt; der Text geht mit der Statusmeldung an die meldende Person und steht
+     in ihrem Verlauf.
 4. **„Speichern“**.
 5. Arbeitsschritte dokumentieren: Text ins Feld beim Verlauf schreiben und **„+
    Schritt“** (oder Enter). Der Eintrag wird sofort mit Name und Zeit gespeichert.
@@ -362,7 +365,7 @@ Was dabei automatisch passiert:
 
 | Aktion | Wirkung |
 |---|---|
-| Statuswechsel | Melder bekommt WhatsApp (falls angemeldet) und Push. Bei **erledigt** und **abgewiesen** zusätzlich eine E-Mail. |
+| Statuswechsel | Melder bekommt WhatsApp (falls angemeldet) und Push. Bei **erledigt** und **abgewiesen** zusätzlich eine E-Mail. Mit dabei ist nur die „Nachricht an die meldende Person“, nie die interne Notiz. |
 | Statuswechsel mit ausgefüllter Notiz | **Die Notiz wird dem Melder als „Bemerkung“ mitgeschickt** – trotz der Bezeichnung „intern“. Vor einem Statuswechsel keine internen Vermerke in der Notiz lassen; interne Schritte über „+ Schritt“ festhalten. |
 | „+ Schritt“ | Melder bekommt WhatsApp/Push (keine E-Mail). |
 | Zuweisung an ein Technik-Mitglied | Diese Person bekommt WhatsApp und Push. |
@@ -566,7 +569,7 @@ generierte Unterschriftenlisten“** stehen je Liste die Links **Ansehen**, **PD
 Hinweis: Der PDF-Link einer erzeugten Liste ist ohne Anmeldung abrufbar, wenn man
 den 12-stelligen Hash kennt. Links daher nicht öffentlich weitergeben.
 
-### 9.2 Rückläufe erfassen (`unterschriftenliste-rueckläufe.html`)
+### 9.2 Rückläufe erfassen (`unterschriftenliste-ruecklaeufe.html`)
 
 Die Seite hat keinen Menüeintrag; Adresse direkt aufrufen.
 

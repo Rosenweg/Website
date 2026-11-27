@@ -1,7 +1,7 @@
 // ZEV / smart-me Strom-Abrechnung — reine Helfer (kein DB/Netz-Bezug, testbar).
 // Pro Eigentuemer ein Mailcow-Alias `zev.<name>@<domain>`; der Name wird aus dem
 // Eigentuemer-Namen der Wohnung slug-ifiziert (Umlaute -> ae/oe/ue, Leerzeichen
-// -> Punkt). Beispiel: "Stefan Mueller" -> "zev.stefan.mueller@rosenweg9.ch".
+// -> Punkt). Beispiel: "Erika Muster" -> "zev.erika.muster@rosenweg9.ch".
 
 // Slug fuer den Alias-Local-Part: kleinschreiben, Umlaute/Akzente entschaerfen,
 // alles Nicht-Alphanumerische zu Punkten, Mehrfach-/Rand-Punkte weg.

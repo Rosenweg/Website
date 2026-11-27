@@ -1034,7 +1034,7 @@
   // STWEG-Dropdown ohne User-Kontext: 1–7, MEG, plus "Allgemein/weiss nicht".
   function buildPubStwegSelect() {
     const opts = STWEG_OPTIONS.map(o => `<option value="${o.v}">${esc(o.l)}</option>`);
-    opts.push(`<option value="" selected>Allgemein / weiß nicht</option>`);
+    opts.push(`<option value="" selected>Allgemein / weiss nicht</option>`);
     $('pubStweg').innerHTML = opts.join('');
     $('pubStweg').value = '';
     if (ortPrefill && ortPrefill.stweg != null && [...$('pubStweg').options].some(o => o.value === String(ortPrefill.stweg))) {

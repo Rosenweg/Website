@@ -87,11 +87,12 @@ const KATALOG = [
   },
   {
     id: 'rosenweg', name: 'Rosenweg (Startmenü, Anmeldung, Skripte)', gruppe: 'Immer erlaubt', pflicht: true,
-    hinweis: 'BGInfo, Drucker, Laufwerke, Open-Shell, pGina',
+    hinweis: 'BGInfo, Drucker, Laufwerke, Open-Shell',
+    // pGina (frühere Windows-Anmeldung) wird nicht mehr benutzt: seit
+    // 27.11.2026 nicht mehr freigegeben.
     regeln: [
       pfad('%PROGRAMFILES%\\Rosenweg\\*'),
       pfad('%PROGRAMFILES%\\Open-Shell\\*'),
-      pfad('%PROGRAMFILES%\\pGina\\*'),
     ],
   },
   // Bilder und Medien (27.11.2026): die Richtlinie installiert beide auf

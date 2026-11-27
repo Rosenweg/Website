@@ -21,7 +21,7 @@
       <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-4">
         <div>
           <h1 class="text-2xl font-bold text-gray-900">📜 Vollmachten</h1>
-          <p class="text-sm text-gray-600">Eigentümer können Verwalter, Mieter oder Dritte bevollmaechtigen, sie zu vertreten.</p>
+          <p class="text-sm text-gray-600">Eigentümer können Verwalter, Mieter oder Dritte bevollmächtigen, sie zu vertreten.</p>
         </div>
         <button onclick="openCreateModal()" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium whitespace-nowrap">+ Neue Vollmacht erteilen</button>
       </div>
@@ -45,7 +45,7 @@
           <button onclick="openTemplateModal()" class="bg-purple-600 text-white px-3 py-1.5 rounded hover:bg-purple-700 text-sm">+ Neue Vorlage</button>
         </div>
         <div id="vorlagen-info" class="bg-blue-50 border border-blue-200 rounded p-3 text-sm text-blue-900 mb-3">
-          ℹ Vorlagen sind vorgefertigte Geltungsbereich-Texte für haeufige Vollmacht-Fälle. Bei der Erfassung einer neuen Vollmacht kann eine Vorlage übernommen und angepasst werden.
+          ℹ Vorlagen sind vorgefertigte Geltungsbereich-Texte für häufige Vollmacht-Fälle. Bei der Erfassung einer neuen Vollmacht kann eine Vorlage übernommen und angepasst werden.
         </div>
         <div id="vorlagen-liste" class="space-y-2"></div>
         <div id="vorlagen-empty" class="hidden bg-white border rounded-lg p-8 text-center text-gray-400 italic">Noch keine Vorlagen erfasst.</div>
@@ -131,7 +131,7 @@
             <select id="m-art" required class="w-full border rounded px-3 py-1.5">
               <option value="">— bitte wählen —</option>
               <option value="generell">Generelle Vertretung (laufende Verwaltung, bis Widerruf)</option>
-              <option value="spezifisch">Spezifische Vollmacht (Einzel-Geschaeft, befristet)</option>
+              <option value="spezifisch">Spezifische Vollmacht (Einzelgeschäft, befristet)</option>
               <option value="auskunft">Datenschutz-/Auskunft-Vollmacht (nur Einsicht, keine Entscheidung)</option>
             </select>
           </div>
@@ -160,8 +160,8 @@
                 <option value="">📝 Vorlage übernehmen…</option>
               </select>
             </div>
-            <textarea id="m-geltung" rows="6" class="w-full border rounded px-3 py-1.5" placeholder="z.B.: Vertretung gegenueber der Verwaltung in allen Belangen meiner Eigentumswohnung; Empfang von Post; Beauftragung kleinerer Reparaturen bis CHF 500."></textarea>
-            <p class="text-xs text-gray-400 mt-1">Je praeziser, desto rechtssicherer. Bei "generell" reicht ein Satz, bei "spezifisch" sollte das konkrete Geschaeft genannt sein.</p>
+            <textarea id="m-geltung" rows="6" class="w-full border rounded px-3 py-1.5" placeholder="z.B.: Vertretung gegenüber der Verwaltung in allen Belangen meiner Eigentumswohnung; Empfang von Post; Beauftragung kleinerer Reparaturen bis CHF 500."></textarea>
+            <p class="text-xs text-gray-400 mt-1">Je präziser, desto rechtssicherer. Bei "generell" reicht ein Satz, bei "spezifisch" sollte das konkrete Geschäft genannt sein.</p>
           </div>
         </fieldset>
 
@@ -201,20 +201,20 @@
         </div>
         <div>
           <label class="block text-xs font-medium text-gray-600 mb-1">Beschreibung <span class="text-gray-400">(wofür diese Vorlage gedacht ist)</span></label>
-          <textarea id="t-beschreibung" rows="2" class="w-full border rounded px-3 py-1.5" placeholder="z.B. Standard-Vollmacht für professionelle Liegenschaftsverwaltung; deckt Mietverhaeltnisse, Reparaturen bis CHF 1'000 ab."></textarea>
+          <textarea id="t-beschreibung" rows="2" class="w-full border rounded px-3 py-1.5" placeholder="z.B. Standard-Vollmacht für professionelle Liegenschaftsverwaltung; deckt Mietverhältnisse, Reparaturen bis CHF 1'000 ab."></textarea>
         </div>
         <div>
           <label class="block text-xs font-medium text-gray-600 mb-1">Art *</label>
           <select id="t-art" required class="w-full border rounded px-3 py-1.5">
             <option value="">— bitte wählen —</option>
             <option value="generell">Generell (laufende Verwaltung)</option>
-            <option value="spezifisch">Spezifisch (Einzelgeschaeft)</option>
+            <option value="spezifisch">Spezifisch (Einzelgeschäft)</option>
             <option value="auskunft">Auskunft (nur Einsicht)</option>
           </select>
         </div>
         <div>
           <label class="block text-xs font-medium text-gray-600 mb-1">Geltungsbereich-Text *</label>
-          <textarea id="t-geltung" rows="8" required class="w-full border rounded px-3 py-1.5 font-mono text-xs" placeholder="Der Bevollmaechtigte ist befugt: 1. ..."></textarea>
+          <textarea id="t-geltung" rows="8" required class="w-full border rounded px-3 py-1.5 font-mono text-xs" placeholder="Die bevollmächtigte Person ist befugt: 1. ..."></textarea>
           <p class="text-xs text-gray-500 mt-1">Wird beim Verwenden 1:1 in den Geltungsbereich-Felder übernommen und kann dort angepasst werden.</p>
         </div>
       </div>
@@ -418,7 +418,7 @@
   }
 
   function typLabel(t) {
-    return { eigentuemer: 'Miteigentuemer', verwaltung: 'Verwaltung', mieter: 'Mieter', extern: 'Extern' }[t] || t;
+    return { eigentuemer: 'Miteigentümer', verwaltung: 'Verwaltung', mieter: 'Mieter', extern: 'Extern' }[t] || t;
   }
 
   function renderList() {
@@ -441,7 +441,8 @@
       const canAdminUpload = v.status === 'entwurf' && !canSign && hatGruppe('technik', 'präsident', 'praesident');
       const canActivatePaper = v.status === 'entwurf' && hatGruppe('technik', 'präsident', 'praesident', 'verwaltung');
       const canEdit = v.status === 'entwurf';
-      const canRevoke = v.status === 'aktiv' && ((v.vollmachtgeber_email || '').toLowerCase() === myEmail || isAdmin);
+      // Der Server entscheidet (darf_widerrufen, gleiche Regel wie beim Widerrufen selbst)
+      const canRevoke = v.darf_widerrufen === true;
       return `<div class="bg-white border rounded-lg p-4 hover:shadow-md transition">
         <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
           <div class="flex-1 min-w-0">
@@ -452,7 +453,7 @@
             </div>
             <p class="text-sm">
               <strong>${esc(v.vollmachtgeber_name)}</strong>
-              <span class="text-gray-500">bevollmaechtigt</span>
+              <span class="text-gray-500">bevollmächtigt</span>
               <strong>${esc(v.bevollmaechtigter_name)}</strong>
               <span class="text-gray-400">(${esc(typLabel(v.bevollmaechtigter_typ))})</span>
             </p>
@@ -529,14 +530,14 @@
         wrap.innerHTML = '<div class="text-gray-400 italic p-1">Keine Kontakte in deinen Wohnungen.</div>';
         return;
       }
-      const roleLabels = { eigentuemer: 'Miteigentuemer', mieter: 'Mieter', verwalter: 'Verwalter', bewohner: 'Bewohner' };
+      const roleLabels = { eigentuemer: 'Miteigentümer', mieter: 'Mieter', verwalter: 'Verwalter', bewohner: 'Bewohner' };
       const roleColors = { eigentuemer: 'bg-blue-100 text-blue-800', mieter: 'bg-amber-100 text-amber-800', verwalter: 'bg-purple-100 text-purple-800', bewohner: 'bg-green-100 text-green-800' };
       // Kontakt per Index aus data-Attribut, nicht als JSON im onclick (XSS ueber Namen)
       wrap.innerHTML = kontakte.map((k, i) => {
         const alreadyAdded = vgList.some(v => (v.email || '').toLowerCase() === (k.email || '').toLowerCase());
         return `<button type="button" ${alreadyAdded ? 'disabled' : ''} data-idx="${i}" class="block w-full text-left p-2 bg-white border border-blue-100 rounded ${alreadyAdded ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-100'} transition">
           <div class="flex items-center justify-between gap-2">
-            <div class="font-medium">${esc(k.name)}${alreadyAdded ? ' <span class="text-xs text-gray-400">(bereits hinzugefuegt)</span>' : ''}</div>
+            <div class="font-medium">${esc(k.name)}${alreadyAdded ? ' <span class="text-xs text-gray-400">(bereits hinzugefügt)</span>' : ''}</div>
             <span class="text-xs px-2 py-0.5 rounded ${roleColors[k.rolle] || 'bg-gray-100 text-gray-700'} flex-shrink-0">${esc(roleLabels[k.rolle] || k.rolle)}</span>
           </div>
           <div class="text-gray-500 text-xs">${esc(k.email || '')}</div>
@@ -567,7 +568,7 @@
     if (!id) return;
     const t = templates.find(x => x.id === id);
     if (!t) return;
-    if (document.getElementById('m-geltung').value.trim() && !confirm('Bestehender Geltungsbereich-Text wird ueberschrieben — wirklich Vorlage übernehmen?')) return;
+    if (document.getElementById('m-geltung').value.trim() && !confirm('Bestehender Geltungsbereich-Text wird überschrieben — wirklich Vorlage übernehmen?')) return;
     document.getElementById('m-geltung').value = t.geltungsbereich;
     if (!document.getElementById('m-art').value) document.getElementById('m-art').value = t.art;
   }
@@ -640,7 +641,7 @@
         wrap.innerHTML = '<div class="text-gray-400 italic p-1">Keine Kontakte in deinen Wohnungen — du kannst unten Person manuell eingeben.</div>';
         return;
       }
-      const roleLabels = { eigentuemer: 'Miteigentuemer', mieter: 'Mieter', verwalter: 'Verwalter', bewohner: 'Bewohner' };
+      const roleLabels = { eigentuemer: 'Miteigentümer', mieter: 'Mieter', verwalter: 'Verwalter', bewohner: 'Bewohner' };
       const roleColors = { eigentuemer: 'bg-blue-100 text-blue-800', mieter: 'bg-amber-100 text-amber-800', verwalter: 'bg-purple-100 text-purple-800', bewohner: 'bg-green-100 text-green-800' };
       // Kontakt per Index aus data-Attribut, nicht als JSON im onclick (XSS ueber Namen)
       wrap.innerHTML = kontakte.map((k, i) => {
@@ -777,7 +778,7 @@
       gueltig_bis: document.getElementById('m-bis').value || null,
     };
     if (!body.bevollmaechtigter_name || !body.bevollmaechtigter_typ || !body.art) {
-      alert('Bitte Pflichtfelder (Bevollmächtigter-Name + Typ, Art) ausfuellen.');
+      alert('Bitte Pflichtfelder (Bevollmächtigter-Name + Typ, Art) ausfüllen.');
       return;
     }
     const id = document.getElementById('m-id').value;
@@ -840,7 +841,7 @@
   }
 
   async function signDigital(id) {
-    if (!confirm('Vollmacht digital signieren?\n\nDies entspricht einer einfachen elektronischen Signatur (ZertES Art.2). Login-Zeit, IP-Adresse und Identitaet werden im Dokument festgehalten.\n\nNach Signatur ist die Vollmacht AKTIV und nicht mehr editierbar — nur Widerruf möglich.')) return;
+    if (!confirm('Vollmacht digital signieren?\n\nDies entspricht einer einfachen elektronischen Signatur (ZertES Art.2). Login-Zeit, IP-Adresse und Identität werden im Dokument festgehalten.\n\nNach Signatur ist die Vollmacht AKTIV und nicht mehr editierbar — nur Widerruf möglich.')) return;
     try {
       const r = await AuthentikAuth.apiFetch(`/api/vollmachten/${id}/sign-digital`, { method: 'POST' });
       if (!r.ok) throw new Error(await r.text());
@@ -918,7 +919,7 @@
               </div>
             </div>
             ${(d.fehlende_namen || []).length ? `<div class="bg-red-50 p-3 rounded"><div class="text-xs font-semibold text-red-800 mb-1">Fehlende Namen:</div><ul class="list-disc list-inside text-xs">${d.fehlende_namen.map(n => `<li>${esc(n)}</li>`).join('')}</ul></div>` : ''}
-            ${(d.auffaelligkeiten || []).length ? `<div class="bg-amber-50 p-3 rounded"><div class="text-xs font-semibold text-amber-800 mb-1">Auffaelligkeiten:</div><ul class="list-disc list-inside text-xs">${d.auffaelligkeiten.map(a => `<li>${esc(a)}</li>`).join('')}</ul></div>` : ''}
+            ${(d.auffaelligkeiten || []).length ? `<div class="bg-amber-50 p-3 rounded"><div class="text-xs font-semibold text-amber-800 mb-1">Auffälligkeiten:</div><ul class="list-disc list-inside text-xs">${d.auffaelligkeiten.map(a => `<li>${esc(a)}</li>`).join('')}</ul></div>` : ''}
             ${d.raw ? `<details><summary class="text-xs text-gray-500 cursor-pointer">Rohausgabe (Parse-Fehler)</summary><pre class="text-xs bg-gray-100 p-2 rounded mt-2 overflow-auto">${esc(d.raw)}</pre></details>` : ''}
           </div>
         </div>

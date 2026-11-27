@@ -224,7 +224,7 @@
                                 </div>
                                 <div>
                                     <label class="block text-xs text-gray-600 mb-1">Rücksendung an</label>
-                                    <input type="text" id="ul-an" placeholder="Stefan Müller (Rosenweg 9)"
+                                    <input type="text" id="ul-an" placeholder="z. B. Erika Muster, Rosenweg 99"
                                         class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
                                 </div>
                             </div>
@@ -1579,7 +1579,8 @@
                                 <td class="px-2 py-1.5 text-right whitespace-nowrap">
                                     <a href="/api/unterschriftenliste/snapshot/${escapeHtml(s.hash)}.pdf?preview=1" target="_blank" class="text-blue-600 hover:underline text-xs mr-2">Ansehen</a>
                                     <a href="/api/unterschriftenliste/snapshot/${escapeHtml(s.hash)}.pdf" class="text-blue-600 hover:underline text-xs mr-2">PDF</a>
-                                    <a href="/api/unterschriftenliste/verify?hash=${escapeHtml(s.hash)}" target="_blank" class="text-emerald-600 hover:underline text-xs">Verify</a>
+                                    <a href="/api/unterschriftenliste/verify?hash=${escapeHtml(s.hash)}" target="_blank" class="text-emerald-600 hover:underline text-xs mr-2">Verify</a>
+                                    <a href="/unterschriftenliste-ruecklaeufe.html?hash=${encodeURIComponent(s.hash)}" class="text-blue-600 hover:underline text-xs">Rückläufe</a>
                                 </td>
                             </tr>`;
                         }).join('')}

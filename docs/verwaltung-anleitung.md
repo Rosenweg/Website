@@ -10,6 +10,11 @@ Hinweis: Früher hiess diese Seite `verwaltung.html`. Unter `verwaltung.html` st
 heute die öffentliche Seite **Hausverwaltung** mit den Kontaktdaten der
 Liegenschaftsverwaltungen (Kontaktpersonen nur nach Anmeldung).
 
+Erreichbar: Hausverwaltung (Gruppe `Verwaltung`) über das Menü **„Verwaltung“** auf
+www (dort auch Rückläufe, Reklamationen, Handwerker, Vollmachten, Auslagen, Projekte,
+Zähler, Energie-Monitor, E-Mail-Verteiler – je nur mit dem Seitenrecht); Ausschuss
+über **„Ausschuss ↗“**, Technik/Präsident über **„Admin ↗“**.
+
 ## Zugriff
 
 Die Seite verlangt eine Anmeldung. Welche Reiter erscheinen, hängt an den
@@ -102,7 +107,7 @@ Zweck / Beschreibung, Rücksendung bis, Rücksendung an, Zeichnungsberechtigte
 (**„+ Person“**), Kollektiv-Text. Knöpfe **Vorschau** und **PDF herunterladen**.
 Rechts die Vorschau mit **Aktualisieren**. Darunter **„Bisher generierte
 Unterschriftenlisten“** mit Links Ansehen / PDF / Verify. Rückläufe werden auf der
-separaten Seite `unterschriftenliste-rueckläufe.html` erfasst
+separaten Seite `unterschriftenliste-ruecklaeufe.html` erfasst
 ([anleitung-ausschuss.md](anleitung-ausschuss.md), Abschnitt 9).
 
 ## Reiter „Bewohner“

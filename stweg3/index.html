@@ -85,7 +85,7 @@
                                         '<div><div class="text-3xl font-bold text-' + ic.color + '-600">' + esc(anzahl) + '</div>' +
                                         '<div class="text-sm text-gray-600">' + esc(typ) + (anzahl !== 1 ? (typ === 'Wohnung' ? 'en' : '') : '') + '</div></div>' +
                                     '</div>' +
-                                    (typ === 'Wohnung' && data.belegung ? '<p class="text-sm text-gray-700">' + esc(data.belegung.selbstbewohnt) + ' Eigentuemer &bull; ' + esc(data.belegung.vermietet) + ' Vermietet' + (parseInt(data.belegung.leer) > 0 ? ' &bull; ' + esc(data.belegung.leer) + ' Leer' : '') + '</p>' : '') +
+                                    (typ === 'Wohnung' && data.belegung ? '<p class="text-sm text-gray-700">' + esc(data.belegung.selbstbewohnt) + ' Eigentümer &bull; ' + esc(data.belegung.vermietet) + ' Vermietet' + (parseInt(data.belegung.leer) > 0 ? ' &bull; ' + esc(data.belegung.leer) + ' Leer' : '') + '</p>' : '') +
                                 '</div>'
                             );
                         }
@@ -96,7 +96,7 @@
                                     '<div class="flex items-center mb-3">' +
                                         '<svg class="h-10 w-10 text-green-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>' +
                                         '<div><div class="text-3xl font-bold text-green-600">' + data.waschkuechen + '</div>' +
-                                        '<div class="text-sm text-gray-600">Waschkuechen</div></div>' +
+                                        '<div class="text-sm text-gray-600">Waschküchen</div></div>' +
                                     '</div>' +
                                     '<p class="text-sm text-gray-700">Gemeinschaftliche Nutzung mit Reservation</p>' +
                                 '</div>'
@@ -108,7 +108,7 @@
                         for (const [typ, anzahl] of Object.entries(data.typen || {})) {
                             parts.push(anzahl + ' ' + typ + (anzahl !== 1 && typ === 'Wohnung' ? 'en' : ''));
                         }
-                        if (data.waschkuechen > 0 && modules.includes('waschkueche')) parts.push(data.waschkuechen + ' Waschkuechen');
+                        if (data.waschkuechen > 0 && modules.includes('waschkueche')) parts.push(data.waschkuechen + ' Waschküchen');
                         const sub = document.getElementById('stweg-subtitle');
                         if (sub) sub.textContent = parts.join(' \u2022 ');
                     }).catch(() => {});
@@ -220,7 +220,7 @@
 
                 // Belegungsfarben
                 const bewohntColor = { eigentuemer: 'green', mieter: 'blue', leer: 'gray' };
-                const bewohntLabel = { eigentuemer: 'Eigentuemer', mieter: 'Vermietet', leer: 'Leer' };
+                const bewohntLabel = { eigentuemer: 'Eigentümer', mieter: 'Vermietet', leer: 'Leer' };
 
                 // Calculate col-span for last row so cards fill the width
                 const remainder = units.length % 3;
@@ -241,7 +241,7 @@
                         '</div>' +
                         '<div class="space-y-1 text-sm text-gray-600">' +
                             (w.stockwerk ? '<p><strong>Etage:</strong> ' + esc(w.stockwerk) + '</p>' : '') +
-                            (w.flaeche_m2 ? '<p><strong>Flaeche:</strong> ' + esc(w.flaeche_m2) + ' m&sup2;</p>' : '') +
+                            (w.flaeche_m2 ? '<p><strong>Fläche:</strong> ' + esc(w.flaeche_m2) + ' m&sup2;</p>' : '') +
                             (w.wertquote_zaehler && w.wertquote_nenner ? '<p><strong>Wertquote:</strong> ' + esc(w.wertquote_zaehler) + '/' + esc(w.wertquote_nenner) + ' &permil;</p>' : '') +
                             (w.besonderheiten ? '<p><strong>Besonderheiten:</strong> ' + esc(w.besonderheiten) + '</p>' : '') +
                             (bl ? '<p><span class="inline-block px-2 py-0.5 rounded text-xs font-medium bg-' + bc + '-100 text-' + bc + '-700">' + bl + '</span></p>' : '') +
@@ -270,7 +270,7 @@
                 document.getElementById('wohnungen-grid').innerHTML = html || '<div class="col-span-3 text-center text-gray-400 py-8">Keine Wohnungen erfasst.</div>';
             })
             .catch(() => {
-                document.getElementById('wohnungen-grid').innerHTML = '<div class="col-span-3 text-center text-gray-400 py-4">Wohnungsdaten nicht verfuegbar</div>';
+                document.getElementById('wohnungen-grid').innerHTML = '<div class="col-span-3 text-center text-gray-400 py-4">Wohnungsdaten nicht verfügbar</div>';
             });
     })();
     </script>
@@ -279,7 +279,7 @@
     <section class="py-12 bg-white">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <h2 class="text-3xl font-bold text-gray-800 mb-2 text-center">So erreichst du uns</h2>
-            <p class="text-center text-gray-500 mb-8">E-Mail-Verteiler fuer STWEG 3</p>
+            <p class="text-center text-gray-500 mb-8">E-Mail-Verteiler für STWEG 3</p>
             <div id="verteiler-cards" class="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
                 <div class="col-span-3 text-center text-gray-400 py-4 animate-pulse">Laden...</div>
             </div>
@@ -293,8 +293,8 @@
         const icons = {
             'ausschuss': { emoji: '&#128188;', color: 'blue', desc: 'Ausschuss-Mitglieder' },
             'bewohner': { emoji: '&#127968;', color: 'green', desc: 'Alle Bewohner' },
-            'eigentuemer': { emoji: '&#128273;', color: 'purple', desc: 'Nur Eigentuemer' },
-            'alle': { emoji: '&#128227;', color: 'orange', desc: 'Alle (Eigentuemer + Mieter)' },
+            'eigentuemer': { emoji: '&#128273;', color: 'purple', desc: 'Nur Eigentümer' },
+            'alle': { emoji: '&#128227;', color: 'orange', desc: 'Alle (Eigentümer + Mieter)' },
             'default': { emoji: '&#128231;', color: 'gray', desc: 'E-Mail-Verteiler' },
         };
 
@@ -334,7 +334,7 @@
     <!-- Waschküchen (dynamisch aus API) -->
     <section id="waschkueche" class="py-12 bg-white">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <h2 class="text-3xl font-bold text-gray-800 mb-2 text-center">Waschkuechen</h2>
+            <h2 class="text-3xl font-bold text-gray-800 mb-2 text-center">Waschküchen</h2>
             <p class="text-center text-gray-500 mb-8">Untergeschoss Rosenweg 9</p>
 
             <div id="wasch-rooms-container" class="grid md:grid-cols-2 gap-6 mb-8">
@@ -343,7 +343,7 @@
 
             <!-- Admin: Raum hinzufuegen -->
             <div id="wasch-admin-section" class="hidden mb-8">
-                <button onclick="showAddRoomModal()" class="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700">+ Raum hinzufuegen</button>
+                <button onclick="showAddRoomModal()" class="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700">+ Raum hinzufügen</button>
             </div>
 
             <!-- Nutzungsregeln -->
@@ -352,16 +352,16 @@
                     <div>
                         <p class="font-semibold text-green-700 mb-2">Pflichten</p>
                         <ul class="space-y-1">
-                            <li>&#10004; Trockner fuer Waeschetrocknung nutzen</li>
+                            <li>&#10004; Trockner für Wäschetrocknung nutzen</li>
                             <li>&#10004; Fenster geschlossen halten</li>
-                            <li>&#10004; Waschkueche nach Gebrauch reinigen</li>
+                            <li>&#10004; Waschküche nach Gebrauch reinigen</li>
                             <li>&#10004; Reservierte Zeiten einhalten</li>
                         </ul>
                     </div>
                     <div>
                         <p class="font-semibold text-red-600 mb-2">Nicht erlaubt</p>
                         <ul class="space-y-1">
-                            <li>&#10008; Fenster oeffnen</li>
+                            <li>&#10008; Fenster öffnen</li>
                             <li>&#10008; Nutzung ohne Reservation</li>
                             <li>&#10008; Ueberschreitung der Zeitfenster</li>
                         </ul>
@@ -387,25 +387,25 @@
                 <input type="hidden" id="rm-id">
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                    <input type="text" id="rm-name" class="w-full border rounded-lg px-3 py-2" placeholder="z.B. Waschkueche 1">
+                    <input type="text" id="rm-name" class="w-full border rounded-lg px-3 py-2" placeholder="z.B. Waschküche 1">
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Standort</label>
                     <input type="text" id="rm-location" class="w-full border rounded-lg px-3 py-2" placeholder="z.B. UG Rosenweg 9">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Energiezaehler-ID</label>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Energiezähler-ID</label>
                     <select id="rm-meter" class="w-full border rounded-lg px-3 py-2">
-                        <option value="">Kein Zaehler</option>
+                        <option value="">Kein Zähler</option>
                     </select>
-                    <p class="text-xs text-gray-500 mt-1">Verknuepft den Raum mit einem Stromzaehler fuer die Verbrauchsabrechnung</p>
+                    <p class="text-xs text-gray-500 mt-1">Verknüpft den Raum mit einem Stromzähler für die Verbrauchsabrechnung</p>
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Tuerzugang (UniFi Access)</label>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Türzugang (UniFi Access)</label>
                     <select id="rm-door" class="w-full border rounded-lg px-3 py-2">
-                        <option value="">Keine Tuer</option>
+                        <option value="">Keine Tür</option>
                     </select>
-                    <p class="text-xs text-gray-500 mt-1">Verknuepft den Raum mit einem UniFi Access Tuerschloss</p>
+                    <p class="text-xs text-gray-500 mt-1">Verknüpft den Raum mit einem UniFi Access Türschloss</p>
                 </div>
                 <div class="flex items-center gap-2">
                     <input type="checkbox" id="rm-active" checked class="rounded">
@@ -434,7 +434,7 @@
             isAdmin = user?.isAdmin || false;
             const token = AuthentikAuth.getToken();
             if (!token) {
-                document.getElementById('wasch-rooms-container').innerHTML = '<div class="col-span-2 text-center text-gray-500 py-8">Bitte anmelden um Waschkuechen zu sehen.</div>';
+                document.getElementById('wasch-rooms-container').innerHTML = '<div class="col-span-2 text-center text-gray-500 py-8">Bitte anmelden um Waschküchen zu sehen.</div>';
                 return;
             }
 
@@ -461,7 +461,7 @@
         function renderRooms() {
             const c = document.getElementById('wasch-rooms-container');
             if (!waschRooms.length) {
-                c.innerHTML = '<div class="col-span-2 text-center text-gray-400 py-8">Keine Waschkuechen fuer diese STWEG konfiguriert.</div>';
+                c.innerHTML = '<div class="col-span-2 text-center text-gray-400 py-8">Keine Waschküchen für diese STWEG konfiguriert.</div>';
                 return;
             }
             c.innerHTML = waschRooms.map((r, i) => {
@@ -476,9 +476,9 @@
                     '</div>' +
                     '<div class="space-y-1 text-sm text-gray-600">' +
                         (r.location ? '<p><strong>Standort:</strong> ' + esc(r.location) + '</p>' : '') +
-                        '<p><strong>Ausstattung:</strong> Waschmaschine, Trockner, Waschtisch, Waescheleinen</p>' +
-                        (meter ? '<p><strong>Zaehler:</strong> <span class="text-green-700">' + esc(meter.name) + '</span></p>' : '') +
-                        (r.unifi_door_id ? '<p><strong>Tuerzugang:</strong> <span class="text-blue-600">Konfiguriert</span></p>' : '') +
+                        '<p><strong>Ausstattung:</strong> Waschmaschine, Trockner, Waschtisch, Wäscheleinen</p>' +
+                        (meter ? '<p><strong>Zähler:</strong> <span class="text-green-700">' + esc(meter.name) + '</span></p>' : '') +
+                        (r.unifi_door_id ? '<p><strong>Türzugang:</strong> <span class="text-blue-600">Konfiguriert</span></p>' : '') +
                     '</div>' +
                 '</div>';
             }).join('');
@@ -494,26 +494,26 @@
             document.getElementById('rm-active').checked = r.active !== false;
             // Populate meter dropdown
             const sel = document.getElementById('rm-meter');
-            sel.innerHTML = '<option value="">Kein Zaehler</option>' +
+            sel.innerHTML = '<option value="">Kein Zähler</option>' +
                 energyMeters.map(m => '<option value="' + m.id + '"' + (String(r.energy_meter_id) === String(m.id) ? ' selected' : '') + '>' + esc(m.name) + '</option>').join('');
             // Populate door dropdown
             const dsel = document.getElementById('rm-door');
-            dsel.innerHTML = '<option value="">Keine Tuer</option>' +
+            dsel.innerHTML = '<option value="">Keine Tür</option>' +
                 accessDoors.map(d => '<option value="' + esc(d.id) + '"' + (r.unifi_door_id === d.id ? ' selected' : '') + '>' + esc(d.name) + (d.type ? ' (' + esc(d.type) + ')' : '') + '</option>').join('');
             document.getElementById('roomModal').classList.remove('hidden');
         };
 
         window.showAddRoomModal = function() {
-            document.getElementById('roomModalTitle').textContent = 'Neuen Raum hinzufuegen';
+            document.getElementById('roomModalTitle').textContent = 'Neuen Raum hinzufügen';
             document.getElementById('rm-id').value = '';
             document.getElementById('rm-name').value = '';
             document.getElementById('rm-location').value = '';
             document.getElementById('rm-active').checked = true;
             const sel = document.getElementById('rm-meter');
-            sel.innerHTML = '<option value="">Kein Zaehler</option>' +
+            sel.innerHTML = '<option value="">Kein Zähler</option>' +
                 energyMeters.map(m => '<option value="' + m.id + '">' + esc(m.name) + '</option>').join('');
             const dsel = document.getElementById('rm-door');
-            dsel.innerHTML = '<option value="">Keine Tuer</option>' +
+            dsel.innerHTML = '<option value="">Keine Tür</option>' +
                 accessDoors.map(d => '<option value="' + esc(d.id) + '">' + esc(d.name) + (d.type ? ' (' + esc(d.type) + ')' : '') + '</option>').join('');
             document.getElementById('roomModal').classList.remove('hidden');
         };
@@ -561,7 +561,7 @@
                 <div>
                     <h2 class="text-2xl font-bold text-gray-800 mb-4 flex items-center gap-2">
                         <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                        Naechste Termine
+                        Nächste Termine
                     </h2>
                     <div id="calendar-widget" class="space-y-3">
                         <div class="bg-white rounded-lg p-4 text-center text-gray-400 animate-pulse">Laden...</div>
@@ -623,7 +623,7 @@
                     '</div>';
                 }).join('');
             })
-            .catch(() => { document.getElementById('calendar-widget').innerHTML = '<div class="bg-white rounded-lg p-4 text-center text-gray-400">Kalender nicht verfuegbar</div>'; });
+            .catch(() => { document.getElementById('calendar-widget').innerHTML = '<div class="bg-white rounded-lg p-4 text-center text-gray-400">Kalender nicht verfügbar</div>'; });
 
         // Add event button for admins
         if (token) {
@@ -631,7 +631,7 @@
             if (user?.isAdmin) {
                 const btn = document.createElement('button');
                 btn.className = 'mt-3 text-sm text-blue-600 hover:underline flex items-center gap-1';
-                btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg> Termin hinzufuegen';
+                btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg> Termin hinzufügen';
                 btn.onclick = () => {
                     const title = prompt('Titel:');
                     if (!title) return;
@@ -670,7 +670,7 @@
                         '</a>';
                     }).join('');
                 })
-                .catch(() => { document.getElementById('projects-widget').innerHTML = '<div class="bg-white rounded-lg p-4 text-center text-gray-400">Projekte nicht verfuegbar</div>'; });
+                .catch(() => { document.getElementById('projects-widget').innerHTML = '<div class="bg-white rounded-lg p-4 text-center text-gray-400">Projekte nicht verfügbar</div>'; });
         } else {
             document.getElementById('projects-widget').innerHTML = '';
         }

@@ -11,8 +11,39 @@
 // Starter der App Rosenweg Salz sieht, api/lib/stationapps.js).
 const SALZ_NAV_GRUPPEN = 'technik,praesident,stweg7-bewohner,r9-bewohner,stweg4-bewohner';
 
-// Services-Menu: kategorisierte Gruppen. Wird identisch für Desktop-Mega-Menu
-// und Mobile-Akkordion gerendert. Permissions: perm = data-perm, permAny = data-perm-any.
+// Mein Telefon und Smartphones: jede Person mit Rosenweg-Konto in einer
+// Hausgruppe (die Seiten selbst verlangen nur die Anmeldung).
+const TELEFON_NAV_GRUPPEN = 'bewohner,eigentuemer,ausschuss,technik,praesident,verwaltung';
+// Waschküche: Räume gibt es nur für die eigene STWEG (api /api/wasch/rooms),
+// also Bewohner/Eigentümer, dazu das Seitenrecht „waschküche“.
+const WASCH_NAV_GRUPPEN = 'waschküche,bewohner,eigentuemer,technik,praesident';
+
+// Menü „Verwaltung“ (Hausverwaltung, Gruppe „Verwaltung“). Das Menü selbst
+// erscheint nur für diese Gruppe (data-nur-gruppe, auch nicht für Technik –
+// die hat „Admin ↗“), jeder Eintrag nur mit dem Seitenrecht. Rechte-Schlüssel
+// mit Umlaut zusätzlich in ASCII, falls sie so in der Rechte-Tabelle stehen.
+// Ohne eigenen Eintrag: kontakte (Reiter in der Objektverwaltung), verwaltung
+// (öffentliche Seite „Hausverwaltung“ im Bewohner-Menü), Waschküche-Admin
+// (prüft auf Technik).
+const VERWALTUNG_NAV_GRUPPE = 'verwaltung';
+const VERWALTUNG_NAV = [
+  { label: '🏢 Objektverwaltung', href: 'objektverwaltung.html', key: 'verwaltung', permAny: 'objektverwaltung,wohnungsverwaltung,bewohner-verwaltung' },
+  { label: '✍️ Unterschriften-Rückläufe', href: 'unterschriftenliste-ruecklaeufe.html', key: 'ruecklaeufe', permAny: 'wohnungsverwaltung' },
+  { label: '🔧 Reklamationen', href: 'reklamationen.html', key: 'reklamationen', permAny: 'reklamationen' },
+  { label: '🧰 Handwerker & Lieferanten', href: 'handwerker.html', key: 'handwerker', permAny: 'handwerker' },
+  { label: '📝 Vollmachten', href: 'vollmachten.html', key: 'vollmachten', permAny: 'vollmachten' },
+  { label: '💸 Auslagen', href: 'auslagen.html', key: 'auslagen', permAny: 'auslagen' },
+  { label: '🏗 Projekte', href: 'projekte.html', key: 'projekte', permAny: 'projekte' },
+  { label: '🔢 Zähler & Verbrauch', href: 'zaehler.html', key: 'zähler', permAny: 'zähler,zaehler' },
+  { label: '⚡ Energie-Monitor', href: 'energie-monitor.html', key: 'energie', permAny: 'energie-monitor' },
+  { label: '✉️ E-Mail-Verteiler', href: 'email-verteiler.html', key: 'verteiler', permAny: 'email-verteiler' },
+];
+
+// Services-Menu: kategorisierte Gruppen. Wird seit der Umstellung auf Rollen-
+// Bereiche (Ausschuss ↗, Admin ↗) NICHT mehr als Menü gezeichnet; die Einträge
+// fürs Volk stehen im Bewohner-Menü, die der Hausverwaltung in VERWALTUNG_NAV.
+// Die Liste bleibt, weil api/lib/stationapps.js daraus die Starter der
+// Stationen ableitet. Permissions: perm = data-perm, permAny = data-perm-any.
 const SERVICES_GROUPS = [
   {
     title: 'Verwaltung & Objekte',
@@ -338,6 +369,7 @@ const RosenwegNav = {
       { href: 'echtheitspruefung.html', label: 'Echtheitsprüfung', group: 'Vorgänge', perm: 'echtheitspruefung' },
       { href: 'brief-tracking.html', label: 'Brief-Tracking', group: 'Vorgänge', perm: 'brief-tracking' },
       { href: 'objektverwaltung.html', label: 'Objektverwaltung', group: 'Verwaltung', perm: 'objektverwaltung', aud: ['admin', 'ausschuss'] },
+      { href: 'unterschriftenliste-ruecklaeufe.html', label: 'Unterschriften-Rückläufe', group: 'Verwaltung', perm: 'wohnungsverwaltung', aud: ['admin', 'ausschuss'] },
       { href: 'grundbuch.html', label: 'Grundbuch', group: 'Verwaltung', perm: 'grundbuch' },
       { href: 'stweg-module.html', label: 'STWEG-Module', group: 'Verwaltung', perm: 'stweg-module', aud: ['admin', 'ausschuss'] },
       { href: 'stweg-seite-editor.html', label: 'STWEG-Seite bearbeiten', group: 'Verwaltung', perm: 'stweg-seite-editor', aud: ['admin', 'ausschuss'] },
@@ -480,6 +512,10 @@ const RosenwegNav = {
               <a href="https://isp.rosenweg4303.ch/wlan.html" class="${dropA('wlan')} block px-4 py-2 text-sm">📶 WLAN-Zugang</a>
               <a href="https://isp.rosenweg4303.ch/tv.html" class="${dropA('tv')} block px-4 py-2 text-sm">📺 TV / Fernsehen</a>
               <a href="https://pwa.rosenweg4303.ch/reparatur/" class="block px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">🔧 Schaden melden ↗</a>
+              <a href="${base}mein-telefon.html" data-perm-any="${TELEFON_NAV_GRUPPEN}" class="${dropA('mein-telefon')} block px-4 py-2 text-sm">📞 Mein Telefon</a>
+              <a href="${base}smartphones.html" data-perm-any="${TELEFON_NAV_GRUPPEN}" class="${dropA('smartphones')} block px-4 py-2 text-sm">📱 Smartphones</a>
+              <a href="${base}apps.html" class="${dropA('apps')} block px-4 py-2 text-sm">📲 Rosenweg-Apps</a>
+              <a href="${base}waschkueche.html" data-perm-any="${WASCH_NAV_GRUPPEN}" class="${dropA('waschküche')} block px-4 py-2 text-sm">🧺 Waschküche</a>
               <a href="${base}salz.html" data-perm-any="${SALZ_NAV_GRUPPEN}" class="${dropA('salz')} block px-4 py-2 text-sm">🧂 Salzvorrat</a>
               <a href="${base}vollmachten.html" data-perm-any="eigentuemer,ausschuss,technik,praesident,verwaltung,bewohner" class="${dropA('vollmachten')} block px-4 py-2 text-sm">📝 Vollmachten</a>
               <a href="${base}projekte.html" data-perm-any="eigentuemer" class="${dropA('projekte')} block px-4 py-2 text-sm">🏗 Projekte</a>
@@ -490,6 +526,18 @@ const RosenwegNav = {
               <a href="${base}verwaltung.html" class="${dropA('hausverwaltung')} block px-4 py-2 text-sm">🏢 Hausverwaltung</a>
               <a href="https://isp.rosenweg4303.ch/" class="block px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">🌐 Internet / ISP ↗</a>
               <a href="${base}#dokumente" class="${dropA('dokumente')} block px-4 py-2 text-sm">📁 Dokumente</a>
+            </div>
+          </div>
+
+          <!-- Hausverwaltung: eigenes Menü, nur für die Gruppe „Verwaltung“ (Ausschuss und
+               Technik haben ihre Bereiche unten). Jeder Eintrag nur mit dem Seitenrecht. -->
+          <div class="relative nav-dropdown" data-nur-gruppe="${VERWALTUNG_NAV_GRUPPE}">
+            <button class="${VERWALTUNG_NAV.some(v => v.key === active) ? 'text-blue-600 font-semibold' : 'text-gray-700 hover:text-blue-600'} px-3 py-2 text-sm transition flex items-center gap-1">
+              Verwaltung
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+            <div class="nav-dropdown-menu hidden absolute left-0 mt-1 w-60 bg-white rounded-lg shadow-lg border py-1 z-50">
+              ${VERWALTUNG_NAV.map(v => `<a href="${base}${v.href}" data-perm-any="${v.permAny}" class="${dropA(v.key)} block px-4 py-2 text-sm">${v.label}</a>`).join('\n              ')}
             </div>
           </div>
 
@@ -540,6 +588,10 @@ const RosenwegNav = {
         <a href="https://isp.rosenweg4303.ch/wlan.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📶 WLAN-Zugang</a>
         <a href="https://isp.rosenweg4303.ch/tv.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📺 TV / Fernsehen</a>
         <a href="https://pwa.rosenweg4303.ch/reparatur/" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🔧 Schaden melden ↗</a>
+        <a href="${base}mein-telefon.html" data-perm-any="${TELEFON_NAV_GRUPPEN}" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📞 Mein Telefon</a>
+        <a href="${base}smartphones.html" data-perm-any="${TELEFON_NAV_GRUPPEN}" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📱 Smartphones</a>
+        <a href="${base}apps.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📲 Rosenweg-Apps</a>
+        <a href="${base}waschkueche.html" data-perm-any="${WASCH_NAV_GRUPPEN}" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🧺 Waschküche</a>
         <a href="${base}salz.html" data-perm-any="${SALZ_NAV_GRUPPEN}" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🧂 Salzvorrat</a>
         <a href="${base}vollmachten.html" data-perm-any="eigentuemer,ausschuss,technik,praesident,verwaltung,bewohner" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📝 Vollmachten</a>
         <a href="${base}projekte.html" data-perm-any="eigentuemer" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🏗 Projekte</a>
@@ -549,6 +601,11 @@ const RosenwegNav = {
         <a href="${base}verwaltung.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🏢 Hausverwaltung</a>
         <a href="https://isp.rosenweg4303.ch/" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🌐 Internet / ISP ↗</a>
         <a href="${base}#dokumente" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📁 Dokumente</a>
+
+        <div data-nur-gruppe="${VERWALTUNG_NAV_GRUPPE}">
+          <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Verwaltung</div>
+          ${VERWALTUNG_NAV.map(v => `<a href="${base}${v.href}" data-perm-any="${v.permAny}" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">${v.label}</a>`).join('\n          ')}
+        </div>
 
         <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Bereiche</div>
         <a href="https://ausschuss.rosenweg4303.ch/" data-perm-any="ausschuss" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">👔 Ausschuss-Bereich ↗</a>
@@ -631,6 +688,17 @@ const RosenwegNav = {
       if (!pages.some(page => hasPerm(page.trim()))) {
         el.style.display = 'none';
       }
+    });
+
+    // data-nur-gruppe="verwaltung": nur für Mitglieder genau dieser Gruppe (kein
+    // Technik-Durchgriff, die hat ihren eigenen Bereich), und nur wenn darin
+    // mindestens ein Eintrag sichtbar bleibt.
+    const gruppenL = (user?.groups || []).map(g => String(g).toLowerCase());
+    document.querySelectorAll('[data-nur-gruppe]').forEach(el => {
+      const soll = el.dataset.nurGruppe.split(',').map(s => s.trim().toLowerCase());
+      const drin = soll.some(g => gruppenL.includes(g));
+      const links = Array.from(el.querySelectorAll('a'));
+      if (!drin || !links.some(a => a.style.display !== 'none')) el.style.display = 'none';
     });
 
     // Mega-Menu: pro Spalte prüfen ob alle Links versteckt → Spalte verstecken

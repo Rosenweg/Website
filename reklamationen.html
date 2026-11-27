@@ -77,7 +77,7 @@
         </div>
         <div>
           <label class="block text-xs font-semibold text-gray-500 mb-1">Status</label>
-          <select id="em-status" class="w-full border rounded-lg px-3 py-2 text-sm">
+          <select id="em-status" class="w-full border rounded-lg px-3 py-2 text-sm" onchange="zeigeMelderFeld()">
             <option value="offen">offen</option>
             <option value="weitergeleitet">weitergeleitet</option>
             <option value="erledigt">erledigt</option>
@@ -96,7 +96,12 @@
         <div>
           <label class="block text-xs font-semibold text-gray-500 mb-1">Notiz (intern)</label>
           <textarea id="em-notiz" rows="3" maxlength="2000" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="interne Notiz …"></textarea>
-          <p class="text-[11px] text-gray-400 mt-1">Nur für Technik/Ausschuss – wird dem Melder nicht gezeigt oder gesendet.</p>
+          <p class="text-[11px] text-gray-400 mt-1">Nur für Technik/Ausschuss – wird der meldenden Person nicht gezeigt oder gesendet.</p>
+        </div>
+        <div id="em-melder-wrap" class="hidden">
+          <label for="em-melder" class="block text-xs font-semibold text-gray-500 mb-1">Nachricht an die meldende Person (optional)</label>
+          <textarea id="em-melder" rows="2" maxlength="500" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="z. B. „Die Lampe ist ersetzt.“"></textarea>
+          <p class="text-[11px] text-gray-400 mt-1">Geht beim Speichern mit der Statusmeldung an <span id="em-melder-name">die meldende Person</span> (WhatsApp, bei „erledigt“ und „abgewiesen“ auch per E-Mail) und erscheint in ihrem Verlauf.</p>
         </div>
         <div>
           <label class="block text-xs font-semibold text-gray-500 mb-1">📜 Verlauf</label>
@@ -240,6 +245,14 @@
   }
 
   let editId = null;
+  let editStatusVorher = null;
+  let editHatMelder = false;
+  function statusWechselt() {
+    return document.getElementById('em-status').value !== editStatusVorher;
+  }
+  function zeigeMelderFeld() {
+    document.getElementById('em-melder-wrap').classList.toggle('hidden', !(editHatMelder && statusWechselt()));
+  }
   function openEdit(id) {
     const r = reklList.find(x => String(x.id) === String(id));
     if (!r) return;
@@ -258,6 +271,13 @@
     }
     document.getElementById('em-assign').innerHTML = assignOptions(r);
     document.getElementById('em-notiz').value = r.notiz || '';
+    // Nachricht an die meldende Person: nur in der Triage-Sicht (dort kommt die Notiz
+    // mit), nur wenn es eine meldende Person gibt und erst, wenn der Status wechselt.
+    editStatusVorher = r.status || 'offen';
+    editHatMelder = !!r.person_id && ('notiz' in r);
+    document.getElementById('em-melder').value = '';
+    document.getElementById('em-melder-name').textContent = r.person_name || 'die meldende Person';
+    zeigeMelderFeld();
     const msg = document.getElementById('em-msg'); msg.classList.add('hidden');
     // Foto laden (authentifiziert -> Blob)
     const fw = document.getElementById('em-foto-wrap'); const fi = document.getElementById('em-foto');
@@ -328,6 +348,8 @@
       kategorie: document.getElementById('em-kategorie').value,
       notiz: document.getElementById('em-notiz').value,
     };
+    const melderText = document.getElementById('em-melder').value.trim();
+    if (editHatMelder && statusWechselt() && melderText) body.melder_bemerkung = melderText;
     const a = document.getElementById('em-assign').value;
     if (a === '') { body.handwerker_id = null; body.zugewiesen_an = null; }
     else if (a.startsWith('tech:')) { body.zugewiesen_an = a.slice(5); body.handwerker_id = null; }
