@@ -1,0 +1,11 @@
+# Nach einem neuen Release: alle 5 Minuten den /apps-Index vergleichen, nur bei Aenderung testen.
+[Unit]
+Description=Android-Dauertest nach neuem Release
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=android
+ExecStart=/home/android/dauertest/lauf.sh --nur-neu
+TimeoutStartSec=45min
+Nice=10

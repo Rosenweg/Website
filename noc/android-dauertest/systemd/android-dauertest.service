@@ -1,0 +1,12 @@
+# Ein Lauf des Android-Dauertests (CT 149). NICHT aktiviert - Stefan entscheidet.
+[Unit]
+Description=Android-Dauertest der Rosenweg-Apps
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=android
+ExecStart=/home/android/dauertest/lauf.sh
+TimeoutStartSec=45min
+Nice=10
