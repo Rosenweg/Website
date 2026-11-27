@@ -51,3 +51,20 @@ test('Karten-Arten', () => {
   assert.ok(!st.istKartenSitzung({}));
   assert.equal(st.anmeldung('bestaetigt').stufe, 'konto');
 });
+
+test('Passwortwechsel: frische Website-Sitzung oder frisches App-Token, sonst nicht', () => {
+  assert.equal(st.passwortWechselErlaubt(st.anmeldung('app', vor(1), jetzt)), true);      // neu: App-Token mit auth_time
+  assert.equal(st.passwortWechselErlaubt(st.anmeldung('website', vor(2), jetzt)), true);
+  assert.equal(st.passwortWechselErlaubt(st.anmeldung('app', vor(60), jetzt)), false);    // zu alt
+  assert.equal(st.passwortWechselErlaubt(st.anmeldung('app', null, jetzt)), false);       // ohne auth_time
+  for (const art of ['otp', 'pat', 'karte', 'qr', 'anlage', 'bestaetigt', 'authentik']) {
+    assert.equal(st.passwortWechselErlaubt(st.anmeldung(art, vor(1), jetzt)), false, art);
+  }
+  assert.equal(st.passwortWechselErlaubt(undefined), false);
+  // die Route nutzt genau diese Pruefung, ohne die alte Sitzungsabfrage
+  const server = require('fs').readFileSync(require('path').join(__dirname, '..', 'server.js'), 'utf8');
+  const rumpf = server.slice(server.indexOf("app.post('/api/change-password'"), server.indexOf("rateLimitGuard('change-password'"));
+  assert.match(rumpf, /if \(!passwortWechselErlaubt\(req\.auth\)\)/);
+  assert.match(rumpf, /reauth: true/);
+  assert.doesNotMatch(rumpf, /FROM sessions/);
+});

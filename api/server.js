@@ -265,7 +265,7 @@ const { authentikAPI, tokenCache, validateAuthentikToken, authentikPasswordLogin
 const { authMiddleware, adminOnly, requirePermission, requireUserLogin } = require('./middleware/auth');
 // Admin-Aktionen mit der Karte: Protokoll, Quittung, Bestaetigung per E-Mail (lib/kartenadmin.js)
 const kartenAdmin = require('./lib/kartenadmin');
-const { FRISCH_MIN: STUFE_FRISCH_MIN } = require('./lib/stufen');
+const { FRISCH_MIN: STUFE_FRISCH_MIN, passwortWechselErlaubt } = require('./lib/stufen');
 // Web-Push (VAPID) -> lib/webpush.js (Opt-in-Benachrichtigungen fuer PWAs)
 const webpushLib = require('./lib/webpush');
 
@@ -1490,11 +1490,17 @@ const AD_PASSWORD_API_URL = process.env.AD_PASSWORD_API_URL || 'http://100.64.2.
 const AD_PASSWORD_API_SECRET = process.env.AD_PASSWORD_API_SECRET || '';
 if (!AD_PASSWORD_API_SECRET) console.warn('[ad-password] AD_PASSWORD_API_SECRET fehlt — Passwoerter werden nicht ins AD uebernommen');
 
-// Passwortwechsel nur aus einer frischen Browser-Anmeldung ueber Authentik: ein
+// Passwortwechsel nur aus einer frischen Anmeldung mit dem Rosenweg-Konto: ein
 // gestohlenes Sitzungstoken (oder eine OTP-Sitzung) allein reicht nicht, um das
 // Konto zu uebernehmen. Das alte Passwort laesst sich nicht verlangen — viele Konten
 // melden sich per Passkey/Einladung an und kennen keins.
-const PASSWORT_FRISCH_MS = 15 * 60 * 1000;
+//
+// Frisch (lib/stufen.js, passwortWechselErlaubt): Website-Sitzung mit id_token oder
+// Access-Token der Rosenweg-Apps, deren auth_time hoechstens STUFE_FRISCH_MIN (15)
+// Minuten alt ist. Die Apps holen das mit prompt=login/max_age=0 (rosenweg_basis:
+// 403 reauth -> bestaetigen()), die Website mit reauth=1. Bisher ging es nur mit der
+// Website-Sitzung; App-Tokens bekamen immer 403. Karte, QR, Anlage und PAT sperrt
+// PAT_GESPERRT schon in authMiddleware (unveraendert).
 app.post('/api/change-password', authMiddleware, async (req, res) => {
   const new_password = req.body?.new_password;
   if (!new_password || typeof new_password !== 'string') {
@@ -1508,18 +1514,11 @@ app.post('/api/change-password', authMiddleware, async (req, res) => {
   }
   const userId = req.user.user_id || req.user.id;
   const sitzungsToken = (req.headers.authorization || '').replace(/^Bearer /, '');
-  let sitzung;
-  try {
-    // Frische in SQL pruefen (Uhr der DB, die created_at gesetzt hat — keine Abweichung
-    // zwischen API- und DB-Uhr, keine Zeitzonen-Deutung von created_at in node).
-    sitzung = (await pool.query(
-      `SELECT id_token, created_at > NOW() - make_interval(secs => $3) AS frisch
-         FROM sessions WHERE token = $1 AND user_id = $2`, [sitzungsToken, userId, PASSWORT_FRISCH_MS / 1000])).rows[0];
-  } catch (err) {
-    return res.status(500).json({ error: fehlerFuerClient(err, 'Fehler') });
-  }
-  if (!sitzung || !sitzung.id_token || !sitzung.frisch) {
-    return res.status(403).json({ error: 'Bitte zur Bestätigung neu anmelden und das Passwort danach innert 15 Minuten ändern.', reauth: true });
+  if (!passwortWechselErlaubt(req.auth)) {
+    return res.status(403).json({
+      error: `Bitte zur Bestätigung neu anmelden und das Passwort danach innert ${STUFE_FRISCH_MIN} Minuten ändern.`,
+      reauth: true, fehler: 'frisch',
+    });
   }
   // Limit erst nach der Frische-Pruefung: sonst verbrauchten die 403-Runden (Seite
   // fragt, wird zur Neuanmeldung geschickt) die Versuche und sperrten den Wechsel (R2-S1f).
