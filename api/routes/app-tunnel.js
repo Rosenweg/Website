@@ -16,6 +16,10 @@
 // Anmeldung: Bearer-Token der Authentik-Anwendung "rosenweg-apps" (öffentlicher
 // Client mit PKCE), geprüft über userinfo — die Introspektion in lib/auth.js
 // kennt nur Tokens des Website-Clients (wie pbx/api/app.py festgestellt hat).
+// Oder (seit 27.11.2026) der Zugang einer Karten-, QR- oder Handy-Anmeldung
+// der App (rw_app_…, routes/app-karte.js): derselbe Weg wie im authMiddleware
+// (karteZugangPruefen). Der Gateway prüft ihn selbst noch einmal über
+// GET /api/auth/me; die Rechte kommen dort wie immer aus Proxmox.
 //
 // Der private Schlüssel entsteht auf dem Gerät, pro App-Start neu; hierher
 // kommt nur der öffentliche. Der Gateway hält die Peers nur im Speicher und
@@ -30,6 +34,8 @@
 
 const crypto = require('crypto');
 const { AUTHENTIK_URL } = require('../lib/config');
+const { karteZugangPruefen } = require('./app-karte');
+const { absenderIp } = require('../middleware/auth');
 
 const APPS_CLIENT_ID = process.env.ROSENWEG_APPS_CLIENT_ID || 'rosenweg-apps';
 const VM_GATEWAY_URL = process.env.VM_GATEWAY_URL || '';
@@ -79,6 +85,18 @@ function appTunnelRoutes(app, { pool, rateLimitGuard }) {
       const gemerkt = kontoCache.get(schluessel);
       if (gemerkt && Date.now() - gemerkt.zeit < 60 * 1000) {
         req.konto = gemerkt.konto; req.personToken = token; return next();
+      }
+
+      // Karte, Anmelde-QR, "Mit dem Handy anmelden": Zugang lebt 15 min, darum
+      // nicht merken (jede Anfrage prüft ihn, widerrufen greift sofort).
+      if (token.startsWith('rw_app_')) {
+        const k = await karteZugangPruefen(pool, token, absenderIp(req));
+        if (!k) return res.status(401).json({ error: 'Anmeldung abgelaufen' });
+        const email = String(k.user.email || '').trim().toLowerCase();
+        if (!email) return res.status(400).json({ error: 'Zu diesem Konto ist keine Mailadresse hinterlegt' });
+        req.konto = { email };
+        req.personToken = token;
+        return next();
       }
 
       const r = await fetch(`${AUTHENTIK_URL}/application/o/userinfo/`, {
