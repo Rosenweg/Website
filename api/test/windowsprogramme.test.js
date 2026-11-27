@@ -29,3 +29,8 @@ test('Ids im Katalog sind eindeutig', () => {
 test('alte Zusaetze mit vlc bleiben gueltig', () => {
   assert.deepStrictEqual(w.rechnerPruefen({ zusatz: ['vlc'] }), {});
 });
+
+test('pGina ist nicht mehr freigegeben', () => {
+  const alles = JSON.stringify(w.KATALOG).toLowerCase();
+  assert.ok(!alles.includes('pgina'), 'pGina steht noch im Katalog');
+});
