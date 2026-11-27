@@ -17,7 +17,7 @@
       "paket": "ch.rosenweg4303.salz",
       "logo": "/img/apps/rosenweg-salz.png",
       "reihenfolge": 20,
-      "text": "Salzvorrat der Enthärtungsanlagen: Anlieferung und eingefüllte Säcke mit dem Barcode buchen, Bestand und Reichweite je Lager.",
+      "text": "Salzvorrat der Enthärtungsanlagen: Anlieferung und eingefüllte Säcke mit dem Barcode buchen, Bestand, Reichweite und „Nächster Sack etwa am …“ je Lager.",
       "fuer": "Buchen dürfen die Bewohner von Rosenweg 2, 4 und 9, die Kooperation (Lager im Rosenweg 10) und die Technik. Alle anderen sehen nur einen Hinweis."
     },
     "kiosk": {
