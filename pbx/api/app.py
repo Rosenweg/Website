@@ -3567,11 +3567,19 @@ def telefon_hintergrund():
         conn.close()
 
 
+# Was die Anlage beim Loeschen eines Kontos entfernt (Stefan 27.11.2026: "alles Persoenliche").
+# Nicht hier, weil mit eigenen Ablaeufen (Entscheid offen): telefon_sitzungen (Abmelden),
+# telefon_nextcloud (Widerruf), telefon_sip_person / telefon_sip_privat (SIP-Zugaenge, pjsip neu
+# schreiben), personen_nummern (Nummernplan), telefon_log und calls (Protokoll, Voicemails).
+PERSON_LOESCHEN_TABELLEN = ("telefon_einstellungen", "telefon_pin", "telefon_ausweise")
+
+
 @app.post("/api/pbx/person/loeschen")
 def pbx_person_loeschen():
     """Haupt-API (X-PBX-Secret) nach dem Loeschen eines Kontos (Loeschungen, processAuthentiKDeletions
-    -> lokalesKontoNachLoeschung): persoenliche Daten der Person auf der Anlage entfernen.
-    Heute: Hintergrundbild der geteilten Telefone (Datei + Zeile). {email} -> {ok, hintergrund}"""
+    -> lokalesKontoNachLoeschung): persoenliche Daten der Person auf der Anlage entfernen -
+    Einstellungen der Apps, PIN, offene Anmelde-QR und das Hintergrundbild (Datei + Zeile).
+    {email} -> {ok, hintergrund (bool), entfernt: {tabelle: zeilen}}"""
     err = require_agi()
     if err:
         return err
@@ -3580,15 +3588,20 @@ def pbx_person_loeschen():
         return jsonify({"error": "email fehlt"}), 400
     conn = db.connect()
     try:
-        hatte = bool(conn.execute("SELECT 1 FROM telefon_hintergrund WHERE email = ?", (email,)).fetchone()) \
+        entfernt = {}
+        for t in PERSON_LOESCHEN_TABELLEN:
+            entfernt[t] = conn.execute(f"DELETE FROM {t} WHERE lower(email) = ?", (email,)).rowcount
+        hatte = bool(conn.execute("SELECT 1 FROM telefon_hintergrund WHERE lower(email) = ?", (email,)).fetchone()) \
             or os.path.isfile(_hintergrund_datei(email))
+        entfernt["telefon_hintergrund"] = conn.execute(
+            "DELETE FROM telefon_hintergrund WHERE lower(email) = ?", (email,)).rowcount
         _hintergrund_loeschen(conn, email)
         conn.commit()
     finally:
         conn.close()
-    if hatte:
-        app.logger.info("Konto geloescht: Hintergrundbild entfernt")
-    return jsonify({"ok": True, "hintergrund": hatte})
+    if any(entfernt.values()) or hatte:
+        app.logger.info("Konto geloescht: persoenliche Daten auf der Anlage entfernt %s", entfernt)
+    return jsonify({"ok": True, "hintergrund": hatte, "entfernt": entfernt})
 
 
 @app.delete("/api/telefon/ich/hintergrund")

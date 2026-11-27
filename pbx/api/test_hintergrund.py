@@ -201,6 +201,36 @@ class PersonLoeschenTest(_Basis):
             self.assertTrue(os.path.exists(pbx._hintergrund_datei(BERT)))   # nur die Person
             self.assertFalse(self.loeschen(ANNA).get_json()["hintergrund"])  # zweimal: ok
 
+    def test_alles_persoenliche_weg(self):
+        """Stefan 27.11.2026: Einstellungen, PIN, offene Anmelde-QR und Hintergrund - nur dieser Person."""
+        conn = db.connect()
+        try:
+            for wer in (ANNA, BERT):
+                conn.execute("INSERT OR REPLACE INTO telefon_einstellungen (email, paket, werte, geaendert) "
+                             "VALUES (?, 'ch.rosenweg4303.home', '{}', 1)", (wer,))
+                conn.execute("INSERT OR REPLACE INTO telefon_pin (email, pin_enc) VALUES (?, 'x')", (wer,))
+                conn.execute("INSERT OR REPLACE INTO telefon_ausweise (token_hash, email, name, expires_at) "
+                             "VALUES (?, ?, 'X', '2099-01-01T00:00:00Z')", ("h-" + wer, wer))
+            conn.commit()
+        finally:
+            conn.close()
+        with mock.patch.object(pbx, "PBX_SHARED_SECRET", "pbx-geheim"):
+            self.hoch("2201", _jpeg())
+            r = self.loeschen(ANNA.upper())
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.get_json()["entfernt"], {"telefon_einstellungen": 1, "telefon_pin": 1,
+                                                     "telefon_ausweise": 1, "telefon_hintergrund": 1})
+        conn = db.connect()
+        try:
+            for t in ("telefon_einstellungen", "telefon_pin", "telefon_ausweise", "telefon_hintergrund"):
+                self.assertIsNone(conn.execute(f"SELECT 1 FROM {t} WHERE lower(email) = ?", (ANNA,)).fetchone(), t)
+            for t in ("telefon_einstellungen", "telefon_pin", "telefon_ausweise"):
+                self.assertIsNotNone(conn.execute(f"SELECT 1 FROM {t} WHERE email = ?", (BERT,)).fetchone(), t)
+            # Abmelden, SIP-Zugaenge, Nummern haben eigene Ablaeufe: die Sitzung bleibt hier stehen
+            self.assertIsNotNone(conn.execute("SELECT 1 FROM telefon_sitzungen WHERE email = ?", (ANNA,)).fetchone())
+        finally:
+            conn.close()
+
     def test_nur_mit_geheimnis(self):
         with mock.patch.object(pbx, "PBX_SHARED_SECRET", "pbx-geheim"):
             self.hoch("2201", _jpeg())

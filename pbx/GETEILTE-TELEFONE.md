@@ -372,8 +372,11 @@ das **Sperrbild** (`FLAG_LOCK`) Rosenweg Gerät (Logo der Gruppe/des Hauses, `Sp
   `/mein-telefon` (nur sichtbar, wenn einer gespeichert ist; ein angemeldetes Telefon übernimmt
   den Standard mit dem nächsten Status, ≤ 30 s).
 - **Konto gelöscht** (Löschungen, `processAuthentiKDeletions` → `lokalesKontoNachLoeschung`): die
-  Haupt-API ruft `POST /api/pbx/person/loeschen` (X-PBX-Secret), die Anlage entfernt Datei und
-  Zeile (`api/lib/pbxperson.js`).
+  Haupt-API ruft `POST /api/pbx/person/loeschen` (X-PBX-Secret, `api/lib/pbxperson.js`). Die Anlage
+  entfernt alles Persönliche ohne eigenen Ablauf: App-Einstellungen (`telefon_einstellungen`), PIN
+  (`telefon_pin`), offene Anmelde-QR (`telefon_ausweise`) und den Hintergrund (Datei + Zeile).
+  Noch nicht dabei (eigene Abläufe, Entscheid offen): Sitzung, Nextcloud-Zugang, SIP-Zugänge
+  (`telefon_sip_person`, `telefon_sip_privat`), Nummer (`personen_nummern`), Protokoll und Voicemails.
 - **Sperrbild:** Ändert jemand das Sperrbild (Galerie/Einstellungen „Sperrbildschirm“ oder
   „Start- und Sperrbildschirm“ – dann teilen sich beide ein Bild, auf Samsung `mWhich=0x5`), setzt
   Gerät sofort wieder das Logo als eigenes Sperrbild. Hochgeladen wird nur der Startbildschirm.
@@ -401,7 +404,7 @@ Telefons – keine E-Mail im Pfad, kein Zugriff auf fremde Bilder):
 | `PUT /api/telefon/hintergrund` | Rohdaten `image/jpeg`, höchstens `PBX_HINTERGRUND_MAX` (600 KB), höchstens 4096 px je Seite → `{ok, version}` |
 | `DELETE /api/telefon/hintergrund` | zurück auf den Standard |
 | `DELETE /api/telefon/ich/hintergrund` | dasselbe für `/mein-telefon` (Authentik-Anmeldung der Person) |
-| `POST /api/pbx/person/loeschen` | Haupt-API (X-PBX-Secret) `{email}` nach einer Konto-Löschung → `{ok, hintergrund}` |
+| `POST /api/pbx/person/loeschen` | Haupt-API (X-PBX-Secret) `{email}` nach einer Konto-Löschung → `{ok, hintergrund, entfernt: {tabelle: zeilen}}` |
 | `GET /api/telefon/status` | Feld `hintergrund` = Fassung (Hash) oder `""` |
 
 Dateien: `PBX_HINTERGRUND_DIR` (Standard `/var/lib/pbx-api/hintergruende/`, legt die API selbst mit
