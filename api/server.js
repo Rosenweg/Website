@@ -6916,47 +6916,96 @@ app.get('/api/admin/mail-chain', authMiddleware, requireTechnikOrPraesident, asy
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/admin/pending-deletions', authMiddleware, requireTechnikOrPraesident, async (_req, res) => {
+// Recht „loeschungen“ wie das Menü (Befund W16): read = Liste, write = Aktionen.
+// Technik/Präsident haben es immer; wer es sonst bekommt, sieht nur die STWEGs
+// seiner Sicht (Ausschuss/Verwaltung, lib/stweg-sicht.js). Jede Aktion steht im
+// admin_protokoll (Bereich 'loeschungen'), mit der Karte auch im Kartenprotokoll.
+const loeschungenLesen = [requirePermission('loeschungen', 'read')];
+const loeschungenSchreiben = [requirePermission('loeschungen', 'write'), kartenAdmin.mitKarteProtokollieren];
+
+/** Vormerkung laden und gegen die STWEG-Sicht pruefen. -> Zeile | null (Antwort gesendet) */
+async function loeschVormerkung(req, res) {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) { res.status(400).json({ error: 'Ungültige ID' }); return null; }
+  const r = await pool.query('SELECT id, email, name, stweg, scheduled_at, cancelled FROM authentik_pending_deletions WHERE id = $1', [id]);
+  const row = r.rows[0];
+  if (!row || !stwegSichtLib.sichtErlaubt(stwegSichtLib.stwegSicht(req.user?.groups || []), row.stweg)) {
+    res.status(404).json({ error: 'Nicht gefunden' });
+    return null;
+  }
+  return row;
+}
+const loeschProtokoll = (req, aktion, row, alt, neu, detail) => adminProtokoll.eintragen(pool, null, req, {
+  bereich: 'loeschungen', aktion, ziel: row.email, alt, neu,
+  detail: [row.name, row.stweg ? `STWEG ${row.stweg}` : null, detail].filter(Boolean).join(' · ') || null,
+}).catch(e => console.error('[loeschungen] Protokoll:', e.message));
+const datumText = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
+
+app.get('/api/admin/pending-deletions', authMiddleware, ...loeschungenLesen, async (req, res) => {
   try {
+    const params = [];
+    const sicht = stwegSichtLib.sichtSql(stwegSichtLib.stwegSicht(req.user?.groups || []), 'd.stweg', params);
     const r = await pool.query(
       `SELECT d.id, d.email, d.name, d.stweg, d.scheduled_at, d.reminder_sent, d.cancelled, d.created_at,
               EXTRACT(DAY FROM (d.scheduled_at - NOW()))::int AS days_until,
               EXISTS(SELECT 1 FROM wohnungen_kontakte wk WHERE LOWER(wk.email) = LOWER(d.email)) AS still_in_kontakte
          FROM authentik_pending_deletions d
-        ORDER BY d.scheduled_at ASC`
+        WHERE ${sicht}
+        ORDER BY d.scheduled_at ASC`, params
     );
     res.json({ deletions: r.rows });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.put('/api/admin/pending-deletions/:id/cancel', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+// Verlauf: wer hat wann gestoppt, verlängert oder entfernt
+app.get('/api/admin/pending-deletions/protokoll', authMiddleware, ...loeschungenLesen, async (req, res) => {
   try {
+    const g = req.user?.groups || [];
+    // STWEG-gebundene Konten sehen nur Einträge ihrer STWEG (steht im Detail)
+    const sicht = stwegSichtLib.stwegSicht(g);
+    let liste = await adminProtokoll.lesen(pool, 'loeschungen', req.query.limit);
+    if (!sicht.alle) {
+      liste = liste.filter(e => {
+        const m = String(e.detail || '').match(/STWEG (\d+)/);
+        return stwegSichtLib.sichtErlaubt(sicht, m ? Number(m[1]) : null);
+      });
+    }
+    res.json({ eintraege: liste });
+  } catch (err) { res.status(500).json({ error: 'Protokoll konnte nicht geladen werden' }); }
+});
+
+app.put('/api/admin/pending-deletions/:id/cancel', authMiddleware, ...loeschungenSchreiben, async (req, res) => {
+  try {
+    const row = await loeschVormerkung(req, res);
+    if (!row) return;
     const r = await pool.query(
-      `UPDATE authentik_pending_deletions SET cancelled = true WHERE id = $1 RETURNING email, cancelled`,
-      [parseInt(req.params.id, 10)],
-    );
-    if (!r.rows[0]) return res.status(404).json({ error: 'Nicht gefunden' });
+      `UPDATE authentik_pending_deletions SET cancelled = true WHERE id = $1 RETURNING email, cancelled`, [row.id]);
     console.log(`[Authentik] Pending-Deletion cancelled by ${req.user.email}: ${r.rows[0].email}`);
+    await loeschProtokoll(req, 'gestoppt', row, `geplant ${datumText(row.scheduled_at)}`, 'gestoppt');
     res.json({ ok: true, ...r.rows[0] });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.put('/api/admin/pending-deletions/:id/reactivate', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+app.put('/api/admin/pending-deletions/:id/reactivate', authMiddleware, ...loeschungenSchreiben, async (req, res) => {
   try {
+    const row = await loeschVormerkung(req, res);
+    if (!row) return;
     const r = await pool.query(
       `UPDATE authentik_pending_deletions SET cancelled = false, reminder_sent = false,
                                               scheduled_at = NOW() + INTERVAL '30 days'
-        WHERE id = $1 RETURNING email`,
-      [parseInt(req.params.id, 10)],
-    );
-    if (!r.rows[0]) return res.status(404).json({ error: 'Nicht gefunden' });
+        WHERE id = $1 RETURNING email, scheduled_at`, [row.id]);
+    await loeschProtokoll(req, 'timer-30-tage', row,
+      `${row.cancelled ? 'gestoppt' : 'geplant'} ${datumText(row.scheduled_at)}`, `geplant ${datumText(r.rows[0].scheduled_at)}`);
     res.json({ ok: true, email: r.rows[0].email });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.delete('/api/admin/pending-deletions/:id', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+app.delete('/api/admin/pending-deletions/:id', authMiddleware, ...loeschungenSchreiben, async (req, res) => {
   try {
-    await pool.query(`DELETE FROM authentik_pending_deletions WHERE id = $1`, [parseInt(req.params.id, 10)]);
+    const row = await loeschVormerkung(req, res);
+    if (!row) return;
+    await pool.query(`DELETE FROM authentik_pending_deletions WHERE id = $1`, [row.id]);
+    await loeschProtokoll(req, 'entfernt', row, `${row.cancelled ? 'gestoppt' : 'geplant'} ${datumText(row.scheduled_at)}`, 'aus der Liste entfernt');
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
