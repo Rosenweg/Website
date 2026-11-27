@@ -24510,9 +24510,14 @@ app.delete('/api/isp/client-vlan-routers/:id', authMiddleware, async (req, res) 
 // === ISP-Wartungen / Stoerungen / Auto-Updates ===
 
 // Permission: Technik OR Ausschuss (analog requireAusschussOrTechnik).
-function ispMaintCanWrite(req) {
-  const groups = (req.user?.groups || []).map(g => String(g || '').toLowerCase());
-  return groups.some(g => g === 'technik' || g === 'ausschuss');
+// ISP-Wartungen schreiben: Technik und Praesident (Befund W13). Vorher technik
+// oder eine Gruppe, die woertlich „ausschuss“ heisst – die gibt es nicht, der
+// Praesident bekam 403. Mit der Karte ins Protokoll (lib/kartenadmin.js).
+function ispMaintCanWrite(req, res) {
+  const groups = req.user?.groups || [];
+  const ok = isTechnik(groups) || isPraesident(groups);
+  if (ok && res) kartenAdmin.vermerken(req, res);
+  return ok;
 }
 
 // Aus Geraete-Name HausNr extrahieren (z.B. "PoE-Switch1 R9 Heizungsraum" -> 9)
@@ -24873,7 +24878,7 @@ app.get('/api/isp/maintenance/public', async (req, res) => {
 
 app.post('/api/isp/maintenance', authMiddleware, async (req, res) => {
   try {
-    if (!ispMaintCanWrite(req)) return res.status(403).json({ error: 'Nur Technik oder Ausschuss' });
+    if (!ispMaintCanWrite(req, res)) return res.status(403).json({ error: 'Nur Technik oder Präsident' });
     const b = req.body || {};
     if (!b.title) return res.status(400).json({ error: 'title Pflicht' });
     const r = await pool.query(
@@ -24895,7 +24900,7 @@ app.post('/api/isp/maintenance', authMiddleware, async (req, res) => {
 
 app.put('/api/isp/maintenance/:id', authMiddleware, async (req, res) => {
   try {
-    if (!ispMaintCanWrite(req)) return res.status(403).json({ error: 'Nur Technik oder Ausschuss' });
+    if (!ispMaintCanWrite(req, res)) return res.status(403).json({ error: 'Nur Technik oder Präsident' });
     const id = parseInt(req.params.id, 10);
     const b = req.body || {};
     // Vorher-Status fuer Transition-Detection (start/end-Notifications)
@@ -24942,7 +24947,7 @@ app.put('/api/isp/maintenance/:id', authMiddleware, async (req, res) => {
 
 app.delete('/api/isp/maintenance/:id', authMiddleware, async (req, res) => {
   try {
-    if (!ispMaintCanWrite(req)) return res.status(403).json({ error: 'Nur Technik oder Ausschuss' });
+    if (!ispMaintCanWrite(req, res)) return res.status(403).json({ error: 'Nur Technik oder Präsident' });
     await pool.query('DELETE FROM isp_maintenance WHERE id = $1', [parseInt(req.params.id, 10)]);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
@@ -24951,7 +24956,7 @@ app.delete('/api/isp/maintenance/:id', authMiddleware, async (req, res) => {
 // Manuelles Ausloesen einer Notification (z.B. fuer Spontan-Ausfall).
 app.post('/api/isp/maintenance/:id/notify', authMiddleware, async (req, res) => {
   try {
-    if (!ispMaintCanWrite(req)) return res.status(403).json({ error: 'Nur Technik oder Ausschuss' });
+    if (!ispMaintCanWrite(req, res)) return res.status(403).json({ error: 'Nur Technik oder Präsident' });
     const id = parseInt(req.params.id, 10);
     const r = await pool.query('SELECT * FROM isp_maintenance WHERE id = $1', [id]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });

@@ -636,6 +636,9 @@
             }
 
             const groups = (user.groups || []).map(g => g.toLowerCase());
+            // Befehle an Windows-Rechner (Nachricht, Abmelden, Neustart …) nur die
+            // Gruppe technik, wie die API (stationen-v2.js nurTechnikGruppe, W12).
+            istTechnikGruppe = groups.includes('technik');
             if (!groups.includes('technik') && !groups.includes('präsident') && !groups.includes('praesident')) {
                 document.getElementById('no-permission').classList.remove('hidden');
                 return;
@@ -660,6 +663,7 @@
             ladeAnkuendigungen();
         });
 
+        let istTechnikGruppe = false;
         async function api(pfad, opts = {}) {
             const res = await AuthentikAuth.apiFetch(pfad, opts);
             if (!res.ok) {
@@ -2733,13 +2737,14 @@
             if (istWin(s)) {
                 let h = e('Einstellen …', 'cfgOeffnen');
                 if (hatAgent(s)) {
-                    h += e('Nachricht anzeigen …', 'befehlNachricht', 'text-blue-700')
+                    if (istTechnikGruppe) h += e('Nachricht anzeigen …', 'befehlNachricht', 'text-blue-700')
                         + e('Befehle und Verlauf', 'befehleOeffnen') + linie;
                     if (!ohneAnschluss(s) && s.anschluss?.length && !s.anschluss_abweichung) h += e('Anschluss neu lernen (Umzug) …', 'anschlussVergessen', 'text-blue-700');
                     if (s.anschluss_abweichung) h += e(s.status !== 'gesperrt' || vomWaechter(s) ? 'Anschluss übernehmen und freigeben …' : 'Anschluss übernehmen …', 'anschlussUebernehmen', 'text-green-700');
-                    h += e('Abmelden …', 'befehlAbmelden', 'text-orange-600')
+                    if (istTechnikGruppe) h += e('Abmelden …', 'befehlAbmelden', 'text-orange-600')
                         + e('Neu starten …', 'befehlNeustart', 'text-orange-600')
                         + e('Einmal vom Netz starten (Sicherung) …', 'befehlNetzstart', 'text-orange-600');
+                    else h += '<div class="px-4 py-2 text-xs text-gray-400 max-w-[16rem]">Befehle an den Rechner (Abmelden, Neustart …) nur für die Gruppe Technik.</div>';
                     if (s.status === 'gesperrt' && !(s.anschluss_abweichung && vomWaechter(s))) h += e('Entsperren', 'entsperren', 'text-green-700');
                     if (s.status !== 'gesperrt') h += e('Sperren …', 'sperren', 'text-red-600');
                 } else {
