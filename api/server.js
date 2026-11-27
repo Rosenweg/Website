@@ -16062,7 +16062,7 @@ function requireTechnikOrPraesident(req, res, next) {
 // ─── Zähler-Technik (Rosenweg 9) ────────────────────────────────────
 // Technische Zähleruebersicht: IP, Online-Status, Seriennummer, alle
 // Messwerte + Zaehlerstaende. Nur fuer Technik / Verwaltung /
-// Rosenweg-9-Eigentuemer (= stweg3-eigentuemer).
+// Rosenweg-9-Eigentuemer (Gruppe r9-eigentuemer).
 const ENERGY_COLLECTOR_URL = process.env.ENERGY_COLLECTOR_URL || 'http://energy-collector:3001';
 
 // ─── Energie-Admin-Proxy ────────────────────────────────────────────
@@ -17667,7 +17667,9 @@ function requireZaehlerTechnik(req, res, next) {
   const ok = isTechnik(groups) || isPraesident(groups)
     // Zaehler-Technik = Haus Rosenweg 9 (STWEG 3): dessen Verwaltung (Übergang: „Verwaltung“)
     || isVerwaltungFor(groups, 3)
-    || gl.includes('stweg3-eigentuemer');
+    // Eigentuemergruppe von STWEG 3 heisst r9-eigentuemer (lib/groups.js STWEG_GROUPS;
+    // Befund W19: vorher stweg3-eigentuemer -> Eigentuemer RW 9 abgewiesen).
+    || gl.includes(STWEG_GROUPS[3].eigentuemer.toLowerCase());
   if (ok) return next();
   return res.status(403).json({ error: 'Nur für Technik, Präsident, Verwaltung oder Rosenweg-9-Eigentümer' });
 }

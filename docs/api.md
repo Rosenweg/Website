@@ -318,7 +318,7 @@ Kurzfassung (Details [`energie-api.md`](energie-api.md)):
 | `GET /api/energy/{surplus,…,tariffs/current}` | offen |
 | `GET /api/energy/*` (alles andere), `GET /api/energie/meine-zaehler` | angemeldet; nur zugeordnete Zähler; voll für T/P und Recht `energie-config:read` |
 | `/api/energie-admin/*` | Recht `energie-config` (GET read, sonst write); 503 ohne `ENERGY_ADMIN_API_KEY` |
-| `GET /api/zaehler-technik` | Gruppe `technik`, `präsident`, `verwaltung` oder `stweg3-eigentuemer`; volle Sicht nur Technik/Präsident oder `energie-config:read` |
+| `GET /api/zaehler-technik` | Gruppe `technik`, `präsident`, `verwaltung` oder `r9-eigentuemer`; volle Sicht nur Technik/Präsident oder `energie-config:read` |
 | `/api/zähler/*` | Recht `zähler` (`POST /api/zähler/benutzer` T/P) |
 
 ### 4.9 Technik, Netz und Nebendienste

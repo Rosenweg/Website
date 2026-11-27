@@ -314,7 +314,7 @@ konfiguriert“. Collector nicht erreichbar → **502**.
 
 Für die Technik-PWA und das MCP-Werkzeug `zaehler_technik`.
 
-- **Zugang:** Gruppe `technik`, `präsident`, `verwaltung` oder `stweg3-eigentuemer`
+- **Zugang:** Gruppe `technik`, `präsident`, `verwaltung` (STWEG 3) oder `r9-eigentuemer`
   (Rosenweg 9); sonst **403**.
 - **Volle Sicht** (IP, Port, Unit-ID, Seriennummer, Live-Werte aller Zähler): wer
   `isAdmin` ist (Technik oder Präsident) oder `energie-config:read` hat.
