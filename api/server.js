@@ -7747,12 +7747,21 @@ function verwaltungUrl(v) {
   return 'https://' + t.replace(/^\/+/, '');
 }
 
-// Admin-View: alle Felder (inkl. Login-Passwoerter), nur Ausschuss/Technik
+// Plattform-Passwort nur fuer wer den Eintrag auch aendern darf (Befund W9):
+// Technik/Praesident und der Ausschuss DIESER STWEG. Ein Ausschuss sieht
+// STWEG-uebergreifende Eintraege (stweg NULL) ohne Passwort.
+function verwaltungFuerLeser(groups, v) {
+  const darf = verwaltungAenderbar(groups, v.stweg);
+  if (darf) return { ...v, darf_aendern: true };
+  return { ...v, plattform_pass: null, plattform_pass_verborgen: !!v.plattform_pass, darf_aendern: false };
+}
+
+// Admin-View: alle Felder; Login-Passwort nur fuer Aenderungsberechtigte
 app.get('/api/verwaltungen', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
   try {
     const g = req.user?.groups || [];
     const { rows: alleVerw } = await pool.query(`SELECT * FROM verwaltungen ORDER BY stweg NULLS FIRST, aktiv DESC, firma_name`);
-    const verw = alleVerw.filter(v => verwaltungLesbar(g, v.stweg));
+    const verw = alleVerw.filter(v => verwaltungLesbar(g, v.stweg)).map(v => verwaltungFuerLeser(g, v));
     const ids = verw.map(v => v.id);
     const { rows: kontakte } = ids.length === 0 ? { rows: [] } : await pool.query(
       `SELECT * FROM verwaltungs_kontakte WHERE verwaltung_id = ANY($1::int[]) ORDER BY verwaltung_id, sort_order, id`,
