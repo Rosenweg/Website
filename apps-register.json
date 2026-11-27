@@ -39,6 +39,17 @@
       "reihenfolge": 30,
       "text": "Die eigenen Angaben im Rosenweg-Portal ansehen und ändern.",
       "fuer": ""
+    },
+    "karten": {
+      "name": "Rosenweg Karten",
+      "repo": "Rosenweg/rosenweg-karten",
+      "paket": "ch.rosenweg4303.karten",
+      "logo": "/img/apps/rosenweg-karten.png",
+      "reihenfolge": 50,
+      "text": "Rosenweg-Karten nachschlagen, Personen zuordnen, entziehen und aus dem Bestand löschen; Kartenprotokoll und Karten-Anmeldungen der Apps.",
+      "fuer": "Für die Technik und den Präsidenten.",
+      "technik": true,
+      "_notiz": "Ab 2.0.0 Flutter-App für alle Plattformen (ersetzt die Java-App 1.6.3, gleiche Kennung und Signatur, versionCode 11). Bis 1.6.3 stand sie unter katalog."
     }
   },
   "katalog": {
@@ -119,13 +130,6 @@
       "repo": "Rosenweg/keyboard-rosenweg",
       "logo": "/img/apps/rosenweg-tastatur.png",
       "text": "Tastatur ohne Datenweitergabe."
-    },
-    "ch.rosenweg4303.karten": {
-      "repo": "Rosenweg/rosenweg-karten",
-      "logo": "/img/apps/rosenweg-karten.png",
-      "technik": true,
-      "text": "NFC-Karten nachschlagen, Personen zuordnen und entziehen.",
-      "fuer": "Für die Technik."
     },
     "ch.rosenweg4303.telefon": {
       "repo": "Rosenweg/android-sip-rosenweg",
