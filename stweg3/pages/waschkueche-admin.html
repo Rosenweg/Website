@@ -63,6 +63,9 @@
                     <button class="tab-btn py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap border-transparent text-gray-500" data-tab="rooms">
                         Räume
                     </button>
+                    <button class="tab-btn py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap border-transparent text-gray-500" data-tab="sperrzeiten">
+                        Sperrzeiten
+                    </button>
                     <button class="tab-btn py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap border-transparent text-gray-500" data-tab="sessions">
                         Sessions
                     </button>
@@ -131,6 +134,38 @@
             </section>
         </div>
 
+        <!-- Tab: Sperrzeiten (Reinigung, Wartung …): Reservieren lehnt sie ab -->
+        <div id="tab-sperrzeiten" class="tab-content hidden">
+            <section class="py-8">
+                <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-2">Sperrzeiten</h2>
+                    <p class="text-sm text-gray-600 mb-6">In einer Sperrzeit kann niemand reservieren; die Belegung zeigt sie grau mit dem Grund. Bestehende Reservationen bleiben – die Meldung nennt, wie viele betroffen sind.</p>
+                    <form id="sperr-form" class="bg-white rounded-lg shadow-md p-6 mb-6 grid md:grid-cols-5 gap-4 items-end">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1" for="sperr-raum">Raum</label>
+                            <select id="sperr-raum" class="w-full px-3 py-2 border border-gray-300 rounded-lg" required></select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1" for="sperr-von">Von</label>
+                            <input type="datetime-local" id="sperr-von" step="900" class="w-full px-3 py-2 border border-gray-300 rounded-lg" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1" for="sperr-bis">Bis</label>
+                            <input type="datetime-local" id="sperr-bis" step="900" class="w-full px-3 py-2 border border-gray-300 rounded-lg" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1" for="sperr-grund">Grund</label>
+                            <input type="text" id="sperr-grund" maxlength="200" placeholder="z.B. Reinigung" class="w-full px-3 py-2 border border-gray-300 rounded-lg" required>
+                        </div>
+                        <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">Sperren</button>
+                    </form>
+                    <div id="sperr-liste" class="bg-white rounded-lg shadow-md overflow-hidden">
+                        <p class="p-6 text-gray-600">Lade Sperrzeiten...</p>
+                    </div>
+                </div>
+            </section>
+        </div>
+
         <!-- Tab: Sessions -->
         <div id="tab-sessions" class="tab-content hidden">
             <section class="py-8">
@@ -167,6 +202,7 @@
                             </button>
                         </div>
                     </div>
+                    <p class="text-sm text-gray-600 mb-4">Abrechnen (E-Mail an alle mit Nutzungen) geht für jeden vergangenen Monat, aber nur einmal. Mit „Automatisch abrechnen“ (Einstellungen) läuft der Vormonat am 1. um 08:00 von selbst.</p>
                     <div id="billing-table" class="bg-white rounded-lg shadow-md overflow-hidden">
                         <p class="p-6 text-gray-600">Lade Abrechnung...</p>
                     </div>
@@ -267,7 +303,7 @@
                     authSection.classList.add('hidden');
                     mainContent.classList.remove('hidden');
                     // Mit Leserecht nur ansehen: keine Knöpfe zum Ändern
-                    ['add-room-btn', 'run-billing-btn'].forEach(id => document.getElementById(id)?.classList.toggle('hidden', !DARF_SCHREIBEN));
+                    ['add-room-btn', 'run-billing-btn', 'sperr-form'].forEach(id => document.getElementById(id)?.classList.toggle('hidden', !DARF_SCHREIBEN));
                     document.getElementById('room-door').disabled = !TECHNIK;
                     await loadDashboard();
                 },
@@ -291,6 +327,7 @@
                     document.getElementById(`tab-${tab}`).classList.remove('hidden');
 
                     if (tab === 'rooms') loadRooms();
+                    if (tab === 'sperrzeiten') loadSperrzeiten();
                     if (tab === 'sessions') loadSessions();
                     if (tab === 'billing') loadBilling();
                     if (tab === 'settings') loadSettings();
@@ -419,6 +456,56 @@
                 }
             });
 
+            // ── Sperrzeiten ──────────────────────────────────────────
+            const fmtZeit = (d) => new Date(d).toLocaleString('de-CH', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+            async function loadSperrzeiten() {
+                try {
+                    const [rooms, sperren] = await Promise.all([api('/api/wasch/rooms'), api('/api/wasch/sperrzeiten')]);
+                    const sel = document.getElementById('sperr-raum');
+                    const alt = sel.value;
+                    sel.innerHTML = rooms.map(r => `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join('');
+                    if (alt) sel.value = alt;
+                    const el = document.getElementById('sperr-liste');
+                    if (sperren.length === 0) { el.innerHTML = '<p class="p-6 text-gray-500">Keine kommenden Sperrzeiten.</p>'; return; }
+                    el.innerHTML = `<ul class="divide-y divide-gray-200">${sperren.map(s => `
+                        <li class="p-4 flex items-center justify-between gap-4">
+                            <div>
+                                <div class="font-medium text-gray-900">${esc(s.grund)}</div>
+                                <div class="text-sm text-gray-600">${esc(s.room_name)} · ${esc(fmtZeit(s.start_time))} – ${esc(fmtZeit(s.end_time))}</div>
+                            </div>
+                            <button data-aktion="sperre-weg" data-id="${esc(s.id)}" ${DARF_SCHREIBEN ? '' : 'hidden'} class="text-red-600 hover:text-red-800 text-sm font-medium">Aufheben</button>
+                        </li>`).join('')}</ul>`;
+                } catch (err) {
+                    toast(err.message || 'Fehler beim Laden der Sperrzeiten', 'error');
+                }
+            }
+            document.getElementById('sperr-liste').addEventListener('click', async (e) => {
+                const b = e.target.closest('[data-aktion="sperre-weg"]');
+                if (!b || !confirm('Sperrzeit aufheben? Danach kann in dieser Zeit wieder reserviert werden.')) return;
+                try {
+                    await api(`/api/wasch/sperrzeiten/${encodeURIComponent(b.dataset.id)}`, { method: 'DELETE' });
+                    toast('Sperrzeit aufgehoben');
+                    loadSperrzeiten();
+                } catch (err) { toast(err.message, 'error'); }
+            });
+            document.getElementById('sperr-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const body = {
+                    room_id: Number(document.getElementById('sperr-raum').value),
+                    // datetime-local = Ortszeit ohne Zone, wie die Reservationen
+                    start_time: document.getElementById('sperr-von').value + ':00',
+                    end_time: document.getElementById('sperr-bis').value + ':00',
+                    grund: document.getElementById('sperr-grund').value.trim(),
+                };
+                try {
+                    const r = await api('/api/wasch/sperrzeiten', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                    const n = r.betroffene_reservationen || 0;
+                    toast(n ? `Gesperrt. Achtung: ${n} Reservation${n === 1 ? '' : 'en'} liegen in dieser Zeit.` : 'Gesperrt');
+                    document.getElementById('sperr-grund').value = '';
+                    loadSperrzeiten();
+                } catch (err) { toast(err.message, 'error'); }
+            });
+
             // ── Sessions ─────────────────────────────────────────────
             async function loadSessions() {
                 try {
@@ -490,7 +577,9 @@
             async function loadBilling() {
                 try {
                     const monthInput = document.getElementById('billing-month');
-                    const month = monthInput.value || new Date().toISOString().slice(0, 7);
+                    // Standard: Vormonat (der lässt sich abrechnen); laufender Monat zum Ansehen wählbar
+                    const vor = new Date(); vor.setDate(1); vor.setMonth(vor.getMonth() - 1);
+                    const month = monthInput.value || `${vor.getFullYear()}-${String(vor.getMonth() + 1).padStart(2, '0')}`;
                     if (!monthInput.value) monthInput.value = month;
 
                     const costs = await api(`/api/wasch/admin/costs?month=${month}`);
@@ -544,7 +633,7 @@
             document.getElementById('run-billing-btn').addEventListener('click', async () => {
                 const month = document.getElementById('billing-month').value;
                 if (!month) { toast('Bitte Monat auswählen', 'error'); return; }
-                if (!confirm(`Abrechnung für ${month} wirklich per E-Mail versenden?`)) return;
+                if (!confirm(`Abrechnung für ${month} wirklich per E-Mail versenden? Jeder Monat wird nur einmal abgerechnet.`)) return;
                 try {
                     const result = await api('/api/wasch/admin/billing/run', {
                         method: 'POST',
@@ -565,6 +654,9 @@
 
                     const fields = [
                         { key: 'cost_per_kwh', label: 'Preis pro kWh (CHF)', type: 'number', step: '0.01' },
+                        { key: 'reservation_max_days', label: 'Reservieren höchstens so viele Tage im Voraus', type: 'number', step: '1' },
+                        { key: 'reservation_max_per_user', label: 'Offene Reservationen je Person höchstens', type: 'number', step: '1' },
+                        { key: 'auto_billing', label: 'Automatisch abrechnen (am 1. um 08:00 den Vormonat)', type: 'toggle' },
                         // UniFi-Access-Felder entfernt: der Server liefert/speichert sie hier
                         // nicht mehr (access_settings, Zutritt-App) -> leere Felder wirkten kaputt
                     ];
@@ -579,7 +671,7 @@
                                         <div class="flex items-center justify-between">
                                             <label class="text-sm font-medium text-gray-700">${f.label}</label>
                                             <label class="relative inline-flex items-center cursor-pointer">
-                                                <input type="checkbox" data-key="${f.key}" class="sr-only peer setting-input" ${checked ? 'checked' : ''}>
+                                                <input type="checkbox" data-key="${f.key}" class="sr-only peer setting-input" ${checked ? 'checked' : ''} ${DARF_SCHREIBEN ? '' : 'disabled'}>
                                                 <div class="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-green-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
                                             </label>
                                         </div>`;

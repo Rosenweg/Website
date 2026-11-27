@@ -42,6 +42,7 @@
         .res-block:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.15); transform: translateY(-1px); }
         .res-own { background: #fef9c3; border-left-color: #eab308; color: #713f12; }
         .res-other { background: #fee2e2; border-left-color: #ef4444; color: #991b1b; }
+        .res-sperre { background: repeating-linear-gradient(45deg, #f3f4f6, #f3f4f6 6px, #e5e7eb 6px, #e5e7eb 12px); border-left-color: #6b7280; color: #374151; }
         .res-active { background: #d1fae5; border-left-color: #10b981; color: #065f46; animation: pulse-border 2s infinite; }
         @keyframes pulse-border { 0%,100% { border-left-color: #10b981; } 50% { border-left-color: #6ee7b7; } }
 
@@ -282,6 +283,7 @@
     let weekStart = null;        // Monday 00:00
     let mobileDay = 0;           // 0–6 for mobile day view
     let reservations = [];       // for displayed week + room
+    let sperrzeiten = [];        // Sperrzeiten (Reinigung, Wartung …) der Woche, grau
     let myReservations = [];     // all upcoming for user
     let nowLineInterval = null;
 
@@ -410,7 +412,10 @@
         if (!selectedRoomId) return;
         const from = weekStart.toISOString();
         const to = new Date(weekStart.getTime() + 7 * 86400000).toISOString();
-        reservations = await api(`/api/wasch/reservations?room_id=${selectedRoomId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+        [reservations, sperrzeiten] = await Promise.all([
+            api(`/api/wasch/reservations?room_id=${selectedRoomId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+            api(`/api/wasch/sperrzeiten?room_id=${selectedRoomId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).catch(() => []),
+        ]);
     }
 
     async function loadMyReservations() {
@@ -520,6 +525,23 @@
             // Reservations for this day
             const dayStart = new Date(d); dayStart.setHours(0,0,0,0);
             const dayEnd = new Date(dayStart.getTime() + 86400000);
+
+            // Sperrzeiten grau mit Grund (Reservieren lehnt sie ab)
+            for (const sp of sperrzeiten) {
+                const sS = new Date(sp.start_time), sE = new Date(sp.end_time);
+                if (sS >= dayEnd || sE <= dayStart) continue;
+                const a = sS < dayStart ? HOUR_START : Math.max(sS.getHours() + sS.getMinutes() / 60, HOUR_START);
+                const b = sE >= dayEnd ? HOUR_END : Math.min(sE.getHours() + sE.getMinutes() / 60, HOUR_END);
+                if (b <= a) continue;
+                const block = document.createElement('div');
+                block.className = 'res-block res-sperre';
+                block.style.top = ((a - HOUR_START) * PX_PER_HOUR) + 'px';
+                block.style.height = Math.max((b - a) * PX_PER_HOUR, 18) + 'px';
+                block.innerHTML = `<div class="font-semibold">Gesperrt</div><div class="truncate">${esc(sp.grund)}</div>`;
+                block.title = `Gesperrt: ${sp.grund}\n${fmtDayLong(sS)} ${fmtTime(sS)} – ${fmtDayLong(sE)} ${fmtTime(sE)}`;
+                block.addEventListener('click', (e) => { e.stopPropagation(); toast(`Gesperrt: ${sp.grund}`, 'error'); });
+                inner.appendChild(block);
+            }
 
             for (const r of reservations) {
                 const rS = new Date(r.start_time);

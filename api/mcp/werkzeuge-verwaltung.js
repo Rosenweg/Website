@@ -289,9 +289,13 @@ const WERKZEUGE_VERWALTUNG = [
   {
     name: 'wasch_abrechnung_starten', rolle: 'ausschuss', pfad: 'wasch', methode: 'POST', frei: false, nurLesen: false,
     titel: 'Abrechnungslauf starten',
-    beschreibung: 'Den Abrechnungslauf der Waschküche jetzt ausführen (läuft sonst am 1. um 08:00). Bestätigt — erzeugt Rechnungen.',
-    eingabe: { bestaetigt: z.boolean().optional() },
-    async lauf(api, a) { return a.bestaetigt ? api('POST', '/api/wasch/admin/billing/run') : vorschau('Der Abrechnungslauf würde jetzt gestartet und Rechnungen erzeugen.'); },
+    beschreibung: 'Einen vergangenen Monat der Waschküche abrechnen (ohne monat: Vormonat; mit Einstellung auto_billing läuft das am 1. um 08:00 selbst). Jeder Monat nur einmal. Bestätigt — verschickt Abrechnungen per E-Mail.',
+    eingabe: { monat: z.string().regex(/^\d{4}-\d{2}$/).optional(), bestaetigt: z.boolean().optional() },
+    async lauf(api, a) {
+      return a.bestaetigt
+        ? api('POST', '/api/wasch/admin/billing/run', { body: a.monat ? { month: a.monat } : {} })
+        : vorschau(`Die Abrechnung ${a.monat || 'des Vormonats'} würde jetzt ausgeführt und per E-Mail verschickt.`);
+    },
   },
   {
     name: 'zutritt_admin', rolle: 'ausschuss', pfad: 'access', methode: 'GET', frei: true, nurLesen: true,
