@@ -341,13 +341,22 @@ async function alleAbmelden(token, jetzt = Date.now()) {
 
 // ─── Seiten (Bestätigungslink) ──────────────────────────────────────────────
 function seite(titel, inhalt) {
+  // Gleiches Bild wie /app-anmelden: blauer Grund, Wappen, helle Karte, breite Knöpfe.
   return `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`
-    + `<meta name="robots" content="noindex"><title>${esc(titel)}</title></head>`
-    + `<body style="font-family:sans-serif;max-width:34rem;margin:2.5rem auto;padding:0 1rem;line-height:1.45">`
-    + `<h1 style="font-size:1.35rem">${esc(titel)}</h1>${inhalt}</body></html>`;
+    + `<meta name="robots" content="noindex"><title>${esc(titel)} – Rosenweg</title><link rel="icon" href="/logo-rosenweg.png">`
+    + `<style>`
+    + `*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#1e3a8a;color:#fff;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.45}`
+    + `main{max-width:28rem;margin:0 auto;padding:2rem 1.25rem;text-align:center}`
+    + `.kopf{color:#bfdbfe;font-size:.85rem;margin-bottom:1rem}.wappen{width:6rem;height:6rem;display:block;margin:0 auto 1.25rem}`
+    + `h1{font-size:1.5rem;margin:0 0 1rem}.karte{background:rgba(30,64,175,.5);border:2px solid #2563eb;border-radius:1rem;padding:1rem;text-align:left;margin:0 0 1.25rem}`
+    + `.karte p{margin:.35rem 0}.gross{font-size:1.1rem;font-weight:600}.klein{color:#bfdbfe;font-size:.85rem}`
+    + `form{margin:0 0 .75rem}button{display:block;width:100%;padding:.85rem 1rem;border-radius:14px;border:1.2px solid #fff;color:#fff;font-size:1.05rem;cursor:pointer}`
+    + `p.text{margin:0 0 1.25rem}`
+    + `</style></head><body><main><div class="kopf">Rosenweg · Aktion bestätigen</div>`
+    + `<img class="wappen" src="/logo-rosenweg.png" alt="Rosenweg"><h1>${esc(titel)}</h1>${inhalt}</main></body></html>`;
 }
-const knopf = (aktion, text, farbe) => `<form method="post" action="${esc(aktion)}" style="display:inline-block;margin:0 .5rem .5rem 0">`
-  + `<button type="submit" style="background:${farbe};color:#fff;border:0;border-radius:6px;padding:.6rem 1rem;font-size:1rem;cursor:pointer">${esc(text)}</button></form>`;
+const knopf = (aktion, text, farbe) => `<form method="post" action="${esc(aktion)}">`
+  + `<button type="submit" style="background:${farbe}">${esc(text)}</button></form>`;
 
 function routen(app) {
   const kopf = (res) => res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Robots-Tag': 'noindex' }).type('html');
@@ -358,16 +367,17 @@ function routen(app) {
     try {
       const e = await standLesen(req.params.token);
       if (!e) return res.status(404).send(seite('Link ungültig', '<p>Diesen Bestätigungslink gibt es nicht.</p>'));
-      const angaben = `<p style="font-size:1.1rem"><strong>${esc(e.text)}</strong><br><span style="color:#6b7280">${esc(e.methode)} ${esc(e.pfad)}</span></p>`
-        + `<p>Ausgelöst: ${esc(zeitText(e.zeit))}<br>Von: ${esc(e.name || e.email)}<br>Woher: ${esc(herkunftText(e) || 'unbekannt')}</p>`;
+      const angaben = `<div class="karte"><p class="gross">${esc(e.text)}</p>`
+        + `<p>Ausgelöst: ${esc(zeitText(e.zeit))}<br>Von: ${esc(e.name || e.email)}<br>Woher: ${esc(herkunftText(e) || 'unbekannt')}</p>`
+        + `<p class="klein">${esc(e.methode)} ${esc(e.pfad)}</p></div>`;
       if (e.status !== 'wartet') return res.send(seite('Schon erledigt', angaben + `<p>Status: ${esc(e.status)}.</p>`));
       if (Date.now() > e.ablauf) {
         return res.send(seite('Link abgelaufen', angaben + '<p>Bitte die Aktion noch einmal auslösen.</p>'
           + knopf(basis(req.params.token) + '/ablehnen', 'Das war ich nicht – Karte sperren', '#b91c1c')));
       }
       res.send(seite('Aktion bestätigen', angaben
-        + '<p>Mit deiner Rosenweg-Karte soll das ausgeführt werden. Erst mit „Bestätigen“ geschieht es.</p>'
-        + knopf(basis(req.params.token) + '/bestaetigen', 'Bestätigen', '#1e40af')
+        + '<p class="text">Mit deiner Rosenweg-Karte soll das ausgeführt werden. Erst mit „Bestätigen“ geschieht es.</p>'
+        + knopf(basis(req.params.token) + '/bestaetigen', 'Bestätigen', '#2563eb')
         + `<span id="ablehnen"></span>` + knopf(basis(req.params.token) + '/ablehnen', 'Ablehnen – Karte sperren', '#b91c1c')));
     } catch (err) {
       console.error('[karten-bestaetigung] ansehen:', err.message);
@@ -379,7 +389,7 @@ function routen(app) {
     try {
       const r = await bestaetigen(req.params.token);
       res.status(r.ok ? 200 : (r.status ? 200 : 410)).send(seite(r.ok ? 'Bestätigt' : 'Nicht ausgeführt',
-        (r.eintrag ? `<p><strong>${esc(r.eintrag.text)}</strong></p>` : '') + `<p>${esc(r.meldung)}</p>`));
+        (r.eintrag ? `<div class="karte"><p class="gross">${esc(r.eintrag.text)}</p></div>` : '') + `<p class="text">${esc(r.meldung)}</p>`));
     } catch (err) {
       console.error('[karten-bestaetigung] bestaetigen:', err.message);
       res.status(500).send(seite('Fehler', '<p>Die Aktion konnte nicht ausgeführt werden.</p>'));
