@@ -853,6 +853,9 @@
       } else if (isOwnerConfirmCase) {
         // Owner bestätigt Erhalt
         if (act === 'ausbezahlt') visible = true;
+      } else if (STATE.can_mark_paid && !isMine && a.status === 'genehmigt') {
+        // Verwaltung der STWEG meldet die Auszahlung (prüfen/genehmigen bleibt beim Ausschuss)
+        if (act === 'ausbezahlt') visible = true;
       }
       if (visible && act === a.status) enabled = false;
       b.style.display = visible ? '' : 'none';

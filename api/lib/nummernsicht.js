@@ -24,7 +24,7 @@
 //
 // Alles hier ist rein (keine Datenbank), damit es ohne Postgres testbar ist;
 // das Laden der internen Nummern bekommt den Pool als Argument.
-const { isTechnik, isPraesident, getUserStwegs } = require('./groups');
+const { isTechnik, isPraesident, getUserStwegs, verwaltungGruppenStwegs, istVerwaltungUebergang } = require('./groups');
 
 const KANAL_PORTAL = 'portal';
 const KANAL_VERZEICHNIS = 'verzeichnis';
@@ -84,6 +84,9 @@ function darfEchteNummernSehen(user, person = {}, { kanal = KANAL_VERZEICHNIS, v
   }
   if (kanal !== KANAL_PORTAL) return false;
   const meine = getUserStwegs((user.groups || []).map(String));
+  // Hausverwaltung je STWEG (stwegN-verwaltung): die Gruppe selbst bestimmt die STWEG.
+  for (const v of verwaltungGruppenStwegs((user.groups || []).map(String))) meine.add(v);
+  // ÜBERGANG: alte globale Gruppe „Verwaltung“ – STWEGs aus dem Vertrag (verwaltungen)
   for (const v of verwaltet || []) meine.add(Number(v));
   if (meine.size === 0) return false;
   const seine = [person.stweg, ...(Array.isArray(person.stwegs) ? person.stwegs : [])]
@@ -188,8 +191,11 @@ function nummernSichtAus(user, kanal, interne, verwaltet = []) {
   });
 }
 
+// ÜBERGANG: nur die alte globale Gruppe „Verwaltung“ braucht die Zuordnung ueber
+// die Vertraege; stwegN-verwaltung ist schon an die STWEG gebunden. Nach dem
+// Umhaengen in Authentik faellt dieser Weg (und VERWALTET_SQL) weg.
 function istVerwaltungsGruppe(user) {
-  return (user?.groups || []).some((g) => String(g).toLowerCase() === 'verwaltung');
+  return istVerwaltungUebergang((user?.groups || []).map(String));
 }
 
 // Welche STWEGs verwaltet die Liegenschaftsverwaltung, zu der `user` gehoert?

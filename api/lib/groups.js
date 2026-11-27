@@ -77,6 +77,8 @@ function isAusschussForAny(groups) {
 function canSeeVerwaltungKontakte(groups, verwaltungStweg, level) {
   groups = groups || [];
   if (isTechnik(groups) || isPraesident(groups)) return true;
+  // Die Hausverwaltung sieht die Kontakte ihrer eigenen Verwaltung (je STWEG).
+  if (verwaltungStweg == null || verwaltungStweg === '' ? isVerwaltungForAny(groups) : isVerwaltungFor(groups, verwaltungStweg)) return true;
   const lvl = level || 'ausschuss';
   if (lvl === 'technik_praesident') return false;
   const vS = (verwaltungStweg == null || verwaltungStweg === '') ? null : Number(verwaltungStweg);
@@ -92,7 +94,84 @@ function canSeeVerwaltungKontakte(groups, verwaltungStweg, level) {
   return false;
 }
 
+// ─── Hausverwaltung je STWEG ─────────────────────────────────────────
+// Die Liegenschaftsverwaltung gilt je STWEG (wie der Ausschuss): Gruppe
+// stwegN-verwaltung bzw. meg-verwaltung fuer STWEG 8 (MEG-Tiefeinstellhalle).
+// Meist verwaltet dieselbe Firma alle STWEGs; ihr Konto steht dann in allen
+// Gruppen. Eine Verwaltungsgruppe macht das Konto NICHT zum Bewohner/Eigentuemer:
+// getUserStwegs() kennt sie absichtlich nicht (Mailverteiler, Waschkueche-
+// Buchung, Abstimmungen usw. bleiben den Bewohnergruppen vorbehalten). Wo die
+// Verwaltung Daten einer STWEG sehen darf, wird verwaltungStwegs() ausdruecklich
+// dazugenommen (z. B. getStwegsMitVerwaltung).
+const VERWALTUNG_GROUPS = {
+  1: 'stweg1-verwaltung', 2: 'stweg2-verwaltung', 3: 'stweg3-verwaltung', 4: 'stweg4-verwaltung',
+  5: 'stweg5-verwaltung', 6: 'stweg6-verwaltung', 7: 'stweg7-verwaltung', 8: 'meg-verwaltung',
+};
+const ALLE_STWEGS = Object.keys(VERWALTUNG_GROUPS).map(Number);
+
+// ÜBERGANG (Umstellung auf Verwaltung je STWEG, Nov. 2026): Die alte globale
+// Gruppe „Verwaltung“ gilt weiter als Verwaltung ALLER STWEGs, bis das Konto in
+// Authentik in stwegN-verwaltung/meg-verwaltung umgehaengt ist. Entfernen:
+// 1. In Authentik pruefen, dass niemand mehr in „Verwaltung“ steht.
+// 2. VERWALTUNG_UEBERGANG_GLOBAL und die Zeile in verwaltungStwegs() hier
+//    loeschen (Suche nach „ÜBERGANG“ im Repo findet alle Stellen).
+// 3. Seed-Zeilen 'Verwaltung' in server.js (initDB) und die Rechte-Zeilen der
+//    Gruppe in der Tabelle permissions loeschen.
+const VERWALTUNG_UEBERGANG_GLOBAL = 'verwaltung';
+function istVerwaltungUebergang(groups) {
+  return (groups || []).some(g => String(g).toLowerCase() === VERWALTUNG_UEBERGANG_GLOBAL);
+}
+
+/** STWEG-Nummern, die nur ueber die Gruppen stwegN-verwaltung verwaltet werden (ohne Übergang). */
+function verwaltungGruppenStwegs(groups) {
+  const lower = new Set((groups || []).map(g => String(g).toLowerCase()));
+  const stwegs = new Set();
+  for (const [nr, name] of Object.entries(VERWALTUNG_GROUPS)) {
+    if (lower.has(name)) stwegs.add(Number(nr));
+  }
+  return stwegs;
+}
+
+/** STWEG-Nummern, die das Konto als Hausverwaltung betreut (inkl. Übergang „Verwaltung“ = alle). */
+function verwaltungStwegs(groups) {
+  if (istVerwaltungUebergang(groups)) return new Set(ALLE_STWEGS); // ÜBERGANG
+  return verwaltungGruppenStwegs(groups);
+}
+
+/** Ist das Konto Hausverwaltung dieser STWEG? */
+function isVerwaltungFor(groups, stweg) {
+  const n = Number(stweg);
+  return Number.isFinite(n) && verwaltungStwegs(groups).has(n);
+}
+
+/** Ist das Konto Hausverwaltung irgendeiner STWEG? */
+function isVerwaltungForAny(groups) {
+  return verwaltungStwegs(groups).size > 0;
+}
+
+/** Verwaltet das Konto alle STWEGs? Nur dann sieht es auch Eintraege ohne STWEG (stweg NULL). */
+function verwaltetAlleStwegs(groups) {
+  const s = verwaltungStwegs(groups);
+  return ALLE_STWEGS.every(n => s.has(n));
+}
+
+/** Ist g ein Gruppenname einer Hausverwaltung (je STWEG oder Übergang)? */
+function istVerwaltungsGruppenName(g) {
+  const n = String(g || '').toLowerCase();
+  return n === VERWALTUNG_UEBERGANG_GLOBAL || Object.values(VERWALTUNG_GROUPS).includes(n);
+}
+
+/** STWEGs, deren Daten das Konto sieht: als Bewohner/Eigentuemer/Ausschuss oder als Verwaltung. */
+function getStwegsMitVerwaltung(groups) {
+  const s = getUserStwegs(groups || []);
+  for (const n of verwaltungStwegs(groups)) s.add(n);
+  return s;
+}
+
 module.exports = {
+  VERWALTUNG_GROUPS, VERWALTUNG_UEBERGANG_GLOBAL, ALLE_STWEGS, istVerwaltungUebergang,
+  verwaltungGruppenStwegs, verwaltungStwegs, isVerwaltungFor, isVerwaltungForAny,
+  verwaltetAlleStwegs, istVerwaltungsGruppenName, getStwegsMitVerwaltung,
   STWEG_GROUPS, parseStweg, getUserStwegs, stwegFolderName, folderStwegNr,
   isTechnik, isPraesident, getAusschussStwegs, isAusschussForAny,
   canSeeVerwaltungKontakte,

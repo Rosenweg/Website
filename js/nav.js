@@ -18,14 +18,16 @@ const TELEFON_NAV_GRUPPEN = 'bewohner,eigentuemer,ausschuss,technik,praesident,v
 // also Bewohner/Eigentümer, dazu das Seitenrecht „waschküche“.
 const WASCH_NAV_GRUPPEN = 'waschküche,bewohner,eigentuemer,technik,praesident';
 
-// Menü „Verwaltung“ (Hausverwaltung, Gruppe „Verwaltung“). Das Menü selbst
-// erscheint nur für diese Gruppe (data-nur-gruppe, auch nicht für Technik –
+// Menü „Verwaltung“ (Hausverwaltung je STWEG: stwegN-verwaltung, meg-verwaltung,
+// api/lib/groups.js VERWALTUNG_GROUPS; ÜBERGANG: alte Gruppe „Verwaltung“). Das
+// Menü selbst erscheint nur für diese Gruppen (data-nur-gruppe, auch nicht für Technik –
 // die hat „Admin ↗“), jeder Eintrag nur mit dem Seitenrecht. Rechte-Schlüssel
 // mit Umlaut zusätzlich in ASCII, falls sie so in der Rechte-Tabelle stehen.
 // Ohne eigenen Eintrag: kontakte (Reiter in der Objektverwaltung), verwaltung
 // (öffentliche Seite „Hausverwaltung“ im Bewohner-Menü), Waschküche-Admin
 // (prüft auf Technik).
-const VERWALTUNG_NAV_GRUPPE = 'verwaltung';
+const VERWALTUNG_NAV_GRUPPE = 'verwaltung,' // ÜBERGANG, nach dem Umhängen in Authentik streichen
+  + [1, 2, 3, 4, 5, 6, 7].map(n => `stweg${n}-verwaltung`).join(',') + ',meg-verwaltung';
 const VERWALTUNG_NAV = [
   { label: '🏢 Objektverwaltung', href: 'objektverwaltung.html', key: 'verwaltung', permAny: 'objektverwaltung,wohnungsverwaltung,bewohner-verwaltung' },
   { label: '✍️ Unterschriften-Rückläufe', href: 'unterschriftenliste-ruecklaeufe.html', key: 'ruecklaeufe', permAny: 'wohnungsverwaltung' },

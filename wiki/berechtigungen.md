@@ -29,13 +29,17 @@ Eine Person kann mehrere Rollen haben; es gilt jeweils die weitestgehende.
 |---|---|---|
 | **Technik** | `technik` | volle Rechte |
 | **Präsident** | `Präsident` (auch `praesident` wird erkannt) | volle Rechte wie Technik (Ausnahme siehe 5.3) |
-| **Verwaltung** | `verwaltung` | Hausverwaltung mit Web-Login; Rechte über die Rechteverwaltung und über eine Gruppe der betreuten STWEG |
+| **Verwaltung** | `stweg1-verwaltung` … `stweg7-verwaltung`, `meg-verwaltung` (= STWEG 8) | Hausverwaltung mit Web-Login, gebunden an **diese** STWEG (wie der Ausschuss); keine Bewohnergruppe nötig. Verwaltet eine Firma alle STWEGs, steht ihr Konto in allen acht Gruppen. **Übergang:** die alte Gruppe `verwaltung` gilt bis zum Umhängen als Verwaltung aller STWEGs (`api/lib/groups.js`, Suche „ÜBERGANG“) |
 | **Ausschuss** | `stweg1-ausschuss` … `stweg7-ausschuss`, `meg-ausschuss` (= STWEG 8) | gebunden an **diese** STWEG |
 | **Eigentümer** | `stweg1-eigentuemer`, `stweg2-…`, `r9-eigentuemer` (STWEG 3), `stweg4-…`, `stweg5-…`, `r1-eigentuemer` (STWEG 6), `stweg7-…`, `meg-eigentuemer`; Eltern-Gruppe `eigentuemer` | Verwalter einer Wohnung (`wohnungen_kontakte.rolle='verwalter'`) werden wie Eigentümer in diese Gruppen gelegt |
 | **Bewohner / Mieter** | `stweg1-bewohner`, …, `r9-bewohner` (STWEG 3), `r1-bewohner` (STWEG 6), `meg-bewohner`; Eltern-Gruppe `bewohner` | Mieter und Bewohner aus `wohnungen_kontakte` |
 | **Anonym** | – | ohne Anmeldung |
 
-Die Zuordnung STWEG ↔ Gruppen steht in `api/lib/groups.js` (`STWEG_GROUPS`).
+Die Zuordnung STWEG ↔ Gruppen steht in `api/lib/groups.js` (`STWEG_GROUPS`,
+für die Verwaltung `VERWALTUNG_GROUPS` mit `verwaltungStwegs`, `isVerwaltungFor`).
+Die Verwaltungsgruppen zählen absichtlich nicht als Mitglied der STWEG
+(`getUserStwegs`): Waschküche, Dokumente der STWEG und Verteiler bleiben bei den
+Bewohnergruppen.
 **Wichtig:** Eine allgemeine Gruppe `ausschuss` ohne STWEG-Nummer zählt im Code
 nicht als Ausschuss (`isAusschussForAny` kennt nur die STWEG-Gruppen); sie wirkt
 nur, wenn sie in der Rechteverwaltung Einträge hat.
@@ -50,9 +54,11 @@ nur, wenn sie in der Rechteverwaltung Einträge hat.
 | `requireAusschussOrTechnik` | Technik, Präsident, Ausschuss **irgendeiner** STWEG |
 | `requireEigentuemer` | Technik, Präsident, jede Gruppe mit `eigentuemer` im Namen |
 | `canManageDocs` | Technik, Präsident, jede Gruppe, die auf `-ausschuss` endet |
-| `canViewKontakteHistory` | Technik, Präsident, `verwaltung`, jede `-ausschuss`-Gruppe |
-| `requireStwegAccess` | Technik, Präsident, jede Gruppe (Ausschuss/Eigentümer/Bewohner) **dieser** STWEG |
-| `requireStwegWrite` / `stwegSchreibErlaubt` | Technik, Präsident, Ausschuss **dieser** STWEG, `verwaltung` nur zusammen mit einer Gruppe **dieser** STWEG |
+| `canViewKontakteHistory` | Technik, Präsident, jede Verwaltungsgruppe, jede `-ausschuss`-Gruppe |
+| `requireStwegAccess` | Technik, Präsident, jede Gruppe (Ausschuss/Eigentümer/Bewohner) **dieser** STWEG, Verwaltung **dieser** STWEG |
+| `requireStwegWrite` / `stwegSchreibErlaubt` | Technik, Präsident, Ausschuss **dieser** STWEG, Verwaltung **dieser** STWEG |
+| `stwegSicht` (`api/lib/stweg-sicht.js`) | Reklamationen, Auslagen: Ausschuss und Verwaltung sehen ihre STWEG(s); Einträge ohne STWEG Ausschuss und eine Verwaltung aller STWEGs |
+| `vmSicht`, `vmDarfVerwalten` (`api/lib/vollmacht-rechte.js`) | Vollmachten: Verwaltung nur mit Seitenrecht `vollmachten` (lesen = ihre STWEG(s) sehen, schreiben = für Dritte erfassen, Papier aktivieren) |
 
 ### 1.3 Seeds der Rechte-Tabelle
 
@@ -66,7 +72,8 @@ NOTHING` – geänderte Werte bleiben):
 | `stweg3-ausschuss`, `stweg6-ausschuss` | `bewohner-verwaltung` | write |
 | alle `*-eigentuemer` und `eigentuemer` | `auslagen` | read |
 | `technik`, `Präsident` | `pbx-admin`, `loeschungen` | write |
-| `Verwaltung` *(nur wenn die Tabelle beim ersten Start leer war)* | `bewohner-verwaltung` write; `energie-monitor`, `email-verteiler`, `zähler`, `kontakte`, `verwaltung` read | |
+| `stweg1-verwaltung` … `stweg7-verwaltung`, `meg-verwaltung` | `objektverwaltung`, `wohnungsverwaltung`, `reklamationen`, `handwerker` write; `vollmachten`, `auslagen`, `zähler`/`zaehler`, `energie-monitor`, `waschküche-admin`/`waschkueche-admin`, `projekte`, `kontakte`, `verwaltung`, `email-verteiler`, `bewohner-verwaltung` read | |
+| `Verwaltung` *(Übergang; nur wenn die Tabelle beim ersten Start leer war)* | `bewohner-verwaltung` write; `energie-monitor`, `email-verteiler`, `zähler`, `kontakte`, `verwaltung` read | |
 
 Alle weiteren Einträge (z. B. `handwerker`, `energie-config`, `energie-monitor` für
 Bewohner, `wohnungsverwaltung` für die Verwaltung) gibt es nur, wenn sie in der
@@ -94,7 +101,7 @@ hat dort keine Rechte, auch wenn er dort wohnt oder Eigentümer ist.
 | Zugangstoken (PAT), Passkeys, MQTT-App-Passwörter | — | ✅ eigene (nur im Browser) | ✅ eigene | ✅ eigene | ✅ eigene | ✅ | ✅ |
 | Eigene Wohnung im Profil (`/api/me/wohnung`) | — | ✅ eigene | ✅ eigene | ✅ eigene | ✅ eigene | ✅ | ✅ |
 | Adressmutation melden | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Telefonbuch | — | 👁 🅢, ohne Archivierte | 👁 🅢, ohne Archivierte | 👁 alle | 👁 alle | 👁 alle | 👁 alle |
+| Telefonbuch | — | 👁 🅢, ohne Archivierte | 👁 🅢, ohne Archivierte | 👁 alle | 👁 🅢 ohne Archivierte (alle bei Verwaltung aller STWEGs) | 👁 alle | 👁 alle |
 | KI-Suche (30/Min.) | — | 👁 nur Sichtbares | 👁 | 👁 + Wohnungen 🅢 | 👁 erweitert | 👁 alles | 👁 alles |
 | Dashboard / Übersicht | — | 👁 eigene | 👁 eigene | 👁 + Freigaben 🅢 | 👁 eigene | 👁 alles | 👁 alles |
 | Push-Benachrichtigungen | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -107,9 +114,9 @@ hat dort keine Rechte, auch wenn er dort wohnt oder Eigentümer ist.
 | Reparatur melden ohne Konto (E-Mail-Code, 8 Stellen, 5 Versuche) | ✅ | – | – | – | – | – | – |
 | Reparatur melden angemeldet (5 / 10 Min.) | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Eigene Meldungen, Verlauf, Foto | — | 👁 eigene | 👁 eigene | 👁 eigene | 👁 eigene | 👁 | 👁 |
-| Reklamationsliste und Bearbeitung (`reklamationen`) | — | — | — | ✅ 🅢 + ohne STWEG | (R), sieht dann aber nur eigene Meldungen | ✅ alle | ✅ alle |
+| Reklamationsliste und Bearbeitung (`reklamationen`) | — | — | — | ✅ 🅢 + ohne STWEG | (R) 🅢 (ohne STWEG nur bei Verwaltung aller STWEGs) | ✅ alle | ✅ alle |
 | Melde-Orte, Auto-Zuweisung | — | — | — | ✅ (Recht `reklamationen`) | (R) | ✅ | ✅ |
-| Waschküche: Räume, Belegung, reservieren | — | ✅ 🅢 | ✅ 🅢 | ✅ 🅢 | ✅ 🅢 (falls Gruppe der STWEG) | ✅ alle | ✅ alle |
+| Waschküche: Räume, Belegung, reservieren | — | ✅ 🅢 | ✅ 🅢 | ✅ 🅢 | — (nur mit Bewohnergruppe) | ✅ alle | ✅ alle |
 | Waschküche: eigene Läufe und Kosten | — | 👁 eigene | 👁 eigene | 👁 eigene | 👁 eigene | 👁 | 👁 |
 | Waschküche-Admin (Räume, Einstellungen, Abrechnung, Türen) | — | — | — | — | — | ✅ | ✅ |
 | Türen öffnen (Zutritt-PWA, 10 / 10 Min., protokolliert) | — | ✅ nach Policy | ✅ nach Policy | ✅ nach Policy | ✅ nach Policy | ✅ | ✅ |
@@ -123,25 +130,25 @@ hat dort keine Rechte, auch wenn er dort wohnt oder Eigentümer ist.
 | Öffentliche STWEG-Infos (Wohnungsliste ohne Namen, Übersicht, Ausschuss-/Technik-Kontakte, Verwaltung öffentlich, Verteilerliste) | 👁 | 👁 | 👁 | 👁 | 👁 | 👁 | 👁 |
 | STWEG-Kontakte (`/api/stweg/:nr/kontakte`, `/api/kontakte/:stweg`) | — | 👁 🅢 | 👁 🅢 | 👁 🅢 | 👁 🅢 | 👁 alle | 👁 alle |
 | Wohnungen lesen (`wohnungsverwaltung` read + Gruppe der STWEG) | — | (R) 🅢 | (R) 🅢 | 👁 🅢 | (R) 🅢 | 👁 | 👁 |
-| Wohnungen, Kontakte, Import, Archiv schreiben | — | — | — | ✅ 🅢 | (R) 🅢 mit Gruppe der STWEG | ✅ | ✅ |
+| Wohnungen, Kontakte, Import, Archiv schreiben | — | — | — | ✅ 🅢 | (R) 🅢 | ✅ | ✅ |
 | Kontakt-Historie | — | — | — | 👁 🅢 | 👁 🅢 | 👁 | 👁 |
 | Personen lesen | — | (R) 🅢 | (R) 🅢 | 👁 🅢 | (R) | 👁 | 👁 |
 | Personen ändern / zusammenführen | — | — | — | ✅ 🅢, **nicht** Personen mit eigenem Konto oder Wohnungen ausserhalb (→ 409) | (R) wie Ausschuss | ✅ | ✅ |
-| Benutzerkonten: Liste | — | — | — | 👁 nur Konten der eigenen STWEG | — | 👁 alle | 👁 alle |
+| Benutzerkonten: Liste (Reiter „Bewohner“ nur, wenn erlaubt) | — | — | — | 👁 nur Konten der eigenen STWEG | — | 👁 alle | 👁 alle |
 | Benutzerkonto anlegen (Recht `bewohner-verwaltung` write) | — | — | — | ✅ ohne Passwort, Name `vorname.nachname`, nur Bewohner-/Eigentümer-Gruppen 🅢 | ✅ falls Seed/Recht vorhanden, aber keine Gruppen vergebbar | ✅ | ✅ |
 | Benutzerkonto ändern | — | — | — | ✅ 🅢; keine Technik-/Präsident-Konten, keine E-Mail, keine Aktivierung, keine Gruppen | — | ✅ | ✅ |
 | Gruppen zuordnen (`/api/admin/groups`) | — | — | — | ✅ nur Bewohner-/Eigentümer-Gruppen 🅢, nur an Konten, die nur solche Gruppen haben oder schon in der STWEG sind | (R) | ✅ | ✅ |
 | Benutzerkonto löschen | — | — | — | — | — | ✅ | ✅ |
 | Vorgemerkte Löschungen (`loeschungen`) | — | — | — | — | — | ✅ | ✅ |
 | ZEV: eigene Rechnungen, PDF, „bezahlt“ | — | ✅ eigene | ✅ eigene + Wohnungen | ✅ eigene | ✅ eigene | ✅ | ✅ |
-| ZEV-Konfiguration und Abgleich | — | — | — | ✅ 🅢 | (R) 🅢 mit Gruppe der STWEG | ✅ | ✅ |
+| ZEV-Konfiguration und Abgleich | — | — | — | ✅ 🅢 | (R) 🅢 | ✅ | ✅ |
 | ZEV: unzugeordnete Rechnungen zuordnen | — | — | — | ✅ 🅢, nur unzugeordnete | — | ✅ auch umhängen | ✅ |
-| Unterschriftenliste erzeugen / Rückläufe erfassen | — | — | — | ✅ 🅢 | (R) 🅢 mit Gruppe der STWEG | ✅ | ✅ |
+| Unterschriftenliste erzeugen / Rückläufe erfassen | — | — | — | ✅ 🅢 | (R) 🅢 | ✅ | ✅ |
 | Echtheitsprüfung Unterschriftenliste (30 / 10 Min.) | 👁 | 👁 | 👁 | 👁 | 👁 | 👁 | 👁 |
 | STWEG-Seiten (Module, Inhalte, Abschnitte) | 👁 | 👁 | 👁 | ✅ 🅢 | — | ✅ | ✅ |
 | STWEG-Termine | — | 👁 🅢 | 👁 🅢 | 👁 🅢 | 👁 🅢 | ✅ | ✅ |
 | Verwaltungen (Firmen, Plattform-Zugänge) | 👁 öffentlicher Teil | — | — | 👁 eigene STWEG + übergreifende, ✅ nur eigene STWEG | — | ✅ | ✅ |
-| Kontakte der Verwaltungen | — | je nach Sichtbarkeitsstufe 🅢 | je nach Stufe 🅢 | je nach Stufe 🅢 | — | 👁 | 👁 |
+| Kontakte der Verwaltungen | — | je nach Sichtbarkeitsstufe 🅢 | je nach Stufe 🅢 | je nach Stufe 🅢 | 👁 eigene Verwaltung 🅢 | 👁 | 👁 |
 | Grundbuch: Status und Anteile | — | 👁 ohne Namen/Adressen | 👁 ohne Namen | 👁 vollständig | 👁 ohne Namen | 👁 | 👁 |
 | Grundbuch: reservieren, erfassen, OCR (30 / Std.) | — | ✅ eigene Reservation | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Grundbuch: verifizieren, Auszugsbild | — | nur eigenes Bild | nur eigenes Bild | ✅ (jede STWEG) | — | ✅ | ✅ |
@@ -149,17 +156,17 @@ hat dort keine Rechte, auch wenn er dort wohnt oder Eigentümer ist.
 | Projekte lesen, kommentieren | öffentliche Projekte | — | 👁 ✅ Kommentar | 👁 | — | ✅ | ✅ |
 | Projekte bearbeiten (Kandidaten, Zeitplan, Anhänge, Budget, öffentlich) | — | — | — | ✅ (jede STWEG) | — | ✅ | ✅ |
 | Vollmachten: eigene erfassen, signieren, PDF hochladen | — | ✅ eigene | ✅ eigene | ✅ eigene | ✅ | ✅ | ✅ |
-| Vollmachten der STWEG sehen | — | — | — | 👁 🅢 | 👁 alle | 👁 alle | 👁 alle |
-| Vollmachten für andere erfassen, Papier-Vollmacht aktivieren | — | — | — | — | ✅ | ✅ | ✅ |
+| Vollmachten der STWEG sehen | — | — | — | 👁 🅢 | (R `vollmachten` lesen) 🅢 | 👁 alle | 👁 alle |
+| Vollmachten für andere erfassen, Papier-Vollmacht aktivieren | — | — | — | — | (R `vollmachten` schreiben) 🅢 | ✅ | ✅ |
 | Vollmachten: Admin-Upload für alle Geber (`?als=admin`) | — | — | — | — | — | ✅ | ✅ |
 
 ### 2.4 Finanzen, Handwerker, Mail
 
 | Bereich | Anonym | Bewohner/Mieter | Eigentümer | Ausschuss | Verwaltung | Technik | Präsident |
 |---|---|---|---|---|---|---|---|
-| Auslagen einreichen, eigene sehen (`auslagen` read) | — | (R) | ✅ eigene | ✅ eigene | (R) | ✅ | ✅ |
+| Auslagen einreichen, eigene sehen (`auslagen` read) | — | (R) | ✅ eigene | ✅ eigene | (R) 👁 alle 🅢 | ✅ | ✅ |
 | Auslagen prüfen/genehmigen | — | — | — | ✅ 🅢 + ohne STWEG, **nicht eigene** | — | ✅ | ✅ |
-| Auslagen als ausbezahlt markieren | — | — | ✅ eigene („erhalten“) | — | ✅ | ✅ | ✅ |
+| Auslagen als ausbezahlt markieren | — | — | ✅ eigene („erhalten“) | — | ✅ 🅢, genehmigte | ✅ | ✅ |
 | Entwürfe sehen/ändern | — | nur Ersteller | nur Ersteller | nur Ersteller | nur Ersteller | 👁 | 👁 |
 | Beleg-Scan (KI, 30 / Std.) | — | (R) | ✅ | ✅ | (R) | ✅ | ✅ |
 | Auslagen-Stundensatz ändern | — | — | — | ✅ | — | ✅ | ✅ |

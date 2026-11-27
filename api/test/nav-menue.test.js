@@ -19,7 +19,11 @@ function konstanten() {
 
 test('Verwaltungsmenü: jede Seite gibt es, Adresse ohne Umlaut, jeder Eintrag mit Seitenrecht', () => {
   const k = konstanten();
-  assert.equal(k.VERWALTUNG_NAV_GRUPPE, 'verwaltung');
+  // Verwaltung je STWEG (api/lib/groups.js) plus Übergang „verwaltung“
+  const { VERWALTUNG_GROUPS } = require('../lib/groups');
+  const navGruppen = k.VERWALTUNG_NAV_GRUPPE.split(',');
+  assert.ok(navGruppen.includes('verwaltung'));
+  for (const g of Object.values(VERWALTUNG_GROUPS)) assert.ok(navGruppen.includes(g), g + ' fehlt im Menü');
   assert.ok(k.VERWALTUNG_NAV.length >= 5);
   for (const v of k.VERWALTUNG_NAV) {
     assert.match(v.href, /^[a-z0-9-]+\.html$/, v.href);

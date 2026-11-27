@@ -439,7 +439,8 @@
         ? vgListe.some(g => (g.email || '').toLowerCase() === myEmail && !g.signed_at)
         : (v.vollmachtgeber_email || '').toLowerCase() === myEmail);
       const canAdminUpload = v.status === 'entwurf' && !canSign && hatGruppe('technik', 'präsident', 'praesident');
-      const canActivatePaper = v.status === 'entwurf' && hatGruppe('technik', 'präsident', 'praesident', 'verwaltung');
+      // Der Server entscheidet (darf_papier_aktivieren: Technik/Präsident, Verwaltung der STWEG mit „Vollmachten: schreiben“)
+      const canActivatePaper = v.darf_papier_aktivieren === true;
       const canEdit = v.status === 'entwurf';
       // Der Server entscheidet (darf_widerrufen, gleiche Regel wie beim Widerrufen selbst)
       const canRevoke = v.darf_widerrufen === true;
