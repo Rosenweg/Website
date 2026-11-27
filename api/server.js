@@ -14,6 +14,7 @@ const { escapeHtml, createSemaphore, normalizePhone, safeId, geheimnisGleich, fe
 
 // STWEG-Gruppen-Mapping + pure Klassifizierer -> lib/groups.js
 const { STWEG_GROUPS, parseStweg, getUserStwegs, stwegFolderName, folderStwegNr, isTechnik, isPraesident, getAusschussStwegs, isAusschussForAny, canSeeVerwaltungKontakte } = require('./lib/groups');
+const { nummernKanal, darfEchteNummernSehen, istTechnikOderPraesident, interneNummerFinden, nummernAusgeben, nummernAusBodyEntfernen, interneNummernLaden, interneNummernCacheLeeren, interneNummernPruefen, nummernSicht } = require('./lib/nummernsicht');
 const { zevAliasAddress, zevGotoTargets } = require('./lib/zev');
 
 const app = express();
@@ -898,7 +899,9 @@ app.post('/api/ki-search', authMiddleware, async (req, res) => {
     const [personen, handwerker, vollmachten, reklamationen, mails, verwaltungen, wohnungen, projekte] = searches.map(s => s.status === 'fulfilled' ? (s.value?.rows || []) : []);
 
     // Treffer normalisieren
-    for (const p of personen) hits.push({ typ: 'Person', titel: p.name, sub: p.email || p.telefon || '', url: '/personen.html', meta: p });
+    // Personen aller STWEGs (Verwaltung): echte Nummer nur Technik/Praesident/selbst
+    const sicht = await nummernSicht(req, pool);
+    for (const p0 of personen) { const p = sicht(p0); hits.push({ typ: 'Person', titel: p.name, sub: p.email || p.telefon || p.interne_nummer || '', url: '/personen.html', meta: p }); }
     for (const h of handwerker) hits.push({ typ: 'Handwerker', titel: h.firma, sub: (h.kategorie || '') + (h.mobile ? ' · ' + h.mobile : ''), url: '/handwerker.html#' + h.id, meta: h });
     for (const v of vollmachten) hits.push({ typ: 'Vollmacht', titel: v.vollmachtgeber_name + ' → ' + v.bevollmaechtigter_name, sub: `${v.art} · ${v.status} · ${v.doc_hash}`, url: '/vollmachten.html', meta: v });
     for (const r of reklamationen) hits.push({ typ: 'Reklamation', titel: (r.beschreibung || '').slice(0, 80), sub: `STWEG ${r.stweg || '—'} · ${r.status}`, url: '/reklamationen.html', meta: r });
@@ -4189,7 +4192,8 @@ app.get('/api/kontakte/:stweg', authMiddleware, async (req, res) => {
       `SELECT * FROM kontakte WHERE stweg = $1 ORDER BY sort_order, name`,
       [stweg]
     );
-    res.json({ kontakte: result.rows });
+    const sicht = await nummernSicht(req, pool);
+    res.json({ kontakte: result.rows.map(k => sicht(k, { email: k.email, name: k.name, stweg })) });
   } catch (err) {
     res.status(500).json({ error: 'Fehler' });
   }
@@ -4202,10 +4206,13 @@ app.put('/api/kontakte', authMiddleware, adminOnly, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // Wer die echten Nummern nicht sieht (GET liefert sie leer), loescht sie
+    // beim Speichern nicht: leeres telefon heisst dann "unveraendert".
+    const telefonSql = istTechnikOderPraesident(req.user) ? '$3' : "COALESCE(NULLIF($3, ''), telefon)";
     for (const k of kontakte) {
       if (k.id) {
         await client.query(
-          `UPDATE kontakte SET name=$1, email=$2, telefon=$3, funktion=$4, wohnung=$5, sort_order=$6, updated_at=NOW()
+          `UPDATE kontakte SET name=$1, email=$2, telefon=${telefonSql}, funktion=$4, wohnung=$5, sort_order=$6, updated_at=NOW()
            WHERE id=$7`,
           [k.name, k.email, k.telefon, k.funktion, k.wohnung, k.sort_order || 0, k.id]
         );
@@ -6332,6 +6339,13 @@ app.get('/api/stweg/:nr/kontakte', authMiddleware, async (req, res) => {
       } catch {}
     }
 
+    // Zugang ist auf die eigene STWEG beschraenkt; ueber MCP/Apps trotzdem nur
+    // interne Nummern (lib/nummernsicht.js).
+    const sicht = await nummernSicht(req, pool);
+    const mitSicht = (k) => sicht(k, { email: k.email, name: k.name, stweg: nr });
+    for (const w of wohnungen) w.bewohner = w.bewohner.map(mitSicht);
+    ausschuss = ausschuss.map(mitSicht);
+
     res.json({ stweg: nr, wohnungen, ausschuss });
   } catch (err) {
     console.error('Kontakte error:', err);
@@ -6422,6 +6436,22 @@ async function findOrCreatePerson(client, name, email, telefon, adresse) {
     [nameNorm, emailNorm],
   );
   return again.rows[0]?.id || null;
+}
+
+// Ueber MCP/geteilte Telefone liefert GET die echten Nummern leer
+// (lib/nummernsicht.js). Kommt der Kontakt so zurueck, bleiben die bisherigen
+// Nummern stehen, statt geloescht zu werden.
+async function verborgeneNummernBehalten(client, req, wohnungId, kontakte) {
+  if (!Array.isArray(kontakte) || nummernKanal(req) === 'portal' || istTechnikOderPraesident(req.user)) return;
+  const alt = await client.query(
+    'SELECT id, telefon, mobile FROM wohnungen_kontakte WHERE wohnung_id = $1 AND archiviert_am IS NULL', [wohnungId]);
+  const nachId = new Map(alt.rows.map(r => [r.id, r]));
+  for (const k of kontakte) {
+    const o = k && k.id ? nachId.get(Number(k.id)) : null;
+    if (!o) continue;
+    if (!k.telefon) k.telefon = o.telefon;
+    if (!k.mobile) k.mobile = o.mobile;
+  }
 }
 
 async function saveKontakte(client, wohnungId, kontakte, stweg) {
@@ -8552,7 +8582,9 @@ app.get('/api/wohnungen/eigentuemer-uebersicht', authMiddleware, requirePermissi
     for (const e of byName.values()) e.rollen = [...e.rollen];
     // Sortierung nach Nachname (letztes Wort), bei Gleichheit nach Vorname
     const lastName = n => (n || '').trim().split(/\s+/).pop() || '';
-    res.json({ eigentuemer: [...byName.values()].sort((a,b) => {
+    const sicht = await nummernSicht(req, pool);
+    const liste = [...byName.values()].map(e => sicht(e, { email: e.email, name: e.name, stwegs: e.objects.map(o => o.stweg) }));
+    res.json({ eigentuemer: liste.sort((a,b) => {
       const c = lastName(a.name).localeCompare(lastName(b.name), 'de');
       return c !== 0 ? c : a.name.localeCompare(b.name, 'de');
     }) });
@@ -9512,7 +9544,8 @@ app.get('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverw
       return { ...w, kontakte };
     });
     wohnungen.sort((a, b) => wohnungSort(a.bezeichnung, b.bezeichnung));
-    res.json({ stweg, wohnungen });
+    const sicht = await nummernSicht(req, pool);
+    res.json({ stweg, wohnungen: wohnungen.map(w => wohnungFuerSicht(sicht, w)) });
   } catch (err) {
     console.error('Wohnungen list error:', err);
     res.status(500).json({ error: 'Fehler beim Laden der Wohnungen' });
@@ -9550,6 +9583,15 @@ app.get('/api/stweg/:stweg/overview', async (req, res) => {
   }
 });
 
+// Wohnung samt Kontakten fuer die Ausgabe: echte Nummern nach lib/nummernsicht.js
+// (Portal: eigene STWEG; MCP/geteilte Telefone: nur interne Nummern).
+function wohnungFuerSicht(sicht, w) {
+  const aus = sicht(w, { emails: [w.eigentuemer_email, w.mieter_email].filter(Boolean), stweg: w.stweg });
+  delete aus.interne_nummer;
+  if (Array.isArray(w.kontakte)) aus.kontakte = w.kontakte.map(k => sicht(k, { email: k.email, name: k.name, stweg: w.stweg }));
+  return aus;
+}
+
 // GET /api/wohnungen/:stweg/stats - Occupancy statistics
 app.get('/api/wohnungen/:stweg/stats', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
   try {
@@ -9575,7 +9617,7 @@ app.get('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
     if (!Number.isFinite(wId) || wId < 1) return res.status(400).json({ error: 'Ungültige Wohnungs-ID' });
     const w = await loadWohnungMitKontakte(wId);
     if (!w || w.stweg !== parseStweg(req.params.stweg)) return res.status(404).json({ error: 'Wohnung nicht gefunden' });
-    res.json(w);
+    res.json(wohnungFuerSicht(await nummernSicht(req, pool), w));
   } catch (err) {
     console.error('Wohnung get error:', err);
     res.status(500).json({ error: 'Fehler beim Laden der Wohnung' });
@@ -9603,7 +9645,8 @@ app.get('/api/wohnungen/:stweg/:id/historie', authMiddleware, requireStwegAccess
         ORDER BY archiviert_am DESC, rolle, id`,
       [wId]
     );
-    res.json({ wohnung: wRes.rows[0], historie: kRes.rows });
+    const sicht = await nummernSicht(req, pool);
+    res.json({ wohnung: wRes.rows[0], historie: kRes.rows.map(k => sicht(k, { email: k.email, name: k.name, stweg })) });
   } catch (err) {
     console.error('Historie error:', err);
     res.status(500).json({ error: 'Fehler beim Laden der Historie' });
@@ -9782,6 +9825,7 @@ app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Wohnung nicht gefunden' });
     }
+    await verborgeneNummernBehalten(client, req, result.rows[0].id, b.kontakte);
     const personenBisher = await adminKontaktePersonenVorbereiten(client, req, result.rows[0].id, b.kontakte); // S2-3-1
     await saveKontakte(client, result.rows[0].id, b.kontakte, stweg);
     await adminKontaktePersonenAbgleichen(client, result.rows[0].id, personenBisher, stweg);
@@ -12155,6 +12199,9 @@ app.get('/api/telefonbuch', authMiddleware, async (req, res) => {
         AND ($1::boolean OR (k.archiviert_am IS NULL AND w.stweg = ANY($2::int[])))
       ORDER BY k.name
     `, [alle, eigene]);
+    // Echte Nummern nur fuers eigene Haus (Portal) bzw. Technik/Praesident/selbst;
+    // sonst die interne Nummer 3HHWWP (lib/nummernsicht.js). Gilt auch fuer MCP.
+    const sicht = await nummernSicht(req, pool);
     // Drucker-Tags filtern, pro Name aggregieren
     const byName = new Map();
     for (const r of rows) {
@@ -12168,6 +12215,8 @@ app.get('/api/telefonbuch', authMiddleware, async (req, res) => {
           deceased: isDeceased,
           email: null,
           telefon: null,
+          interne_nummer: null,
+          nummern_verborgen: false,
           rollen: new Set(),
           wohnungen: [],
         });
@@ -12175,7 +12224,10 @@ app.get('/api/telefonbuch', authMiddleware, async (req, res) => {
       const e = byName.get(cleanName);
       // Bevorzuge Nicht-Drucker-Email
       if (!isDruckerTag && r.email && !e.email) e.email = r.email.trim();
-      if (r.telefon && !e.telefon) e.telefon = r.telefon.trim();
+      const s = sicht({ telefon: r.telefon }, { email: r.email, name: cleanName, stweg: r.stweg });
+      if (s.telefon && !e.telefon) e.telefon = String(s.telefon).trim();
+      if (s.nummern_verborgen) e.nummern_verborgen = true;
+      if (s.interne_nummer && !e.interne_nummer) e.interne_nummer = s.interne_nummer;
       if (r.rolle) e.rollen.add(r.rolle);
       e.wohnungen.push({
         wohnung_id: r.wohnung_id,
@@ -12186,8 +12238,8 @@ app.get('/api/telefonbuch', authMiddleware, async (req, res) => {
       });
       if (isDeceased) e.deceased = true;
     }
-    // Set → Array für JSON
-    for (const e of byName.values()) e.rollen = [...e.rollen];
+    // Set → Array für JSON; verborgen nur melden, wenn wirklich nichts Echtes da ist
+    for (const e of byName.values()) { e.rollen = [...e.rollen]; if (e.telefon) e.nummern_verborgen = false; }
     // Sortierung nach Nachname (letztes Wort), dann Vorname
     const lastName = n => (n || '').trim().split(/\s+/).pop() || '';
     const list = [...byName.values()].sort((a, b) => {
@@ -15144,6 +15196,24 @@ const PERSONEN_SCOPE_SQL = (n) => `(NOT EXISTS (SELECT 1 FROM wohnungen_kontakte
    OR EXISTS (SELECT 1 FROM wohnungen_kontakte k0 JOIN wohnungen w0 ON w0.id = k0.wohnung_id
                WHERE k0.person_id = p.id AND w0.stweg = ANY($${n}::int[])))`;
 
+// Angaben, nach denen lib/nummernsicht.js entscheidet: E-Mail, Name und die
+// STWEGs der (aktiven) Wohnungen der Person.
+function personFuerSicht(p) {
+  const stwegs = (Array.isArray(p?.wohnungen) ? p.wohnungen : [])
+    .filter(w => w && !w.archiviert_am).map(w => w.stweg);
+  return { email: p?.email, name: p?.name, stwegs };
+}
+async function darfNummernDerPerson(req, personId) {
+  const r = await pool.query(
+    `SELECT p.email, p.name, COALESCE(array_agg(DISTINCT w.stweg) FILTER (WHERE w.stweg IS NOT NULL), '{}') AS stwegs
+       FROM personen p
+       LEFT JOIN wohnungen_kontakte k ON k.person_id = p.id AND k.archiviert_am IS NULL
+       LEFT JOIN wohnungen w ON w.id = k.wohnung_id
+      WHERE p.id = $1 GROUP BY p.id`, [personId]);
+  if (!r.rows[0]) return false;
+  return darfEchteNummernSehen(req.user, r.rows[0], { kanal: nummernKanal(req) });
+}
+
 // GET /api/personen — Liste aller Personen mit ihren Wohnungen
 app.get('/api/personen', authMiddleware, requireWohnungsverwaltungRead, async (req, res) => {
   try {
@@ -15177,7 +15247,8 @@ app.get('/api/personen', authMiddleware, requireWohnungsverwaltungRead, async (r
         ORDER BY p.name LIMIT 1000`,
       params,
     );
-    res.json({ personen: r.rows });
+    const sicht = await nummernSicht(req, pool);
+    res.json({ personen: r.rows.map(p => sicht(p, personFuerSicht(p))) });
   } catch (err) {
     console.error('Personen list error:', err);
     res.status(500).json({ error: 'Fehler beim Laden' });
@@ -15209,7 +15280,8 @@ app.get('/api/personen/:id', authMiddleware, requireWohnungsverwaltungRead, asyn
       params,
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
-    res.json(r.rows[0]);
+    const sicht = await nummernSicht(req, pool);
+    res.json(sicht(r.rows[0], personFuerSicht(r.rows[0])));
   } catch (err) {
     res.status(500).json({ error: fehlerFuerClient(err, 'Fehler beim Laden') });
   }
@@ -15223,7 +15295,9 @@ app.put('/api/personen/:id', authMiddleware, requireWohnungsverwaltungWrite, asy
     // H4: STWEG-Scope-Check: Ausschuss darf nur Personen aus eigenem STWEG editieren
     const allowed = await userCanEditPerson(req.user, id);
     if (!allowed) return res.status(403).json({ error: 'Diese Person gehört nicht zu einem STWEG für den du Ausschuss-Berechtigung hast' });
-    const b = req.body || {};
+    let b = req.body || {};
+    // Verborgene Nummern (GET liefert sie leer) beim Speichern nicht ueberschreiben
+    if (!(await darfNummernDerPerson(req, id))) b = nummernAusBodyEntfernen(b);
     const IDENT_FELDER = ['name', 'vorname', 'nachname', 'email', 'telefon', 'mobile', 'telefone', 'adresse'];
     if (IDENT_FELDER.some(f => b[f] !== undefined) && await personGeschuetztFuer(req.user, id)) {
       return res.status(409).json({ error: 'Diese Person hat ein eigenes Konto oder Wohnungen in einer anderen STWEG. Name und Kontaktdaten aendert sie selbst im Profil oder die Technik.' });
@@ -15358,7 +15432,13 @@ app.get('/api/personen-dedup/kandidaten', authMiddleware, requireWohnungsverwalt
        ORDER BY sort, n DESC, schlüssel
        LIMIT 200
     `, scope ? [scope] : []);
-    res.json({ kandidaten: r.rows });
+    // Kandidaten liegen im STWEG-Scope der Person (Portal: eigenes Haus); ueber
+    // MCP/Apps nur interne Nummern.
+    const sicht = await nummernSicht(req, pool);
+    const kandidaten = r.rows.map(k => ({
+      ...k, personen: (k.personen || []).map(p => sicht(p, { email: p.email, name: p.name, stwegs: scope || [] })),
+    }));
+    res.json({ kandidaten });
   } catch (err) {
     res.status(500).json({ error: fehlerFuerClient(err) });
   }
@@ -18555,6 +18635,39 @@ app.get('/api/pbx/personen', requirePbxSecret, async (_req, res) => {
   } catch (e) {
     console.error('[pbx-personen]', e.message);
     res.status(500).json({ error: 'Abfrage fehlgeschlagen' });
+  }
+});
+
+// Rueckweg: die pbx-api schickt nach jedem Abgleich die vergebenen Nummern
+// (nummer, email, name, wohnung, haus, aktiv) — die ganze Liste, sie ersetzt
+// das Abbild. Damit zeigen Telefonbuch und Nextcloud-Sync die interne Nummer
+// statt der echten (lib/nummernsicht.js). Keine Weiterleitungsziele.
+app.put('/api/pbx/personen/nummern', requirePbxSecret, async (req, res) => {
+  const geprueft = interneNummernPruefen(req.body?.nummern);
+  if (!geprueft.ok) return res.status(400).json({ error: geprueft.fehler });
+  // Leere Liste waere ein Abriss aller Nummern — nur mit ausdruecklichem leer=true.
+  if (geprueft.nummern.length === 0 && req.body?.leer !== true) {
+    return res.status(400).json({ error: 'Leere Liste (leer=true, wenn wirklich gewollt)' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM telefon_interne_nummern');
+    for (const n of geprueft.nummern) {
+      await client.query(
+        `INSERT INTO telefon_interne_nummern (nummer, email, name, wohnung, haus, aktiv, aktualisiert)
+         VALUES ($1,$2,$3,$4,$5,$6,NOW())`,
+        [n.nummer, n.email, n.name, n.wohnung, n.haus, n.aktiv]);
+    }
+    await client.query('COMMIT');
+    interneNummernCacheLeeren();
+    res.json({ ok: true, anzahl: geprueft.nummern.length });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[pbx-personen-nummern]', e.message);
+    res.status(500).json({ error: 'Speichern fehlgeschlagen' });
+  } finally {
+    client.release();
   }
 });
 
@@ -26943,7 +27056,9 @@ app.get('/api/vollmachten/lookup/personen', authMiddleware, async (req, res) => 
           ORDER BY name LIMIT 10`,
         ['%' + q + '%'],
       );
-      return res.json({ personen: r.rows });
+      // Verwaltung sucht ueber alle STWEGs: echte Nummern nur Technik/Praesident/selbst
+      const sicht = await nummernSicht(req, pool);
+      return res.json({ personen: r.rows.map(p => sicht(p, { email: p.email, name: p.name })) });
     }
     // Alle anderen: nur Personen mit Wohnung in den eigenen STWEGs und nur
     // Name/E-Mail (reicht fuer die Bevollmaechtigten-Auswahl). Frueher bekam
@@ -27015,7 +27130,9 @@ app.get('/api/vollmachten/lookup/my-kontakte', authMiddleware, async (req, res) 
         ORDER BY LOWER(k.email), k.rolle`,
       params,
     );
-    res.json({ kontakte: r.rows });
+    // Eigene Wohnungen = eigenes Haus; ueber MCP nur interne Nummern (ausser die eigene)
+    const sicht = await nummernSicht(req, pool);
+    res.json({ kontakte: r.rows.map(k => sicht(k, { email: k.email, name: k.name, stweg: k.stweg })) });
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
@@ -28871,6 +28988,21 @@ async function initDB() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_pbx_ring_enabled ON pbx_ring_members(enabled) WHERE enabled = true;
+
+      -- Abbild der persoenlichen Nummern 3HHWWP der Anlage (pbx-api schickt die
+      -- ganze Liste nach jedem Abgleich, PUT /api/pbx/personen/nummern). Quelle
+      -- bleibt die Anlage; hier nur, damit Verzeichnisse (Telefonbuch, Nextcloud-
+      -- Sync) statt der echten Nummern die interne zeigen (lib/nummernsicht.js).
+      CREATE TABLE IF NOT EXISTS telefon_interne_nummern (
+        nummer VARCHAR(6) PRIMARY KEY,
+        email VARCHAR(255) NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        wohnung VARCHAR(255),
+        haus INTEGER,
+        aktiv BOOLEAN NOT NULL DEFAULT true,
+        aktualisiert TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_telefon_interne_email ON telefon_interne_nummern(LOWER(email));
 
       CREATE TABLE IF NOT EXISTS pbx_config (
         key VARCHAR(60) PRIMARY KEY,
