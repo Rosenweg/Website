@@ -16711,7 +16711,7 @@ app.post('/api/mqtt/service-users', authMiddleware, requireMqttTechnik, async (r
     await pool.query(
       'INSERT INTO mqtt_service_users (username, password_hash, can_write, topic_filter, description) VALUES ($1,$2,$3,$4,$5)',
       [username, hash, can_write, topic_filter, description]);
-    res.json({ username, password, can_write, topic_filter, hint: 'Passwort wird nur EINMAL angezeigt — jetzt notieren.' });
+    res.json({ username, password, can_write, topic_filter, broker: MQTT_BROKER_HINT, hint: 'Passwort wird nur EINMAL angezeigt — jetzt notieren.' });
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ error: 'Username existiert bereits' });
     res.status(500).json({ error: fehlerFuerClient(e) });
@@ -16757,6 +16757,8 @@ app.delete('/api/mqtt/topic-rules/:id', authMiddleware, requireMqttTechnik, asyn
 // Nicht-interaktiver MQTT-Login (siehe authentikPasswordLogin/lib/auth.js). Wir
 // verwalten AUSSCHLIESSLICH Tokens mit Präfix "mqtt-<pk>-", damit wir nie andere
 // App-Passwörter des Users anfassen. Der MQTT-Username = Authentik-Username.
+// Interne Adresse nur aus der Umgebung bzw. hier – nie fest in Seitentexten
+// (mqtt.html zeigt sie aus der Antwort, Befund F6-3).
 const MQTT_BROKER_HINT = {
   host: process.env.MQTT_PUBLIC_HOST || 'mqtt.rosenweg4303.ch',
   internalHost: process.env.MQTT_INTERNAL_HOST || '100.64.2.51',
@@ -16852,7 +16854,7 @@ app.get('/api/mqtt/user-app-passwords', authMiddleware, requireUserLogin, requir
     const au = await authentikUserByEmail(String(req.query.email || ''));
     if (!au) return res.status(404).json({ error: 'User nicht gefunden' });
     const [topics, pws] = await Promise.all([mqttTopicsForUser(au.email, au.groups), listMqttAppPasswords(au.pk)]);
-    res.json({ username: au.username, email: au.email, name: au.name, groups: au.groups, superuser: mqttIsSuperuser(au.groups), topics, appPasswords: pws });
+    res.json({ username: au.username, email: au.email, name: au.name, groups: au.groups, superuser: mqttIsSuperuser(au.groups), topics, appPasswords: pws, broker: MQTT_BROKER_HINT });
   } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
 });
 app.post('/api/mqtt/user-app-passwords', authMiddleware, requireUserLogin, requireMqttTechnik, async (req, res) => {
@@ -16860,7 +16862,7 @@ app.post('/api/mqtt/user-app-passwords', authMiddleware, requireUserLogin, requi
     const au = await authentikUserByEmail(String(req.body?.email || ''));
     if (!au) return res.status(404).json({ error: 'User nicht gefunden' });
     const created = await createMqttAppPassword(au.pk, req.body?.label || `Vergeben von ${req.user.name || req.user.email}`);
-    res.json({ ...created, username: au.username, email: au.email });
+    res.json({ ...created, username: au.username, email: au.email, broker: MQTT_BROKER_HINT });
   } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
 });
 app.delete('/api/mqtt/user-app-passwords/:id', authMiddleware, requireUserLogin, requireMqttTechnik, async (req, res) => {

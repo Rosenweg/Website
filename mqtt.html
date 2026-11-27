@@ -247,6 +247,11 @@
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
+    // Interne Broker-Adresse kommt aus der API-Antwort (broker), nie fest im Text (F6-3).
+    function brokerIntern(d) {
+        const b = d && d.broker;
+        return b && b.internalHost ? `mqtt://${b.internalHost}:${b.port || 1883}` : 'interne Adresse (siehe Technik-Doku)';
+    }
 
     // ─── Bekannte Authentik-Gruppen (für <datalist>) ──────────────────
     const KNOWN_GROUPS = (() => {
@@ -925,7 +930,7 @@
                 <p class="font-semibold text-green-800 mb-1">Service-User <span class="mono">${esc(d.username)}</span> angelegt</p>
                 <p class="text-gray-700 mb-1">Passwort (nur jetzt sichtbar):
                     <span class="mono bg-white px-2 py-0.5 rounded border select-all">${esc(d.password)}</span></p>
-                <p class="text-xs text-gray-500">Broker <span class="mono">mqtt://100.64.2.51:1883</span> (intern) oder
+                <p class="text-xs text-gray-500">Broker <span class="mono">${esc(brokerIntern(d))}</span> (intern) oder
                     <span class="mono">wss://mqtt.rosenweg4303.ch</span> · Topic <span class="mono">${esc(d.topic_filter)}</span>
                     · ${d.can_write ? 'Lesen + Schreiben' : 'nur Lesen'}</p>`;
             box.classList.remove('hidden');
@@ -1026,7 +1031,7 @@
                 </div>
                 <div class="text-xs text-gray-500 leading-relaxed">
                     <p class="font-semibold text-gray-600 mb-0.5">Broker</p>
-                    <p>intern: <span class="mono">mqtt://100.64.2.51:1883</span> (kein TLS)</p>
+                    <p>intern: <span class="mono">${esc(brokerIntern(d))}</span> (kein TLS)</p>
                     <p>extern (geplant): <span class="mono">mqtts://mqtt.rosenweg4303.ch:8883</span></p>
                 </div>
                 <div>
@@ -1069,7 +1074,7 @@
                 <div class="space-y-1 text-gray-700">
                     <p>Username: <span class="mono bg-white px-2 py-0.5 rounded border select-all">${esc(d.username)}</span></p>
                     <p>App-Passwort: <span class="mono bg-white px-2 py-0.5 rounded border select-all">${esc(d.key)}</span></p>
-                    <p class="text-xs text-gray-500">Broker intern <span class="mono">mqtt://100.64.2.51:1883</span> · extern (geplant) <span class="mono">mqtts://mqtt.rosenweg4303.ch:8883</span></p>
+                    <p class="text-xs text-gray-500">Broker intern <span class="mono">${esc(brokerIntern(d))}</span> · extern (geplant) <span class="mono">mqtts://mqtt.rosenweg4303.ch:8883</span></p>
                 </div>`;
             box.classList.remove('hidden');
             // Detail (inkl. Passwortliste) frisch laden — Klartext-Box bleibt bis zur nächsten Aktion sichtbar

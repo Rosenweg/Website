@@ -112,7 +112,7 @@
   <!-- SIP-Telefone -->
   <div class="card">
     <h2>☎️ SIP-Telefone (LAN/VPN)</h2>
-    <p class="muted" style="font-size:.82rem;margin-bottom:.7rem">Registrierung am Server <b class="mono">100.64.2.29</b> (Port 5060, nur im LAN/VPN). Benutzername = Extension, Passwort wie unten. Danach als Ring-Mitglied „SIP-Telefon" hinzufügbar.</p>
+    <p class="muted" style="font-size:.82rem;margin-bottom:.7rem">Registrierung an der Telefonanlage (Port 5060, nur im LAN/VPN; die Adresse steht im QR-Code zum Einrichten). Benutzername = Extension, Passwort unten über „anzeigen“ oder „kopieren“. Danach als Ring-Mitglied „SIP-Telefon" hinzufügbar.</p>
     <table><thead><tr><th>Ext</th><th>Name</th><th>App</th><th>Nutzung</th><th>Passwort</th><th>Registriert</th><th>Status</th><th></th></tr></thead>
       <tbody id="exts"></tbody></table>
     <div class="row" style="margin-top:.8rem;border-top:1px solid #f1f5f9;padding-top:.8rem">
@@ -284,12 +284,26 @@ async function loadExts(){
         .map(([v,l])=>`<option value="${v}"${(x.client||'linphone')===v?' selected':''}>${l}</option>`).join('')}</select></td>
     <td><select onchange="setKontext('${esc(x.ext)}',this.value)">${[['internal','persönlich'],['geteilt','geteilt (Anmeldung)']]
         .map(([v,l])=>`<option value="${v}"${(x.context||'internal')===v?' selected':''}>${l}</option>`).join('')}</select></td>
-    <td class="mono">${esc(x.secret)}</td>
+    <td class="mono"><span id="pw-${esc(x.ext)}">••••••</span>
+        <button class="sec" onclick="pwZeigen('${esc(x.ext)}')" title="Passwort kurz zeigen">anzeigen</button>
+        <button class="sec" onclick="pwKopieren('${esc(x.ext)}')" title="Passwort in die Zwischenablage">kopieren</button></td>
     <td>${x.registered?'<span class="pill ok">● registriert</span>':'<span class="muted">nicht angemeldet</span>'}</td>
     <td>${x.enabled?'<span class="pill ok">aktiv</span>':'<span class="muted">aus</span>'}</td>
     <td>${inRing.has(String(x.ext))?'<span class="pill ok">in Ring-Group</span>':`<button class="sec" onclick="addSipToRing('${esc(x.ext)}')">+ Ring-Group</button>`}
         <button class="sec" onclick="qrZeigen('${esc(x.ext)}')" title="QR-Code zum Einrichten">📱 QR</button>
         <button class="danger" onclick="delExt('${esc(x.ext)}')">Löschen</button></td></tr>`).join('') || '<tr><td colspan="8" class="muted">Keine SIP-Telefone.</td></tr>';
+}
+// SIP-Passwoerter nicht im Klartext in der Tabelle (Befund F5-1): nur auf Klick,
+// nach 15 Sekunden wieder verdeckt, oder direkt in die Zwischenablage.
+function pwVon(ext){ const x = sipPhones.find(p=>String(p.ext)===String(ext)); return x ? String(x.secret||'') : ''; }
+function pwZeigen(ext){
+  const el = document.getElementById('pw-'+ext); if(!el) return;
+  el.textContent = pwVon(ext) || '—';
+  setTimeout(()=>{ const e = document.getElementById('pw-'+ext); if(e) e.textContent='••••••'; }, 15000);
+}
+async function pwKopieren(ext){
+  try { await navigator.clipboard.writeText(pwVon(ext)); const el = document.getElementById('pw-'+ext); if(el){ el.textContent='kopiert'; setTimeout(()=>{ el.textContent='••••••'; }, 2000); } }
+  catch(e){ showErr('Kopieren nicht möglich – „anzeigen“ benutzen'); }
 }
 async function addSipToRing(ext){
   const ph = sipPhones.find(x=>String(x.ext)===String(ext));
