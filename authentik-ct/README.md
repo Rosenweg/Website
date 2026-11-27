@@ -42,58 +42,57 @@ Client-IP per Syslog an CrowdSec auf dem Edge (100.64.2.40:4514/udp). Stand in
 `/var/lib/authentik-crowdsec-melder/stand`. Prüfen auf dem Edge:
 `cscli metrics show parsers | grep authentik`, `cscli alerts list`.
 
-## Anmeldeseite: Deutsch, ohne „Registrieren“ (Befunde B1, B2, offen)
+## Anmeldeseite: Deutsch, ohne „Registrieren“ (Befunde B1, B2, umgesetzt 27.11.2026)
 
-Stand 27.11.2026, **nicht live geändert**. Die Anmeldeseite zeigt „Welcome to
-authentik!“, „Log in to continue …“, „Enter the email address …“, das Wort
-„authentik“ und auf „Passwort zurücksetzen“ den Link „Noch kein Konto?
-Registrieren.“ Konten legen Ausschuss und Technik an; Selbst-Registrierung ist
-nicht vorgesehen.
-
+Konten legen Ausschuss und Technik an; Selbst-Registrierung ist nicht vorgesehen.
 Nichts davon steht in diesem Repo: Es gibt keine Blueprints (in der Compose ist
 kein `/blueprints/custom` eingebunden), Flows, Stages und Brand liegen nur in der
-Authentik-Datenbank. Darum hier das Vorgehen – in der Admin-Oberfläche
-(`https://authentik.rosenweg4303.ch/if/admin/`, Technik) oder per API
-(`/api/v3/…`, Token mit Admin-Recht). Erst lesen, dann ändern; jede Änderung im
-JOURNAL vermerken.
+Authentik-Datenbank. Geändert per API (`/api/v3/…`, Token mit Admin-Recht).
 
-1. **Welche Flows sind im Einsatz?** System → Brands → Brand für
-   `auth.rosenweg4303.ch`/`authentik.rosenweg4303.ch` (meist `authentik-default`)
-   → Abschnitt Default flows: Authentication flow, Recovery flow, (Enrollment
-   gibt es dort nicht). Per API: `GET /api/v3/core/brands/` → Felder
-   `flow_authentication`, `flow_recovery`.
-2. **Titel „Welcome to authentik!“** ist der Titel des Authentication-Flows
-   (Standard `default-authentication-flow`). Flows & Stages → Flows → Flow
-   bearbeiten → **Title** z. B. „Mit dem Rosenweg-Konto anmelden“. Gleich beim
-   Recovery-Flow (Titel z. B. „Passwort zurücksetzen“). API:
-   `PATCH /api/v3/flows/instances/<slug>/` mit `{"title": "…"}`.
-3. **Sprache.** Die festen Texte („Log in to continue to …“, „Enter the email
-   address …“) kommen aus der Oberfläche von Authentik und folgen der Sprache des
-   Browsers bzw. der Einstellung `settings.locale`. Für alle Besucher Deutsch:
-   im Brand unter **Attributes** `settings: {locale: de}` setzen (gilt als
-   Vorgabe für Nutzer dieses Brands; vorher prüfen, dass die Version 2026.5 das
-   so auswertet – sonst bleibt nur die Browser-Sprache). Texte, die Authentik
-   auf Deutsch nicht übersetzt, lassen sich nur über die Stage-Felder (z. B. im
-   Recovery-Flow den Text der E-Mail-Stage) oder eigene Vorlagen unter
-   `./templates` ersetzen.
-4. **Wort „authentik“.** Im Brand **Branding title** auf „Rosenweg“ setzen,
-   Logo und Favicon auf das Rosenweg-Logo (`/media/…`, im Volume `./media`).
-   Der Fuss „Powered by authentik“ lässt sich über die Footer-Links/Custom CSS
-   des Brands ausblenden, falls die Version das anbietet.
-5. **„Registrieren“ entfernen.** Der Link erscheint, weil in der
-   Identification-Stage ein **Enrollment flow** eingetragen ist. Flows & Stages →
-   Stages → die Identification-Stage des Authentication-Flows (Standard
-   `default-authentication-identification`) **und** die des Recovery-Flows
-   bearbeiten → Flow settings → **Enrollment flow leeren**. API:
-   `PATCH /api/v3/stages/identification/<pk>/` mit `{"enrollment_flow": null}`.
-   Danach den Enrollment-Flow selbst prüfen (Flows mit Designation
-   „Enrollment“): Wird er nirgends gebraucht (Website, Nextcloud, PVE, ISP
-   nutzen ihn nicht), **deaktivieren statt löschen** – z. B. Authentication
-   „Require superuser“ –, damit er auch über die direkte Adresse
-   `/if/flow/<slug>/` nicht erreichbar ist.
-6. **Prüfen:** privates Browserfenster auf `https://www.rosenweg4303.ch` →
-   „Anmelden“: deutscher Titel, kein „Registrieren“, Anmeldung mit Konto und mit
-   Karte geht weiter; „Passwort vergessen?“ schickt die Mail wie bisher.
+**Sicherung vorher:** CT 128, `/root/authentik-sicherung-2026-11-27/` – Flow-Exporte
+(`flow-<slug>.yaml`, Format Blueprint) und JSON-Stände (`flow-<slug>.json`,
+`brands.json`, `stages-*.json`, `policy-bindings.json`, `flow-bindings.json`,
+`sources.json`). Die neuen Werte liegen daneben unter `neu/`. `ak.sh METHOD PFAD
+[JSON-DATEI]` ruft die API auf und liest das Token zur Laufzeit aus
+`/opt/rosenweg-core/.env` (gibt es nie aus).
+
+**Stand jetzt:**
+
+| Objekt | vorher | jetzt |
+|---|---|---|
+| Brand `authentik-default`, `attributes.settings.locale` | – | `de` (→ `default_locale: de`; Seite deutsch auch bei englischem Browser) |
+| Flow `default-authentication-flow`, Titel | „Welcome to authentik!“ | „Bei Rosenweg anmelden“ |
+| Flow `default-source-authentication`, Titel | „Welcome to authentik!“ | „Bei Rosenweg anmelden“ |
+| Flows `default-provider-authorization-{explicit,implicit}-consent`, Titel | „Redirecting to %(app)s“ | „Weiter zu %(app)s“ |
+| Flow `default-provider-invalidation-flow`, Titel | „You've logged out of %(app)s.“ | „Sie wurden von %(app)s abgemeldet.“ |
+| Kerberos-Quelle `ad-kerberos`, Name (Knopf auf der Anmeldeseite) | „SSO Login“ | „SSO-Anmeldung“ |
+| Stage `recovery-identification`, `enrollment_flow` | `default-authentication-flow` (ergab „Noch kein Konto? Registrieren.“) | leer |
+| Stage `default-authentication-identification` | `enrollment_flow` war schon leer, `recovery_flow` = `password-recovery` | unverändert |
+| Flow `default-source-enrollment` (einziger Enrollment-Flow, von keiner Quelle genutzt) | Titel englisch, `policy_engine_mode: any` | Titel „Registrierung ist deaktiviert“, `policy_engine_mode: all`, zusätzlich Policy **`rosenweg-deny-all`** (Expression, `return False` mit Meldung „Registrierung ist nicht möglich …“) gebunden, Reihenfolge 100. Nicht gelöscht. |
+
+Branding-Titel war schon „Rosenweg“; Password- und Consent-Stage haben in 2026.5
+keine Textfelder. Der Recovery-Flow (`password-recovery`, Titel „Passwort
+zurücksetzen“) bleibt; der Link „Benutzername oder Passwort vergessen?“ steht weiter
+auf der Anmeldeseite.
+
+**Geprüft (27.11.2026):** Headless-Chrome mit `--lang=en-US` zeigt „Bei Rosenweg
+anmelden“, „Email oder Username“, „Anmelden“, „SSO-Anmeldung“, „Benutzername oder
+Passwort vergessen?“, kein „Registrieren“. `/if/flow/default-source-enrollment/`
+endet mit „Registrierung ist nicht möglich …“. Anmeldung über
+`www.rosenweg4303.ch/api/auth/login` läuft bis zur Passwort-Stage.
+
+**Noch englisch bzw. offen (in der Admin-Oberfläche nicht einstellbar):**
+- Recovery-Seite: „Enter the email address or username associated with your
+  account.“ – fester Text der Oberfläche, in der deutschen Übersetzung von 2026.5
+  nicht übersetzt. Nur über eine eigene Vorlage bzw. ein Upstream-Update lösbar.
+- Fuss „Powered by authentik“ und Alt-Text „authentik Logo“; das Logo selbst
+  (`https://www.rosenweg4303.ch/logo-rosenweg.png`, 1 MB) lud im headless Chrome
+  nicht – im normalen Browser prüfen, ggf. kleineres Logo unter `/media` ablegen.
+
+**Zurück:** Titel und `enrollment_flow` per `PATCH` mit den Werten aus der
+Sicherung; Policy-Bindung `rosenweg-deny-all` an `default-source-enrollment`
+löschen und `policy_engine_mode` wieder `any`; im Brand `locale` aus
+`attributes.settings` entfernen. Oder die `flow-*.yaml` als Blueprint einspielen.
 
 Wer das später reproduzierbar haben will: dieselben Werte als Blueprint unter
 `authentik-ct/blueprints/` ablegen und in der Compose bei server und worker
