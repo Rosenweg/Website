@@ -175,7 +175,11 @@ async function authMiddleware(req, res, next) {
       if (!k) return res.status(401).json({ error: 'Anmeldung abgelaufen' });
       const vollerPfad = ((req.baseUrl || '') + req.path).toLowerCase()
         .replace(/\/{2,}/g, '/').replace(/^\/api\//, '').replace(/^\/+|\/+$/g, '');
-      if (PAT_GESPERRT.some(pfx => vollerPfad === pfx || vollerPfad.startsWith(pfx + '/'))) {
+      // auth/me (nur lesen: wer bin ich) braucht die Telefonanlage, um den Zugang
+      // einer App zu pruefen (pbx current_user -> /api/auth/me), z.B. beim
+      // Nextcloud-Zugang der App auf dem eigenen Handy. Der Rest von auth/ bleibt zu.
+      const nurWerBinIch = vollerPfad === 'auth/me' && req.method === 'GET';
+      if (!nurWerBinIch && PAT_GESPERRT.some(pfx => vollerPfad === pfx || vollerPfad.startsWith(pfx + '/'))) {
         return res.status(403).json({ error: 'Mit der Karten-Anmeldung nicht erlaubt — bitte im Portal mit dem Rosenweg-Konto anmelden' });
       }
       req.user = k.user;
