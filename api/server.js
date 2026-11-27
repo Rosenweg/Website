@@ -263,6 +263,9 @@ const { AUTHENTIK_URL, AUTHENTIK_EXTERNAL_URL, AUTHENTIK_CLIENT_ID, AUTHENTIK_CL
 const { authentikAPI, tokenCache, validateAuthentikToken, authentikPasswordLogin, appTokensVergessen, MANAGED_PAGES, ACCESS_LEVELS, resolveAncestorGroups, getUserPermissions } = require('./lib/auth');
 // Auth-Middleware -> middleware/auth.js (authMiddleware/adminOnly/requirePermission/requireUserLogin)
 const { authMiddleware, adminOnly, requirePermission, requireUserLogin } = require('./middleware/auth');
+// Admin-Aktionen mit der Karte: Protokoll, Quittung, Bestaetigung per E-Mail (lib/kartenadmin.js)
+const kartenAdmin = require('./lib/kartenadmin');
+const { FRISCH_MIN: STUFE_FRISCH_MIN } = require('./lib/stufen');
 // Web-Push (VAPID) -> lib/webpush.js (Opt-in-Benachrichtigungen fuer PWAs)
 const webpushLib = require('./lib/webpush');
 
@@ -972,7 +975,7 @@ app.get('/api/permissions', authMiddleware, requirePermission('rechteverwaltung'
   }
 });
 
-app.put('/api/permissions', authMiddleware, requirePermission('rechteverwaltung', 'write'), async (req, res) => {
+app.put('/api/permissions', authMiddleware, requirePermission('rechteverwaltung', 'write'), kartenAdmin.bestaetigungVerlangen, async (req, res) => {
   const { permissions } = req.body; // [{ group_name, page, access }]
   if (!Array.isArray(permissions)) return res.status(400).json({ error: 'permissions Array erforderlich' });
 
@@ -1071,6 +1074,9 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
       permissions: permissions,
       whatsapp_opt_in: whatsappOptIn,
     },
+    // Wie ist diese Anfrage angemeldet (lib/stufen.js)? Nur Auskunft, sperrt nichts.
+    // stufe: karte | konto | frisch; art: website | otp | app | authentik | pat | karte | qr | handy | anlage | bestaetigt
+    anmeldung: { ...(req.auth || { stufe: 'karte', art: 'unbekannt', auth_time: null }), frisch_min: STUFE_FRISCH_MIN },
   });
   } catch (err) {
     console.error('[auth/me] Error:', err.message);
@@ -11105,7 +11111,7 @@ function resolveGroupHierarchy(desiredGroupPks, allGroups) {
 }
 
 // PUT /api/admin/users/:pk - Update user
-app.put('/api/admin/users/:pk', authMiddleware, async (req, res) => {
+app.put('/api/admin/users/:pk', authMiddleware, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   const callerGroups = req.user?.groups || [];
   const isAdmin = isTechnik(callerGroups) || isPraesident(callerGroups);
   const ausschussStwegs = getAusschussStwegs(callerGroups);
@@ -11187,7 +11193,7 @@ app.put('/api/admin/users/:pk', authMiddleware, async (req, res) => {
 });
 
 // DELETE /api/admin/users/:pk - Delete/deactivate user
-app.delete('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-verwaltung', 'write'), async (req, res) => {
+app.delete('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-verwaltung', 'write'), kartenAdmin.bestaetigungVerlangen, async (req, res) => {
   // Konten loeschen nur Technik/Praesident (bewohner-verwaltung:write haben auch
   // Verwaltung und Ausschuss – die koennten sonst beliebige Konten loeschen).
   const callerGroups = req.user?.groups || [];
@@ -12112,7 +12118,7 @@ app.get('/api/proxmox/roles', authMiddleware, adminOnly, async (req, res) => {
 });
 
 // Set ACL (grant access)
-app.put('/api/proxmox/acl', authMiddleware, adminOnly, async (req, res) => {
+app.put('/api/proxmox/acl', authMiddleware, adminOnly, kartenAdmin.bestaetigungVerlangen, async (req, res) => {
   try {
     const { path, userid, roleid } = req.body;
     if (!path || !userid || !roleid) return res.status(400).json({ error: 'path, userid und roleid erforderlich' });
@@ -12127,7 +12133,7 @@ app.put('/api/proxmox/acl', authMiddleware, adminOnly, async (req, res) => {
 });
 
 // Delete ACL (revoke access)
-app.delete('/api/proxmox/acl', authMiddleware, adminOnly, async (req, res) => {
+app.delete('/api/proxmox/acl', authMiddleware, adminOnly, kartenAdmin.bestaetigungVerlangen, async (req, res) => {
   try {
     const { path, userid, roleid } = req.body;
     if (!path || !userid || !roleid) return res.status(400).json({ error: 'path, userid und roleid erforderlich' });
@@ -15448,7 +15454,7 @@ app.get('/api/personen-dedup/kandidaten', authMiddleware, requireWohnungsverwalt
 // POST /api/personen/merge — zwei Personen zusammenfuehren
 // body: { keep_id, merge_id } — alle Kontakte von merge_id werden auf keep_id umgehaengt,
 // merge_id wird geloescht. Daten aus merge_id ueberschreiben die in keep_id nur wenn keep_id-Feld leer ist.
-app.post('/api/personen/merge', authMiddleware, requireWohnungsverwaltungWrite, async (req, res) => {
+app.post('/api/personen/merge', authMiddleware, requireWohnungsverwaltungWrite, kartenAdmin.bestaetigungVerlangen, async (req, res) => {
   const client = await pool.connect();
   try {
     const keepId = parseInt(req.body?.keep_id, 10);
@@ -16173,8 +16179,9 @@ app.delete('/api/mail-approval-config/:id', authMiddleware, requireTechnikOrPrae
 // Nur Technik + Präsident dürfen die Queue sehen/bearbeiten/freigeben.
 function requireTechnikOrPraesident(req, res, next) {
   const groups = req.user?.groups || [];
-  if (isTechnik(groups) || isPraesident(groups)) return next();
-  return res.status(403).json({ error: 'Nur für Technik oder Präsident' });
+  if (!isTechnik(groups) && !isPraesident(groups)) return res.status(403).json({ error: 'Nur für Technik oder Präsident' });
+  kartenAdmin.vermerken(req, res); // mit der Karte: Protokoll + Quittung (lib/kartenadmin.js)
+  next();
 }
 
 // ─── Zähler-Technik (Rosenweg 9) ────────────────────────────────────
@@ -16208,7 +16215,7 @@ function energyAdminHeaders(extra = {}) {
 }
 // Lesen (GET) braucht energie-config/read, alles andere /write.
 const energyAdminRecht = (req, res, next) => requirePermission('energie-config', req.method === 'GET' ? 'read' : 'write')(req, res, next);
-app.use('/api/energie-admin', authMiddleware, energyAdminRecht, async (req, res) => {
+app.use('/api/energie-admin', authMiddleware, energyAdminRecht, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   const path = req.path;
   if (!ENERGY_ADMIN_ROUTES.some(([m, re]) => m === req.method && re.test(path))) {
     return res.status(404).json({ error: 'Unbekannter Energie-Admin-Endpunkt' });
@@ -16405,6 +16412,7 @@ app.post('/api/mqtt/token', authMiddleware, async (req, res) => {
     // nur Gruppen zaehlen, nicht role=admin — sonst zeigt das Token Superuser an,
     // die der Broker dann verweigert.
     const isTech = isTechnik(groups) || isPraesident(groups);
+    if (isTech) kartenAdmin.vermerken(req, res); // Technik-Token mit der Karte: protokollieren
     const email = String(req.user.email).toLowerCase();
     // Eindeutiger Username je Token: die ACL-Pruefung kennt nur den Usernamen. Der
     // aus der E-Mail abgeleitete Name kollidierte (a+b@ und a_b@ -> a_b@) bzw. konnte
@@ -16651,8 +16659,9 @@ app.post('/api/mqtt/aclcheck', mqttBrokerGuard, async (req, res) => {
 // ─── MQTT-Verwaltung + Publish (Technik) fuer die Web-UI ────────────
 function requireMqttTechnik(req, res, next) {
   const groups = req.user?.groups || [];
-  if (req.user?.isAdmin || groups.some(g => String(g).toLowerCase() === 'technik')) return next();
-  return res.status(403).json({ error: 'Nur fuer Technik' });
+  if (!req.user?.isAdmin && !groups.some(g => String(g).toLowerCase() === 'technik')) return res.status(403).json({ error: 'Nur fuer Technik' });
+  kartenAdmin.vermerken(req, res); // mit der Karte: Protokoll + Quittung (lib/kartenadmin.js)
+  next();
 }
 
 // Lazy MQTT-Write-Client (Broker-User 'collector', darf energy/#,display/# schreiben).
@@ -18062,7 +18071,7 @@ app.put('/api/verwaltung-mail-queue/:id', authMiddleware, requireTechnikOrPraesi
 // >= min_approvers verschiedene User aus required_groups. Erst dann Versand.
 // H3-Fix: Race-Safe durch SELECT ... FOR UPDATE auf queue-Row im selben
 // Transaktionsblock. Status-Wechsel auf 'freigegeben' atomar mit COUNT.
-app.post('/api/verwaltung-mail-queue/:id/freigeben', authMiddleware, async (req, res) => {
+app.post('/api/verwaltung-mail-queue/:id/freigeben', authMiddleware, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
@@ -18797,6 +18806,67 @@ async function kartenProtokollieren(aktion, { nfcId, displayId, email, name, dur
   }
   console.log(`[pbx-karte] ${aktion} ${erfolg ? 'ok' : 'fehlgeschlagen'}: Karte ${displayId || nfcId} ${email ? '-> ' + email + ' ' : ''}durch ${durch || '?'}${detail ? ' (' + detail + ')' : ''}`);
 }
+
+// ─── Admin-Aktionen mit der Karte (lib/kartenadmin.js) ──────────────────────
+// Karte = Schluessel (Entscheid Stefan 27.11.2026): volle Rechte, aber jede
+// Admin-Aktion mit der Karte steht im Kartenprotokoll und wird quittiert; die
+// zwoelf heiklen muessen per E-Mail-Link bestaetigt werden.
+kartenAdmin.einrichten({
+  speicher: kartenAdmin.sqlSpeicher(pool),
+  senden: (opts, trigger) => loggedSendMail(opts, trigger), // Systemmail, nicht ueber die Mail-Freigabe
+  MAIL_FROM, PORTAL_URL: SITE_URL,
+  protokollieren: (aktion, felder) => kartenProtokollieren(aktion, felder),
+  technikMelden: async (text) => {
+    const gid = await resolveTechnikWhatsappGroupId();
+    if (gid) await queueWhatsappMessage({ chatId: gid, body: text.slice(0, 3500), sourceType: 'karten-bestaetigung' });
+  },
+  // Rechte zum Ausfuehrungszeitpunkt: Konto aktiv und Gruppen frisch aus Authentik
+  personLaden: async (email) => {
+    const r = await authentikAPI('GET', `/core/users/?search=${encodeURIComponent(email)}`);
+    const u = (r.results || []).find(x => String(x.email || '').toLowerCase() === String(email).toLowerCase());
+    return u ? { aktiv: u.is_active !== false, groups: (u.groups_obj || []).map(g => g.name) } : null;
+  },
+  sitzungenWiderrufen: async (wo, grund) => {
+    const bedingung = wo.id ? 'id = $1' : 'LOWER(email) = LOWER($1)';
+    await pool.query(`UPDATE app_karten_sitzungen SET revoked_at = NOW(), revoked_by = 'bestaetigungslink', revoked_reason = $2,
+        zugang_hash = NULL, herausforderung_hash = NULL WHERE revoked_at IS NULL AND ${bedingung}`, [wo.id || wo.email, grund]);
+  },
+  ausfuehren: kartenAdmin.loopbackAusfuehren(process.env.PORT || 3000),
+});
+kartenAdmin.routen(app);
+
+// Offene Bestaetigungen der Person (Hinweis-Band im Portal, Apps)
+app.get('/api/me/bestaetigungen', authMiddleware, async (req, res) => {
+  try {
+    const r = await pool.query(`SELECT id, text, methode, pfad, art, app, geraet, created_at, ablauf
+        FROM karten_bestaetigungen WHERE LOWER(email) = LOWER($1) AND status = 'wartet' AND ablauf > NOW()
+        ORDER BY created_at DESC LIMIT 20`, [req.user.email || '']);
+    res.json({ offen: r.rows });
+  } catch (e) {
+    if (/does not exist/.test(e.message)) return res.json({ offen: [] });
+    console.error('[karten-bestaetigung] offen:', e.message);
+    res.status(500).json({ error: 'Abfrage fehlgeschlagen' });
+  }
+});
+
+// Kartenprotokoll fuer die Technik. ?aktion=admin-mit-karte (Admin-Aktionen mit der Karte),
+// bestaetigung-angefragt | bestaetigt | abgelehnt | app-anmeldung …; ?email=; ?tage= (Standard 30)
+app.get('/api/karten-protokoll', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const tage = Math.min(365, Math.max(1, parseInt(req.query.tage, 10) || 30));
+    const bed = ['created_at > NOW() - make_interval(days => $1)'];
+    const p = [tage];
+    if (req.query.aktion) { p.push(String(req.query.aktion)); bed.push(`aktion = $${p.length}`); }
+    if (req.query.email) { p.push(String(req.query.email).toLowerCase()); bed.push(`LOWER(ziel_email) = $${p.length}`); }
+    const r = await pool.query(`SELECT id, aktion, nfc_id, display_id, ziel_email, ziel_name, durch, erfolg, detail, created_at
+        FROM access_karten_protokoll WHERE ${bed.join(' AND ')} ORDER BY created_at DESC LIMIT 500`, p);
+    res.json({ tage, eintraege: r.rows });
+  } catch (e) {
+    if (/does not exist/.test(e.message)) return res.json({ tage: 30, eintraege: [] });
+    console.error('[karten-protokoll]', e.message);
+    res.status(500).json({ error: 'Abfrage fehlgeschlagen' });
+  }
+});
 
 // Fremdkarte in die Access-Karteninventur importieren.
 // Dokumentiert (Access-API, "Import Third-Party NFC Cards"): POST multipart/form-data, Feld "file"
@@ -20956,7 +21026,9 @@ app.post('/api/push/test', authMiddleware, async (req, res) => {
 // Berechtigungs-Helper: nur technik/praesident sind voll-admin auf ISP.
 function ispIsAdmin(req) {
   const g = req.user?.groups || [];
-  return isTechnik(g) || isPraesident(g) || req.user?.isAdmin;
+  const admin = isTechnik(g) || isPraesident(g) || req.user?.isAdmin;
+  if (admin) kartenAdmin.vermerken(req, req.res); // mit der Karte: Protokoll + Quittung (schreibend)
+  return admin;
 }
 
 // Hilfsfunktion: hat user die Wohnung X als Eigentümer/Mieter/Bewohner?
