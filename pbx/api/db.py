@@ -291,6 +291,24 @@ CREATE TABLE IF NOT EXISTS telefon_apps_ist (
     PRIMARY KEY (ext, paket)
 );
 
+-- Versionsstand der Rosenweg-Apps auf den Geraeten (Updater der Apps, Stefan 27.11.2026: "die
+-- Apps melden ihre Version ... ohne Personendaten"). geraet = SHA-256-Kennung (Android: aus der
+-- ANDROID_ID, Computer: aus der Maschinen-ID), nicht umkehrbar. Eine Meldung ersetzt alle Zeilen
+-- des Geraets fuer die Plattform (nicht mehr gemeldet = deinstalliert). Geteilte Telefone stehen
+-- zusaetzlich mit Nebenstelle in telefon_apps_ist (adb-Updater).
+CREATE TABLE IF NOT EXISTS apps_stand (
+    geraet        TEXT NOT NULL,
+    plattform     TEXT NOT NULL,           -- 'android' | 'linux-deb' | 'macos' | 'windows'
+    paket         TEXT NOT NULL,
+    version       TEXT NOT NULL DEFAULT '',
+    version_code  INTEGER,
+    geteilt       INTEGER NOT NULL DEFAULT 0,  -- Android mit Rosenweg Geraet
+    station       INTEGER NOT NULL DEFAULT 0,  -- Rosenweg-Station / verwaltete Installation
+    system        TEXT NOT NULL DEFAULT '',
+    zuletzt       INTEGER NOT NULL,            -- epoch s
+    PRIMARY KEY (geraet, plattform, paket)
+);
+
 -- WLAN der geteilten Telefone (Stefan 25.11.2026): SSID "Rosenweg" mit PPSK, das Passwort
 -- bestimmt das VLAN. Die Schluessel stehen NUR hier in der Datenbank (nie im Repo, nie im Log);
 -- Rosenweg Geraet holt seinen mit dem Geraete-Token und richtet das WLAN als Device Owner ein.
