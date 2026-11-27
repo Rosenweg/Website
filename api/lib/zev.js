@@ -47,4 +47,37 @@ function zevGotoTargets({ bewohnerEmail, archivMailbox, invoiceEmail }) {
   return [...set];
 }
 
-module.exports = { zevSlug, zevAliasAddress, isValidEmail, zevGotoTargets };
+// ─── Sicht auf die Online-Rechnungen („Meine ZEV-Rechnungen“) ─────────────
+// Bewohnende Partei einer Wohnung: ist ein aktiver Mieter da, sind das Mieter
+// und Bewohner (Eigentuemerin vermietet); sonst Bewohner und Eigentuemer
+// (selbst bewohnt). Verwalter gehoeren nie dazu.
+function zevBewohnendePartei(kontakte) {
+  const rollen = new Set((kontakte || []).map(k => k && k.rolle));
+  return rollen.has('mieter') ? new Set(['mieter', 'bewohner']) : new Set(['bewohner', 'eigentuemer']);
+}
+
+// Darf `email` die Rechnung `rechnung` ({ wohnung_id, bewohner_email }) sehen?
+// `kontakte` = aktive Kontakte der Wohnung (nicht archiviert, gueltig_ab <= heute),
+// `zevAktiv` = ZEV-Modul der STWEG an, `eigentuemerSiehtMieter` = Schalter der STWEG.
+//  1. Eigene Rechnung (Empfaengeradresse = eigene Adresse): immer, auch nach Auszug.
+//  2. Schalter an: Eigentuemerin der Wohnung sieht alle Rechnungen der Wohnung.
+//  3. Sonst nur die bewohnende Partei, und nur Rechnungen, deren Empfaenger
+//     heute selbst zur bewohnenden Partei gehoert (keine Vormieter-Rechnungen,
+//     keine Rechnungen der vermietenden Eigentuemerin an die Mieter).
+function zevDarfRechnungSehen({ email, rechnung, kontakte, zevAktiv, eigentuemerSiehtMieter }) {
+  const me = String(email || '').trim().toLowerCase();
+  if (!me || !rechnung) return false;
+  const empf = String(rechnung.bewohner_email || '').trim().toLowerCase();
+  if (empf && empf === me) return true;
+  if (!zevAktiv || rechnung.wohnung_id == null) return false;
+  const ks = (kontakte || []).filter(k => k && Number(k.wohnung_id) === Number(rechnung.wohnung_id));
+  const meineRollen = ks.filter(k => String(k.email || '').trim().toLowerCase() === me).map(k => k.rolle);
+  if (!meineRollen.length) return false;
+  if (eigentuemerSiehtMieter === true && meineRollen.includes('eigentuemer')) return true;
+  if (!empf) return false;
+  const partei = zevBewohnendePartei(ks);
+  const empfRollen = ks.filter(k => String(k.email || '').trim().toLowerCase() === empf).map(k => k.rolle);
+  return meineRollen.some(r => partei.has(r)) && empfRollen.some(r => partei.has(r));
+}
+
+module.exports = { zevSlug, zevAliasAddress, isValidEmail, zevGotoTargets, zevBewohnendePartei, zevDarfRechnungSehen };

@@ -17,7 +17,7 @@ const druckApi = require('./lib/druckapi'); // Druck-API CT 111 und Gotenberg (D
 const { STWEG_GROUPS, parseStweg, getUserStwegs, stwegFolderName, folderStwegNr, isTechnik, isPraesident, getAusschussStwegs, isAusschussForAny, canSeeVerwaltungKontakte,
   VERWALTUNG_GROUPS, istVerwaltungUebergang, verwaltungStwegs, isVerwaltungFor, isVerwaltungForAny, verwaltetAlleStwegs, istVerwaltungsGruppenName, getStwegsMitVerwaltung } = require('./lib/groups');
 const { nummernKanal, darfEchteNummernSehen, istTechnikOderPraesident, interneNummerFinden, nummernAusgeben, nummernAusBodyEntfernen, interneNummernLaden, interneNummernCacheLeeren, interneNummernPruefen, nummernSicht } = require('./lib/nummernsicht');
-const { zevAliasAddress, zevGotoTargets } = require('./lib/zev');
+const { zevAliasAddress, zevGotoTargets, zevDarfRechnungSehen } = require('./lib/zev');
 const reklMelder = require('./lib/reklamation-melder');
 const vollmachtRechte = require('./lib/vollmacht-rechte');
 const projekteRechte = require('./lib/projekte-rechte');
@@ -8214,11 +8214,10 @@ app.post('/api/zev/sync/:stweg', authMiddleware, requirePermission('wohnungsverw
   catch (e) { console.error('[zev-sync]', e); res.status(500).json({ error: e.message }); }
 });
 
-// Wohnungen, zu denen der User AKTUELL gehoert — jede Rolle (Eigentuemer/Mieter/
-// Bewohner/Verwalter), nicht archiviert, in einer ZEV-aktiven STWEG. Mitglieder eines
-// Objekts sehen dessen Rechnungen der AKTUELLEN Belegung. Vormieter-Rechnungen
-// (Bewohner-Mail gehoert keinem aktuellen Kontakt mehr) bleiben dem Vormieter
-// zugeordnet (revDSG/Datensparsamkeit) — das wird je Rechnung separat geprueft.
+// Wohnungen, zu denen der User AKTUELL gehoert — jede Rolle, nicht archiviert,
+// gueltig_ab <= heute, in einer ZEV-aktiven STWEG. Das ist nur die Vorauswahl;
+// wer welche Rechnung sieht, entscheidet zevDarfRechnungSehen (lib/zev.js):
+// ohne Schalter `eigentuemer_sieht_mieter` nur die bewohnende Partei (Z3).
 async function getZevMemberWohnungen(user) {
   const email = String(user?.email || '').toLowerCase();
   if (!email) return [];
@@ -8233,67 +8232,62 @@ async function getZevMemberWohnungen(user) {
   return r.rows.map(x => x.wohnung_id);
 }
 
-// W1: Wohnungen, deren Eigentuemer der User ist UND deren STWEG den Schalter
-// `eigentuemer_sieht_mieter` = true hat. Fuer diese darf er ALLE Rechnungen sehen
-// (auch die des aktuellen Mieters). Default ist der Schalter aus -> leere Liste.
-async function getZevOwnerWohnungen(user) {
+// Filtert Rechnungszeilen ({ wohnung_id, bewohner_email, ... }) auf die, die der
+// User sehen darf. Laedt dazu die aktiven Kontakte und den Schalter je Wohnung.
+async function zevSichtbareRechnungen(user, rows) {
   const email = String(user?.email || '').toLowerCase();
-  if (!email) return [];
-  const r = await pool.query(
-    `SELECT DISTINCT k.wohnung_id
-       FROM wohnungen_kontakte k
-       JOIN wohnungen w ON k.wohnung_id = w.id
-       JOIN zev_config c ON c.stweg = w.stweg AND c.aktiv = true AND c.eigentuemer_sieht_mieter = true
-      WHERE k.archiviert_am IS NULL
-        AND (k.gueltig_ab IS NULL OR k.gueltig_ab <= CURRENT_DATE)
-        AND k.rolle = 'eigentuemer'
-        AND LOWER(k.email) = $1`, [email]);
-  return r.rows.map(x => x.wohnung_id);
+  if (!email || !rows.length) return [];
+  const ids = [...new Set(rows.map(r => r.wohnung_id).filter(x => x != null))];
+  const kontakte = [];
+  const cfgByW = {};
+  if (ids.length) {
+    const k = await pool.query(
+      `SELECT w.id AS wohnung_id, k.rolle, k.email,
+              COALESCE(c.aktiv, false) AS zev_aktiv,
+              COALESCE(c.eigentuemer_sieht_mieter, false) AS eigentuemer_sieht_mieter
+         FROM wohnungen w
+         LEFT JOIN zev_config c ON c.stweg = w.stweg
+         LEFT JOIN wohnungen_kontakte k ON k.wohnung_id = w.id AND k.archiviert_am IS NULL
+              AND (k.gueltig_ab IS NULL OR k.gueltig_ab <= CURRENT_DATE)
+        WHERE w.id = ANY($1::int[])`, [ids]);
+    for (const x of k.rows) {
+      cfgByW[x.wohnung_id] = { zevAktiv: x.zev_aktiv === true, eigentuemerSiehtMieter: x.eigentuemer_sieht_mieter === true };
+      if (x.rolle) kontakte.push({ wohnung_id: x.wohnung_id, rolle: x.rolle, email: x.email });
+    }
+  }
+  return rows.filter(r => zevDarfRechnungSehen({
+    email, rechnung: r, kontakte,
+    zevAktiv: cfgByW[r.wohnung_id]?.zevAktiv === true,
+    eigentuemerSiehtMieter: cfgByW[r.wohnung_id]?.eigentuemerSiehtMieter === true,
+  }));
 }
 
 app.get('/api/zev/meine-rechnungen', authMiddleware, async (req, res) => {
   try {
     const email = String(req.user?.email || '').toLowerCase();
+    if (!email) return res.json({ rechnungen: [] });
     const memberWohnungen = await getZevMemberWohnungen(req.user);
-    const ownerWohnungen = await getZevOwnerWohnungen(req.user); // W1: nur bei aktivem Toggle
-    if (!email && !memberWohnungen.length && !ownerWohnungen.length) return res.json({ rechnungen: [] });
     const r = await pool.query(
-      `SELECT id, wohnung_id, betreff, absender, empfangen_am, pdf_filename, pdf_size,
+      `SELECT id, wohnung_id, bewohner_email, betreff, absender, empfangen_am, pdf_filename, pdf_size,
               rechnungsnummer, rechnungsdatum, zeitraum_von, zeitraum_bis, objekt, betrag_chf, positionen,
               bezahlt, bezahlt_am,
               (pdf_data IS NOT NULL) AS has_pdf
          FROM zev_rechnungen zr
-        WHERE (LOWER(bewohner_email) = $1 AND $1 <> '')
-           OR (wohnung_id = ANY($2::int[])
-               AND EXISTS (SELECT 1 FROM wohnungen_kontakte kk
-                            WHERE kk.wohnung_id = zr.wohnung_id
-                              AND kk.archiviert_am IS NULL
-                              AND LOWER(kk.email) = LOWER(zr.bewohner_email)))
-           OR (wohnung_id = ANY($3::int[]))
-        ORDER BY empfangen_am DESC NULLS LAST, id DESC`, [email, memberWohnungen, ownerWohnungen]);
-    res.json({ rechnungen: r.rows });
+        WHERE LOWER(bewohner_email) = $1
+           OR wohnung_id = ANY($2::int[])
+        ORDER BY empfangen_am DESC NULLS LAST, id DESC`, [email, memberWohnungen]);
+    const sichtbar = await zevSichtbareRechnungen(req.user, r.rows);
+    res.json({ rechnungen: sichtbar.map(({ bewohner_email, ...rest }) => rest) });
   } catch (e) { console.error('[zev-meine-rechnungen]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 
 app.get('/api/zev/rechnung/:id/pdf', authMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const email = String(req.user?.email || '').toLowerCase();
-    const memberWohnungen = await getZevMemberWohnungen(req.user);
-    const ownerWohnungen = await getZevOwnerWohnungen(req.user);
     const r = await pool.query('SELECT wohnung_id, bewohner_email, pdf_filename, pdf_data FROM zev_rechnungen WHERE id = $1', [id]);
     if (!r.rows.length || !r.rows[0].pdf_data) return res.status(404).json({ error: 'Nicht gefunden' });
     const row = r.rows[0];
-    let allowed = (email && String(row.bewohner_email || '').toLowerCase() === email);
-    if (!allowed && memberWohnungen.includes(row.wohnung_id)) {
-      // Mitglied des Objekts: nur wenn die Rechnung einem AKTUELLEN Kontakt gehoert
-      const cur = await pool.query(
-        `SELECT 1 FROM wohnungen_kontakte WHERE wohnung_id = $1 AND archiviert_am IS NULL AND LOWER(email) = LOWER($2) LIMIT 1`,
-        [row.wohnung_id, row.bewohner_email]);
-      allowed = cur.rows.length > 0;
-    }
-    if (!allowed && ownerWohnungen.includes(row.wohnung_id)) allowed = true; // W1: Eigentümer mit aktivem Toggle
-    if (!allowed) return res.status(403).json({ error: 'Kein Zugriff' });
+    if (!(await zevSichtbareRechnungen(req.user, [row])).length) return res.status(403).json({ error: 'Kein Zugriff' });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${String(row.pdf_filename || 'rechnung.pdf').replace(/[^\w.\-]/g, '_')}"`);
     res.send(row.pdf_data);
@@ -8305,21 +8299,9 @@ app.post('/api/zev/rechnung/:id/bezahlt', authMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const bezahlt = !!req.body?.bezahlt;
-    const email = String(req.user?.email || '').toLowerCase();
-    const memberWohnungen = await getZevMemberWohnungen(req.user);
-    const ownerWohnungen = await getZevOwnerWohnungen(req.user);
     const r = await pool.query('SELECT wohnung_id, bewohner_email FROM zev_rechnungen WHERE id = $1', [id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Nicht gefunden' });
-    const row = r.rows[0];
-    let allowed = (email && String(row.bewohner_email || '').toLowerCase() === email);
-    if (!allowed && memberWohnungen.includes(row.wohnung_id)) {
-      const cur = await pool.query(
-        `SELECT 1 FROM wohnungen_kontakte WHERE wohnung_id = $1 AND archiviert_am IS NULL AND LOWER(email) = LOWER($2) LIMIT 1`,
-        [row.wohnung_id, row.bewohner_email]);
-      allowed = cur.rows.length > 0;
-    }
-    if (!allowed && ownerWohnungen.includes(row.wohnung_id)) allowed = true; // W1: Eigentümer mit aktivem Toggle
-    if (!allowed) return res.status(403).json({ error: 'Kein Zugriff' });
+    if (!(await zevSichtbareRechnungen(req.user, r.rows)).length) return res.status(403).json({ error: 'Kein Zugriff' });
     await pool.query(
       `UPDATE zev_rechnungen SET bezahlt = $2,
               bezahlt_am = CASE WHEN $2 THEN NOW() ELSE NULL END,
