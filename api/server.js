@@ -22,6 +22,7 @@ const reklMelder = require('./lib/reklamation-melder');
 const vollmachtRechte = require('./lib/vollmacht-rechte');
 const projekteRechte = require('./lib/projekte-rechte');
 const rechteSchluessel = require('./lib/rechte-schluessel');
+const kontaktformular = require('./lib/kontaktformular');
 const stwegSichtLib = require('./lib/stweg-sicht');
 const verteilerVerwaltung = require('./lib/verteiler-verwaltung');
 
@@ -20827,6 +20828,25 @@ app.get('/api/reklamationen/:id/foto', authMiddleware, requirePermission('reklam
     if (!p) return res.status(404).json({ error: 'Kein Foto vorhanden' });
     return sendeReklamationsFoto(res, p);
   } catch (e) { console.error('[reklamation-foto]', e); if (!res.headersSent) res.status(500).end(); }
+});
+
+// ─── Kontaktformular der Startseite (Befund W1) ──────────────────────────
+// Ohne Anmeldung; Nachricht an technik@ ueber das Mailcow-Gateway (noreply),
+// Absender nur als Reply-To. Drossel je IP und gesamt wie die Code-Anforderung.
+app.post('/api/kontakt', async (req, res) => {
+  try {
+    const k = kontaktformular.pruefen(req.body);
+    if (k.spam) return res.json({ ok: true });
+    if (k.fehler) return res.status(400).json({ error: k.fehler });
+    if (!otpIpErlaubt(req) || !otpGlobalErlaubt('kontakt')) {
+      return res.status(429).json({ error: 'Zu viele Nachrichten. Bitte später erneut oder per E-Mail an ' + kontaktformular.ZIEL + '.' });
+    }
+    await loggedSendMail(kontaktformular.mail(k, MAIL_FROM), 'kontaktformular');
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[kontakt]', e.message);
+    res.status(500).json({ error: 'Nachricht konnte nicht gesendet werden. Bitte per E-Mail an ' + kontaktformular.ZIEL + '.' });
+  }
 });
 
 // ─── Reparatur-Melder OHNE Login: per E-Mail-Code (OTP) fuer bekannte Bewohner ───

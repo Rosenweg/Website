@@ -202,6 +202,7 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `GET /api/auth/login`, `/callback`, `/logout` | Anmeldung |
 | `POST /api/reklamationen/code`, `/oeffentlich`; `POST /api/doodle/code`, `/verify`; `GET/POST /api/doodle/public/:id` | Code-Abläufe |
 | `GET /api/melde-ort/:code` | Melde-Ort zu einem QR-Code |
+| `POST /api/kontakt` | Kontaktformular der Startseite: Mail an technik@ (Honigtopf, Drossel je IP und gesamt, Absender nur Reply-To; `lib/kontaktformular.js`) |
 | `GET /api/energy/{surplus,surplus-available,lametric,shelly,solar-live,tariffs,tariffs/current}` | Geräte und Anzeigen, ohne `consumers` ([`energie-api.md`](energie-api.md)) |
 | `GET /api/public/ausschuss`, `/api/public/technik`, `/api/verwaltungen/public` | öffentliche Kontakte |
 | `GET /api/stweg/:stweg/wohnungen`, `/api/stweg/:stweg/overview` | Wohnungsliste und Belegung **ohne** Namen |
