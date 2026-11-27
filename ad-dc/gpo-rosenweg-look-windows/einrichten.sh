@@ -12,8 +12,9 @@
 #   2. die genannten Rechner dorthin verschieben
 #   3. die Richtlinie anlegen (einmal) und an OU=Windows haengen
 #   4. Skript und Bilder ins sysvol, Startskript (Rechner) und Abmeldeskript
-#      (Benutzer) eintragen, Version hochzaehlen; den Open-Shell-Installer
-#      einmal mit Pruefsumme holen
+#      (Benutzer) eintragen, Version hochzaehlen; die Installer von
+#      Open-Shell und VLC einmal mit Pruefsumme holen, die von IrfanView
+#      (von Hand nach programme/) pruefen
 #   5. Rechte im sysvol neu setzen
 #
 # Auf dc1 als root, im Verzeichnis mit rosenweg-look.ps1 und bilder/:
@@ -75,6 +76,44 @@ if [ ! -f "$HIER/programme/$CHROME_DATEI" ]; then
     mv "$HIER/programme/$CHROME_DATEI.neu" "$HIER/programme/$CHROME_DATEI"
     echo "Chrome geholt: $(sha256sum "$HIER/programme/$CHROME_DATEI" | cut -d' ' -f1)"
 fi
+
+# IrfanView (Bilder) und VLC (Audio/Video), rosenweg-look.ps1: feste
+# Versionen mit Pruefsumme wie Open-Shell, nicht im Git. Version, Dateiname
+# und Pruefsumme stehen auch in rosenweg-look.ps1 - beide aendern.
+#
+# IrfanView: der deutsche 64-bit-Installer und die offiziellen 64-bit-
+# Plugins. Die Pruefsummen sind die auf https://www.irfanview.com/64bit.htm.
+# irfanview.info gibt die Dateien nur nach einem Klick auf der Download-Seite
+# heraus (sonst kommt eine HTML-Seite "Click again to start Download") -
+# darum hier kein curl: im Browser von dort laden und nach programme/ legen.
+#
+# VLC: das MSI von download.videolan.org; die Pruefsumme stimmt mit der dort
+# veroeffentlichten (.sha256) ueberein.
+IRFANVIEW_DATEI="iview476g_x64_setup.exe"
+IRFANVIEW_SHA256="f4041d0dd55d0020b6725cf650765269ddcfdbd2d74993f566fe5ac733656050"
+IRFANPLUGINS_DATEI="iview476_plugins_x64_setup.exe"
+IRFANPLUGINS_SHA256="ebc0c4b8bbd25b17f025d56d52fdb92d040e1f7f9215880ff1227ecba15ef713"
+VLC_DATEI="vlc-3.0.24-win64.msi"
+VLC_URL="https://download.videolan.org/pub/videolan/vlc/3.0.24/win64/$VLC_DATEI"
+VLC_SHA256="22172095ce4c2d5f5b600bb4c142d78105db29a77fa59a931941876f3b20f6d0"
+if [ ! -f "$HIER/programme/$VLC_DATEI" ]; then
+    curl -fsSL -o "$HIER/programme/$VLC_DATEI.neu" "$VLC_URL"
+    mv "$HIER/programme/$VLC_DATEI.neu" "$HIER/programme/$VLC_DATEI"
+fi
+for d in "$IRFANVIEW_DATEI" "$IRFANPLUGINS_DATEI"; do
+    [ -f "$HIER/programme/$d" ] || {
+        echo "$d fehlt in $HIER/programme/ - im Browser von https://www.irfanview.com/64bit.htm laden und dorthin legen" >&2
+        exit 1
+    }
+done
+while read -r summe datei; do
+    echo "$summe  $HIER/programme/$datei" | sha256sum -c --quiet - \
+        || { echo "Pruefsumme von $datei stimmt nicht - Datei loeschen und neu laden" >&2; exit 1; }
+done <<EOF
+$IRFANVIEW_SHA256 $IRFANVIEW_DATEI
+$IRFANPLUGINS_SHA256 $IRFANPLUGINS_DATEI
+$VLC_SHA256 $VLC_DATEI
+EOF
 
 # --- 1. OU ------------------------------------------------------------------
 if ! samba-tool ou list -H "$SAM" | grep -qx "OU=Windows"; then
@@ -151,6 +190,17 @@ install -m 0644 "$HIER/drucker.ps1" "$start_dir/drucker.ps1"
 install -m 0644 "$HIER/programme.ps1" "$start_dir/programme.ps1"
 install -m 0644 "$HIER/programme/$OPENSHELL_DATEI" "$start_dir/$OPENSHELL_DATEI"
 install -m 0644 "$HIER/programme/$CHROME_DATEI" "$start_dir/$CHROME_DATEI"
+# Aeltere Versionen von IrfanView/VLC aus dem sysvol (sonst wuechse es mit
+# jedem Update um 100 MB), dann die aktuellen
+for alt in "$start_dir"/iview*_x64_setup.exe "$start_dir"/vlc-*-win64.msi; do
+    case "$(basename "$alt")" in
+        "$IRFANVIEW_DATEI"|"$IRFANPLUGINS_DATEI"|"$VLC_DATEI") ;;
+        *) if [ -f "$alt" ]; then rm -f "$alt"; echo "Alter Installer entfernt: $(basename "$alt")"; fi ;;
+    esac
+done
+for d in "$IRFANVIEW_DATEI" "$IRFANPLUGINS_DATEI" "$VLC_DATEI"; do
+    install -m 0644 "$HIER/programme/$d" "$start_dir/$d"
+done
 install -m 0644 "$HIER/aufraeumen.ps1" "$start_dir/aufraeumen.ps1"
 
 # scripts.ini statt psscripts.ini: so startet die Richtlinie powershell.exe

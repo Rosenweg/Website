@@ -475,26 +475,222 @@ Setze $cr 'ShowHomeButton' 1 'DWord'
 Setze "$cr\Recommended" 'RestoreOnStartup' 4 'DWord'
 Setze "$cr\Recommended\RestoreOnStartupURLs" '1' 'https://www.rosenweg4303.ch'
 
-# Chrome als Standard fuer Webseiten und PDF. Windows liest die Datei bei
-# jeder Anmeldung (Richtlinie "Standardzuordnungen", nur in der Domaene).
-# Erst wenn Chrome da ist - sonst zeigten Links ins Leere.
-$zuordnung = Join-Path $prog 'standardprogramme.xml'
+# --- Bilder und Medien: IrfanView und VLC ------------------------------------
+# Stefan, 27.11.2026: auf allen Windows-Rechnern IrfanView (64 bit, deutsch,
+# mit den offiziellen Plugins) fuer Bilder und VLC fuer Audio und Video -
+# auch fuer die Aufnahmen des Rosenweg Diktiergeraets (m4a/aac/ogg).
+#
+# Wie Open-Shell (unten): feste Versionen, die Installer legt einrichten.sh
+# mit Pruefsumme ins sysvol (nicht im Git), hier wird vor dem Start noch
+# einmal geprueft. Installiert wird, wenn das Programm fehlt oder der hier
+# notierte Stand nicht der verlangte ist - eine neue Version ist also: Datei,
+# Version und Pruefsumme hier UND in einrichten.sh aendern, einrichten.sh.
+# Beide Programme bringen keinen eigenen Updater mit, der als SYSTEM liefe;
+# die Hinweise auf neue Versionen sind aus (VLC: aufraeumen.ps1).
+#
+# IrfanView-Lizenz: Freeware fuer private und nicht-kommerzielle Nutzung.
+# Die Stockwerkeigentuemergemeinschaft gilt dabei wie Privatpersonen
+# (Stefan, 27.11.2026) - siehe README.
+#
+# Erlaubt (AppLocker) sind beide als Pflicht im Katalog (api/lib/
+# windowsprogramme.js): die Richtlinie verteilt sie auf jeden Rechner und
+# macht sie zum Standard - abwaehlbar duerfen sie dort nicht sein.
+#
+# Zuruecknehmen: $MedienAn = $false, einrichten.sh - beim naechsten Start
+# werden beide still deinstalliert, die Zuordnungen fallen weg.
+$MedienAn           = $true
+$IrfanViewVersion   = '4.76'
+$IrfanViewDatei     = 'iview476g_x64_setup.exe'
+$IrfanViewSha256    = 'F4041D0DD55D0020B6725CF650765269DDCFDBD2D74993F566FE5AC733656050'
+$IrfanPluginsDatei  = 'iview476_plugins_x64_setup.exe'
+$IrfanPluginsSha256 = 'EBC0C4B8BBD25B17F025D56D52FDB92D040E1F7F9215880FF1227ECBA15EF713'
+$VlcVersion         = '3.0.24'
+$VlcDatei           = 'vlc-3.0.24-win64.msi'
+$VlcSha256          = '22172095CE4C2D5F5B600BB4C142D78105DB29A77FA59A931941876F3B20F6D0'
+
+$ivOrdner = Join-Path $env:ProgramFiles 'IrfanView'
+$ivExe    = Join-Path $ivOrdner 'i_view64.exe'
+$vlcExe   = Join-Path $env:ProgramFiles 'VideoLAN\VLC\vlc.exe'
+# Was installiert ist, steht hier (unter Programme: nur Admins schreiben
+# dort). Die Versionsangaben der Programme selbst sind uneinheitlich
+# (IrfanView "4.76" vs. Dateiversion), so ist der Vergleich eindeutig.
+$medienStand = Join-Path $prog 'medien.stand'
+$medienIst = @{}
+if (Test-Path $medienStand) {
+    foreach ($z in Get-Content $medienStand) { if ($z -match '^(\w+)=(.+)$') { $medienIst[$Matches[1]] = $Matches[2].Trim() } }
+}
+function MedienStandSchreiben {
+    ($medienIst.Keys | Sort-Object | ForEach-Object { "$_=$($medienIst[$_])" }) | Set-Content -Path $medienStand -Encoding ASCII
+}
+# Installer aus der Richtlinie nach C:\Windows\Temp (nur Admins/SYSTEM
+# schreiben dort, die Programm-Whitelist erlaubt es) und pruefen.
+# Gibt den Pfad zurueck oder $null.
+function InstallerHolen([string]$datei, [string]$sha256, [string]$wer) {
+    $von = Join-Path $Quelle $datei
+    if (-not (Test-Path $von)) { Log "${wer}: $datei fehlt in der Richtlinie - nicht installiert"; return $null }
+    $tmp = Join-Path $env:WINDIR "Temp\Rosenweg-$datei"
+    Copy-Item $von $tmp -Force
+    if ((Get-FileHash $tmp -Algorithm SHA256).Hash -ne $sha256) {
+        Log "${wer}: Pruefsumme von $datei stimmt NICHT - nicht installiert"
+        Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+        return $null
+    }
+    $tmp
+}
+function Deinstalleintrag([string]$muster) {
+    Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
+        Where-Object { $_.DisplayName -like $muster }
+}
+
+if ($MedienAn) {
+    # IrfanView: der deutsche Installer (iview...g_...). /assoc=1 meldet die
+    # Bildformate bei Windows an (rechnerweit, /assocallusers=1) - Standard
+    # werden sie erst ueber die Standardzuordnungen unten. /ini: die
+    # Einstellungen je Person im servergespeicherten %APPDATA%\IrfanView
+    # (IrfanView loest %APPDATA% selbst auf), nicht im Programmordner.
+    if (-not (Test-Path $ivExe) -or $medienIst['irfanview'] -ne $IrfanViewVersion) {
+        $tmp = InstallerHolen $IrfanViewDatei $IrfanViewSha256 'IrfanView'
+        if ($tmp) {
+            $pr = Start-Process -FilePath $tmp -Wait -PassThru -ArgumentList '/silent',
+                "/folder=`"$ivOrdner`"", '/desktop=0', '/thumbs=0', '/group=1', '/allusers=1',
+                '/assoc=1', '/assocallusers=1', '/ini="%APPDATA%\IrfanView"'
+            Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+            if ($pr.ExitCode -eq 0 -and (Test-Path $ivExe)) {
+                $medienIst['irfanview'] = $IrfanViewVersion; $medienIst.Remove('plugins'); MedienStandSchreiben
+            }
+            Log "IrfanView $IrfanViewVersion installiert (Rueckgabe $($pr.ExitCode))"
+        }
+    }
+    # Die offiziellen Plugins (64 bit, gleiche Version): z.B. HEIC, AVIF,
+    # Kamera-RAW und weitere Formate und Funktionen (Liste: irfanview.com/plugins.htm)
+    if ((Test-Path $ivExe) -and ($medienIst['plugins'] -ne $IrfanViewVersion -or -not (Test-Path (Join-Path $ivOrdner 'Plugins')))) {
+        $tmp = InstallerHolen $IrfanPluginsDatei $IrfanPluginsSha256 'IrfanView-Plugins'
+        if ($tmp) {
+            $pr = Start-Process -FilePath $tmp -Wait -PassThru -ArgumentList '/silent', "/folder=`"$ivOrdner`""
+            Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+            if ($pr.ExitCode -eq 0 -and (Test-Path (Join-Path $ivOrdner 'Plugins'))) { $medienIst['plugins'] = $IrfanViewVersion; MedienStandSchreiben }
+            Log "IrfanView-Plugins $IrfanViewVersion installiert (Rueckgabe $($pr.ExitCode))"
+        }
+    }
+
+    # VLC: das MSI. Es meldet die Audio- und Videoformate bei Windows an
+    # (VLC.<endung>.Document); ein Upgrade ersetzt die alte Version. Ein VLC
+    # aus dem EXE-Installer (NSIS, uninstall.exe) waere ein zweites Paket im
+    # selben Ordner - das wird vorher still entfernt.
+    if (-not (Test-Path $vlcExe) -or $medienIst['vlc'] -ne $VlcVersion) {
+        $tmp = InstallerHolen $VlcDatei $VlcSha256 'VLC'
+        if ($tmp) {
+            foreach ($alt in @(Deinstalleintrag 'VLC media player*' | Where-Object { [string]$_.UninstallString -match 'uninstall\.exe' })) {
+                $u = ([string]$alt.UninstallString).Trim('"')
+                if (Test-Path -LiteralPath $u) {
+                    $pr = Start-Process -FilePath $u -Wait -PassThru -ArgumentList '/S'
+                    Log "VLC (EXE-Installer $($alt.DisplayVersion)) entfernt (Rueckgabe $($pr.ExitCode))"
+                }
+            }
+            $pr = Start-Process -FilePath "$env:WINDIR\System32\msiexec.exe" -Wait -PassThru `
+                -ArgumentList '/i', "`"$tmp`"", '/qn', '/norestart'
+            Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+            if ($pr.ExitCode -in 0, 3010 -and (Test-Path $vlcExe)) { $medienIst['vlc'] = $VlcVersion; MedienStandSchreiben }
+            Log "VLC $VlcVersion installiert (Rueckgabe $($pr.ExitCode))"
+        }
+    }
+
+    # Keine Verknuepfungen auf dem oeffentlichen Desktop (das MSI von VLC legt
+    # eine an; IrfanView mit /desktop=0 nicht, nur zur Sicherheit). Das
+    # Startmenue behaelt beide.
+    foreach ($lnk in @(Get-ChildItem "$env:PUBLIC\Desktop" -Filter '*.lnk' -ErrorAction SilentlyContinue |
+                       Where-Object { $_.Name -like 'VLC*' -or $_.Name -like 'IrfanView*' })) {
+        Remove-Item -LiteralPath $lnk.FullName -Force; Log "entfernt: $($lnk.FullName)"
+    }
+} else {
+    $ivWeg = Join-Path $ivOrdner 'iv_uninstall.exe'
+    if (Test-Path $ivWeg) {
+        $pr = Start-Process -FilePath $ivWeg -Wait -PassThru -ArgumentList '/silent'
+        Log "IrfanView entfernt (Rueckgabe $($pr.ExitCode))"
+    }
+    foreach ($e in @(Deinstalleintrag 'VLC media player*')) {
+        $code = [regex]::Match([string]$e.UninstallString, '\{[0-9A-Fa-f-]{36}\}').Value
+        if ($code) {
+            $pr = Start-Process -FilePath "$env:WINDIR\System32\msiexec.exe" -Wait -PassThru -ArgumentList '/x', $code, '/qn', '/norestart'
+            Log "VLC entfernt (Rueckgabe $($pr.ExitCode))"
+        }
+    }
+    Remove-Item $medienStand -Force -ErrorAction SilentlyContinue
+}
+
+# --- Standardzuordnungen ------------------------------------------------------
+# Chrome fuer Webseiten und PDF, IrfanView fuer Bilder, VLC fuer Audio und
+# Video. Windows liest die Datei bei jeder Anmeldung (Richtlinie
+# "Standardzuordnungen", nur in der Domaene).
+#
+# Nur was wirklich da ist: ein Programm, das fehlt, bekommt keine Zuordnung
+# (sonst zeigten Links und Dateien ins Leere). Die ProgId einer Endung liest
+# das Skript aus der Registrierung, die das Programm selbst angelegt hat
+# (RegisteredApplications -> Capabilities\FileAssociations, sonst die Endung
+# selbst) - so passt sie zur installierten Version, auch wenn ein Hersteller
+# die Namen aendert. Was ein Programm nicht anmeldet, steht im Protokoll.
+$IrfanViewEndungen = '.jpg', '.jpeg', '.jpe', '.jfif', '.png', '.gif', '.bmp', '.dib', '.tif', '.tiff',
+                     '.webp', '.ico', '.heic', '.heif', '.avif'
+$VlcEndungen = '.mp3', '.m4a', '.aac', '.ogg', '.oga', '.opus', '.wav', '.flac', '.wma', '.mka', '.amr', '.3ga',
+               '.mp4', '.m4v', '.mkv', '.avi', '.mov', '.wmv', '.webm', '.mpg', '.mpeg', '.3gp', '.ts', '.mts',
+               '.m2ts', '.flv', '.ogv', '.vob'
+$klassen = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes'
+function Faehigkeiten([string]$muster) {
+    # FileAssociations des bei Windows angemeldeten Programms (oder $null)
+    $ra = Get-ItemProperty 'HKLM:\SOFTWARE\RegisteredApplications' -ErrorAction SilentlyContinue
+    if (-not $ra) { return $null }
+    $p = $ra.PSObject.Properties | Where-Object { $_.Name -like $muster } | Select-Object -First 1
+    if (-not $p) { return $null }
+    Get-ItemProperty "Registry::HKEY_LOCAL_MACHINE\$($p.Value)\FileAssociations" -ErrorAction SilentlyContinue
+}
+function ProgIdFuer([string]$endung, [string]$muster, $faehig) {
+    $kandidaten = @()
+    if ($faehig -and $faehig.$endung) { $kandidaten += [string]$faehig.$endung }
+    $k = Join-Path $klassen $endung
+    $std = (Get-ItemProperty $k -ErrorAction SilentlyContinue).'(default)'
+    if ($std) { $kandidaten += [string]$std }
+    $ow = Get-Item (Join-Path $k 'OpenWithProgids') -ErrorAction SilentlyContinue
+    if ($ow) { $kandidaten += $ow.GetValueNames() }
+    foreach ($p in $kandidaten) {
+        if ($p -like $muster -and (Test-Path -LiteralPath (Join-Path $klassen $p))) { return $p }
+    }
+    $null
+}
+$eintraege = New-Object System.Collections.Generic.List[string]
+$ohne = New-Object System.Collections.Generic.List[string]
+function Zuordnen([string]$endung, [string]$progId, [string]$app) {
+    $eintraege.Add("  <Association Identifier=""$endung"" ProgId=""$progId"" ApplicationName=""$app"" />")
+}
 if ($chromeExe) {
-    $xml = @'
-<?xml version="1.0" encoding="UTF-8"?>
-<DefaultAssociations>
-  <Association Identifier=".htm" ProgId="ChromeHTML" ApplicationName="Google Chrome" />
-  <Association Identifier=".html" ProgId="ChromeHTML" ApplicationName="Google Chrome" />
-  <Association Identifier=".pdf" ProgId="ChromePDF" ApplicationName="Google Chrome" />
-  <Association Identifier="http" ProgId="ChromeHTML" ApplicationName="Google Chrome" />
-  <Association Identifier="https" ProgId="ChromeHTML" ApplicationName="Google Chrome" />
-</DefaultAssociations>
-'@
+    Zuordnen '.htm' 'ChromeHTML' 'Google Chrome'
+    Zuordnen '.html' 'ChromeHTML' 'Google Chrome'
+    Zuordnen '.pdf' 'ChromePDF' 'Google Chrome'
+    Zuordnen 'http' 'ChromeHTML' 'Google Chrome'
+    Zuordnen 'https' 'ChromeHTML' 'Google Chrome'
+}
+$medienApps = @()
+if ($MedienAn -and (Test-Path $ivExe)) { $medienApps += , @('IrfanView', 'IrfanView*', $IrfanViewEndungen) }
+if ($MedienAn -and (Test-Path $vlcExe)) { $medienApps += , @('VLC media player', 'VLC*', $VlcEndungen) }
+foreach ($m in $medienApps) {
+    $faehig = Faehigkeiten $m[1]
+    foreach ($e in $m[2]) {
+        $p = ProgIdFuer $e $m[1] $faehig
+        if ($p) { Zuordnen $e $p $m[0] } else { $ohne.Add("$($m[0]) $e") }
+    }
+}
+$zuordnung = Join-Path $prog 'standardprogramme.xml'
+$sys = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System'
+if ($eintraege.Count) {
+    $xml = "<?xml version=""1.0"" encoding=""UTF-8""?>`r`n<DefaultAssociations>`r`n" +
+           ($eintraege -join "`r`n") + "`r`n</DefaultAssociations>`r`n"
     if (-not (Test-Path $zuordnung) -or (Get-Content $zuordnung -Raw) -ne $xml) {
         Set-Content -Path $zuordnung -Value $xml -Encoding UTF8 -NoNewline
-        Log "Standardprogramme: Chrome fuer http/https/.htm/.html/.pdf"
+        Log "Standardprogramme: $($eintraege.Count) Zuordnungen ($(if ($chromeExe) { 'Chrome ' })$(($medienApps | ForEach-Object { $_[0] }) -join ', '))$(if ($ohne.Count) { "; nicht angemeldet: $($ohne -join ', ')" })"
     }
-    Setze 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System' 'DefaultAssociationsConfiguration' $zuordnung
+    Setze $sys 'DefaultAssociationsConfiguration' $zuordnung
+} elseif ((Get-ItemProperty $sys -ErrorAction SilentlyContinue).DefaultAssociationsConfiguration) {
+    Remove-ItemProperty $sys -Name 'DefaultAssociationsConfiguration' -ErrorAction SilentlyContinue
+    Log "Standardprogramme: keine - Richtlinie entfernt"
 }
 
 # Taskleiste (nur Windows 11): Explorer und Chrome statt der Vorgaben von
