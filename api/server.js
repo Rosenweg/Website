@@ -4620,7 +4620,12 @@ app.post('/api/verteiler/send', authMiddleware, async (req, res) => {
     }
     try {
       const { rows: [vt] } = await pool.query('SELECT id, stweg, active FROM email_verteiler WHERE id = $1', [vid]);
-      if (!vt || !verteilerVerwaltung.portalDarfSenden(req.user?.groups || [], await verteilerPortalPerm(req), vt)) {
+      const perm = await verteilerPortalPerm(req);
+      // V10: Senden verlangt „email-verteiler“ = schreiben (lesen zeigt nur die Liste).
+      if (!verteilerVerwaltung.portalDarfSendenRecht(perm)) {
+        return res.status(403).json({ error: 'Senden braucht das Recht „E-Mail-Verteiler“ = schreiben' });
+      }
+      if (!vt || !verteilerVerwaltung.portalDarfSenden(req.user?.groups || [], perm, vt)) {
         return res.status(403).json({ error: 'Nur an Verteiler der eigenen STWEG' });
       }
     } catch (e) { return res.status(500).json({ error: 'Fehler' }); }
@@ -4637,6 +4642,9 @@ app.post('/api/verteiler/send', authMiddleware, async (req, res) => {
 
   const { verteiler_id, subject, body } = req.body;
   let recipients = Array.isArray(req.body.recipients) ? req.body.recipients : [];
+  // V10: „Ihr Name (optional)“ wird Anzeigename im From (Adresse bleibt die des Gateways).
+  const absName = verteilerVerwaltung.absenderName(req.body.sender_name, req.user?.name);
+  let verteilerAdresse = null;
   if (!subject || !body) {
     return res.status(400).json({ error: 'Betreff und Text erforderlich' });
   }
@@ -4646,6 +4654,7 @@ app.post('/api/verteiler/send', authMiddleware, async (req, res) => {
     try {
       const { rows: [vt] } = await pool.query('SELECT * FROM email_verteiler WHERE id = $1', [parseInt(verteiler_id)]);
       if (!vt) return res.status(404).json({ error: 'Verteiler nicht gefunden' });
+      verteilerAdresse = vt.email_address || null;
       recipients = await resolveVerteilerRecipients(vt);
     } catch (e) {
       console.error('resolveVerteilerRecipients failed:', e.message);
@@ -4667,16 +4676,19 @@ app.post('/api/verteiler/send', authMiddleware, async (req, res) => {
     let sent = 0;
     let failed = [];
     let gateway = null;
+    let messageId = null;
+    let htmlBody = '';
     // EINE Mail, alle Empfänger im BCC — so sehen sie sich gegenseitig NICHT (DSGVO).
     // To = MAIL_FROM (neutral); der Verteiler-Alias darf NICHT ins To (sonst Re-Fanout).
     try {
       // Body kommt als Plain-Text aus der Textarea — Zeilenumbrueche erhalten:
       // text-Teil 1:1, html-Teil escaped + \n -> <br>. Sonst schluckt HTML die Umbrueche.
-      const htmlBody = String(body)
+      htmlBody = String(body)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         .replace(/\r?\n/g, '<br>');
-      ({ gateway } = await mailSenden({
-        from: MAIL_FROM,
+      let result;
+      ({ result, gateway } = await mailSenden({
+        from: { name: absName, address: MAIL_FROM },
         to: MAIL_FROM,
         bcc: validRecipients,
         // Antworten gehen an den sendenden User, nicht an die generische From-Adresse.
@@ -4685,6 +4697,7 @@ app.post('/api/verteiler/send', authMiddleware, async (req, res) => {
         text: body,
         html: htmlBody,
       }, 'verteiler-direct'));
+      messageId = result?.messageId || null;
       sent = validRecipients.length;
     } catch (sendErr) {
       gateway = sendErr.gateway || null;
@@ -4697,10 +4710,24 @@ app.post('/api/verteiler/send', authMiddleware, async (req, res) => {
     await pool.query(
       `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments, recipients_list, failed_recipients, status, trigger, to_addresses, gateway)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-      [verteiler_id || null, req.user?.email || MAIL_FROM, req.user?.name || 'Admin', subject, sent, false,
+      [verteiler_id || null, req.user?.email || MAIL_FROM, absName, subject, sent, false,
        JSON.stringify(recipients), failed.length > 0 ? JSON.stringify(failed) : null, status,
        'verteiler-direct', recipients.join(', '), gateway]
     );
+
+    // V10: Portal-Rundmail ins E-Mail-Archiv (per Mail an den Alias erledigt das
+    // archiv@ im goto; hier geht der Versand direkt per BCC an die Mitglieder).
+    if (sent > 0) {
+      const a = verteilerVerwaltung.portalRundmailArchiv({
+        absenderEmail: req.user?.email || MAIL_FROM, absenderName: absName, verteilerAdresse,
+        anzahl: sent, subject, text: body, html: htmlBody, messageId,
+      });
+      await pool.query(
+        `INSERT INTO email_archive (from_email, from_name, to_addresses, subject, text_body, html_body, message_id, email_date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW()) ON CONFLICT (message_id) DO NOTHING`,
+        [a.from_email, a.from_name, a.to_addresses, a.subject, a.text_body, a.html_body, a.message_id],
+      ).catch(e => console.error('[verteiler-direct] Archivieren fehlgeschlagen:', e.message));
+    }
 
     res.json({ success: true, sent, failed: failed.length });
   } catch (err) {
@@ -10055,8 +10082,11 @@ async function verteilerPortalPerm(req) {
 app.get('/api/verteiler', authMiddleware, async (req, res) => {
   try {
     let verwStwegs = null;
+    let darfSenden = true;
     if (!req.user?.isAdmin) {
-      verwStwegs = [...verteilerVerwaltung.portalVerteilerStwegs(req.user?.groups || [], await verteilerPortalPerm(req))];
+      const perm = await verteilerPortalPerm(req);
+      darfSenden = verteilerVerwaltung.portalDarfSendenRecht(perm); // V10: schreiben
+      verwStwegs = [...verteilerVerwaltung.portalVerteilerStwegs(req.user?.groups || [], perm)];
       if (!verwStwegs.length) return res.status(403).json({ error: 'Admin-Rechte erforderlich' });
     }
     const result = await pool.query(
@@ -10104,8 +10134,8 @@ app.get('/api/verteiler', authMiddleware, async (req, res) => {
       v.member_count = allEmails.size;
       v.resolved_emails = [...allEmails];
     }));
-    if (verwStwegs) return res.json({ verteiler: rows.map(verteilerVerwaltung.fuerVerwaltung), nur_lesen: true });
-    res.json({ verteiler: rows });
+    if (verwStwegs) return res.json({ verteiler: rows.map(verteilerVerwaltung.fuerVerwaltung), nur_lesen: true, darf_senden: darfSenden });
+    res.json({ verteiler: rows, darf_senden: true });
   } catch (err) {
     res.status(500).json({ error: 'Fehler beim Laden der Verteiler' });
   }
@@ -30724,7 +30754,7 @@ async function initDB() {
         INSERT INTO permissions (group_name, page, access) VALUES
         ('Verwaltung', 'bewohner-verwaltung', 'write'),
         ('Verwaltung', 'energie-monitor', 'read'),
-        ('Verwaltung', 'email-verteiler', 'read'),
+        ('Verwaltung', 'email-verteiler', 'write'),
         ('Verwaltung', 'zähler', 'read'),
         ('Verwaltung', 'kontakte', 'read'),
         ('Verwaltung', 'verwaltung', 'read')
@@ -30774,7 +30804,8 @@ async function initDB() {
       // vollmachten write: fuer Dritte erfassen, Papier aktivieren (Entscheid Stefan 27.11.2026)
       ['vollmachten', 'write'], ['auslagen', 'read'], ['zähler', 'read'], ['energie-monitor', 'read'],
       ['waschküche-admin', 'read'], ['projekte', 'write'], ['kontakte', 'read'], ['verwaltung', 'read'],
-      ['email-verteiler', 'read'], ['bewohner-verwaltung', 'read'],
+      // email-verteiler write: im Portal an die Verteiler senden (Entscheid Stefan 27.11.2026, V10)
+      ['email-verteiler', 'write'], ['bewohner-verwaltung', 'read'],
     ];
     for (const groupName of Object.values(VERWALTUNG_GROUPS)) {
       for (const [page, access] of VERWALTUNG_SEITENRECHTE) {

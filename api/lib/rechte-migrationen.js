@@ -23,6 +23,9 @@ const RECHTE_MIGRATIONEN = [
   { name: '2026-11-27-projekte-verwaltung-write', page: 'projekte', access: 'write', gruppen: VERWALTUNGEN },
   // Konten anlegen: alle Ausschuesse (Entscheid Stefan 27.11.2026, Befund W2/F3-8)
   { name: '2026-11-27-bewohner-verwaltung-ausschuss-write', page: 'bewohner-verwaltung', access: 'write', gruppen: AUSSCHUESSE },
+  // Im Portal an Verteiler senden verlangt schreiben (Entscheid Stefan 27.11.2026, V10);
+  // 'Verwaltung' = ÜBERGANG (alte globale Gruppe).
+  { name: '2026-11-27-email-verteiler-verwaltung-write', page: 'email-verteiler', access: 'write', gruppen: [...VERWALTUNGEN, 'Verwaltung'] },
 ];
 
 const SQL_TABELLE = `
