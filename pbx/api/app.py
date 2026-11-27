@@ -3821,6 +3821,9 @@ PORTAL_PFADE_STANDARD = {
     # hierher zurueck, nur fuer die Person am Telefon), eigene Handys abmelden
     "ch.rosenweg4303.meintelefon": ["/api/telefonanlage/", "GET /api/messenger/zugaenge", "DELETE /api/messenger/zugaenge/",
                                     "GET /api/apps/sitzungen", "DELETE /api/apps/sitzungen/"],
+    # Rosenweg Waschkueche (Bewohner der STWEG mit Waschkueche, Verwalten mit "waschküche-admin";
+    # die Haupt-API prueft Raeume/STWEG und Rechte selbst)
+    "ch.rosenweg4303.waschkueche": ["/api/wasch/"],
 }
 _PORTAL_PFAD = re.compile(r"/api/[A-Za-z0-9._~!$&'()*+,;=:@%/-]{1,1000}(\?[A-Za-z0-9._~!$&'()*+,;=:@%/?-]{0,1000})?")
 _PORTAL_KODIERT_VERBOTEN = re.compile(r"%(2e|2f|5c|00)", re.I)

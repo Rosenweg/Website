@@ -32,6 +32,11 @@ test('apps-register.json ist gueltig und kennt die bisherigen Apps', () => {
   assert.equal(daten.apps.reparatur.technik, false);
   assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.reparatur.logo.split('?')[0])));
   assert.ok(!fs.existsSync(path.join(WURZEL, 'img', 'apps', 'rosenweg-karten.png')));
+  // Rosenweg Waschkueche (Welle 1): Bewohner-App, nicht in der Technik-Gruppe
+  assert.equal(daten.apps.waschkueche.paket, 'ch.rosenweg4303.waschkueche');
+  assert.equal(daten.apps.waschkueche.repo, 'Rosenweg/rosenweg-waschkueche');
+  assert.ok(!daten.apps.waschkueche.technik);
+  assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.waschkueche.logo)));
 });
 
 test('pruefen findet Fehler', () => {
