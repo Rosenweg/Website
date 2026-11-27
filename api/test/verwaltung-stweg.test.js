@@ -187,7 +187,7 @@ test('Seed: Seitenrechte für alle Verwaltungsgruppen, wie bisher „Verwaltung�
   assert.match(s, /for \(const groupName of Object\.values\(VERWALTUNG_GROUPS\)\)/);
   const block = s.slice(s.indexOf('const VERWALTUNG_SEITENRECHTE'), s.indexOf('for (const groupName of Object.values(VERWALTUNG_GROUPS))'));
   for (const [page, access] of [['objektverwaltung', 'write'], ['wohnungsverwaltung', 'write'], ['reklamationen', 'write'], ['handwerker', 'write'],
-    ['vollmachten', 'read'], ['auslagen', 'read'], ['energie-monitor', 'read'], ['projekte', 'read'], ['kontakte', 'read'],
+    ['vollmachten', 'write'], ['auslagen', 'read'], ['energie-monitor', 'read'], ['projekte', 'read'], ['kontakte', 'read'],
     ['verwaltung', 'read'], ['email-verteiler', 'read'], ['bewohner-verwaltung', 'read']]) {
     assert.ok(block.includes(`['${page}', '${access}']`), `${page}=${access} fehlt`);
   }
@@ -201,4 +201,46 @@ test('STWEG-Zugriff und Schreibrecht kennen die Verwaltung der STWEG', () => {
   const schreib = s.slice(s.indexOf('function stwegSchreibErlaubt'), s.indexOf('function requireStwegWrite'));
   assert.match(schreib, /isVerwaltungFor\(groups, nr\)/);
   assert.doesNotMatch(schreib, /'verwaltung'/);
+});
+
+// ─── Verteiler (Rundmails empfangen, nur eigene STWEG beschreiben) ───
+const vv = require('../lib/verteiler-verwaltung');
+
+test('Bewohner-Rundmail einer STWEG geht auch an deren Verwaltung', () => {
+  assert.equal(vv.verwaltungsGruppeFuerVerteiler({ stweg: 3, group_names: ['r9-bewohner'] }), 'stweg3-verwaltung');
+  assert.equal(vv.verwaltungsGruppeFuerVerteiler({ stweg: 5, group_names: ['stweg5-eigentuemer'] }), 'stweg5-verwaltung');
+  assert.equal(vv.verwaltungsGruppeFuerVerteiler({ stweg: 8, group_name: 'meg-bewohner' }), 'meg-verwaltung');
+  assert.equal(vv.verwaltungsGruppeFuerVerteiler({ stweg: 3, group_names: ['verwaltung:bewohner:stweg=3'] }), 'stweg3-verwaltung');
+  // Ausschuss-Verteiler, fremde STWEG-Gruppe, ohne Gruppen: nicht
+  assert.equal(vv.verwaltungsGruppeFuerVerteiler({ stweg: 3, group_names: ['stweg3-ausschuss'] }), null);
+  assert.equal(vv.verwaltungsGruppeFuerVerteiler({ stweg: 3, group_names: ['stweg5-bewohner'] }), null);
+  assert.equal(vv.verwaltungsGruppeFuerVerteiler({ stweg: 3, members: ['a@example.org'] }), null);
+});
+
+test('Verwaltung STWEG 3 darf an Verteiler von STWEG 3 senden, nicht an STWEG 5', () => {
+  assert.equal(vv.verwaltungsGruppeDarfSenden(['stweg3-verwaltung'], { stweg: 3 }), true);
+  assert.equal(vv.verwaltungsGruppeDarfSenden(['stweg3-verwaltung'], { stweg: 5 }), false);
+  assert.equal(vv.verwaltungsGruppeDarfSenden(['meg-verwaltung'], { stweg: 8 }), true);
+  assert.equal(vv.verwaltungsGruppeDarfSenden(['r9-bewohner'], { stweg: 3 }), false);
+});
+
+test('Server: Verwaltungs-Absender nur für die STWEG des Verteilers, Ordner lesen', () => {
+  const s = lies('api/server.js');
+  assert.match(s, /isActiveVerwaltungEmail\(senderEmailLower, list\.stweg\)/);
+  assert.match(s, /\$1::int IS NULL OR v\.stweg IS NULL OR v\.stweg = \$1::int/);
+  const doc = s.slice(s.indexOf('function isDocPathAllowed'), s.indexOf('function isDocPathAllowed') + 1200);
+  assert.match(doc, /getStwegsMitVerwaltung\(groups\)/);
+  const tab = lies('fileserver-lxc/ordnerrechte/tabelle.txt');
+  for (const [ordner, gruppe] of [['stweg1', 'stweg1-verwaltung'], ['stweg3', 'stweg3-verwaltung'], ['stweg6', 'stweg6-verwaltung'], ['meg', 'meg-verwaltung'], ['stweg8', 'meg-verwaltung']]) {
+    const zeile = tab.split('\n').find(z => z.startsWith(ordner + ' '));
+    assert.ok(zeile && zeile.split('|')[1].includes(gruppe), `${ordner}: ${gruppe} fehlt als Leser`);
+    assert.ok(!zeile.split('|')[2].includes('verwaltung'), `${ordner}: Verwaltung darf nicht schreiben`);
+  }
+});
+
+test('Reklamations-Stammdaten und ZEV: Verwaltung der STWEG', () => {
+  const s = lies('api/server.js');
+  const rekl = s.slice(s.indexOf('function reklStwegSchreibbar'), s.indexOf('function reklStwegSchreibbar') + 400);
+  assert.match(rekl, /isVerwaltungFor\(g, n\)/);
+  assert.match(s, /const zevStwegs = \[\.\.\.new Set\(\[\.\.\.getAusschussStwegs\(g\), \.\.\.verwaltungStwegs\(g\)\]\)\]/);
 });

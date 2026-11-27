@@ -21,6 +21,7 @@ const { zevAliasAddress, zevGotoTargets } = require('./lib/zev');
 const reklMelder = require('./lib/reklamation-melder');
 const vollmachtRechte = require('./lib/vollmacht-rechte');
 const stwegSichtLib = require('./lib/stweg-sicht');
+const verteilerVerwaltung = require('./lib/verteiler-verwaltung');
 
 const app = express();
 
@@ -670,10 +671,10 @@ function isDocPathAllowed(filePath, groups) {
   if (folder === 'allgemein' || folder.toLowerCase() === 'scans') return true;
   // Projekte folder: accessible to all eigentuemer
   if (folder === 'projekte' && groups.some(g => g.toLowerCase().includes('eigentuemer'))) return true;
-  // Hausverwaltung (stwegN-verwaltung) absichtlich NICHT: die Regel ist mit der
-  // Fileserver-Tabelle (fileserver-lxc/ordnerrechte/tabelle.txt) abgestimmt; ob
-  // die Verwaltung STWEG-Ordner lesen soll, ist offen (PR „Verwaltung je STWEG“).
-  const stwegs = getUserStwegs(groups);
+  // Lesen: Bewohner/Eigentuemer/Ausschuss der STWEG und deren Hausverwaltung
+  // (stwegN-verwaltung). Gleiche Regel wie die Fileserver-Tabelle
+  // fileserver-lxc/ordnerrechte/tabelle.txt (Zeilen stweg1 … meg) – beide aendern.
+  const stwegs = getStwegsMitVerwaltung(groups);
   const nr = folderStwegNr(folder);
   return nr !== null && stwegs.has(nr);
 }
@@ -2660,8 +2661,10 @@ app.get('/api/wasch/rooms', authMiddleware, async (req, res) => {
       : await pool.query('SELECT * FROM wasch_rooms WHERE active = true ORDER BY name');
     // Mandantentrennung (S1-2-3): Nicht-Admins sehen nur Raeume ihrer STWEG(s) —
     // gleiche Regel wie beim Reservieren (Raum ohne STWEG: jede STWEG-Zugehoerigkeit).
+    // Lesen darf zusaetzlich die Hausverwaltung der STWEG (stwegN-verwaltung);
+    // reservieren bleibt den Bewohnergruppen (POST /api/wasch/reservations).
     if (!req.user.isAdmin) {
-      const meine = getUserStwegs(req.user.groups || []);
+      const meine = getStwegsMitVerwaltung(req.user.groups || []);
       return res.json(result.rows.filter(r => r.stweg ? meine.has(Number(r.stweg)) : meine.size > 0));
     }
     res.json(result.rows);
@@ -2719,9 +2722,9 @@ app.get('/api/wasch/reservations', authMiddleware, async (req, res) => {
        WHERE r.cancelled = false`;
     const params = [];
     // Mandantentrennung (S1-2-3): Nicht-Admins sehen Reservationen (mit Namen) nur
-    // in Raeumen ihrer STWEG(s), wie beim Reservieren.
+    // in Raeumen ihrer STWEG(s), wie beim Reservieren; lesen auch die Hausverwaltung.
     if (!req.user.isAdmin) {
-      params.push([...getUserStwegs(req.user.groups || [])]);
+      params.push([...getStwegsMitVerwaltung(req.user.groups || [])]);
       query += ` AND (rm.stweg = ANY($${params.length}::int[]) OR (rm.stweg IS NULL AND cardinality($${params.length}::int[]) > 0))`;
     }
     if (room_id) { params.push(room_id); query += ` AND r.room_id = $${params.length}`; }
@@ -4481,6 +4484,13 @@ async function resolveVerteilerRecipients(verteiler) {
         : await resolveGroupEmails(gn);
       emails.forEach(e => { if (!isInvalidDrucker(e)) allEmails.add(e); });
     }
+    // Rundmail an Bewohner/Eigentuemer einer STWEG: auch an deren Hausverwaltung
+    // (stwegN-verwaltung), die nicht mehr in der Bewohnergruppe steht
+    // (lib/verteiler-verwaltung.js).
+    const verwGruppe = verteilerVerwaltung.verwaltungsGruppeFuerVerteiler(verteiler);
+    if (verwGruppe && !groupNames.some(gn => String(gn).toLowerCase() === verwGruppe)) {
+      (await resolveGroupEmails(verwGruppe)).forEach(e => { if (!isInvalidDrucker(e)) allEmails.add(e); });
+    }
     // Statische Zusatz-Mitglieder additiv zur Gruppe (z.B. WhatsApp-Bridge-Adressen
     // wie technik@whatsapp.rosenweg4303.ch). Frueher wurden members bei group_names ignoriert.
     for (const m of (verteiler.members || [])) {
@@ -4736,10 +4746,10 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
     const senderEmailLower = senderEmail.toLowerCase();
     let allowed = false;
     // Exemption: die aktive(n) Verwaltung(en) und ihre Kontakt-Emails duerfen
-    // an JEDEN geschuetzten Verteiler schreiben, ohne explizit in einer
-    // Authentik-Gruppe zu sein. Diese Adressen sind extern (Drittfirma) und
-    // koennen nicht ueber Authentik-Membership beruecksichtigt werden.
-    if (await isActiveVerwaltungEmail(senderEmailLower)) {
+    // an die geschuetzten Verteiler IHRER STWEG schreiben (Vertrag fuer diese
+    // STWEG oder STWEG-uebergreifend), ohne explizit in einer Authentik-Gruppe
+    // zu sein. Diese Adressen sind extern (Drittfirma). Frueher: an JEDEN Verteiler.
+    if (await isActiveVerwaltungEmail(senderEmailLower, list.stweg)) {
       allowed = true;
       console.log(`[Verteiler] Sender ${senderEmail} als aktive Verwaltung erkannt — erlaubt`);
     }
@@ -4749,7 +4759,9 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
         const user = akData.results?.find(u => u.email?.toLowerCase() === senderEmailLower);
         if (user) {
           const userGroupNames = (user.groups_obj || []).map(g => g.name.toLowerCase());
-          allowed = allowedGroups.some(g => userGroupNames.includes(g.toLowerCase()));
+          allowed = allowedGroups.some(g => userGroupNames.includes(g.toLowerCase()))
+            // Hausverwaltung dieser STWEG (stwegN-verwaltung) – nur fuer ihre Verteiler
+            || verteilerVerwaltung.verwaltungsGruppeDarfSenden(userGroupNames, list);
         }
       } catch (err) { console.error('[Verteiler] Sender-Auth-Check fehler:', err.message); }
     }
@@ -6662,6 +6674,11 @@ async function syncKontakteToAuthentik(stweg, kontakte, bewohntVon) {
       // Determine which groups to assign based on rolle
       const targetGroups = [];
       const effectiveBewohntVon = k._bewohntVon || bewohntVon;
+      // Rolle 'verwalter' an einer Wohnung ist NICHT die Hausverwaltung (Gruppen
+      // stwegN-verwaltung), sondern eine vom Eigentuemer betraute Person, die ihn
+      // vertritt (z. B. Angehoerige, Treuhand fuer eine Wohnung). Sie gehoert darum
+      // wie der Eigentuemer in die Eigentuemergruppe der STWEG (Entscheid Stefan
+      // 27.11.2026). Die Hausverwaltung selbst wird unten ausgenommen.
       if (k.rolle === 'eigentuemer' || k.rolle === 'verwalter') {
         targetGroups.push(stwegGroups.eigentuemer);
         // Self-occupied: Eigentümer/Verwalter also become Bewohner
@@ -8301,9 +8318,11 @@ app.post('/api/zev/rechnung/:id/bezahlt', authMiddleware, async (req, res) => {
 app.get('/api/zev/unzugeordnet', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
   try {
     // Technik/Praesident alle; sonst nur Rechnungen der eigenen Ausschuss-STWEGs
-    // (Rechnungen ohne STWEG bleiben bei Technik).
+    // bzw. der von der Hausverwaltung betreuten STWEGs (Rechnungen ohne STWEG
+    // bleiben bei Technik).
     const g = req.user?.groups || [];
     const alle = isTechnik(g) || isPraesident(g);
+    const zevStwegs = [...new Set([...getAusschussStwegs(g), ...verwaltungStwegs(g)])];
     const r = await pool.query(
       `SELECT id, stweg, wohnung_id, alias_address, betreff, absender, empfangen_am,
               rechnungsnummer, rechnungsdatum, zeitraum_von, zeitraum_bis, objekt, betrag_chf,
@@ -8311,7 +8330,7 @@ app.get('/api/zev/unzugeordnet', authMiddleware, requirePermission('wohnungsverw
          FROM zev_rechnungen
         WHERE COALESCE(zuordnung, 'unzugeordnet') = 'unzugeordnet'
           AND ($1::boolean OR stweg = ANY($2::int[]))
-        ORDER BY empfangen_am DESC NULLS LAST, id DESC LIMIT 200`, [alle, [...getAusschussStwegs(g)]]);
+        ORDER BY empfangen_am DESC NULLS LAST, id DESC LIMIT 200`, [alle, zevStwegs]);
     res.json({ rechnungen: r.rows });
   } catch (e) { console.error('[zev-unzugeordnet]', e); res.status(500).json({ error: 'Fehler' }); }
 });
@@ -8327,11 +8346,13 @@ app.post('/api/zev/rechnung/:id/zuordnen', authMiddleware, requirePermission('wo
     if (!w.rows.length) return res.status(404).json({ error: 'Wohnung nicht gefunden' });
     const stweg = w.rows[0].stweg;
     // STWEG-Pruefung: Ziel-Wohnung und (falls bekannt) bisherige STWEG der
-    // Rechnung muessen zu den eigenen Ausschuss-STWEGs gehoeren.
+    // Rechnung muessen zu den eigenen Ausschuss-STWEGs bzw. den STWEGs der
+    // Hausverwaltung (stwegN-verwaltung) gehoeren.
     const g = req.user?.groups || [];
     const alle = isTechnik(g) || isPraesident(g);
     if (!alle) {
       const eigene = getAusschussStwegs(g);
+      for (const n of verwaltungStwegs(g)) eigene.add(n);
       const alt = await pool.query('SELECT stweg, zuordnung FROM zev_rechnungen WHERE id = $1', [id]);
       if (!alt.rows.length) return res.status(404).json({ error: 'Rechnung nicht gefunden' });
       // S2-3-3: Ausschuss ordnet nur unzugeordnete Rechnungen zu – bereits zugeordnete
@@ -13086,8 +13107,12 @@ function auslagenStwegFolder(stweg) {
 // Berechtigte Domains werden aus verwaltungen.email + verwaltungs_kontakte.email
 // abgeleitet (alles was @<domain> hat zaehlt). Beruecksichtigt vertrag_von /
 // vertrag_bis: nur Verwaltungen mit aktuell laufendem Vertrag.
-async function isActiveVerwaltungEmail(email) {
+// stweg (optional): nur Verwaltungen mit Vertrag fuer diese STWEG oder fuer alle
+// (verwaltungen.stweg NULL). Ohne stweg wie bisher jede aktive Verwaltung.
+async function isActiveVerwaltungEmail(email, stweg = null) {
   if (!email) return false;
+  const stwegNr = parseInt(stweg, 10);
+  const stwegParam = Number.isFinite(stwegNr) && stwegNr > 0 ? stwegNr : null;
   const e = String(email).toLowerCase();
   const at = e.lastIndexOf('@');
   if (at < 1 || at === e.length - 1) return false;
@@ -13101,6 +13126,7 @@ async function isActiveVerwaltungEmail(email) {
             WHERE v.aktiv = true
               AND (v.vertrag_von IS NULL OR v.vertrag_von <= CURRENT_DATE)
               AND (v.vertrag_bis IS NULL OR v.vertrag_bis >= CURRENT_DATE)
+              AND ($1::int IS NULL OR v.stweg IS NULL OR v.stweg = $1::int)
               AND v.email IS NOT NULL AND v.email <> ''
            UNION ALL
            SELECT k.email AS addr
@@ -13109,9 +13135,11 @@ async function isActiveVerwaltungEmail(email) {
             WHERE v.aktiv = true
               AND (v.vertrag_von IS NULL OR v.vertrag_von <= CURRENT_DATE)
               AND (v.vertrag_bis IS NULL OR v.vertrag_bis >= CURRENT_DATE)
+              AND ($1::int IS NULL OR v.stweg IS NULL OR v.stweg = $1::int)
               AND k.email IS NOT NULL AND k.email <> ''
          ) s
         WHERE addr LIKE '%@%'`,
+      [stwegParam],
     );
     const domains = new Set(r.rows.map(x => x.domain).filter(Boolean));
     return domains.has(senderDomain);
@@ -20013,13 +20041,14 @@ app.get('/api/reklamationen/auto-assign', authMiddleware, requirePermission('rek
   } catch (e) { console.error('[rekl-auto-assign-get]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 // STWEG-Trennung fuer Reklamations-Stammdaten (Auto-Zuweisung, Melde-Orte):
-// Technik/Praesident alles; sonst nur STWEGs, in deren Ausschuss man sitzt.
+// Technik/Praesident alles; sonst nur STWEGs, in deren Ausschuss man sitzt
+// oder die man als Hausverwaltung betreut (stwegN-verwaltung).
 // stweg 0/NULL gilt fuer alle STWEGs -> nur Technik/Praesident.
 function reklStwegSchreibbar(groups, stweg) {
   const g = groups || [];
   if (isTechnik(g) || isPraesident(g)) return true;
   const n = parseInt(stweg, 10);
-  return Number.isFinite(n) && n > 0 && getAusschussStwegs(g).has(n);
+  return Number.isFinite(n) && n > 0 && (getAusschussStwegs(g).has(n) || isVerwaltungFor(g, n));
 }
 // Regeln komplett setzen (Upsert pro Kategorie; leeres Ziel = Regel loeschen).
 app.put('/api/reklamationen/auto-assign', authMiddleware, requirePermission('reklamationen', 'write'), async (req, res) => {
@@ -30152,7 +30181,8 @@ async function initDB() {
     // Schreibweisen (Code fragt 'zähler', die Rechte-Tabelle hatte 'zaehler').
     const VERWALTUNG_SEITENRECHTE = [
       ['objektverwaltung', 'write'], ['wohnungsverwaltung', 'write'], ['reklamationen', 'write'], ['handwerker', 'write'],
-      ['vollmachten', 'read'], ['auslagen', 'read'], ['zähler', 'read'], ['zaehler', 'read'], ['energie-monitor', 'read'],
+      // vollmachten write: fuer Dritte erfassen, Papier aktivieren (Entscheid Stefan 27.11.2026)
+      ['vollmachten', 'write'], ['auslagen', 'read'], ['zähler', 'read'], ['zaehler', 'read'], ['energie-monitor', 'read'],
       ['waschküche-admin', 'read'], ['waschkueche-admin', 'read'], ['projekte', 'read'], ['kontakte', 'read'], ['verwaltung', 'read'],
       ['email-verteiler', 'read'], ['bewohner-verwaltung', 'read'],
     ];
@@ -30163,6 +30193,11 @@ async function initDB() {
            ON CONFLICT (group_name, page) DO NOTHING`, [groupName, page, access]);
       }
     }
+    // ÜBERGANG: die alte Gruppe „Verwaltung“ ebenso (bestehender Wert bleibt;
+    // read -> write einmalig per SQL, siehe PR „Verwaltung je STWEG“).
+    await client.query(
+      `INSERT INTO permissions (group_name, page, access) VALUES ('Verwaltung', 'vollmachten', 'write')
+       ON CONFLICT (group_name, page) DO NOTHING`);
 
     // Seed auslagen read für alle Eigentümer-Gruppen (eigene Auslagen einsehen/einreichen)
     const eigentuemerGroups = Object.values(STWEG_GROUPS).map(g => g.eigentuemer).filter(Boolean);

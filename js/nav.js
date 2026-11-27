@@ -24,8 +24,9 @@ const WASCH_NAV_GRUPPEN = 'waschküche,bewohner,eigentuemer,technik,praesident';
 // die hat „Admin ↗“), jeder Eintrag nur mit dem Seitenrecht. Rechte-Schlüssel
 // mit Umlaut zusätzlich in ASCII, falls sie so in der Rechte-Tabelle stehen.
 // Ohne eigenen Eintrag: kontakte (Reiter in der Objektverwaltung), verwaltung
-// (öffentliche Seite „Hausverwaltung“ im Bewohner-Menü), Waschküche-Admin
-// (prüft auf Technik).
+// (öffentliche Seite „Hausverwaltung“ im Bewohner-Menü). Waschküche: die
+// Verwaltung sieht Räume und Belegung ihrer STWEG (nur lesen, reservieren
+// bleibt bei den Bewohnern); die Admin-Seite prüft auf Technik.
 const VERWALTUNG_NAV_GRUPPE = 'verwaltung,' // ÜBERGANG, nach dem Umhängen in Authentik streichen
   + [1, 2, 3, 4, 5, 6, 7].map(n => `stweg${n}-verwaltung`).join(',') + ',meg-verwaltung';
 const VERWALTUNG_NAV = [
@@ -36,6 +37,7 @@ const VERWALTUNG_NAV = [
   { label: '📝 Vollmachten', href: 'vollmachten.html', key: 'vollmachten', permAny: 'vollmachten' },
   { label: '💸 Auslagen', href: 'auslagen.html', key: 'auslagen', permAny: 'auslagen' },
   { label: '🏗 Projekte', href: 'projekte.html', key: 'projekte', permAny: 'projekte' },
+  { label: '🧺 Waschküche (Belegung)', href: 'waschkueche.html', key: 'waschküche', permAny: 'waschküche-admin,waschkueche-admin' },
   { label: '🔢 Zähler & Verbrauch', href: 'zaehler.html', key: 'zähler', permAny: 'zähler,zaehler' },
   { label: '⚡ Energie-Monitor', href: 'energie-monitor.html', key: 'energie', permAny: 'energie-monitor' },
   { label: '✉️ E-Mail-Verteiler', href: 'email-verteiler.html', key: 'verteiler', permAny: 'email-verteiler' },
