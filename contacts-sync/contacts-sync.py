@@ -9,6 +9,12 @@ ihren Geraeten, inklusive Weiterleitung. Die echten Nummern bleiben in der
 Personenverwaltung des Portals. Die internen Nummern kommen aus
 telefon_interne_nummern (Abbild der Anlage, PUT /api/pbx/personen/nummern).
 Verwaltungen und ihre Mitarbeitenden behalten ihre (geschaeftlichen) Nummern.
+
+Z-Push (Handy, ActiveSync) seit Befund F1-7: nicht mehr ein Ordner fuer alle,
+sondern Sammlungen alle/, keine/ (Verwaltungen, Telefonzentrale) und s1/…s8/
+(Personen je STWEG, aus den aktiven Wohnungskontakten wie das Portal-
+Telefonbuch). Das Z-Push-Backend (zpush/sicht.php) setzt daraus je Konto das
+Verzeichnis zusammen, das die Person im Portal-Telefonbuch sieht.
 """
 import os, json, uuid, re, ssl, base64, urllib.request, subprocess, shutil
 
@@ -190,6 +196,30 @@ def verzeichnis(personen, verw, vkont, interne, echte=False):
     return desired
 
 
+def sammlungen(personen, verw, vkont, interne):
+    """-> {sammlung: {uid: vcard}} fuer Z-Push. alle = ganzes Verzeichnis (wie
+    bisher); keine = nur Telefonzentrale und Verwaltungen; sN = nur die Personen,
+    die in STWEG N einen aktiven Wohnungskontakt haben (p['stwegs'])."""
+    out = {"alle": verzeichnis(personen, verw, vkont, interne),
+           "keine": verzeichnis([], verw, vkont, interne)}
+    for n in range(1, 9):
+        mit = [p for p in personen if n in [int(x) for x in (p.get("stwegs") or []) if str(x).isdigit()]]
+        karten = verzeichnis(mit, [], [], interne)
+        karten.pop("rosenweg-pbx", None)
+        out["s%d" % n] = karten
+    return out
+
+
+def stand(samml):
+    """Pruefsumme ueber alle Sammlungen: das Backend baut Sichten nur bei Aenderung neu."""
+    import hashlib
+    h = hashlib.sha256()
+    for name in sorted(samml):
+        for uid in sorted(samml[name]):
+            h.update((name + "/" + uid + "\n").encode()); h.update(samml[name][uid].encode())
+    return h.hexdigest()
+
+
 def propfind_uids(ctx, base, auth, host):
     r = urllib.request.Request(base, data=b'<?xml version="1.0"?><propfind xmlns="DAV:"><prop><getetag/></prop></propfind>', method="PROPFIND")
     r.add_header("Authorization", auth); r.add_header("Depth", "1")
@@ -233,7 +263,13 @@ def main():
     sogo_base = ENV.get("SOGO_BASE", "https://100.64.2.33/SOGo/dav/")
     sogo_host = ENV.get("SOGO_HOST", "mailcow.rosenweg9.ch")
     pgc = finde_pg_container()
-    personen = jq(pgc, "SELECT COALESCE(json_agg(json_build_object('name',name,'tel',telefon,'mobile',mobile,'telefone',telefone,'email',email,'emails',emails,'adresse',adresse)),'[]'::json) FROM personen WHERE COALESCE(name,'')<>''")
+    # stwegs: STWEGs mit aktivem Wohnungskontakt (wie GET /api/telefonbuch): per
+    # person_id, sonst E-Mail und Name. Braucht SELECT auf wohnungen, wohnungen_kontakte.
+    personen = jq(pgc, "SELECT COALESCE(json_agg(json_build_object('name',p.name,'tel',p.telefon,'mobile',p.mobile,'telefone',p.telefone,'email',p.email,'emails',p.emails,'adresse',p.adresse,"
+                       "'stwegs',(SELECT COALESCE(json_agg(DISTINCT w.stweg),'[]'::json) FROM wohnungen_kontakte k JOIN wohnungen w ON w.id=k.wohnung_id "
+                       "WHERE k.archiviert_am IS NULL AND k.deleted_at IS NULL AND w.deleted_at IS NULL AND w.stweg IS NOT NULL "
+                       "AND (k.person_id=p.id OR (k.person_id IS NULL AND LOWER(k.email)=LOWER(p.email) AND LOWER(TRIM(k.name))=LOWER(TRIM(p.name))))))),'[]'::json) "
+                       "FROM personen p WHERE COALESCE(p.name,'')<>''")
     verw = jq(pgc, "SELECT COALESCE(json_agg(json_build_object('firma',firma_name,'tel',telefon,'email',email,'adresse',adresse,'website',website)),'[]'::json) FROM verwaltungen WHERE aktiv")
     vkont = jq(pgc, "SELECT COALESCE(json_agg(json_build_object('firma',v.firma_name,'name',k.name,'funktion',k.funktion,'email',k.email,'tel',k.telefon)),'[]'::json) FROM verwaltungs_kontakte k JOIN verwaltungen v ON v.id=k.verwaltung_id WHERE v.aktiv")
     try:
@@ -251,13 +287,26 @@ def main():
     # ersetzt). praesident@: volle Fassung mit echten Nummern (Entscheid Stefan).
     carddav_sync(ctx, desired, "SOGo inbox@", sogo_base + "inbox@rosenweg4303.ch/Contacts/personal/", "inbox@rosenweg4303.ch", ENV["INBOX_PW"], False, sogo_host)
     carddav_sync(ctx, voll, "SOGo praesident@", sogo_base + "praesident@rosenweg4303.ch/Contacts/personal/", "praesident@rosenweg4303.ch", ENV["PRAESIDENT_PW"], False, sogo_host)
+    # Z-Push: Sammlungen + STAND; das Backend (zpush/sicht.php) waehlt je Konto.
+    # Nur lesbar fuer www-data (kein chown mehr: das Handy soll nichts aendern).
+    samml = sammlungen(personen, verw, vkont, interne)
     tmp = "/tmp/zpush-vcards"
     if os.path.isdir(tmp): shutil.rmtree(tmp)
     os.makedirs(tmp)
-    for uid, bd in desired.items(): open(tmp + "/" + uid + ".vcf", "w").write(bd)
-    subprocess.run("rsync -a --delete -e 'ssh -o StrictHostKeyChecking=accept-new' " + tmp + "/ root@100.64.2.38:/var/lib/zpush-contacts/", shell=True, check=False)
-    subprocess.run("ssh -o StrictHostKeyChecking=accept-new root@100.64.2.38 chown -R www-data:www-data /var/lib/zpush-contacts", shell=True, check=False)
-    print("Z-Push CT115: rsynced " + str(len(desired)) + " vcards")
+    for name, karten in samml.items():
+        os.makedirs(tmp + "/" + name)
+        for uid, bd in karten.items(): open(tmp + "/" + name + "/" + uid + ".vcf", "w").write(bd)
+    open(tmp + "/STAND", "w").write(stand(samml) + "\n")
+    # Erst die Karten, dann STAND: sonst baute das Backend eine Sicht aus alten
+    # Karten und hielte sie fuer aktuell.
+    ssh = "-e 'ssh -o StrictHostKeyChecking=accept-new' "
+    r = subprocess.run("rsync -a --delete --exclude=/STAND --chmod=D755,F644 " + ssh + tmp + "/ root@100.64.2.38:/var/lib/zpush-contacts/", shell=True, check=False)
+    if r.returncode == 0:
+        subprocess.run("rsync -a --chmod=F644 " + ssh + tmp + "/STAND root@100.64.2.38:/var/lib/zpush-contacts/STAND", shell=True, check=False)
+    else:
+        print("  Z-Push: rsync fehlgeschlagen (" + str(r.returncode) + "), STAND bleibt")
+    subprocess.run("ssh -o StrictHostKeyChecking=accept-new root@100.64.2.38 chown -R root:root /var/lib/zpush-contacts", shell=True, check=False)
+    print("Z-Push CT115: " + ", ".join("%s=%d" % (n, len(k)) for n, k in sorted(samml.items())))
     print("DONE")
 
 

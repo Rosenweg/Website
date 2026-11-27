@@ -57,6 +57,12 @@ jobs:
           "$RUNNER_TEMP/pbx/bin/pip" install --quiet -r pbx/api/requirements.txt
           cd pbx/api && "$RUNNER_TEMP/pbx/bin/python" -m unittest test_karten_verwalter -v
 
+      - name: Z-Push-Sicht je Konto (PHP, Befund F1-7)
+        run: |
+          php -l zpush/sicht.php
+          php -l zpush/backend-rosenweg.php
+          php zpush/test_sicht.php
+
   kerberos-pruefer:
     # Prueft Kerberos-Tickets der Agent-Anmeldung (api/kerberos-pruefer, Protokoll v2)
     runs-on: ubuntu-latest

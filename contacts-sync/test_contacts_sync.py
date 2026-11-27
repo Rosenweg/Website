@@ -80,5 +80,40 @@ class GleichePerson(unittest.TestCase):
         self.assertFalse(cs.gleiche_person("Anna Beispiel AG", "Anna Beispiel"))
 
 
+class SammlungenJeStweg(unittest.TestCase):
+    """F1-7: Z-Push bekommt je STWEG eine Sammlung; das Backend setzt je Konto zusammen."""
+
+    def setUp(self):
+        personen = [dict(p) for p in PERSONEN]
+        personen[0]["stwegs"] = [3]
+        personen[1]["stwegs"] = [3, 5]
+        personen[2]["stwegs"] = []          # kein aktiver Wohnungskontakt
+        self.s = cs.sammlungen(personen, VERW, VKONT, INTERNE)
+        self.namen = lambda sammlung: {v.split("FN:", 1)[1].split("\r\n", 1)[0] for v in self.s[sammlung].values()}
+
+    def test_sammlungen_vorhanden(self):
+        self.assertEqual(set(self.s), {"alle", "keine"} | {"s%d" % n for n in range(1, 9)})
+
+    def test_alle_wie_bisher(self):
+        self.assertEqual(self.s["alle"], cs.verzeichnis(PERSONEN, VERW, VKONT, INTERNE))
+
+    def test_keine_nur_verwaltung_und_zentrale(self):
+        self.assertEqual(self.namen("keine"), {"Rosenweg", "Muster Verwaltungen AG", "Eva Sachbearbeiterin"})
+
+    def test_je_stweg_nur_eigene_personen(self):
+        self.assertEqual(self.namen("s3"), {"Anna Beispiel", "Bruno Beispiel"})
+        self.assertEqual(self.namen("s5"), {"Bruno Beispiel"})
+        self.assertEqual(self.s["s1"], {})
+        for n in range(1, 9):
+            self.assertNotIn("Clara Ohnenummer", self.namen("s%d" % n))
+            self.assertNotIn("rosenweg-pbx", self.s["s%d" % n])
+
+    def test_stand_aendert_sich_mit_inhalt(self):
+        a = cs.stand(self.s)
+        b = dict(self.s); b["s3"] = {}
+        self.assertNotEqual(a, cs.stand(b))
+        self.assertEqual(a, cs.stand(dict(self.s)))
+
+
 if __name__ == "__main__":
     unittest.main()
