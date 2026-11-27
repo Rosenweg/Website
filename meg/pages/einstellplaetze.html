@@ -131,7 +131,8 @@
         loadVerfuegbar();
         try {
             const user = await AuthentikAuth.init();
-            if (user && (user.isAdmin || (user.groups || []).some(g => /ausschuss|technik|präsident|praesident/i.test(g)))) {
+            // Wie die API (api/routes/meg.js megManageGate): Admin oder MEG-Ausschuss (Befund W25)
+            if (user && (user.isAdmin || (user.groups || []).some(g => ['meg-ausschuss', 'technik', 'präsident', 'praesident'].includes(String(g).toLowerCase())))) {
                 document.getElementById('admin-wrap').classList.remove('hidden');
                 loadGrid();
             } else {
