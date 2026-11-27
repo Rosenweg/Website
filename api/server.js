@@ -14104,6 +14104,22 @@ function canEditAuslageStatus(row, user) {
   return false;
 }
 
+// Befund W22: Prüfen/Genehmigen/Ablehnen fremder Auslagen braucht zusätzlich zum
+// Ausschuss der STWEG das Seitenrecht „auslagen“ = write (Standard für jeden
+// Ausschuss, initDB). „read“ heisst: eigene Auslagen erfassen und die Liste
+// sehen. Technik/Präsident immer. „Ausbezahlt“ (canMarkPaid) bleibt eigene Regel.
+async function auslagenSchreibrecht(req) {
+  const g = req.user?.groups || [];
+  if (isTechnik(g) || isPraesident(g)) return true;
+  if (req._auslagenWrite === undefined) {
+    try { req._auslagenWrite = (await getUserPermissions(g))['auslagen'] === 'write'; } catch { req._auslagenWrite = false; }
+  }
+  return req._auslagenWrite;
+}
+async function darfAuslagePruefen(row, req) {
+  return canEditAuslageStatus(row, req.user) && await auslagenSchreibrecht(req);
+}
+
 // "Ausbezahlt" / "erhalten" dürfen setzen:
 // - Technik / Präsident (offizielle Auszahlung)
 // - die Verwaltung der STWEG der Auslage (ohne row: Verwaltung irgendeiner
@@ -14341,7 +14357,7 @@ app.get('/api/auslagen', authMiddleware, requirePermission('auslagen', 'read'), 
       auslagen: result.rows,
       kategorien: AUSLAGEN_KATEGORIEN,
       projekte: projektsRes.rows,
-      can_review: isAdmin || ausschussStwegs.length > 0,
+      can_review: isAdmin || (ausschussStwegs.length > 0 && await auslagenSchreibrecht(req)),
       can_mark_paid: canMarkPaid(req.user),
       review_stwegs: isAdmin ? 'all' : ausschussStwegs,
     });
@@ -14469,7 +14485,7 @@ app.put('/api/auslagen/:id', authMiddleware, requirePermission('auslagen', 'read
 
     const groups = req.user.groups || [];
     const isOwner = row.user_email.toLowerCase() === (req.user.email || '').toLowerCase();
-    const canReview = canEditAuslageStatus(row, req.user);
+    const canReview = await darfAuslagePruefen(row, req);
     // Fremde Entwuerfe (S3-2-3): auch keine Ausschuss-Bemerkung vor dem Einreichen.
     if (row.status === 'entwurf' && !isOwner) return res.status(403).json({ error: 'Entwurf muss zuerst vom Ersteller eingereicht werden' });
 
@@ -14639,7 +14655,7 @@ app.delete('/api/auslagen/:id', authMiddleware, requirePermission('auslagen', 'r
     if (cur.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const row = cur.rows[0];
     const isOwner = row.user_email.toLowerCase() === (req.user.email || '').toLowerCase();
-    const canReview = canEditAuslageStatus(row, req.user);
+    const canReview = await darfAuslagePruefen(row, req);
     // Entwurf gehoert allein dem Ersteller (S3-2-3): Pruefer duerfen ihn nicht vorab loeschen.
     if (row.status === 'entwurf' && !isOwner) {
       return res.status(403).json({ error: 'Entwurf kann nur der Ersteller löschen' });
@@ -14795,7 +14811,7 @@ app.post('/api/auslagen/:id/belege', authMiddleware, requirePermission('auslagen
     if (row.status === 'entwurf' && !isOwner) {
       return res.status(403).json({ error: 'Belege eines Entwurfs kann nur der Ersteller ändern' });
     }
-    if (!(isOwner && (row.status === 'eingereicht' || row.status === 'entwurf')) && !canEditAuslageStatus(row, req.user)) {
+    if (!(isOwner && (row.status === 'eingereicht' || row.status === 'entwurf')) && !(await darfAuslagePruefen(row, req))) {
       return res.status(403).json({ error: 'Belege hinzufügen nur bei eigener eingereichter Auslage oder Ausschuss' });
     }
     const { beleg_base64, beleg_filename, waehrung_original, wechselkurs_chf, kurs_quelle } = req.body || {};
@@ -14839,7 +14855,7 @@ app.delete('/api/auslagen/:id/belege/:bid', authMiddleware, requirePermission('a
     if (row.status === 'entwurf' && !isOwner) {
       return res.status(403).json({ error: 'Belege eines Entwurfs kann nur der Ersteller ändern' });
     }
-    if (!(isOwner && (row.status === 'eingereicht' || row.status === 'entwurf')) && !canEditAuslageStatus(row, req.user)) {
+    if (!(isOwner && (row.status === 'eingereicht' || row.status === 'entwurf')) && !(await darfAuslagePruefen(row, req))) {
       return res.status(403).json({ error: 'Löschen nur bei eigener eingereichter Auslage oder Ausschuss' });
     }
     const beleg = await pool.query('SELECT beleg_path FROM auslagen_belege WHERE id = $1 AND auslage_id = $2', [bid, id]);
@@ -15033,7 +15049,7 @@ app.put('/api/auslagen/:id/positionen', authMiddleware, requirePermission('ausla
     const isOwner = row.user_email.toLowerCase() === (req.user.email || '').toLowerCase();
     const offen = row.status === 'eingereicht' || row.status === 'entwurf';
     // Fremde Entwuerfe (S3-2-3) bleiben auch fuer Ausschuss/Technik gesperrt.
-    if (!offen || (!isOwner && (row.status === 'entwurf' || !canEditAuslageStatus(row, req.user)))) {
+    if (!offen || (!isOwner && (row.status === 'entwurf' || !(await darfAuslagePruefen(row, req))))) {
       await client.query('ROLLBACK');
       return res.status(403).json({ error: 'Positionen nur bei eingereichter Auslage bzw. eigenem Entwurf editierbar (nicht nach Genehmigung)' });
     }
