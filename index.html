@@ -413,29 +413,67 @@
         <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
             <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center">Kontakt</h2>
             <div class="bg-white rounded-lg shadow-md p-8">
-                <form class="space-y-6">
+                <!-- Kontaktformular (Befund W1): geht per Mail an technik@ (POST /api/kontakt) -->
+                <form id="kontakt-form" class="space-y-6" novalidate>
+                    <!-- Honigtopf gegen Spam: fuer Menschen unsichtbar, nicht ausfuellen -->
+                    <div aria-hidden="true" style="position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden">
+                        <label>Website <input type="text" name="website" id="kontakt-website" tabindex="-1" autocomplete="off"></label>
+                    </div>
                     <div class="grid md:grid-cols-2 gap-6">
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-2">Name</label>
-                            <input type="text" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="Ihr Name">
+                            <input type="text" id="kontakt-name" required maxlength="100" autocomplete="name" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="Ihr Name">
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-2">E-Mail</label>
-                            <input type="email" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="ihre@email.ch">
+                            <input type="email" id="kontakt-email" required maxlength="254" autocomplete="email" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="ihre@email.ch">
                         </div>
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Betreff</label>
-                        <input type="text" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="Betreff">
+                        <input type="text" id="kontakt-betreff" maxlength="150" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="Betreff">
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Nachricht</label>
-                        <textarea rows="5" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="Ihre Nachricht..."></textarea>
+                        <textarea rows="5" id="kontakt-nachricht" required maxlength="5000" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="Ihre Nachricht..."></textarea>
                     </div>
-                    <button type="submit" class="w-full bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition">
+                    <p id="kontakt-meldung" class="hidden text-sm rounded-lg px-4 py-3"></p>
+                    <button type="submit" id="kontakt-senden" class="w-full bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition">
                         Nachricht senden
                     </button>
+                    <p class="text-xs text-gray-500 text-center">Die Nachricht geht an die Technik der STWEG-Kooperation; die Antwort kommt an Ihre E-Mail-Adresse.</p>
                 </form>
+                <script>
+                (function () {
+                    const f = document.getElementById('kontakt-form');
+                    const m = document.getElementById('kontakt-meldung');
+                    const btn = document.getElementById('kontakt-senden');
+                    const zeige = (text, ok) => {
+                        m.textContent = text;
+                        m.className = 'text-sm rounded-lg px-4 py-3 ' + (ok ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-700');
+                    };
+                    f.addEventListener('submit', async (e) => {
+                        e.preventDefault();
+                        const wert = (id) => document.getElementById(id).value;
+                        btn.disabled = true; btn.textContent = 'Wird gesendet …';
+                        try {
+                            const r = await fetch('/api/kontakt', {
+                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ name: wert('kontakt-name'), email: wert('kontakt-email'), betreff: wert('kontakt-betreff'),
+                                    nachricht: wert('kontakt-nachricht'), website: wert('kontakt-website') }),
+                            });
+                            const d = await r.json().catch(() => ({}));
+                            if (!r.ok) throw new Error(d.error || 'Fehler ' + r.status);
+                            f.reset();
+                            zeige('Danke – Ihre Nachricht ist unterwegs. Wir antworten an Ihre E-Mail-Adresse.', true);
+                        } catch (err) {
+                            zeige(err.message, false);
+                        } finally {
+                            btn.disabled = false; btn.textContent = 'Nachricht senden';
+                        }
+                    });
+                })();
+                </script>
                 <div class="mt-6 pt-6 border-t border-gray-200">
                     <p class="text-sm text-gray-600 text-center">
                         Für dringende Anfragen kontaktieren Sie bitte direkt die Hausverwaltung

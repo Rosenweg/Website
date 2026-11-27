@@ -321,7 +321,7 @@
       for (const c of k) (groups[c.art] || []).push(c);
       const sectionMeta = {
         exakt: { title: '🎯 Exakte Dubletten', desc: 'Gleicher Name (Tippfehler-frei) — fast immer echte Duplikate.', color: 'red' },
-        token: { title: '🔄 Vor-/Nachname vertauscht', desc: 'Token-Set identisch (z.B. "Sara Weigt" vs "Weigt Sara") — typischerweise mergen.', color: 'amber' },
+        token: { title: '🔄 Vor-/Nachname vertauscht', desc: 'Token-Set identisch (z.B. "Anna Muster" vs "Muster Anna") — typischerweise mergen.', color: 'amber' },
         email: { title: '✉ Gleiche Email, ähnlicher Name', desc: 'Könnten Tippfehler-Varianten sein oder echte Familienmitglieder mit unterschiedlichen Namen — bitte einzeln prüfen.', color: 'blue' },
       };
       const html = ['exakt', 'token', 'email'].map(art => {
@@ -409,7 +409,9 @@
         const data = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
         close();
-        alert(`Merge erfolgreich: ${data.reassigned_kontakte} Kontakte umgehängt.`);
+        // 202: wartet auf Bestätigung per Mail (Karten-Anmeldung, W17/N5)
+        if (r.status === 202) { alert(AuthentikAuth.bestaetigungsText(data)); return; }
+        alert(`Zusammengeführt: ${data.reassigned_kontakte} Kontakte umgehängt.`);
         await openDedup();
         await loadList();
       } catch (e) {

@@ -676,6 +676,7 @@
                 });
                 const data = await r.json().catch(() => ({}));
                 if (!r.ok) return sshMeldung(data.error || 'Konnte nicht hinterlegt werden.', false);
+                if (r.status === 202) return sshMeldung(AuthentikAuth.bestaetigungsText(data), false); // W17
                 feld.value = ''; label.value = '';
                 sshMeldung('Schlüssel hinterlegt.', true);
                 await loadSshZugang();
@@ -703,6 +704,7 @@
                 });
                 const data = await r.json().catch(() => ({}));
                 if (!r.ok) return sshMeldung(data.error || 'Konnte nicht gespeichert werden.', false);
+                if (r.status === 202) return sshMeldung(AuthentikAuth.bestaetigungsText(data), false); // W17
                 sshMeldung(wert
                     ? `${data.gefunden ?? 0} Schlüssel bei GitHub gefunden, ${data.uebernommen ?? 0} neu übernommen.`
                     : 'GitHub-Konto gelöst, die von dort geholten Schlüssel sind entfernt.', true);
@@ -715,6 +717,7 @@
                 const r = await AuthentikAuth.apiFetch('/api/ssh/me/github/abgleich', { method: 'POST' });
                 const data = await r.json().catch(() => ({}));
                 if (!r.ok) return sshMeldung(data.error || 'Abgleich fehlgeschlagen.', false);
+                if (r.status === 202) return sshMeldung(AuthentikAuth.bestaetigungsText(data), false); // W17
                 sshMeldung(`${data.gefunden ?? 0} Schlüssel bei GitHub, ${data.uebernommen ?? 0} neu, ${data.entfernt ?? 0} entfallen.`, true);
                 await loadSshZugang();
             } catch (e) { sshMeldung('Abgleich fehlgeschlagen: ' + e.message, false); }

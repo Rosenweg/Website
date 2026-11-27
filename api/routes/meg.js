@@ -5,7 +5,7 @@
 const express = require('express');
 const { pool } = require('../lib/db');
 const { authMiddleware } = require('../middleware/auth');
-const { getAusschussStwegs } = require('../lib/groups');
+const { getAusschussStwegs, isTechnik, isPraesident } = require('../lib/groups');
 
 const router = express.Router();
 
@@ -14,7 +14,7 @@ const router = express.Router();
 // das Bearbeiten-Grid — adminOnly waere zu streng und gaebe 403 beim Speichern.
 function megManageGate(req, res, next) {
   const groups = req.user?.groups || [];
-  if (req.user?.isAdmin || getAusschussStwegs(groups).has(8)) return next();
+  if (req.user?.isAdmin || isTechnik(groups) || isPraesident(groups) || getAusschussStwegs(groups).has(8)) return next();
   return res.status(403).json({ error: 'MEG-Ausschuss oder Technik erforderlich' });
 }
 
@@ -36,7 +36,7 @@ router.get('/einstellplaetze', authMiddleware, async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM meg_einstellplaetze ORDER BY typ, platz_nr');
     const groups = req.user?.groups || [];
-    if (req.user?.isAdmin || getAusschussStwegs(groups).has(8)) return res.json(r.rows);
+    if (req.user?.isAdmin || isTechnik(groups) || isPraesident(groups) || getAusschussStwegs(groups).has(8)) return res.json(r.rows);
     const me = String(req.user?.email || '').toLowerCase();
     res.json(r.rows.map(p => (me && String(p.zugeordnet_email || '').toLowerCase() === me)
       ? p

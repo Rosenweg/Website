@@ -202,6 +202,7 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `GET /api/auth/login`, `/callback`, `/logout` | Anmeldung |
 | `POST /api/reklamationen/code`, `/oeffentlich`; `POST /api/doodle/code`, `/verify`; `GET/POST /api/doodle/public/:id` | Code-Abläufe |
 | `GET /api/melde-ort/:code` | Melde-Ort zu einem QR-Code |
+| `POST /api/kontakt` | Kontaktformular der Startseite: Mail an technik@ (Honigtopf, Drossel je IP und gesamt, Absender nur Reply-To; `lib/kontaktformular.js`) |
 | `GET /api/energy/{surplus,surplus-available,lametric,shelly,solar-live,tariffs,tariffs/current}` | Geräte und Anzeigen, ohne `consumers` ([`energie-api.md`](energie-api.md)) |
 | `GET /api/public/ausschuss`, `/api/public/technik`, `/api/verwaltungen/public` | öffentliche Kontakte |
 | `GET /api/stweg/:stweg/wohnungen`, `/api/stweg/:stweg/overview` | Wohnungsliste und Belegung **ohne** Namen |
@@ -289,7 +290,7 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 |---|---|
 | `GET/POST/PUT/DELETE /api/auslagen…`, Belege, Positionen, `scan-beleg` | Recht `auslagen:read`; sehen: Ersteller, A🅢, T/P (Entwürfe nur Ersteller und T/P); Status ändern A🅢/T/P, keine Selbstgenehmigung; „ausbezahlt“ T/P/Verwaltung bzw. Ersteller („erhalten“); Scan 30 / Std. |
 | `PUT/DELETE /api/auslagen-stundensatz` | Recht `auslagen-stundensatz:write` |
-| `/api/projects…` | lesen: Eigentümer, T/P oder Verwaltung mit Recht `projekte` (Auslagen eines Projekts dann nur ihrer STWEG(s), `lib/projekte-rechte.js`); kommentieren: Eigentümer; bearbeiten: Ausschuss (jede STWEG) oder T/P |
+| `/api/projects…` | lesen: Eigentümer, T/P oder Verwaltung mit Recht `projekte` (Auslagen eines Projekts dann nur ihrer STWEG(s)); kommentieren: Eigentümer; anlegen (`POST /api/projects`) und bearbeiten: T/P, Ausschuss der STWEG des Projekts, Verwaltung der STWEG mit `projekte` = schreiben; Projekte der ganzen Kooperation (`stweg` leer) jeder Ausschuss bzw. eine Verwaltung aller STWEGs (`lib/projekte-rechte.js`) |
 | `/api/handwerker*`, `/api/handwerker-events`, `/api/handwerker-notfall` | Recht `handwerker` |
 | `GET /api/dashboard`, `POST /api/ki-search` (30 / Min.), `GET /api/telefonbuch` | angemeldet, Inhalt nach Rolle gefiltert |
 
@@ -318,7 +319,7 @@ Kurzfassung (Details [`energie-api.md`](energie-api.md)):
 | `GET /api/energy/{surplus,…,tariffs/current}` | offen |
 | `GET /api/energy/*` (alles andere), `GET /api/energie/meine-zaehler` | angemeldet; nur zugeordnete Zähler; voll für T/P und Recht `energie-config:read` |
 | `/api/energie-admin/*` | Recht `energie-config` (GET read, sonst write); 503 ohne `ENERGY_ADMIN_API_KEY` |
-| `GET /api/zaehler-technik` | Gruppe `technik`, `präsident`, `verwaltung` oder `stweg3-eigentuemer`; volle Sicht nur Technik/Präsident oder `energie-config:read` |
+| `GET /api/zaehler-technik` | Gruppe `technik`, `präsident`, `verwaltung` oder `r9-eigentuemer`; volle Sicht nur Technik/Präsident oder `energie-config:read` |
 | `/api/zähler/*` | Recht `zähler` (`POST /api/zähler/benutzer` T/P) |
 
 ### 4.9 Technik, Netz und Nebendienste

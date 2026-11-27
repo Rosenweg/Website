@@ -323,7 +323,22 @@ const MANAGED_PAGES = [
   // Seit B19 prueft die API das Recht (lib/vollmacht-rechte.js): lesen = Vollmachten
   // der verwalteten STWEG(s) sehen, schreiben = fuer Dritte erfassen, Papier aktivieren.
   { id: 'vollmachten', label: 'Vollmachten (Verwaltung)' },
+  // Befund F6-1: diese Rechte stehen in der Tabelle und wirken, fehlten aber als Spalte.
+  { id: 'objektverwaltung', label: 'Objektverwaltung' },
+  { id: 'projekte', label: 'Projekte' },
+  { id: 'email-archiv', label: 'E-Mail-Archiv' },
+  { id: 'loeschungen', label: 'Konto-Löschungen' },
+  { id: 'pbx-admin', label: 'Telefonanlage (PBX-Admin)' },
+  { id: 'echtheitspruefung', label: 'Echtheitsprüfung' },
 ];
+
+// Spalten der Rechteverwaltung: MANAGED_PAGES plus jeder weitere Schluessel aus
+// der Tabelle permissions (Bezeichnung = Schluessel), damit nichts unsichtbar bleibt.
+function rechteSpalten(zeilen) {
+  const bekannt = new Set(MANAGED_PAGES.map(p => p.id));
+  const weitere = [...new Set((zeilen || []).map(r => r && r.page).filter(p => p && !bekannt.has(p)))].sort();
+  return [...MANAGED_PAGES, ...weitere.map(id => ({ id, label: id }))];
+}
 
 const ACCESS_LEVELS = { none: 0, read: 1, write: 2 };
 
@@ -404,5 +419,5 @@ async function getUserPermissions(groups) {
 module.exports = {
   authentikAPI, tokenCache, validateAuthentikToken, authentikPasswordLogin,
   validateAppToken, istAppToken, appTokensVergessen, APPS_CLIENT_ID,
-  MANAGED_PAGES, ACCESS_LEVELS, resolveAncestorGroups, getUserPermissions,
+  MANAGED_PAGES, ACCESS_LEVELS, resolveAncestorGroups, getUserPermissions, rechteSpalten,
 };

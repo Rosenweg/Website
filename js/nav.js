@@ -22,7 +22,7 @@ const WASCH_NAV_GRUPPEN = 'waschküche,bewohner,eigentuemer,technik,praesident';
 // api/lib/groups.js VERWALTUNG_GROUPS; ÜBERGANG: alte Gruppe „Verwaltung“). Das
 // Menü selbst erscheint nur für diese Gruppen (data-nur-gruppe, auch nicht für Technik –
 // die hat „Admin ↗“), jeder Eintrag nur mit dem Seitenrecht. Rechte-Schlüssel
-// mit Umlaut zusätzlich in ASCII, falls sie so in der Rechte-Tabelle stehen.
+// nur mit Umlaut (die API führt ASCII-Zeilen zusammen, api/lib/rechte-schluessel.js).
 // Ohne eigenen Eintrag: kontakte (Reiter in der Objektverwaltung), verwaltung
 // (öffentliche Seite „Hausverwaltung“ im Bewohner-Menü). Waschküche: die
 // Verwaltung sieht Räume und Belegung ihrer STWEG (nur lesen, reservieren
@@ -37,8 +37,8 @@ const VERWALTUNG_NAV = [
   { label: '📝 Vollmachten', href: 'vollmachten.html', key: 'vollmachten', permAny: 'vollmachten' },
   { label: '💸 Auslagen', href: 'auslagen.html', key: 'auslagen', permAny: 'auslagen' },
   { label: '🏗 Projekte', href: 'projekte.html', key: 'projekte', permAny: 'projekte' },
-  { label: '🧺 Waschküche (Belegung)', href: 'waschkueche.html', key: 'waschküche', permAny: 'waschküche-admin,waschkueche-admin' },
-  { label: '🔢 Zähler & Verbrauch', href: 'zaehler.html', key: 'zähler', permAny: 'zähler,zaehler' },
+  { label: '🧺 Waschküche (Belegung)', href: 'waschkueche.html', key: 'waschküche', permAny: 'waschküche-admin' },
+  { label: '🔢 Zähler & Verbrauch', href: 'zaehler.html', key: 'zähler', permAny: 'zähler' },
   { label: '⚡ Energie-Monitor', href: 'energie-monitor.html', key: 'energie', permAny: 'energie-monitor' },
   { label: '✉️ E-Mail-Verteiler', href: 'email-verteiler.html', key: 'verteiler', permAny: 'email-verteiler' },
 ];
@@ -326,6 +326,15 @@ const RosenwegNav = {
 
   // Sind wir auf einer STWEG-Webseite? (stweg1-7/meg-Subdomain, rosenweg9/rosenweg1-Domain,
   // oder Direktzugriff /stwegN/...). Steuert STWEG-only-Nav-Eintraege (relative pages/-Links).
+  // Adresse der Reklamationsseite der aktuellen STWEG-Seite, sonst null.
+  // Subdomain stwegN.rosenweg4303.ch: /pages/reklamationen.html; Direktzugriff
+  // /stwegN/…: /stwegN/pages/reklamationen.html.
+  _stwegReklHref() {
+    if (typeof window === 'undefined' || !this._isStwegSite()) return null;
+    const m = (window.location.pathname || '').match(/^\/(stweg[1-7]|meg)\//);
+    return m ? `/${m[1]}/pages/reklamationen.html` : '/pages/reklamationen.html';
+  },
+
   _isStwegSite() {
     const h = (typeof window !== 'undefined' && window.location.hostname) || '';
     const p = (typeof window !== 'undefined' && window.location.pathname) || '';
@@ -357,7 +366,7 @@ const RosenwegNav = {
       { href: 'mail-templates.html', label: 'Vorlagen', group: 'Mail-Betrieb', perm: 'mail-templates' },
       { href: 'email-log.html', label: 'Mail-Log', group: 'Mail-Betrieb', perm: 'email-log' },
       { href: 'email-archiv.html', label: 'Mail-Archiv', group: 'Mail-Betrieb', perm: 'email-archiv' },
-      { href: 'mail-empfaenger-admin.html', label: 'Empfänger', group: 'Mail-Betrieb', perm: 'mail-empfaenger' },
+      { href: 'mail-empfaenger-admin.html', label: 'Empfänger', group: 'Mail-Betrieb', perm: 'mail-empfänger' },
       { href: 'verwaltung-mail-outbox.html', label: 'Mail-Outbox', group: 'Mail-Betrieb', perm: 'verwaltung-mail-outbox' },
       { href: 'email-verteiler.html', label: 'Mail-Verteiler', group: 'Mail-Betrieb', perm: 'email-verteiler', aud: ['admin'] },
       { href: 'rechteverwaltung.html', label: 'Rechte', group: 'System', perm: 'rechteverwaltung' },
@@ -461,6 +470,11 @@ const RosenwegNav = {
     const a = (key) => active === key ? 'text-blue-600 font-semibold' : 'text-gray-700 hover:text-blue-600';
     const dropA = (key) => active === key ? 'bg-blue-50 text-blue-600' : 'text-gray-700 hover:bg-gray-50';
     const stwegen = this._config?.stwegen || [];
+    // Auf einer STWEG-Seite: deren Reklamationsseite (stwegN/pages/reklamationen.html)
+    // im Bewohner-Menue verlinken (Entscheid Stefan 27.11.2026: Seiten bleiben).
+    const reklHref = this._stwegReklHref();
+    const stwegReklD = reklHref ? `<a href="${this._esc(reklHref)}" class="${dropA('reklamationen')} block px-4 py-2 text-sm">📋 Reklamationen dieser STWEG</a>` : '';
+    const stwegReklM = reklHref ? `<a href="${this._esc(reklHref)}" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📋 Reklamationen dieser STWEG</a>` : '';
 
     // STWEG/MEG leben in eigenen Frontend-Containern auf Subdomains
     // (stwegN.rosenweg4303.ch, meg.rosenweg4303.ch). Links daher absolut
@@ -518,6 +532,7 @@ const RosenwegNav = {
               <a href="https://isp.rosenweg4303.ch/wlan.html" class="${dropA('wlan')} block px-4 py-2 text-sm">📶 WLAN-Zugang</a>
               <a href="https://isp.rosenweg4303.ch/tv.html" class="${dropA('tv')} block px-4 py-2 text-sm">📺 TV / Fernsehen</a>
               <a href="https://pwa.rosenweg4303.ch/reparatur/" class="block px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">🔧 Schaden melden ↗</a>
+              ${stwegReklD}
               <a href="${base}mein-telefon.html" data-perm-any="${TELEFON_NAV_GRUPPEN}" class="${dropA('mein-telefon')} block px-4 py-2 text-sm">📞 Mein Telefon</a>
               <a href="${base}smartphones.html" data-perm-any="${TELEFON_NAV_GRUPPEN}" class="${dropA('smartphones')} block px-4 py-2 text-sm">📱 Smartphones</a>
               <a href="${base}apps.html" class="${dropA('apps')} block px-4 py-2 text-sm">📲 Rosenweg-Apps</a>
@@ -594,6 +609,7 @@ const RosenwegNav = {
         <a href="https://isp.rosenweg4303.ch/wlan.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📶 WLAN-Zugang</a>
         <a href="https://isp.rosenweg4303.ch/tv.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📺 TV / Fernsehen</a>
         <a href="https://pwa.rosenweg4303.ch/reparatur/" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🔧 Schaden melden ↗</a>
+        ${stwegReklM}
         <a href="${base}mein-telefon.html" data-perm-any="${TELEFON_NAV_GRUPPEN}" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📞 Mein Telefon</a>
         <a href="${base}smartphones.html" data-perm-any="${TELEFON_NAV_GRUPPEN}" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📱 Smartphones</a>
         <a href="${base}apps.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📲 Rosenweg-Apps</a>

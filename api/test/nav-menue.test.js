@@ -74,3 +74,24 @@ test('F5-3: PBX-Admin steht unter „Betrieb & Admin“ und im Admin-Menü, nur 
   const server = fs.readFileSync(path.join(WURZEL, 'api', 'server.js'), 'utf8');
   assert.match(server, /\('technik', 'pbx-admin', 'write'\),\s*\('Präsident', 'pbx-admin', 'write'\)/);
 });
+
+test('STWEG-Seiten: Reklamationsseite der STWEG im Bewohner-Menü (Desktop und Handy)', () => {
+  assert.equal(quelle.split('${stwegReklD}').length - 1, 1);
+  assert.equal(quelle.split('${stwegReklM}').length - 1, 1);
+  for (const d of ['stweg1', 'stweg2', 'stweg3', 'stweg4', 'stweg5', 'stweg6', 'stweg7', 'meg']) {
+    assert.ok(fs.existsSync(path.join(WURZEL, d, 'pages', 'reklamationen.html')), d);
+  }
+  // Helfer ausführen: ohne STWEG-Seite kein Eintrag, mit Pfad /stwegN/ der eigene
+  const start = quelle.indexOf('  _stwegReklHref() {');
+  const ende = quelle.indexOf('  _isStwegSite() {');
+  const helfer = quelle.slice(start, ende);
+  const isStweg = quelle.slice(ende, quelle.indexOf('\n  },', ende) + 4);
+  const probe = (host, pfad) => {
+    const sb = { window: { location: { hostname: host, pathname: pfad } } };
+    vm.runInNewContext(`const o = {${helfer}${isStweg}}; globalThis.__r = o._stwegReklHref();`, sb);
+    return sb.__r;
+  };
+  assert.equal(probe('www.rosenweg4303.ch', '/index.html'), null);
+  assert.equal(probe('stweg5.rosenweg4303.ch', '/'), '/pages/reklamationen.html');
+  assert.equal(probe('www.rosenweg4303.ch', '/stweg3/index.html'), '/stweg3/pages/reklamationen.html');
+});

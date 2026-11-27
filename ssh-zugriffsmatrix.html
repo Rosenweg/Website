@@ -221,6 +221,8 @@ async function regelSpeichern() {
         const r = await AuthentikAuth.apiFetch('/api/ssh/matrix', { method: 'POST', body: koerper });
         const d = await r.json().catch(() => ({}));
         if (!r.ok) return meldung(d.error || 'Konnte nicht gespeichert werden.', false);
+        // 202: wartet auf Bestätigung per Mail (Karten-Anmeldung) – noch nicht gespeichert (W17)
+        if (r.status === 202) return meldung(AuthentikAuth.bestaetigungsText(d), false);
         $('r-subjekt').value = '';
         meldung(d.neu ? 'Regel angelegt.' : 'Bestehende Regel geändert.', true);
         await laden();
@@ -232,6 +234,7 @@ async function regelLoeschen(id) {
     try {
         const r = await AuthentikAuth.apiFetch(`/api/ssh/matrix/${id}`, { method: 'DELETE' });
         if (!r.ok) return meldung('Konnte nicht entfernt werden.', false);
+        if (r.status === 202) return meldung(AuthentikAuth.bestaetigungsText(await r.json().catch(() => ({}))), false);
         meldung('Regel entfernt.', true);
         await laden();
     } catch (e) { meldung('Konnte nicht entfernt werden: ' + e.message, false); }

@@ -191,7 +191,8 @@
 
         function isManager(user) {
             const g = (user.groups || []).map(x => String(x).toLowerCase());
-            return !!user.isAdmin || g.includes('technik') || g.includes('präsident') || g.includes('praesident') || g.some(x => x.endsWith('-ausschuss'));
+            // Wie die API: nur Technik/Präsident (Befund W3; vorher jeder Ausschuss -> 403)
+            return !!user.isAdmin || g.includes('technik') || g.includes('präsident') || g.includes('praesident');
         }
 
         async function load() {
