@@ -130,16 +130,23 @@
     (async () => {
         loadVerfuegbar();
         try {
-            const user = await AuthentikAuth.init();
-            // Wie die API (api/routes/meg.js megManageGate): Admin oder MEG-Ausschuss (Befund W25)
-            if (user && (user.isAdmin || (user.groups || []).some(g => ['meg-ausschuss', 'technik', 'präsident', 'praesident'].includes(String(g).toLowerCase())))) {
-                document.getElementById('admin-wrap').classList.remove('hidden');
-                loadGrid();
-            } else {
+            const user = await AuthentikAuth.init({ requireAuth: false });
+            if (!user) {
+                // Nicht angemeldet: Anmelden kann zur Platz-Verwaltung führen.
                 document.getElementById('login-hint').classList.remove('hidden');
+            } else {
+                // M1/M3: Der Server entscheidet (MEG-Ausschuss, Technik, Präsident).
+                // Angemeldete ohne Recht sehen nur den öffentlichen Teil – kein
+                // Anmelde-Knopf, der nicht weiterhilft.
+                const r = await fetch('/api/meg/einstellplaetze/rechte', { headers: { Authorization: 'Bearer ' + AuthentikAuth.getToken() } });
+                const rechte = r.ok ? await r.json() : {};
+                if (rechte.verwalten === true) {
+                    document.getElementById('admin-wrap').classList.remove('hidden');
+                    loadGrid();
+                }
             }
         } catch {
-            document.getElementById('login-hint').classList.remove('hidden');
+            if (!AuthentikAuth.isLoggedIn()) document.getElementById('login-hint').classList.remove('hidden');
         }
         document.getElementById('login-btn')?.addEventListener('click', () => AuthentikAuth.login());
     })();

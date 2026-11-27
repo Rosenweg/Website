@@ -5,18 +5,22 @@
 const express = require('express');
 const { pool } = require('../lib/db');
 const { authMiddleware } = require('../middleware/auth');
-const { getAusschussStwegs, isTechnik, isPraesident } = require('../lib/groups');
+const { darfMegPlaetzeVerwalten } = require('../lib/meg');
 
 const router = express.Router();
 
-// MEG-Platzverwaltung: Technik/Praesident (isAdmin) ODER MEG-Ausschuss
-// (Ausschuss fuer STWEG 8). Frontend (einstellplaetze.html) zeigt dem Ausschuss
-// das Bearbeiten-Grid — adminOnly waere zu streng und gaebe 403 beim Speichern.
+// MEG-Platzverwaltung: Technik/Praesident ODER MEG-Ausschuss (Ausschuss fuer
+// STWEG 8), Regel in lib/meg.js. Die Seite fragt /einstellplaetze/rechte und
+// zeigt das Bearbeiten-Grid nur dann (M1).
 function megManageGate(req, res, next) {
-  const groups = req.user?.groups || [];
-  if (req.user?.isAdmin || isTechnik(groups) || isPraesident(groups) || getAusschussStwegs(groups).has(8)) return next();
-  return res.status(403).json({ error: 'MEG-Ausschuss oder Technik erforderlich' });
+  if (darfMegPlaetzeVerwalten(req.user)) return next();
+  return res.status(403).json({ error: 'Nur der MEG-Ausschuss, Technik oder Präsident dürfen Plätze ändern.' });
 }
+
+// Was die Seite anbieten darf (M1). Eingeloggt; keine Daten, nur das Recht.
+router.get('/einstellplaetze/rechte', authMiddleware, (req, res) => {
+  res.json({ verwalten: darfMegPlaetzeVerwalten(req.user) });
+});
 
 // Public: nur die zu vermietenden Plaetze (fuer "Motorradplaetze noch frei").
 // Keine PII — nur platz_nr/typ/status. Wird vom meg-Frontend ungeschuetzt geladen.
@@ -35,8 +39,7 @@ router.get('/einstellplaetze/verfuegbar', async (req, res) => {
 router.get('/einstellplaetze', authMiddleware, async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM meg_einstellplaetze ORDER BY typ, platz_nr');
-    const groups = req.user?.groups || [];
-    if (req.user?.isAdmin || isTechnik(groups) || isPraesident(groups) || getAusschussStwegs(groups).has(8)) return res.json(r.rows);
+    if (darfMegPlaetzeVerwalten(req.user)) return res.json(r.rows);
     const me = String(req.user?.email || '').toLowerCase();
     res.json(r.rows.map(p => (me && String(p.zugeordnet_email || '').toLowerCase() === me)
       ? p
