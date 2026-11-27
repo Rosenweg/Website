@@ -97,3 +97,22 @@ test('QR-Anmeldung: Praefix RWAPP1, Token-Form, Telefon-QR mit Hinweis', () => {
   assert.equal(ak.qrAnmeldungPruefen({ ...ohneKarte, token: t, schluessel: 'x' }).ok, false);
   assert.equal(ak.qrAnmeldungPruefen({ token: t }).ok, false);
 });
+
+test('Mit dem Handy anmelden: Benutzer-Code lesbar, Eingabe tolerant, nur ohne Karte', () => {
+  for (let i = 0; i < 50; i++) {
+    const c = ak.neuerBenutzerCode();
+    assert.match(c, /^[B-DF-HJ-NP-TV-XZ2-9]{4}-[B-DF-HJ-NP-TV-XZ2-9]{4}$/);
+    assert.equal(ak.benutzerCode(c), c);
+    assert.equal(ak.benutzerCode(c.toLowerCase().replace('-', ' ')), c);
+  }
+  assert.equal(ak.benutzerCode('ABCD-EFGH'), null);   // Vokale kommen nie vor
+  assert.equal(ak.benutzerCode('BCDF-GHJ'), null);
+  assert.equal(ak.benutzerCode('<script>'), null);
+  const { uid, ...ohneKarte } = gueltig();
+  assert.equal(ak.handyCodePruefen(ohneKarte).ok, true);
+  assert.equal(ak.handyCodePruefen({ ...ohneKarte, schluessel: 'x' }).ok, false);
+  assert.equal(ak.handyCodePruefen(null).ok, false);
+  assert.equal(ak.ohneKarte('qr'), true);
+  assert.equal(ak.ohneKarte('handy'), true);
+  assert.equal(ak.ohneKarte('karte'), false);
+});

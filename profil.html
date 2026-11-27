@@ -23,7 +23,7 @@
 
     <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
     <script src="/js/nav.js?v=3"></script>
-    <script src="/js/meine-geraete.js?v=2"></script>
+    <script src="/js/meine-geraete.js?v=3"></script>
     <script src="/js/phone-helpers.js?v=1"></script>
 
     <div class="max-w-4xl mx-auto px-4 py-8 space-y-6">
@@ -1532,7 +1532,7 @@
                         <div class="min-w-0">
                             <div class="font-semibold">${esc(s.app_name)} <span class="font-normal text-gray-500">auf ${esc(s.geraet_name)}${s.plattform ? ' · ' + esc(s.plattform) : ''}</span></div>
                             ${d.alle ? `<div class="text-sm text-gray-700">${esc(s.name)} &lt;${esc(s.email)}&gt;</div>` : ''}
-                            <div class="text-xs text-gray-500">${s.art === 'qr' ? 'Anmelde-QR' : 'Karte …' + esc(s.karte_anzeige)} · Gerät ${esc(s.geraet)}</div>
+                            <div class="text-xs text-gray-500">${s.art === 'qr' ? 'Anmelde-QR' : s.art === 'handy' ? 'Handy bestätigt' : 'Karte …' + esc(s.karte_anzeige)} · Gerät ${esc(s.geraet)}</div>
                         </div>
                         <button onclick="appSitzungAbmelden('${esc(s.id)}')" class="text-xs text-red-600 hover:underline shrink-0">Abmelden</button>
                     </div>

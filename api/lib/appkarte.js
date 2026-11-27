@@ -136,6 +136,38 @@ function qrAnmeldungPruefen(body) {
   return p.ok ? { ok: true, werte: { token, ...p.werte } } : p;
 }
 
+// ─── "Mit dem Handy anmelden" (Stefan 27.11.2026) ────────────────────────────
+// Umgekehrter QR für Computer ohne Kamera und ohne Kartenleser: die App am
+// Computer zeigt einen QR mit der Portal-Adresse /app-anmelden#<code>; die
+// Person scannt ihn mit der Kamera ihres Handys (jede Kamera-App genügt), ist im
+// Portal angemeldet und bestätigt. Prinzip Geräte-Code (RFC 8628). Der kurze
+// Benutzer-Code steht auch lesbar unter dem QR (zum Abtippen).
+const HANDY_ZEICHEN = 'BCDFGHJKLMNPQRSTVWXZ23456789';   // ohne 0/O, 1/I, Vokale (keine Wörter)
+
+function neuerBenutzerCode() {
+  const b = crypto.randomBytes(8);
+  let c = '';
+  for (let i = 0; i < 8; i++) c += HANDY_ZEICHEN[b[i] % HANDY_ZEICHEN.length];
+  return c.slice(0, 4) + '-' + c.slice(4);
+}
+
+/** Eingabe/URL-Teil -> "ABCD-EFGH" oder null (Gross/klein, Leer- und Bindestriche egal). */
+function benutzerCode(roh) {
+  const c = String(roh || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (c.length !== 8 || [...c].some(z => !HANDY_ZEICHEN.includes(z))) return null;
+  return c.slice(0, 4) + '-' + c.slice(4);
+}
+
+/** Anfrage "Code holen" prüfen: App, Gerät, Schlüssel wie bei Karte und QR. */
+function handyCodePruefen(body) {
+  return appGeraetPruefen(body && typeof body === 'object' ? body : {});
+}
+
+/** Ohne Karte angemeldet (QR oder Handy): beim Erneuern Konto statt Karte prüfen. */
+function ohneKarte(art) {
+  return art === 'qr' || art === 'handy';
+}
+
 /**
  * Ratenbegrenzung aus den gezählten Versuchen. Zählt nur Fehlversuche (ausser
  * "alle" je IP), damit eine Person mit vielen Apps nicht ausgesperrt wird.
@@ -181,4 +213,5 @@ module.exports = {
   neueSitzungsId, neuesZugangsToken, neuesQrToken, zufall, hash, kartenUid, qrToken,
   oeffentlicherSchluessel, erneuernText, unterschriftGueltig, anzeigeText,
   anmeldungPruefen, qrAnmeldungPruefen, gebremst, abzuloesen, istTechnikOderPraesident,
+  neuerBenutzerCode, benutzerCode, handyCodePruefen, ohneKarte,
 };
