@@ -936,7 +936,7 @@ app.post('/api/ki-search', authMiddleware, async (req, res) => {
         ? pool.query('SELECT id, bezeichnung, stweg, eigentuemer_name, mieter_name FROM wohnungen WHERE (de_norm(bezeichnung) LIKE de_norm($1) OR de_norm(COALESCE(eigentuemer_name,\'\')) LIKE de_norm($1) OR de_norm(COALESCE(mieter_name,\'\')) LIKE de_norm($1))' + (isAdmin ? '' : ' AND stweg = ANY($2::int[])') + ' LIMIT 5', isAdmin ? [like] : [like, wohnStwegs]).catch(() => ({ rows: [] }))
         : { rows: [] },
       // Projekte
-      pool.query('SELECT slug, titel, status FROM projects WHERE de_norm(titel) LIKE de_norm($1) OR de_norm(COALESCE(beschreibung,\'\')) LIKE de_norm($1) LIMIT 3', [like]).catch(() => ({ rows: [] })),
+      pool.query('SELECT slug, title AS titel, status FROM projects WHERE de_norm(title) LIKE de_norm($1) OR de_norm(COALESCE(description,\'\')) LIKE de_norm($1) LIMIT 3', [like]).catch(() => ({ rows: [] })),
     ]);
 
     const [personen, handwerker, vollmachten, reklamationen, mails, verwaltungen, wohnungen, projekte] = searches.map(s => s.status === 'fulfilled' ? (s.value?.rows || []) : []);
@@ -12025,6 +12025,25 @@ async function requireProjekteLesen(req, res, next) {
   res.status(403).json({ error: 'Nur für Eigentümer oder die Verwaltung (Recht Projekte)' });
 }
 
+async function projektePerm(req) {
+  try { return (await getUserPermissions(req.user?.groups || []))['projekte']; } catch { return undefined; }
+}
+
+/** Middleware: Projekt :slug bearbeiten (Technik/Praesident, Ausschuss bzw. Verwaltung
+ *  der STWEG des Projekts; lib/projekte-rechte.js projektBearbeiten). */
+async function requireProjektBearbeiten(req, res, next) {
+  try {
+    const { rows: [p] } = await pool.query('SELECT id, stweg, status FROM projects WHERE slug = $1', [req.params.slug]);
+    if (!p) return res.status(404).json({ error: 'Projekt nicht gefunden' });
+    const groups = req.user?.groups || [];
+    if (!projekteRechte.projektBearbeiten(groups, await projektePerm(req), p.stweg)) {
+      return res.status(403).json({ error: p.stweg ? 'Nur Ausschuss oder Verwaltung dieser STWEG' : 'Nur Ausschuss, Technik oder Präsident' });
+    }
+    req.projekt = p;
+    next();
+  } catch (e) { res.status(500).json({ error: 'Fehler' }); }
+}
+
 /** Middleware: require ausschuss or technik for editing */
 function requireAusschussOrTechnik(req, res, next) {
   const groups = req.user?.groups || [];
@@ -12213,7 +12232,7 @@ app.get('/api/public/project/:slug/document/:path(*)', async (req, res) => {
 });
 
 // PUT /api/projects/:slug/public — toggle public access (admin only)
-app.put('/api/projects/:slug/public', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+app.put('/api/projects/:slug/public', authMiddleware, requireProjektBearbeiten, async (req, res) => {
   try {
     const { public_access } = req.body;
     const { rows: [row] } = await pool.query(
@@ -12228,7 +12247,7 @@ app.put('/api/projects/:slug/public', authMiddleware, requireAusschussOrTechnik,
 });
 
 // PUT /api/projects/:slug/budget — Budget setzen (Ausschuss/Technik)
-app.put('/api/projects/:slug/budget', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+app.put('/api/projects/:slug/budget', authMiddleware, requireProjektBearbeiten, async (req, res) => {
   try {
     const budget = req.body?.budget_chf;
     const warnPct = req.body?.budget_warnung_pct;
@@ -12294,6 +12313,7 @@ app.get('/api/projects/:slug', authMiddleware, requireProjekteLesen, async (req,
       candidates: candidates.rows, timeline: timeline.rows, comments: comments.rows, attachments: attachments.rows,
       auslagen_stat: auslagenStat,
       darf_kommentieren: projekteRechte.projekteKommentieren(req.user?.groups || []),
+      darf_bearbeiten: projekteRechte.projektBearbeiten(req.user?.groups || [], await projektePerm(req), project.stweg),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -12325,6 +12345,82 @@ app.get('/api/projects/:slug/auslagen', authMiddleware, requireProjekteLesen, as
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// GET /api/projects-rechte — was darf das Konto anlegen (Formular „Neues Projekt“)
+app.get('/api/projects-rechte', authMiddleware, requireProjekteLesen, async (req, res) => {
+  const auswahl = projekteRechte.projektAnlegenAuswahl(req.user?.groups || [], await projektePerm(req));
+  res.json({ anlegen: projekteRechte.darfAnlegen(auswahl), ...auswahl, status: projekteRechte.PROJEKT_STATUS });
+});
+
+function projektStwegLesen(v) {
+  if (v === null || v === undefined || v === '') return { stweg: null };
+  const n = parseInt(v, 10);
+  if (!Number.isFinite(n) || n < 1 || n > 8) return { fehler: 'Ungültige STWEG' };
+  return { stweg: n };
+}
+
+// POST /api/projects {title, description, status, stweg} — neues Projekt
+// (Entscheid Stefan 27.11.2026: Ausschuss und Verwaltung je eigene STWEG(s)).
+app.post('/api/projects', authMiddleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const title = String(b.title || '').replace(/[\u0000-\u001F]/g, ' ').trim().slice(0, 150);
+    if (!title) return res.status(400).json({ error: 'Titel fehlt' });
+    const st = projektStwegLesen(b.stweg);
+    if (st.fehler) return res.status(400).json({ error: st.fehler });
+    if (!projekteRechte.projektBearbeiten(req.user?.groups || [], await projektePerm(req), st.stweg)) {
+      return res.status(403).json({ error: st.stweg ? 'Nur Projekte der eigenen STWEG' : 'Projekte der ganzen Kooperation nur Ausschuss, Technik oder Präsident' });
+    }
+    const status = projekteRechte.PROJEKT_STATUS.includes(b.status) ? b.status : 'geplant';
+    const description = b.description ? String(b.description).slice(0, 5000) : null;
+    const basis = projekteRechte.slugAusTitel(title);
+    // Freies Kuerzel suchen (ohne ON CONFLICT: die Tabelle stammt nicht aus initDB)
+    for (let i = 1; i <= 50; i++) {
+      const slug = i === 1 ? basis : `${basis}-${i}`;
+      const da = await pool.query('SELECT 1 FROM projects WHERE slug = $1', [slug]);
+      if (da.rows.length) continue;
+      try {
+        const r = await pool.query(
+          'INSERT INTO projects (slug, title, description, status, stweg) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+          [slug, title, description, status, st.stweg]);
+        return res.status(201).json(r.rows[0]);
+      } catch (e) { if (e.code !== '23505') throw e; }
+    }
+    res.status(409).json({ error: 'Kein freies Kürzel für diesen Titel' });
+  } catch (err) { console.error('[projekt-neu]', err.message); res.status(500).json({ error: 'Projekt konnte nicht angelegt werden' }); }
+});
+
+// PUT /api/projects/:slug {title, description, status, stweg} — Projekt bearbeiten.
+// STWEG aendern: das Konto muss auch die neue STWEG bearbeiten duerfen.
+app.put('/api/projects/:slug', authMiddleware, requireProjektBearbeiten, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const sets = []; const params = [];
+    const push = (col, v) => { params.push(v); sets.push(`${col} = $${params.length}`); };
+    if (b.title !== undefined) {
+      const t = String(b.title || '').replace(/[\u0000-\u001F]/g, ' ').trim().slice(0, 150);
+      if (!t) return res.status(400).json({ error: 'Titel fehlt' });
+      push('title', t);
+    }
+    if (b.description !== undefined) push('description', b.description ? String(b.description).slice(0, 5000) : null);
+    if (b.status !== undefined && b.status !== req.projekt.status) {
+      if (!projekteRechte.PROJEKT_STATUS.includes(b.status)) return res.status(400).json({ error: 'Ungültiger Status' });
+      push('status', b.status);
+    }
+    if (b.stweg !== undefined) {
+      const st = projektStwegLesen(b.stweg);
+      if (st.fehler) return res.status(400).json({ error: st.fehler });
+      if (!projekteRechte.projektBearbeiten(req.user?.groups || [], await projektePerm(req), st.stweg)) {
+        return res.status(403).json({ error: 'Diese STWEG darfst du nicht zuweisen' });
+      }
+      push('stweg', st.stweg);
+    }
+    if (!sets.length) return res.status(400).json({ error: 'Keine Änderungen' });
+    params.push(req.params.slug);
+    const r = await pool.query(`UPDATE projects SET ${sets.join(', ')}, updated_at = NOW() WHERE slug = $${params.length} RETURNING *`, params);
+    res.json(r.rows[0]);
+  } catch (err) { console.error('[projekt-bearbeiten]', err.message); res.status(500).json({ error: 'Projekt konnte nicht gespeichert werden' }); }
+});
+
 // GET /api/projects-mini — kompakte Liste für Dropdowns (kein Eigentümer-Check, alle eingeloggten User)
 app.get('/api/projects-mini', authMiddleware, async (req, res) => {
   try {
@@ -12334,7 +12430,7 @@ app.get('/api/projects-mini', authMiddleware, async (req, res) => {
 });
 
 // POST /api/projects/:slug/candidates - Add candidate
-app.post('/api/projects/:slug/candidates', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+app.post('/api/projects/:slug/candidates', authMiddleware, requireProjektBearbeiten, async (req, res) => {
   try {
     const { rows: [project] } = await pool.query('SELECT id FROM projects WHERE slug = $1', [req.params.slug]);
     if (!project) return res.status(404).json({ error: 'Projekt nicht gefunden' });
@@ -12350,7 +12446,7 @@ app.post('/api/projects/:slug/candidates', authMiddleware, requireAusschussOrTec
 });
 
 // PUT /api/projects/:slug/candidates/:id - Update candidate
-app.put('/api/projects/:slug/candidates/:id', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+app.put('/api/projects/:slug/candidates/:id', authMiddleware, requireProjektBearbeiten, async (req, res) => {
   try {
     const { name, kontakt, telefon, email, webseite, offerte_betrag, offerte_details, bewertung, status, notizen } = req.body;
     const { rows: [row] } = await pool.query(
@@ -12365,7 +12461,7 @@ app.put('/api/projects/:slug/candidates/:id', authMiddleware, requireAusschussOr
 });
 
 // DELETE /api/projects/:slug/candidates/:id
-app.delete('/api/projects/:slug/candidates/:id', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+app.delete('/api/projects/:slug/candidates/:id', authMiddleware, requireProjektBearbeiten, async (req, res) => {
   try {
     // ID nur innerhalb des Projekts im Pfad (sonst Kandidaten beliebiger Projekte)
     await pool.query('DELETE FROM project_candidates WHERE id = $1 AND project_id = (SELECT id FROM projects WHERE slug = $2)', [req.params.id, req.params.slug]);
@@ -12376,7 +12472,7 @@ app.delete('/api/projects/:slug/candidates/:id', authMiddleware, requireAusschus
 });
 
 // POST /api/projects/:slug/timeline - Add timeline entry
-app.post('/api/projects/:slug/timeline', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+app.post('/api/projects/:slug/timeline', authMiddleware, requireProjektBearbeiten, async (req, res) => {
   try {
     const { rows: [project] } = await pool.query('SELECT id FROM projects WHERE slug = $1', [req.params.slug]);
     if (!project) return res.status(404).json({ error: 'Projekt nicht gefunden' });
@@ -12391,7 +12487,7 @@ app.post('/api/projects/:slug/timeline', authMiddleware, requireAusschussOrTechn
 });
 
 // PUT /api/projects/:slug/timeline/:id
-app.put('/api/projects/:slug/timeline/:id', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+app.put('/api/projects/:slug/timeline/:id', authMiddleware, requireProjektBearbeiten, async (req, res) => {
   try {
     const { datum, titel, beschreibung, erledigt } = req.body;
     const { rows: [row] } = await pool.query(
@@ -12405,7 +12501,7 @@ app.put('/api/projects/:slug/timeline/:id', authMiddleware, requireAusschussOrTe
 });
 
 // DELETE /api/projects/:slug/timeline/:id
-app.delete('/api/projects/:slug/timeline/:id', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+app.delete('/api/projects/:slug/timeline/:id', authMiddleware, requireProjektBearbeiten, async (req, res) => {
   try {
     await pool.query('DELETE FROM project_timeline WHERE id = $1 AND project_id = (SELECT id FROM projects WHERE slug = $2)', [req.params.id, req.params.slug]);
     res.json({ success: true });
@@ -12431,7 +12527,7 @@ app.post('/api/projects/:slug/comments', authMiddleware, requireEigentuemer, asy
 });
 
 // DELETE /api/projects/:slug/comments/:id - Ausschuss/Technik can delete
-app.delete('/api/projects/:slug/comments/:id', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+app.delete('/api/projects/:slug/comments/:id', authMiddleware, requireProjektBearbeiten, async (req, res) => {
   try {
     await pool.query('DELETE FROM project_comments WHERE id = $1 AND project_id = (SELECT id FROM projects WHERE slug = $2)', [req.params.id, req.params.slug]);
     res.json({ success: true });
@@ -12441,7 +12537,7 @@ app.delete('/api/projects/:slug/comments/:id', authMiddleware, requireAusschussO
 });
 
 // POST /api/projects/:slug/attachments - Link existing doc to timeline/candidate
-app.post('/api/projects/:slug/attachments', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+app.post('/api/projects/:slug/attachments', authMiddleware, requireProjektBearbeiten, async (req, res) => {
   try {
     const { target_type, target_id, doc_path } = req.body;
     if (!['timeline', 'kandidaten'].includes(target_type)) return res.status(400).json({ error: 'Ungültiger Typ' });
@@ -12463,7 +12559,7 @@ app.post('/api/projects/:slug/attachments', authMiddleware, requireAusschussOrTe
 });
 
 // DELETE /api/projects/:slug/attachments/:id - Unlink doc
-app.delete('/api/projects/:slug/attachments/:id', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+app.delete('/api/projects/:slug/attachments/:id', authMiddleware, requireProjektBearbeiten, async (req, res) => {
   try {
     await pool.query('DELETE FROM project_attachments WHERE id = $1 AND project_slug = $2', [req.params.id, req.params.slug]);
     res.json({ success: true });
@@ -30106,6 +30202,9 @@ async function initDB() {
       -- Projekt-Budget (Soll-Wert) für Budget-Tracking
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS budget_chf NUMERIC(12,2);
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS budget_warnung_pct INTEGER DEFAULT 80;
+      -- Projekt einer STWEG (1-8) oder der ganzen Kooperation (NULL); regelt, wer
+      -- es bearbeitet (lib/projekte-rechte.js projektBearbeiten).
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS stweg INTEGER;
 
       -- Optional: Auslage einem Projekt zuordnen (Budget-Tracking)
       ALTER TABLE auslagen ADD COLUMN IF NOT EXISTS projekt_slug VARCHAR(100);
@@ -30300,7 +30399,7 @@ async function initDB() {
       ['objektverwaltung', 'write'], ['wohnungsverwaltung', 'write'], ['reklamationen', 'write'], ['handwerker', 'write'],
       // vollmachten write: fuer Dritte erfassen, Papier aktivieren (Entscheid Stefan 27.11.2026)
       ['vollmachten', 'write'], ['auslagen', 'read'], ['zähler', 'read'], ['energie-monitor', 'read'],
-      ['waschküche-admin', 'read'], ['projekte', 'read'], ['kontakte', 'read'], ['verwaltung', 'read'],
+      ['waschküche-admin', 'read'], ['projekte', 'write'], ['kontakte', 'read'], ['verwaltung', 'read'],
       ['email-verteiler', 'read'], ['bewohner-verwaltung', 'read'],
     ];
     for (const groupName of Object.values(VERWALTUNG_GROUPS)) {

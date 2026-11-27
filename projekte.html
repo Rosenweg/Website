@@ -24,7 +24,10 @@
                 <h1 class="text-3xl font-bold mb-2">Projekte</h1>
                 <p class="text-lg opacity-90">Laufende und geplante Projekte der STWEG-Kooperation</p>
             </div>
-            <button onclick="exportProjects()" class="text-sm bg-white/20 hover:bg-white/30 text-white px-3 py-1.5 rounded">⬇ Excel</button>
+            <div class="flex gap-2">
+                <button id="btn-neues-projekt" onclick="neuesProjekt()" class="hidden text-sm bg-white text-emerald-700 hover:bg-emerald-50 font-medium px-3 py-1.5 rounded">+ Neues Projekt</button>
+                <button onclick="exportProjects()" class="text-sm bg-white/20 hover:bg-white/30 text-white px-3 py-1.5 rounded">⬇ Excel</button>
+            </div>
         </div>
     </section>
 
@@ -41,16 +44,56 @@
     <script>
     let currentProject = null;
     let canEdit = false;
+    let RECHTE = null;
+    const STWEG_NAME = n => n == 8 ? 'MEG' : 'STWEG ' + n;
+    const KOOPERATION = 'ganze Kooperation';
+    function stwegOptionen(aktuell) {
+        const o = [];
+        if (RECHTE && (RECHTE.ohneStweg || RECHTE.alle)) o.push(KOOPERATION);
+        for (const n of (RECHTE?.stwegs || [])) o.push(STWEG_NAME(n));
+        if (aktuell !== undefined && !o.includes(aktuell)) o.unshift(aktuell);
+        return o;
+    }
+    const stwegAusOption = v => v === KOOPERATION ? null : (v === 'MEG' ? 8 : parseInt(String(v).replace(/\D/g, ''), 10) || null);
+
+    function projektFormular(titel, p, onSave) {
+        const aktuell = p ? (p.stweg ? STWEG_NAME(p.stweg) : KOOPERATION) : undefined;
+        const status = (RECHTE?.status || ['geplant', 'aktiv', 'abgeschlossen', 'archiviert']).slice();
+        if (p && p.status && !status.includes(p.status)) status.unshift(p.status);
+        showModal(titel, [
+            { name: 'title', label: 'Titel', value: p?.title || '' },
+            { name: 'stweg', label: 'Gehört zu', type: 'select', value: aktuell || stwegOptionen()[0], options: stwegOptionen(aktuell) },
+            { name: 'status', label: 'Status', type: 'select', value: p?.status || 'geplant', options: status },
+            { name: 'description', label: 'Beschreibung', type: 'textarea', value: p?.description || '' },
+        ], async (d) => {
+            const r = await AuthentikAuth.apiFetch(p ? `/api/projects/${p.slug}` : '/api/projects', {
+                method: p ? 'PUT' : 'POST',
+                body: { title: d.title, description: d.description, status: d.status, stweg: stwegAusOption(d.stweg) },
+            });
+            const res = await r.json().catch(() => ({}));
+            if (!r.ok) { alert(res.error || 'Fehler ' + r.status); return; }
+            closeModal();
+            onSave(res);
+        });
+    }
+    function neuesProjekt() {
+        projektFormular('Neues Projekt', null, async (neu) => { await loadProjects(); loadProject(neu.slug); });
+    }
+    function projektBearbeiten() {
+        projektFormular('Projekt bearbeiten', currentProject, async () => { await loadProjects(); loadProject(currentProject.slug); });
+    }
     let projectDocs = [];
 
     async function init() {
         const user = await AuthentikAuth.init({ requireAuth: true });
         if (!user) return;
-        const groups = user.groups || [];
-        canEdit = groups.some(g => {
-            const gl = g.toLowerCase();
-            return gl === 'technik' || gl.endsWith('-ausschuss') || gl === 'präsident';
-        });
+        // Bearbeiten entscheidet der Server je Projekt (darf_bearbeiten, nach STWEG);
+        // anlegen: welche STWEG das Konto waehlen darf (/api/projects-rechte).
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/projects-rechte');
+            if (r.ok) RECHTE = await r.json();
+        } catch (_) {}
+        document.getElementById('btn-neues-projekt').classList.toggle('hidden', !(RECHTE && RECHTE.anlegen));
         loadProjects();
     }
 
@@ -69,7 +112,8 @@
                 'Warnung ab %': p.budget_warnung_pct || '',
                 'Start': p.start_date || '',
                 'Ende geplant': p.end_date || '',
-                'Beschreibung': p.beschreibung || '',
+                'Beschreibung': p.description || p.beschreibung || '',
+                'Gehört zu': p.stweg ? STWEG_NAME(p.stweg) : 'Kooperation',
             }));
             await RosenwegExcel.fromData(rows, 'projekte-{date}.xlsx', 'Projekte');
         } catch (e) { alert('Fehler: ' + e.message); }
@@ -80,6 +124,10 @@
         if (!resp.ok) { document.getElementById('project-content').innerHTML = '<p class="text-red-500">Fehler beim Laden</p>'; return; }
         const projects = await resp.json();
         const tabs = document.getElementById('project-tabs');
+        if (!projects.length) {
+            document.getElementById('project-content').innerHTML = '<p class="text-center text-gray-400 py-12">Noch keine Projekte.'
+                + (RECHTE && RECHTE.anlegen ? ' Oben mit „+ Neues Projekt“ anlegen.' : '') + '</p>';
+        }
         tabs.innerHTML = projects.map((p, i) => `
             <button onclick="loadProject(${jsArg(p.slug)})" id="tab-${esc(p.slug)}"
                 class="whitespace-nowrap py-3 px-1 border-b-2 text-sm font-medium transition ${i === 0 ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-gray-500 hover:text-gray-700'}">
@@ -99,6 +147,7 @@
         const resp = await AuthentikAuth.apiFetch(`/api/projects/${slug}`);
         if (!resp.ok) return;
         currentProject = await resp.json();
+        canEdit = currentProject.darf_bearbeiten === true;
         // Load all docs once, then render
         const docsResp = await AuthentikAuth.apiFetch('/api/documents');
         projectDocs = docsResp.ok ? await docsResp.json() : [];
@@ -197,6 +246,10 @@
 
         el.innerHTML = `
             <div class="grid gap-8">
+                <div class="flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600">
+                    <span>${esc(p.stweg ? STWEG_NAME(p.stweg) : 'Ganze Kooperation')} · Status: <strong>${esc(p.status || '—')}</strong></span>
+                    ${canEdit ? '<button onclick="projektBearbeiten()" class="text-emerald-700 hover:text-emerald-900 font-medium">✎ Projekt bearbeiten</button>' : ''}
+                </div>
                 <!-- Status & Timeline -->
                 <div class="bg-white rounded-xl shadow p-6">
                     <div class="flex items-center justify-between mb-4">
