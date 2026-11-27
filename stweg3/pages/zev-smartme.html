@@ -137,6 +137,26 @@
                     </table>
                 </div>
             </section>
+
+            <!-- Zugeordnete Rechnungen umhängen (Ausschuss/Verwaltung der STWEG, protokolliert) -->
+            <section id="zug-section" class="bg-white rounded-xl shadow-sm border p-5 hidden">
+                <h2 class="text-lg font-bold text-gray-900 mb-1">Zugeordnete Rechnungen</h2>
+                <p class="text-sm text-gray-500 mb-4">Falsch zugeordnet (z. B. Mieterwechsel)? Neue Wohnung bzw. den Allgemeinzähler wählen und „Umhängen“. Jede Änderung wird mit Name und Zeit festgehalten; „bezahlt“ wird beim neuen Empfänger zurückgesetzt.</p>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left text-xs uppercase tracking-wider text-gray-500 border-b">
+                                <th class="py-2 pr-3">Empfangen</th>
+                                <th class="py-2 pr-3">Rechnung</th>
+                                <th class="py-2 pr-3">Jetzt bei</th>
+                                <th class="py-2 pr-3">Umhängen zu</th>
+                                <th class="py-2"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="zug-body"></tbody>
+                    </table>
+                </div>
+            </section>
         </div>
     </main>
 
@@ -162,7 +182,7 @@
         }
         $('alias-hint').classList.toggle('hidden', RECHTE.alias || !RECHTE.schreiben);
         document.querySelectorAll('#content input').forEach(el => {
-            if (el.closest('#unz-section')) return;
+            if (el.closest('#unz-section') || el.closest('#zug-section')) return;
             if (!RECHTE.schreiben) el.disabled = true;
         });
         $('save-row').classList.toggle('hidden', !RECHTE.schreiben);
@@ -229,6 +249,7 @@
             WOHNUNGEN = data.wohnungen || [];
             renderWohnungen(data.wohnungen);
             loadUnzugeordnet();
+            if (RECHTE.schreiben) loadZugeordnet(); // Umhängen nur mit Schreibrecht
             $('loading').classList.add('hidden');
             $('content').classList.remove('hidden');
         } catch (e) {
@@ -317,8 +338,55 @@
             if (remail && d.remail === false) alert('Zugeordnet, aber die Re-Mail ging nicht raus: ' + (d.remail_error || 'unbekannter Fehler'));
             tr.remove();
             if (!$('unz-body').children.length) $('unz-section').classList.add('hidden');
+            if (RECHTE.schreiben) loadZugeordnet();
         } catch (err) { alert('Fehler: ' + err.message); e.target.disabled = false; e.target.textContent = 'Zuordnen'; }
     }
+    // ── Zugeordnete Rechnungen umhängen ──
+    function renderZugeordnet(rows) {
+        const sec = $('zug-section');
+        if (!rows.length) { sec.classList.add('hidden'); return; }
+        sec.classList.remove('hidden');
+        $('zug-body').innerHTML = rows.map(z => {
+            const jetzt = z.zuordnung === 'allgemein' ? 'Allgemeinzähler' : (z.bezeichnung || ('Wohnung ' + z.wohnung_id));
+            const la = z.letzte_aenderung;
+            const spur = la ? `<br><span class="text-xs text-gray-500">${esc(la.aktion === 'umgehaengt' ? 'umgehängt' : 'zugeordnet')} ${esc((la.zeit || '').slice(0, 10))} von ${esc(la.name || la.email || '?')}${la.alt && la.aktion === 'umgehaengt' ? ' (vorher ' + esc(la.alt) + ')' : ''}</span>` : '';
+            return `<tr class="border-b last:border-0 align-top" data-id="${z.id}">
+            <td class="py-2 pr-3 text-xs whitespace-nowrap">${esc((z.empfangen_am || '').slice(0, 10))}</td>
+            <td class="py-2 pr-3 text-xs">${esc(z.rechnungsnummer || '—')}<br><span class="text-gray-500">${z.betrag_chf != null ? 'CHF ' + Number(z.betrag_chf).toFixed(2) : ''}${z.bezahlt ? ' · bezahlt' : ''}</span></td>
+            <td class="py-2 pr-3">${esc(jetzt)}${z.bewohner_name ? '<br><span class="text-xs text-gray-500">' + esc(z.bewohner_name) + '</span>' : ''}${spur}</td>
+            <td class="py-2 pr-3"><select class="zug-sel border rounded px-2 py-1 text-xs">${wohnungOptions()}</select><label class="block text-xs text-gray-500 mt-1"><input type="checkbox" class="zug-remail"> Re-Mail an den neuen Empfänger</label></td>
+            <td class="py-2"><button class="zug-assign bg-blue-600 text-white px-3 py-1 rounded text-xs font-semibold hover:bg-blue-700">Umhängen</button></td>
+        </tr>`; }).join('');
+        $('zug-body').querySelectorAll('.zug-assign').forEach(btn => btn.addEventListener('click', onUmhaengen));
+    }
+    async function onUmhaengen(e) {
+        const tr = e.target.closest('tr');
+        const id = tr.dataset.id;
+        const wid = tr.querySelector('.zug-sel').value;
+        const remail = tr.querySelector('.zug-remail').checked;
+        if (!wid) { alert('Bitte eine Wohnung oder den Allgemeinzähler wählen.'); return; }
+        if (!confirm('Rechnung umhängen? Der bisherige Empfänger sieht sie danach nicht mehr.')) return;
+        e.target.disabled = true; e.target.textContent = '…';
+        try {
+            const r = await AuthentikAuth.apiFetch(`/api/zev/rechnung/${id}/zuordnen`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(wid === 'allgemein' ? { wohnung_id: 'allgemein', stweg: STWEG, remail } : { wohnung_id: Number(wid), remail }),
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) { alert('Nicht umgehängt: ' + (d.error || ('Fehler ' + r.status))); e.target.disabled = false; e.target.textContent = 'Umhängen'; return; }
+            if (remail && d.remail === false) alert('Umgehängt, aber die Re-Mail ging nicht raus: ' + (d.remail_error || 'unbekannter Fehler'));
+            await loadZugeordnet();
+        } catch (err) { alert('Fehler: ' + err.message); e.target.disabled = false; e.target.textContent = 'Umhängen'; }
+    }
+    async function loadZugeordnet() {
+        try {
+            const r = await AuthentikAuth.apiFetch(`/api/zev/rechnungen/${STWEG}`, { cache: 'no-store' });
+            if (!r.ok) return;
+            const d = await r.json();
+            renderZugeordnet(d.rechnungen || []);
+        } catch {}
+    }
+
     async function loadUnzugeordnet() {
         try {
             const r = await AuthentikAuth.apiFetch('/api/zev/unzugeordnet', { cache: 'no-store' });

@@ -8470,6 +8470,35 @@ app.get('/api/zev/unzugeordnet', authMiddleware, requirePermission('wohnungsverw
   } catch (e) { console.error('[zev-unzugeordnet]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 
+// Zugeordnete Rechnungen einer STWEG (neueste 100) zum Umhängen, mit der
+// letzten Zuordnungs-Änderung aus admin_protokoll. Ausschuss und Verwaltung
+// der STWEG, Technik/Präsident.
+app.get('/api/zev/rechnungen/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
+  try {
+    const stweg = parseStweg(req.params.stweg);
+    const g = req.user?.groups || [];
+    if (!(isTechnik(g) || isPraesident(g) || getAusschussStwegs(g).has(stweg) || isVerwaltungFor(g, stweg))) {
+      return res.status(403).json({ error: 'Nur Ausschuss und Verwaltung dieser STWEG' });
+    }
+    const r = await pool.query(
+      `SELECT zr.id, zr.wohnung_id, w.bezeichnung, zr.bewohner_name, zr.zuordnung, zr.empfangen_am,
+              zr.rechnungsnummer, zr.zeitraum_von, zr.zeitraum_bis, zr.betrag_chf, zr.bezahlt
+         FROM zev_rechnungen zr LEFT JOIN wohnungen w ON w.id = zr.wohnung_id
+        WHERE zr.stweg = $1 AND COALESCE(zr.zuordnung, 'unzugeordnet') <> 'unzugeordnet'
+        ORDER BY zr.empfangen_am DESC NULLS LAST, zr.id DESC LIMIT 100`, [stweg]);
+    let letzte = new Map();
+    if (r.rows.length) {
+      await adminProtokoll.bereit(pool);
+      const p = await pool.query(
+        `SELECT DISTINCT ON (ziel) ziel, zeit, aktion, alt, neu, name, email FROM admin_protokoll
+          WHERE bereich = 'zev' AND ziel = ANY($1::text[]) ORDER BY ziel, zeit DESC`,
+        [r.rows.map(x => `zev-rechnung #${x.id}`)]);
+      letzte = new Map(p.rows.map(x => [x.ziel, x]));
+    }
+    res.json({ rechnungen: r.rows.map(x => ({ ...x, letzte_aenderung: letzte.get(`zev-rechnung #${x.id}`) || null })) });
+  } catch (e) { console.error('[zev-rechnungen-stweg]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
 // B3: eine Rechnung manuell einer Wohnung (+ Bewohner) zuordnen; optional Re-Mail ausloesen.
 app.post('/api/zev/rechnung/:id/zuordnen', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), async (req, res) => {
   try {
@@ -8499,11 +8528,9 @@ app.post('/api/zev/rechnung/:id/zuordnen', authMiddleware, requirePermission('wo
       for (const n of verwaltungStwegs(g)) eigene.add(n);
       const alt = await pool.query('SELECT stweg, zuordnung FROM zev_rechnungen WHERE id = $1', [id]);
       if (!alt.rows.length) return res.status(404).json({ error: 'Rechnung nicht gefunden' });
-      // S2-3-3: Ausschuss ordnet nur unzugeordnete Rechnungen zu – bereits zugeordnete
-      // (auch automatisch) nicht auf eine andere Wohnung/einen anderen Empfaenger umhaengen.
-      if ((alt.rows[0].zuordnung || 'unzugeordnet') !== 'unzugeordnet') {
-        return res.status(409).json({ error: 'Rechnung ist bereits zugeordnet. Umhängen nur durch Technik.' });
-      }
+      // Bereits zugeordnete Rechnungen (auch automatisch) duerfen Ausschuss und
+      // Hausverwaltung der STWEG umhaengen (Auftrag Stefan 27.11.2026, vorher nur
+      // Technik); jede Aenderung steht in admin_protokoll (Bereich 'zev').
       // Rechnung ohne STWEG (nicht ableitbar, z. B. fremder Absender) nur Technik/
       // Praesident – sonst koennte jeder Ausschuss fremde Rechnungen in die eigene
       // STWEG ziehen. Zuordnen nur innerhalb der STWEG der Rechnung (Z1).
@@ -8539,12 +8566,31 @@ app.post('/api/zev/rechnung/:id/zuordnen', authMiddleware, requirePermission('wo
         if (occ) { bewEmail = occ.email || null; bewName = bewName || occ.name; }
       }
     }
+    const vorher = (await pool.query(
+      `SELECT zr.wohnung_id, zr.bewohner_email, zr.bewohner_name, zr.zuordnung, w.bezeichnung
+         FROM zev_rechnungen zr LEFT JOIN wohnungen w ON w.id = zr.wohnung_id WHERE zr.id = $1`, [id])).rows[0];
+    if (!vorher) return res.status(404).json({ error: 'Rechnung nicht gefunden' });
+    // Neuer Empfaenger: „bezahlt“ des bisherigen gilt nicht fuer ihn
+    const empfaengerNeu = (vorher.wohnung_id || null) !== (wohnungId || null)
+      || String(vorher.bewohner_email || '').toLowerCase() !== String(bewEmail || '').toLowerCase();
     const upd = await pool.query(
-      `UPDATE zev_rechnungen SET wohnung_id=$2, stweg=$3, bewohner_email=$4, bewohner_name=$5, zuordnung=$7 WHERE id=$1
-          AND ($6::boolean OR COALESCE(zuordnung, 'unzugeordnet') = 'unzugeordnet')
+      `UPDATE zev_rechnungen SET wohnung_id=$2, stweg=$3, bewohner_email=$4, bewohner_name=$5, zuordnung=$6,
+              bezahlt = CASE WHEN $7::boolean THEN false ELSE bezahlt END,
+              bezahlt_am = CASE WHEN $7::boolean THEN NULL ELSE bezahlt_am END,
+              bezahlt_von = CASE WHEN $7::boolean THEN NULL ELSE bezahlt_von END
+        WHERE id=$1
        RETURNING id, stweg, bewohner_email, bewohner_name, zeitraum_von, zeitraum_bis, betrag_chf, pdf_filename, pdf_data`,
-      [id, wohnungId, stweg, bewEmail, bewName, alle, allgemein ? 'allgemein' : 'wohnung']);
+      [id, wohnungId, stweg, bewEmail, bewName, allgemein ? 'allgemein' : 'wohnung', empfaengerNeu]);
     if (!upd.rows.length) return res.status(404).json({ error: 'Rechnung nicht gefunden' });
+    const wohnungText = async () => allgemein ? 'Allgemeinzähler'
+      : ((await pool.query('SELECT bezeichnung FROM wohnungen WHERE id = $1', [wohnungId])).rows[0]?.bezeichnung || `Wohnung ${wohnungId}`);
+    const warZugeordnet = (vorher.zuordnung || 'unzugeordnet') !== 'unzugeordnet';
+    await adminProtokoll.eintragen(pool, null, req, {
+      bereich: 'zev', aktion: warZugeordnet ? 'umgehaengt' : 'zugeordnet', ziel: `zev-rechnung #${id}`,
+      alt: warZugeordnet ? `${vorher.zuordnung === 'allgemein' ? 'Allgemeinzähler' : (vorher.bezeichnung || 'Wohnung ' + vorher.wohnung_id)}${vorher.bewohner_name ? ' · ' + vorher.bewohner_name : ''}` : 'unzugeordnet',
+      neu: `${await wohnungText()}${bewName ? ' · ' + bewName : ''}`,
+      detail: `STWEG ${stweg}${empfaengerNeu && warZugeordnet ? ' · bezahlt zurückgesetzt' : ''}`,
+    }).catch(e2 => console.warn('[zev-zuordnen] Protokoll:', e2.message));
     const remailZiel = allgemein ? remailAn : upd.rows[0].bewohner_email;
     if (b.remail === true && !remailZiel) {
       return res.json({ ok: true, remail: false, remail_error: allgemein ? 'Keine Allgemeinzähler-Adresse in der Konfiguration' : 'Kein Empfänger mit Mail-Adresse' });
