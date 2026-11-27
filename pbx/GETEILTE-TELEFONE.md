@@ -361,11 +361,19 @@ das **Sperrbild** (`FLAG_LOCK`) Rosenweg Gerät (Logo der Gruppe/des Hauses, `Sp
 - **Bedienung:** keine. Wer angemeldet ist, setzt einen Hintergrund wie gewohnt (Rosenweg Galerie
   „Als Hintergrund“, Einstellungen, jede App). Gerät merkt das, verkleinert das Bild auf
   Bildschirmgröße, speichert es als JPEG (≤ 500 KB) und lädt es hoch. Nach dem Anmelden an
-  **irgendeinem** geteilten Telefon setzt Gerät das Bild der Person; beim Abmelden den Standard
-  (`WallpaperManager.clear(FLAG_SYSTEM)` = Hersteller-Hintergrund, wie auf einem frisch
-  eingerichteten Telefon – das Einrichten setzt keinen eigenen).
-- **Zurücksetzen:** auf `/mein-telefon` „Hintergrund zurücksetzen“ (nur sichtbar, wenn einer
-  gespeichert ist). Ein angemeldetes Telefon übernimmt den Standard mit dem nächsten Status (≤ 30 s).
+  **irgendeinem** geteilten Telefon setzt Gerät das Bild der Person; beim Abmelden den Standard.
+- **Standard** (Stefan 27.11.2026): ruhiger Rosenweg-Hintergrund, auf jedem Telefon gleich, von
+  Gerät gezeichnet (kein Download): Verlauf `#1E3A8A` → `#172554`, kleines Rosenweg-Logo (28 %
+  breit, 16 % deckend, etwas unter der Mitte). Gilt beim Abmelden, wenn die Person keinen hat, und
+  beim ersten Start nach dem Update für einen liegengebliebenen fremden Hintergrund.
+- **Zurücksetzen:** am Telefon im Rosenweg Launcher unter Einstellungen → Startbildschirm
+  „Hintergrund zurücksetzen“ (nur geteilt + angemeldet; Launcher → AnlageProvider
+  `hintergrund_zuruecksetzen` → `DELETE /api/telefon/hintergrund`, Standard sofort), oder auf
+  `/mein-telefon` (nur sichtbar, wenn einer gespeichert ist; ein angemeldetes Telefon übernimmt
+  den Standard mit dem nächsten Status, ≤ 30 s).
+- **Konto gelöscht** (Löschungen, `processAuthentiKDeletions` → `lokalesKontoNachLoeschung`): die
+  Haupt-API ruft `POST /api/pbx/person/loeschen` (X-PBX-Secret), die Anlage entfernt Datei und
+  Zeile (`api/lib/pbxperson.js`).
 - **Sperrbild:** Ändert jemand das Sperrbild (Galerie/Einstellungen „Sperrbildschirm“ oder
   „Start- und Sperrbildschirm“ – dann teilen sich beide ein Bild, auf Samsung `mWhich=0x5`), setzt
   Gerät sofort wieder das Logo als eigenes Sperrbild. Hochgeladen wird nur der Startbildschirm.
@@ -393,6 +401,7 @@ Telefons – keine E-Mail im Pfad, kein Zugriff auf fremde Bilder):
 | `PUT /api/telefon/hintergrund` | Rohdaten `image/jpeg`, höchstens `PBX_HINTERGRUND_MAX` (600 KB), höchstens 4096 px je Seite → `{ok, version}` |
 | `DELETE /api/telefon/hintergrund` | zurück auf den Standard |
 | `DELETE /api/telefon/ich/hintergrund` | dasselbe für `/mein-telefon` (Authentik-Anmeldung der Person) |
+| `POST /api/pbx/person/loeschen` | Haupt-API (X-PBX-Secret) `{email}` nach einer Konto-Löschung → `{ok, hintergrund}` |
 | `GET /api/telefon/status` | Feld `hintergrund` = Fassung (Hash) oder `""` |
 
 Dateien: `PBX_HINTERGRUND_DIR` (Standard `/var/lib/pbx-api/hintergruende/`, legt die API selbst mit

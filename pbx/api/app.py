@@ -3567,6 +3567,30 @@ def telefon_hintergrund():
         conn.close()
 
 
+@app.post("/api/pbx/person/loeschen")
+def pbx_person_loeschen():
+    """Haupt-API (X-PBX-Secret) nach dem Loeschen eines Kontos (Loeschungen, processAuthentiKDeletions
+    -> lokalesKontoNachLoeschung): persoenliche Daten der Person auf der Anlage entfernen.
+    Heute: Hintergrundbild der geteilten Telefone (Datei + Zeile). {email} -> {ok, hintergrund}"""
+    err = require_agi()
+    if err:
+        return err
+    email = str((request.get_json(silent=True) or {}).get("email") or "").strip().lower()
+    if not email or "@" not in email or len(email) > 320:
+        return jsonify({"error": "email fehlt"}), 400
+    conn = db.connect()
+    try:
+        hatte = bool(conn.execute("SELECT 1 FROM telefon_hintergrund WHERE email = ?", (email,)).fetchone()) \
+            or os.path.isfile(_hintergrund_datei(email))
+        _hintergrund_loeschen(conn, email)
+        conn.commit()
+    finally:
+        conn.close()
+    if hatte:
+        app.logger.info("Konto geloescht: Hintergrundbild entfernt")
+    return jsonify({"ok": True, "hintergrund": hatte})
+
+
 @app.delete("/api/telefon/ich/hintergrund")
 def telefon_ich_hintergrund_loeschen():
     """Mein Telefon: eigenen Hintergrund der geteilten Telefone zuruecksetzen (Standard).

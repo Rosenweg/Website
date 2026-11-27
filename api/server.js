@@ -7097,6 +7097,9 @@ async function lokalesKontoNachLoeschung(email) {
     await pool.query('UPDATE api_tokens SET revoked_at = NOW() WHERE LOWER(user_email) = $1 AND revoked_at IS NULL', [e]);
     for (const [t, v] of tokenCache) { if (String(v.user?.email || '').toLowerCase() === e) tokenCache.delete(t); }
     appTokensVergessen(e);
+    // Anlage: Hintergrundbild der geteilten Telefone usw. (lib/pbxperson.js)
+    const pbx = await require('./lib/pbxperson').personLoeschen({ url: PBX_API_URL, secret: PBX_SHARED_SECRET, email: e });
+    if (!pbx.ok) console.warn(`[Authentik] Anlage-Daten nach Loeschung nicht entfernt: ${pbx.grund}`);
     console.log(`[Authentik] Lokales Konto ${e} nach Loeschung: ${ids.length} Zeile(n)${nochKonto ? '' : ' deaktiviert'}, Sitzungen/PATs beendet`);
   } catch (err) {
     console.error(`[Authentik] Lokales Konto ${e} nach Loeschung nicht bereinigt:`, err.message);

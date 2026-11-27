@@ -48,7 +48,7 @@ def _me(user):
     return get
 
 
-class HintergrundTest(unittest.TestCase):
+class _Basis(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         db.init_db()
@@ -89,6 +89,7 @@ class HintergrundTest(unittest.TestCase):
     def status(self, ext):
         return self.c.get("/api/telefon/status", headers=_basic(ext, "geheim" + ext)).get_json()
 
+class HintergrundTest(_Basis):
     def test_ohne_bild_standard(self):
         self.assertEqual(self.hole("2201").status_code, 404)
         self.assertEqual(self.status("2201")["hintergrund"], "")
@@ -175,6 +176,40 @@ class HintergrundTest(unittest.TestCase):
         with mock.patch.object(pbx.requests, "get", side_effect=_me(None)):
             r = self.c.delete("/api/telefon/ich/hintergrund", headers={"Authorization": "Bearer x"})
         self.assertEqual(r.status_code, 401)
+
+
+class PersonLoeschenTest(_Basis):
+    """Loeschungen: die Haupt-API meldet ein geloeschtes Konto, die Anlage entfernt das Bild."""
+
+    def loeschen(self, email, secret="pbx-geheim"):
+        return self.c.post("/api/pbx/person/loeschen", json={"email": email},
+                           headers={"X-PBX-Secret": secret})
+
+    def test_bild_und_zeile_weg(self):
+        with mock.patch.object(pbx, "PBX_SHARED_SECRET", "pbx-geheim"):
+            self.hoch("2201", _jpeg())
+            self.hoch("2202", _jpeg(fuell=300))
+            r = self.loeschen(ANNA.upper())
+            self.assertEqual(r.status_code, 200)
+            self.assertTrue(r.get_json()["hintergrund"])
+            conn = db.connect()
+            try:
+                self.assertIsNone(conn.execute("SELECT 1 FROM telefon_hintergrund WHERE email = ?", (ANNA,)).fetchone())
+            finally:
+                conn.close()
+            self.assertFalse(os.path.exists(pbx._hintergrund_datei(ANNA)))
+            self.assertTrue(os.path.exists(pbx._hintergrund_datei(BERT)))   # nur die Person
+            self.assertFalse(self.loeschen(ANNA).get_json()["hintergrund"])  # zweimal: ok
+
+    def test_nur_mit_geheimnis(self):
+        with mock.patch.object(pbx, "PBX_SHARED_SECRET", "pbx-geheim"):
+            self.hoch("2201", _jpeg())
+            self.assertEqual(self.loeschen(ANNA, secret="falsch").status_code, 401)
+            self.assertEqual(self.c.post("/api/pbx/person/loeschen", json={"email": ANNA}).status_code, 401)
+            self.assertTrue(os.path.exists(pbx._hintergrund_datei(ANNA)))
+            self.assertEqual(self.loeschen("").status_code, 400)
+        with mock.patch.object(pbx, "PBX_SHARED_SECRET", ""):
+            self.assertEqual(self.loeschen(ANNA, secret="").status_code, 401)
 
 
 class JpegMasseTest(unittest.TestCase):
