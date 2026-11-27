@@ -50,6 +50,16 @@
       "fuer": "Für die Technik und den Präsidenten.",
       "technik": true,
       "_notiz": "Stefan 27.11.2026: Rosenweg Karten wird aufgelöst und geht in Zutritt auf (eigenes Paket, eigenes Repo; kein Update-Pfad über ch.rosenweg4303.karten). Flutter, alle Plattformen."
+    },
+    "mein-telefon": {
+      "name": "Rosenweg Mein Telefon",
+      "repo": "Rosenweg/rosenweg-mein-telefon",
+      "paket": "ch.rosenweg4303.meintelefon",
+      "logo": "/img/apps/rosenweg-mein-telefon.png",
+      "reihenfolge": 35,
+      "text": "Die eigene Rosenweg-Nummer einstellen: Weiterleitung und Voicemail, wo du angemeldet bist (geteilte Telefone, eigene Handys), Anmelde-QR für geteilte Telefone und Apps. Telefoniert wird mit Rosenweg Telefon.",
+      "fuer": "Für alle mit einer Rosenweg-Nummer.",
+      "_notiz": "Plan Flutter-Apps Welle 1 (27.11.2026): bündelt mein-telefon.html, pbx/web/telefon.html und den Teil „eigenes Handy“ von smartphones.html; die Web-Seiten bleiben. Kennung ohne Unterstrich (Rücksprung-Schema, iOS-Bundle-ID)."
     }
   },
   "katalog": {

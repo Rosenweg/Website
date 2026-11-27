@@ -15,7 +15,7 @@ const daten = JSON.parse(fs.readFileSync(DATEI, 'utf8'));
 
 test('apps-register.json ist gueltig und kennt die bisherigen Apps', () => {
   assert.deepEqual(reg.pruefen(daten), []);
-  for (const k of ['vm', 'salz', 'kiosk', 'profil', 'zutritt']) assert.ok(daten.apps[k], k);
+  for (const k of ['vm', 'salz', 'kiosk', 'profil', 'zutritt', 'mein-telefon']) assert.ok(daten.apps[k], k);
   assert.equal(daten.apps.salz.paket, 'ch.rosenweg4303.salz');
   assert.equal(Object.keys(daten.katalog).length >= 16, true);
   assert.equal(daten.katalog['ch.rosenweg4303.telefon'].nicht_oeffentlich, true);
