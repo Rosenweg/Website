@@ -303,7 +303,10 @@ const RosenwegDocs = {
     // Admin: upload button
     if (this.canManage) {
       html += `
-        <div class="mb-6 flex justify-end">
+        <div class="mb-6 flex justify-end gap-2">
+          <button onclick="RosenwegDocs.showPapierkorb()" class="px-4 py-2 rounded-lg border text-gray-700 hover:bg-gray-50 transition flex items-center gap-2 text-sm" title="Gelöschte und ersetzte Dateien der letzten 30 Tage">
+            🗑 Papierkorb
+          </button>
           <button onclick="RosenwegDocs.showUploadDialog()" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition flex items-center gap-2 text-sm">
             <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
@@ -775,7 +778,7 @@ const RosenwegDocs = {
       } catch (err) {
         if (!err.vorhanden) throw err;
         // Gleicher Name im Ordner: erst fragen, nie still ueberschreiben (F3-4)
-        if (!confirm(`„${safeName}“ gibt es in diesem Ordner schon.\n\nDie bestehende Datei ersetzen?`)) {
+        if (!confirm(`„${safeName}“ gibt es in diesem Ordner schon.\n\nDie bestehende Datei ersetzen? Die alte Fassung kommt in den Papierkorb (30 Tage).`)) {
           this._showUploadError('Nicht hochgeladen – bitte die Datei umbenennen oder „Ersetzen“ wählen.');
           btn.disabled = false;
           btn.textContent = 'Hochladen';
@@ -822,7 +825,7 @@ const RosenwegDocs = {
           await this._uploadFile(`/api/documents/${uploadPath}`, file, { ohneUeberschreiben: true });
         } catch (err) {
           if (!err.vorhanden) throw err;
-          if (!confirm(`„${safeName}“ gibt es in diesem Ordner schon.\n\nAuch diese Datei ersetzen?`)) {
+          if (!confirm(`„${safeName}“ gibt es in diesem Ordner schon.\n\nAuch diese Datei ersetzen? Die alte Fassung kommt in den Papierkorb (30 Tage).`)) {
             this._showUploadError('Nicht ersetzt.');
             btn.disabled = false;
             btn.textContent = 'Ersetzen';
@@ -967,14 +970,73 @@ const RosenwegDocs = {
 
   async confirmDelete(path) {
     const fileName = this.getFileName(path);
-    if (!confirm(`"${fileName}" wirklich löschen?`)) return;
+    if (!confirm(`"${fileName}" löschen?\n\nDie Datei kommt in den Papierkorb und lässt sich dort 30 Tage lang wiederherstellen.`)) return;
 
     try {
       const resp = await AuthentikAuth.apiFetch(`/api/documents/${path}`, { method: 'DELETE' });
-      if (!resp.ok) throw new Error('Löschen fehlgeschlagen');
+      if (!resp.ok) {
+        const d = await resp.json().catch(() => ({}));
+        throw new Error(d.error || 'Löschen fehlgeschlagen');
+      }
       await this.loadAndRender(true);
     } catch (err) {
       alert('Fehler beim Löschen: ' + err.message);
+    }
+  },
+
+  // ─── Papierkorb: gelöschte und ersetzte Dateien, 30 Tage ──────────────
+  async showPapierkorb() {
+    this.closeModal();
+    const modal = document.createElement('div');
+    modal.id = 'docs-upload-modal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4';
+    modal.innerHTML = `
+      <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 max-h-[85vh] flex flex-col">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-lg font-semibold text-gray-800">🗑 Papierkorb</h3>
+          <button onclick="RosenwegDocs.closeModal()" class="text-gray-400 hover:text-gray-700 text-2xl leading-none">&times;</button>
+        </div>
+        <p class="text-sm text-gray-600 mb-3">Gelöschte und beim Ersetzen überschriebene Dateien. Nach 30 Tagen werden sie endgültig gelöscht.</p>
+        <div id="docs-papierkorb-liste" class="overflow-y-auto space-y-2"><p class="text-sm text-gray-400">Lade…</p></div>
+      </div>`;
+    modal.addEventListener('click', (e) => { if (e.target === modal) this.closeModal(); });
+    document.body.appendChild(modal);
+    await this._papierkorbLaden();
+  },
+
+  async _papierkorbLaden() {
+    const el = document.getElementById('docs-papierkorb-liste');
+    if (!el) return;
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/documents-papierkorb');
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Fehler ' + r.status);
+      const liste = d.eintraege || [];
+      const datum = (x) => x ? new Date(x).toLocaleDateString('de-CH') : '';
+      el.innerHTML = liste.length ? liste.map(e => `
+        <div class="flex items-center justify-between gap-3 border rounded-lg px-3 py-2">
+          <div class="min-w-0">
+            <div class="font-medium text-gray-800 truncate">${this._escapeHtml(this.getFileName(e.pfad))}</div>
+            <div class="text-xs text-gray-500 truncate">${this._escapeHtml(e.pfad)}</div>
+            <div class="text-xs text-gray-500">${e.grund === 'ersetzt' ? 'ersetzt' : 'gelöscht'} am ${this._escapeHtml(datum(e.geloescht_am))}${e.geloescht_name || e.geloescht_von ? ' von ' + this._escapeHtml(e.geloescht_name || e.geloescht_von) : ''} · endgültig weg am ${this._escapeHtml(datum(e.endgueltig_am))}</div>
+          </div>
+          <button onclick="RosenwegDocs.wiederherstellen(${Number(e.id)})" class="shrink-0 px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Wiederherstellen</button>
+        </div>`).join('') : '<p class="text-sm text-gray-500">Der Papierkorb ist leer.</p>';
+    } catch (err) {
+      el.innerHTML = `<p class="text-sm text-red-600">${this._escapeHtml(err.message)}</p>`;
+    }
+  },
+
+  async wiederherstellen(id) {
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/documents-papierkorb/${id}/wiederherstellen`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Fehler ' + r.status);
+      if (d.umbenannt) alert(`Am alten Ort liegt inzwischen eine andere Datei. Wiederhergestellt als:\n${d.path}`);
+      await this._papierkorbLaden();
+      this.loadAndRender(true);
+    } catch (err) {
+      alert('Wiederherstellen fehlgeschlagen: ' + err.message);
     }
   },
 };

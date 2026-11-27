@@ -27,6 +27,7 @@ const stwegSichtLib = require('./lib/stweg-sicht');
 const { waschAdminErlaubt, waschRaumAenderbar } = require('./lib/wasch-admin');
 const adminProtokoll = require('./lib/admin-protokoll');
 const { taeglichUm } = require('./lib/tageszeit');
+const papierkorb = require('./lib/papierkorb');
 const verteilerVerwaltung = require('./lib/verteiler-verwaltung');
 
 const app = express();
@@ -11444,6 +11445,8 @@ const IGNORED_FILES = new Set(['README.md', 'LICENSE', '.gitignore', '.gitkeep',
 
 /** Resolve user path safely within DOCS_PATH, returns null if path escapes */
 function safeDocPath(userPath) {
+  // Der Papierkorb (lib/papierkorb.js) ist nur über /api/documents-papierkorb erreichbar
+  if (papierkorb.imPapierkorb(userPath)) return null;
   const resolved = pathModule.resolve(DOCS_PATH, userPath);
   if (!resolved.startsWith(pathModule.resolve(DOCS_PATH) + '/') && resolved !== pathModule.resolve(DOCS_PATH)) return null;
   return resolved;
@@ -11752,11 +11755,20 @@ app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, re
       if (da) return res.status(412).json({ error: 'Datei mit diesem Namen gibt es schon', path: filePath, vorhanden: true });
     }
 
+    // Überschreiben: die bisherige Fassung kommt in den Papierkorb (30 Tage zurückholbar)
+    let ersetzt = null;
+    const vorhanden = await fs.stat(fullPath).then(s => s.isFile(), () => false);
+    if (vorhanden) {
+      ersetzt = await papierkorb.hineinlegen(papierkorbDeps(), filePath, req.user, 'ersetzt');
+      await adminProtokoll.eintragen(pool, null, req, { bereich: 'dokumente', aktion: 'ersetzt', ziel: filePath, detail: `alte Fassung im Papierkorb #${ersetzt.id}` })
+        .catch(e => console.warn('[DOCS] Protokoll:', e.message));
+    }
+
     await fs.mkdir(pathModule.dirname(fullPath), { recursive: true });
     await fs.writeFile(fullPath, req.body);
 
     previewCache.delete(filePath);
-    res.json({ success: true, path: filePath });
+    res.json({ success: true, path: filePath, ersetzt: !!ersetzt });
   } catch (err) {
     console.error('Document upload error:', err.message);
     res.status(500).json({ error: 'Dokument konnte nicht hochgeladen werden' });
@@ -11779,15 +11791,58 @@ app.delete('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req,
     const fullPath = safeDocPath(filePath);
     if (!fullPath) return res.status(400).json({ error: 'Ungültiger Pfad' });
 
-    await fs.unlink(fullPath);
+    // Nicht endgültig: in den Papierkorb (lib/papierkorb.js), 30 Tage zurückholbar
+    const e = await papierkorb.hineinlegen(papierkorbDeps(), filePath, req.user, 'geloescht');
+    await adminProtokoll.eintragen(pool, null, req, { bereich: 'dokumente', aktion: 'geloescht', ziel: filePath, detail: `Papierkorb #${e.id}` })
+      .catch(er => console.warn('[DOCS] Protokoll:', er.message));
     previewCache.delete(filePath);
-    res.json({ success: true });
+    res.json({ success: true, papierkorb: true, id: e.id, tage: papierkorb.TAGE });
   } catch (err) {
     if (err.code === 'ENOENT') return res.status(404).json({ error: 'Dokument nicht gefunden' });
+    if (err.code === 'EISDIR') return res.status(400).json({ error: 'Nur Dateien können gelöscht werden' });
     console.error('Document delete error:', err.message);
     res.status(500).json({ error: 'Dokument konnte nicht gelöscht werden' });
   }
 });
+
+// ─── Papierkorb der Dokumente (lib/papierkorb.js) ─────────────────────
+function papierkorbDeps() { return { pool, fs, root: DOCS_PATH }; }
+
+// Liste: was man am ursprünglichen Ort schreiben darf
+app.get('/api/documents-papierkorb', authMiddleware, canManageDocs, async (req, res) => {
+  try {
+    const groups = req.user?.groups || [];
+    const liste = await papierkorb.liste(papierkorbDeps(), (pfad) => canWriteDocPath(pfad, groups));
+    res.json({ eintraege: liste, tage: papierkorb.TAGE });
+  } catch (err) {
+    console.error('[DOCS] Papierkorb-Liste:', err.message);
+    res.status(500).json({ error: 'Papierkorb konnte nicht geladen werden' });
+  }
+});
+
+app.post('/api/documents-papierkorb/:id/wiederherstellen', authMiddleware, canManageDocs, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige ID' });
+    const groups = req.user?.groups || [];
+    const r = await papierkorb.wiederherstellen(papierkorbDeps(), id, (pfad) => canWriteDocPath(pfad, groups));
+    if (!r) return res.status(404).json({ error: 'Nicht im Papierkorb' });
+    await adminProtokoll.eintragen(pool, null, req, { bereich: 'dokumente', aktion: 'wiederhergestellt', ziel: r.pfad, detail: r.umbenannt ? `ursprünglich ${r.eintrag.pfad}` : null })
+      .catch(e => console.warn('[DOCS] Protokoll:', e.message));
+    previewCache.delete(r.pfad);
+    res.json({ success: true, path: r.pfad, umbenannt: r.umbenannt });
+  } catch (err) {
+    if (err.code === 'ENOENT') return res.status(404).json({ error: 'Die Datei im Papierkorb fehlt' });
+    console.error('[DOCS] Wiederherstellen:', err.message);
+    res.status(500).json({ error: 'Wiederherstellen fehlgeschlagen' });
+  }
+});
+
+// Nach 30 Tagen endgültig löschen (täglich 04:00 Schweizer Zeit)
+taeglichUm(4, 0, async () => {
+  const weg = await papierkorb.aufraeumen(papierkorbDeps());
+  if (weg.length) console.log(`[DOCS] Papierkorb: ${weg.length} Datei(en) nach ${papierkorb.TAGE} Tagen endgültig gelöscht`);
+}, { name: 'Papierkorb' });
 
 // POST /api/documents/move - Move a document to another folder
 app.post('/api/documents/move', authMiddleware, canManageDocs, async (req, res) => {
