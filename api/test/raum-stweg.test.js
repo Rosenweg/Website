@@ -40,6 +40,23 @@ test('Ausschuss STWEG 2: eigene Häuser und Räume ohne STWEG, nicht Haus 9', ()
   assert.equal(rs.raumErlaubt(g, { kurz: 'hof' }), true);
 });
 
+// T1: Kurzname mit Zusatz (zweiter Raum im selben Haus) behält die STWEG des Hauses.
+test('Kurzname mit Zusatz -> STWEG des Hauses', () => {
+  assert.equal(rs.stwegVonKurz('r9b'), 3);
+  assert.equal(rs.stwegVonKurz('r9keller'), 3);
+  assert.equal(rs.stwegVonKurz('r13a2'), 2);
+  assert.equal(rs.stwegVonKurz('r1b'), 6);
+  assert.equal(rs.stwegVonKurz('megb'), 8);
+  assert.equal(rs.stwegVonKurz('tg2'), 8);
+  assert.equal(rs.stwegVonKurz('r92'), null);   // Haus 92 gibt es nicht, kein „r9“ + „2“
+  assert.equal(rs.stwegVonKurz('r3b'), null);   // kein Haus 3
+  assert.equal(rs.stwegVonKurz('rb9'), null);
+  // Ausschuss/Verwaltung STWEG 3 sehen r9b, andere Ausschüsse nicht mehr
+  assert.equal(rs.raumErlaubt(['stweg3-verwaltung'], { kurz: 'r9b' }), true);
+  assert.equal(rs.raumErlaubt(['stweg3-ausschuss'], { kurz: 'r9b' }), true);
+  assert.equal(rs.raumErlaubt(['stweg2-ausschuss'], { kurz: 'r9b' }), false);
+});
+
 test('Nur Seitenrecht ohne Ausschuss/Verwaltung: kein Raum', () => {
   assert.equal(rs.raumErlaubt(['stweg5-bewohner'], { kurz: 'r5' }), false);
 });

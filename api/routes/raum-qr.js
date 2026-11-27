@@ -447,7 +447,7 @@ router.post('/orte', authMiddleware, requirePermission('reklamationen', 'write')
     if (!TYPEN[typ]) return res.status(400).json({ error: 'Unbekannter Typ' });
     if (!/^[a-z0-9]{1,12}$/.test(kurz)) return res.status(400).json({ error: 'Kurzname: 1–12 Kleinbuchstaben/Ziffern, z. B. r9' });
     if (!standort) return res.status(400).json({ error: 'Standort erforderlich' });
-    if (!darf(req, { kurz })) return res.status(403).json({ error: `${NICHT_EIGENE}: Kurzname des Hauses, z. B. r9` });
+    if (!darf(req, { kurz })) return res.status(403).json({ error: `${NICHT_EIGENE}: Kurzname des Hauses, z. B. r9 oder r9b` });
     await tabelle();
     const ex = await pool.query('SELECT 1 FROM raum_orte WHERE typ=$1 AND kurz=$2 AND aktiv', [typ, kurz]);
     if (ex.rows.length) return res.status(409).json({ error: `Raum ${typ}-${kurz} gibt es schon` });
