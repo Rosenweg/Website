@@ -194,6 +194,7 @@
       <div class="card">
         <h2>Profilbild</h2>
         <p class="sub">Bild für das WhatsApp-Konto des Bots (JPEG oder PNG, möglichst quadratisch). Gilt sofort in allen Gruppen.</p>
+        <p class="sub hidden" id="ppHinweis">Erst verbinden (QR-Code oben scannen), dann lässt sich das Profilbild setzen.</p>
         <input type="file" id="ppFile" accept="image/jpeg,image/png">
         <div class="actions"><button class="btn" id="ppBtn">Profilbild setzen</button></div>
       </div>
@@ -429,7 +430,7 @@
 
   // ── Tabs ───────────────────────────────────────────────────────────────
   var TABS = [
-    { id:'pairing',  label:'Pairing' },
+    { id:'pairing',  label:'Verbindung' },
     { id:'forwards', label:'Weiterleitungen' },
     { id:'send',     label:'Senden' },
     { id:'broadcast',label:'📢 Broadcast' },
@@ -474,9 +475,9 @@
       var badge = document.getElementById('statusBadge'), txt = document.getElementById('statusText');
       badge.className = 'status ' + (h.wa_ready ? 'ok' : (h.needs_pairing ? 'warn' : 'bad'));
       txt.textContent = h.wa_ready ? 'verbunden' : (h.needs_pairing ? 'Pairing nötig' : 'getrennt');
-      // Show/hide pairing tab
-      var pairBtn = document.querySelector('nav.tabs button[data-tab="pairing"]');
-      if (pairBtn) pairBtn.classList.toggle('hidden', !!h.wa_ready);
+      // Reiter „Verbindung“ bleibt immer sichtbar: dort liegt auch das Profilbild,
+      // und das laesst sich nur bei bestehender Verbindung setzen (F6-7).
+      ppZustand(!!h.wa_ready);
       return h;
     }).catch(function(){
       var badge = document.getElementById('statusBadge'), txt = document.getElementById('statusText');
@@ -586,19 +587,25 @@
   }
 
   // ── Profilbild ─────────────────────────────────────────────────────────
+  function ppZustand(verbunden){
+    var btn = document.getElementById('ppBtn'), h = document.getElementById('ppHinweis');
+    if (btn && !btn.dataset.busy) btn.disabled = !verbunden;
+    if (h) h.classList.toggle('hidden', verbunden);
+  }
   function setProfilePic(){
     var f = document.getElementById('ppFile').files[0];
     if (!f){ toast('Bild wählen','err'); return; }
     if (!/^image\/(jpeg|png)$/.test(f.type)){ toast('Nur JPEG oder PNG','err'); return; }
-    var btn = document.getElementById('ppBtn'); btn.disabled=true;
+    var btn = document.getElementById('ppBtn'); btn.disabled=true; btn.dataset.busy='1';
+    var fertig = function(){ delete btn.dataset.busy; ppZustand(!!(health && health.wa_ready)); };
     var rd = new FileReader();
     rd.onload = function(){
       var b64 = String(rd.result).split(',')[1];
       api('POST','/gateway/ui/profile-picture',{ mimetype:f.type, data_base64:b64 })
         .then(function(){ toast('Profilbild gesetzt','ok'); document.getElementById('ppFile').value=''; })
-        .catch(apiErr).then(function(){ btn.disabled=false; });
+        .catch(apiErr).then(fertig);
     };
-    rd.onerror = function(){ toast('Datei nicht lesbar','err'); btn.disabled=false; };
+    rd.onerror = function(){ toast('Datei nicht lesbar','err'); fertig(); };
     rd.readAsDataURL(f);
   }
 
@@ -835,7 +842,6 @@
     refreshHealth().then(function(){
       var initial = (location.hash||'').replace('#','');
       var valid = TABS.some(function(t){ return t.id===initial; });
-      if (initial==='pairing' && health && health.wa_ready) valid=false;
       showTab(valid ? initial : 'forwards');
     });
     setInterval(refreshHealth, 15000);
