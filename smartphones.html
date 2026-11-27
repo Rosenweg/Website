@@ -8,11 +8,14 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="/js/authentik-auth.js?v=5"></script>
     <script src="/js/nav.js?v=3"></script>
-    <script src="/js/meine-geraete.js?v=1"></script>
+    <script src="/js/meine-geraete.js?v=2"></script>
     <style>
         .qr { background:#fff; border-radius:14px; padding:12px; width:min(100%, 300px); aspect-ratio:1; margin:0 auto; }
         .qr svg { width:100%; height:100%; display:block; }
         .qr.alt { opacity:.25; }
+        .wahl { display:flex; background:#e2e8f0; border-radius:.6rem; padding:3px; gap:3px; margin-bottom:.75rem; }
+        .wahl button { flex:1; padding:.4rem .5rem; border-radius:.5rem; font-size:.85rem; color:#334155; }
+        .wahl button[aria-pressed="true"] { background:#1e3a8a; color:#fff; font-weight:600; }
         .knopf { padding:.35rem .7rem; border-radius:.5rem; font-size:.85rem; background:#e2e8f0; white-space:nowrap; }
         .knopf:hover { background:#cbd5e1; }
         .knopf.rot { background:#fee2e2; color:#991b1b; }
@@ -45,10 +48,17 @@
     <div id="inhalt" class="hidden space-y-5">
         <div class="grid md:grid-cols-2 gap-5">
             <section class="bg-white rounded-xl shadow p-5">
-                <h2 class="font-semibold mb-1">Dein Anmelde-QR</h2>
-                <p class="text-sm text-slate-500 mb-3">Vor die Kamera eines gesperrten Telefons halten („QR-Code scannen“). Gilt einmal und nur kurz, die Seite holt von selbst einen neuen. Einfacher: Rosenweg-Karte hinten ans Telefon halten.</p>
+                <h2 class="font-semibold mb-2">Dein Anmelde-QR</h2>
+                <!-- Zwei Codes, nicht austauschbar: geteilte Telefone (Anlage, RWTEL1) und Apps auf dem
+                     eigenen Handy (Website-API, RWAPP1; api/routes/app-karte.js) -->
+                <div class="wahl" role="group" aria-label="Anmelde-QR für">
+                    <button type="button" id="wahlTelefon" onclick="qrArt('telefon')">Geteiltes Telefon</button>
+                    <button type="button" id="wahlApp" onclick="qrArt('app')">App auf eigenem Handy</button>
+                </div>
+                <p class="text-sm text-slate-500 mb-3" id="qrText"></p>
                 <div class="qr" id="qr"></div>
                 <div class="text-center text-sm text-slate-500 mt-2" id="frist"></div>
+                <div class="hidden text-center text-sm mt-2 rounded-lg px-3 py-2 bg-green-100 text-green-800" id="qrOk"></div>
             </section>
             <section class="bg-white rounded-xl shadow p-5">
                 <h2 class="font-semibold mb-2">Hier bist du angemeldet</h2>
@@ -194,28 +204,85 @@ async function messengerAbmelden(id, name, technik) {
 }
 
 // ── Anmelde-QR und eigene Sitzungen (frueher pbx.rosenweg4303.ch/telefon) ──
+// Zwei Arten (Stefan 27.11.2026): "Geteiltes Telefon" – der Sperrbildschirm scannt ihn (Anlage,
+// /api/telefon/ausweis); "App auf eigenem Handy" – der Anmeldeschirm einer Rosenweg-App scannt ihn
+// (Website-API, /api/apps/qr-ausweis) und bekommt ihre eigene Sitzung. Beide einmalig und kurz gueltig.
+const QR_TEXT = {
+    telefon: 'Vor die Kamera eines gesperrten Telefons halten („QR-Code scannen“). Gilt einmal und nur kurz, die Seite holt von selbst einen neuen. Einfacher: Rosenweg-Karte hinten ans Telefon halten.',
+    app: 'In der Rosenweg-App auf deinem Handy „QR-Code scannen“ tippen und die Kamera auf diesen Code halten. Jede App meldet sich einzeln an; der Code gilt einmal und nur kurz, danach kommt von selbst ein neuer. Diese Seite ist auf dem Handy selbst offen? Dann in der App einfach „Mit Rosenweg-Konto anmelden“ tippen.',
+};
+let art = 'telefon', telefonDarf = true, qrId = null, qrStandHolt = false, nurAppGezeigt = false;
+try { if (localStorage.getItem('rw-qr-art') === 'app') art = 'app'; } catch (e) {}
+if (location.hash === '#app-qr') art = 'app';
+
+function qrArt(neu) {
+    if (neu !== 'telefon' && neu !== 'app') return;
+    const anders = neu !== art;
+    art = neu;
+    try { localStorage.setItem('rw-qr-art', art); } catch (e) {}
+    $('wahlTelefon').setAttribute('aria-pressed', String(art === 'telefon'));
+    $('wahlApp').setAttribute('aria-pressed', String(art === 'app'));
+    $('qrText').textContent = QR_TEXT[art];
+    if (anders) { $('qrOk').classList.add('hidden'); $('qr').innerHTML = ''; $('frist').textContent = ''; bisMs = 0; qrId = null; }
+    if (art === 'telefon' && !telefonDarf) { $('frist').textContent = 'Dein Konto ist für geteilte Telefone nicht freigeschaltet.'; return; }
+    if (anders) holeQr();
+}
 async function holeQr() {
-    if (holt) return; holt = true;
+    if (holt) return;
+    if (art === 'telefon' && !telefonDarf) return;
+    holt = true;
+    const fuer = art;
     try {
-        const r = await api('/api/telefon/ausweis', {method: 'POST'});
+        const r = fuer === 'app' ? await web('/api/apps/qr-ausweis', {method: 'POST'})
+                                 : await api('/api/telefon/ausweis', {method: 'POST'});
         const d = await json(r);
+        if (fuer !== art) return;   // inzwischen umgeschaltet
         if (!r.ok) { $('qr').innerHTML = ''; $('frist').textContent = d.error || 'Kein Anmelde-QR.'; bisMs = 0; return; }
         $('qr').innerHTML = d.qr_svg;   // vom Server erzeugtes SVG
         $('qr').classList.remove('alt');
+        qrId = fuer === 'app' ? d.id : null;
         bisMs = Date.now() + (d.ttl_seconds || 90) * 1000;
-    } catch (e) { if (e.message !== 'auth') $('frist').textContent = 'Keine Verbindung zur Telefonanlage.'; }
+    } catch (e) {
+        if (e.message !== 'auth') $('frist').textContent = fuer === 'app' ? 'Keine Verbindung zum Portal.' : 'Keine Verbindung zur Telefonanlage.';
+    }
     finally { holt = false; }
 }
+/** App-QR: hat ihn eine App eingeloest? Dann zeigen welche (und wo) und gleich einen neuen holen. */
+async function qrStand() {
+    if (art !== 'app' || !qrId || qrStandHolt) return;
+    qrStandHolt = true;
+    const id = qrId;
+    try {
+        const d = await json(await web('/api/apps/qr-ausweis/' + encodeURIComponent(id)));
+        if (d.eingeloest && id === qrId) {
+            qrId = null;
+            $('qrOk').textContent = '✓ ' + (d.app_name || 'App') + ' auf ' + (d.geraet_name || 'deinem Handy') + ' ist angemeldet.';
+            $('qrOk').classList.remove('hidden');
+            bisMs = 0;
+            holeQr();
+            ladeMeine().catch(() => {});
+        }
+    } catch (e) {}
+    finally { qrStandHolt = false; }
+}
+let takt = 0;
 function tick() {
     if (document.hidden) return;
+    if (art === 'telefon' && !telefonDarf) return;
     const s = Math.round((bisMs - Date.now()) / 1000);
     if (bisMs && s > 0) $('frist').textContent = 'gültig noch ' + s + ' s';
     else { $('frist').textContent = 'wird erneuert …'; $('qr').classList.add('alt'); }
     if (s <= 10) holeQr();
+    if (++takt % 2 === 0) qrStand();
 }
 async function ladeMeine() {
     const d = await json(await api('/api/telefon/meine'));
-    if (d.darf === false) { $('qr').innerHTML = ''; $('frist').textContent = 'Dein Konto ist für geteilte Telefone nicht freigeschaltet.'; bisMs = 0; }
+    telefonDarf = d.darf !== false;
+    if (!telefonDarf && art === 'telefon' && !nurAppGezeigt) {
+        // Nur Apps moeglich: einmal von selbst den App-QR zeigen
+        nurAppGezeigt = true;
+        qrArt('app');
+    }
     const xs = d.sitzungen || [];
     $('meine').innerHTML = xs.map(s => `<li class="py-2 flex items-center gap-2">
         <div class="flex-1"><b>${esc(s.geraet)}</b><div class="text-xs text-slate-500">Geteiltes Telefon · Nebenstelle ${esc(s.ext)} · seit ${esc(zeit(s.seit))}</div></div>
@@ -393,8 +460,9 @@ function zeigeGate() { $('inhalt').classList.add('hidden'); $('gate').classList.
     if (AuthentikAuth.ready) await AuthentikAuth.ready;
     if (!AuthentikAuth.isLoggedIn()) { zeigeGate(); return; }
     $('inhalt').classList.remove('hidden');
+    qrArt(art);   // Knoepfe und Text; holt den QR
     try { await ladeMeine(); } catch (e) {}
-    await holeQr();
+    if (!$('qr').innerHTML) await holeQr();
     // Nach einem 401 (Login abgelaufen) nicht weiter abfragen: jede Abfrage waere ein
     // gescheiterter Versuch, und nach 8 sperrt CrowdSec 24 h (rosenweg/anmeldung-bf).
     setInterval(() => { if (!abgelaufen) tick(); }, 1000);
