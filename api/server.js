@@ -4519,7 +4519,21 @@ app.get('/api/verteiler/by-stweg/:stweg', async (req, res) => {
 });
 
 const verteilerSendLog = new Map(); // userId → [timestamps]
-app.post('/api/verteiler/send', authMiddleware, adminOnly, async (req, res) => {
+app.post('/api/verteiler/send', authMiddleware, async (req, res) => {
+  // T/P (isAdmin) wie bisher; die Verwaltung nur an aktive Verteiler ihrer
+  // STWEG(s), nur per verteiler_id (Befund V2, lib/verteiler-verwaltung.js).
+  if (!req.user?.isAdmin) {
+    const vid = parseInt(req.body?.verteiler_id, 10);
+    if (!Number.isFinite(vid) || (Array.isArray(req.body?.recipients) && req.body.recipients.length)) {
+      return res.status(403).json({ error: 'Admin-Rechte erforderlich' });
+    }
+    try {
+      const { rows: [vt] } = await pool.query('SELECT id, stweg, active FROM email_verteiler WHERE id = $1', [vid]);
+      if (!vt || !verteilerVerwaltung.portalDarfSenden(req.user?.groups || [], await verteilerPortalPerm(req), vt)) {
+        return res.status(403).json({ error: 'Nur an Verteiler der eigenen STWEG' });
+      }
+    } catch (e) { return res.status(500).json({ error: 'Fehler' }); }
+  }
   // Rate limit: max 10 sends per 10 minutes per user
   const uid = req.user.user_id || req.user.id;
   const now = Date.now();
@@ -9811,15 +9825,26 @@ app.post('/api/wohnungen/:stweg/import', authMiddleware, requirePermission('wohn
 
 // ─── Verteiler CRUD (admin only) ────────────────────────────────────
 
-// List all Verteiler
-app.get('/api/verteiler', authMiddleware, adminOnly, async (req, res) => {
+// Seitenrecht „email-verteiler“ der Verwaltung (Befund V2, lib/verteiler-verwaltung.js)
+async function verteilerPortalPerm(req) {
+  try { return (await getUserPermissions(req.user?.groups || []))['email-verteiler']; } catch { return undefined; }
+}
+
+// List all Verteiler (T/P alle; Verwaltung nur ihre STWEG(s), ohne Mitglieder)
+app.get('/api/verteiler', authMiddleware, async (req, res) => {
   try {
+    let verwStwegs = null;
+    if (!req.user?.isAdmin) {
+      verwStwegs = [...verteilerVerwaltung.portalVerteilerStwegs(req.user?.groups || [], await verteilerPortalPerm(req))];
+      if (!verwStwegs.length) return res.status(403).json({ error: 'Admin-Rechte erforderlich' });
+    }
     const result = await pool.query(
       `SELECT id, stweg, name, email_address, members, active,
               reply_to, subject_prefix, group_name, group_names, created_at,
               whatsapp_group_id, whatsapp_group_name, external_allowed,
               jsonb_array_length(COALESCE(members, '[]'::jsonb)) as member_count
-       FROM email_verteiler ORDER BY stweg, name`
+       FROM email_verteiler ${verwStwegs ? 'WHERE active = true AND stweg = ANY($1::int[])' : ''} ORDER BY stweg, name`,
+      verwStwegs ? [verwStwegs] : []
     );
     // For group-based verteiler, resolve actual member count.
     // War ~22s: jede Authentik-Gruppe loeste 2 Full-List-Calls (/core/groups,
@@ -9858,6 +9883,7 @@ app.get('/api/verteiler', authMiddleware, adminOnly, async (req, res) => {
       v.member_count = allEmails.size;
       v.resolved_emails = [...allEmails];
     }));
+    if (verwStwegs) return res.json({ verteiler: rows.map(verteilerVerwaltung.fuerVerwaltung), nur_lesen: true });
     res.json({ verteiler: rows });
   } catch (err) {
     res.status(500).json({ error: 'Fehler beim Laden der Verteiler' });

@@ -302,6 +302,7 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `/api/mail-templates`, `/api/mail-approval-config` | T/P |
 | `/api/mail-empfänger` | Recht `mail-empfänger` |
 | `/api/verteiler*`, `POST /api/verteiler/send`, `POST /api/email/send`, `/api/email/log`, `/api/dmarc/reports`, `/api/email/quota` | T/P |
+| `GET /api/verteiler`, `POST /api/verteiler/send` (nur `verteiler_id`) | zusätzlich Verwaltung mit Recht `email-verteiler`: nur aktive Verteiler ihrer STWEG(s), ohne Mitgliederliste (`lib/verteiler-verwaltung.js`) |
 | `GET /api/email-log` | T/P |
 | `/api/email-archive*` | Ausschuss (jede STWEG) oder T/P; Löschen nach 4-Augen-Prinzip, höchstens ein offener Antrag je Mail |
 | `GET /api/documents`, `GET /api/documents/:path` | angemeldet; `allgemein`, `scans`, eigene STWEG, `projekte` für Eigentümer; gesperrte Unterordner nur T/P |
