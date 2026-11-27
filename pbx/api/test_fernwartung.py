@@ -43,7 +43,7 @@ class FernwartungTest(unittest.TestCase):
         db.init_db()
         conn = db.connect()
         try:
-            conn.execute("INSERT INTO sip_extensions (ext, name, secret, context, client) VALUES (?,?,?,?,?)",
+            conn.execute("INSERT OR IGNORE INTO sip_extensions (ext, name, secret, context, client) VALUES (?,?,?,?,?)",
                          ("2002", "Rosenweg Smartphone 2", "geheim-2002", "geteilt", "android-sip"))
             conn.commit()
         finally:
@@ -62,7 +62,11 @@ class FernwartungTest(unittest.TestCase):
             if pfad == "/zustand":
                 return {"peers": [{"ext": "2002", "letzter_handshake": int(pbx.time.time()) - 30, "sitzung": None}]}
             return {"ok": True}
-        for p in (mock.patch.object(pbx, "_zentrale", side_effect=zentrale),
+        # Modul-Konstanten: laeuft auch, wenn ein anderer Test app.py zuerst geladen hat
+        for p in (mock.patch.object(pbx, "ADB_ZENTRALE_URL", "http://zentrale.test:8080"),
+                  mock.patch.object(pbx, "ADB_ZENTRALE_TOKEN", "z" * 40),
+                  mock.patch.object(pbx, "PBX_SHARED_SECRET", "agi-geheimnis"),
+                  mock.patch.object(pbx, "_zentrale", side_effect=zentrale),
                   mock.patch.object(pbx.ami, "originate"),
                   mock.patch.object(pbx.ami, "registered_aors", return_value={"2002"}),
                   mock.patch.object(pbx.adb_updater, "fingerabdruck", return_value="BB:" * 15 + "BB"),
