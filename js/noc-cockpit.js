@@ -76,6 +76,9 @@
     .tag-rot  { background: rgba(248,113,113,.18); border-color: #f87171; color: #fecaca; }
     .tag-gelb { background: rgba(251,191,36,.15); border-color: #fbbf24; color: #fde68a; }
     .tag-info { background: rgba(56,189,248,.15); border-color: #38bdf8; color: #bae6fd; }
+    .noc-srv-zeile { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: .15rem .5rem; align-items: center; font-size: .72rem; margin-top: .3rem; }
+    .noc-srv-zeile > .noc-bar { grid-column: span 2; height: .3rem; }
+    .noc-wandbild .noc-srv-zeile { font-size: .85rem; }
     .noc-wandbild .noc-stationen { grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: .6rem; }
     .noc-wandbild .noc-st-name { font-size: 1.05rem; }
     .noc-wandbild .noc-st-zeit { font-size: .85rem; }
@@ -278,6 +281,134 @@
     </div>`;
   }
 
+  // Server: Proxmox-Cluster und PBS. Komplett aus den Daten gezeichnet —
+  // Knotenzahl, Platten und Jobs stehen nicht fest. Auswertung und Ampeln:
+  // api/lib/nocserver.js.
+  const SERVER = `
+    <div class="flex items-center justify-between mt-5 mb-2">
+      <div class="flex items-center gap-2">
+        <span class="noc-led led-amber" data-el="led-pve"></span>
+        <span class="text-[11px] font-mono uppercase tracking-wider text-slate-300">Server · Proxmox-Cluster</span>
+        <span class="text-[10px] text-slate-500 font-mono" data-el="pve-kopf"></span>
+      </div>
+      <span class="text-[10px] text-slate-500 font-mono" data-el="srv-fehler"></span>
+    </div>
+    <div data-el="pve" class="noc-gitter"><div class="text-xs text-slate-500 font-mono">lade…</div></div>
+    <div class="flex items-center justify-between mt-5 mb-2">
+      <div class="flex items-center gap-2">
+        <span class="noc-led led-amber" data-el="led-pbs"></span>
+        <span class="text-[11px] font-mono uppercase tracking-wider text-slate-300">Backup-Server · PBS</span>
+      </div>
+    </div>
+    <div data-el="pbs" class="noc-gitter"><div class="text-xs text-slate-500 font-mono">lade…</div></div>`;
+
+  const FARBE = { rot: '#f87171', gelb: '#fbbf24', gruen: '#34d399', grau: '#64748b' };
+  const TEXT = { rot: 'text-rose-400', gelb: 'text-amber-300', gruen: 'text-emerald-300', grau: 'text-slate-400' };
+  const fmtBytes = (b) => {
+    if (b === null || b === undefined) return '—';
+    const u = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+    let v = b, i = 0;
+    while (v >= 1000 && i < u.length - 1) { v /= 1000; i++; }
+    return v.toFixed(v >= 100 ? 0 : 1) + ' ' + u[i];
+  };
+  const fmtStunden = (h) => (h === null || h === undefined ? '—' : h < 48 ? Math.round(h) + ' h' : Math.round(h / 24) + ' T');
+  // Eine Zeile mit Balken in Ampelfarbe.
+  const srvBalken = (name, wert, pct, ampel, titel) => `
+    <div class="noc-srv-zeile"${titel ? ` title="${esc(titel)}"` : ''}>
+      <div class="noc-name">${name}</div><div class="noc-zahl ${TEXT[ampel] || ''}">${esc(wert)}</div>
+      <div class="noc-bar"><div style="width:${Math.max(0, Math.min(100, pct || 0)).toFixed(1)}%;background:${FARBE[ampel] || '#06b6d4'}"></div></div>
+    </div>`;
+  const ampelPunkt = (ampel, text, titel) => `
+    <span class="noc-pill"${titel ? ` title="${esc(titel)}"` : ''}>
+      <span class="noc-led ${LED[ampel] || 'led-grau'}"></span><span>${esc(text)}</span>
+    </span>`;
+  const nichtEingerichtet = (teil) => `<div class="noc-tile noc-breit"><div class="noc-label">nicht eingerichtet</div>
+    <div class="noc-leise">In /opt/rosenweg-core/.env fehlt: ${esc((teil.fehlt || []).join(', '))}</div></div>`;
+
+  function pveKacheln(p) {
+    const k = [];
+    for (const n of p.knoten || []) {
+      k.push(`<div class="noc-tile"${n.gruende.length ? ` title="${esc(n.gruende.join(' · '))}"` : ''}>
+        <div class="noc-label flex items-center gap-2"><span class="noc-led ${LED[n.ampel]}"></span><span>${esc(n.name)}</span>
+          <span class="ml-auto text-[10px] ${TEXT[n.ampel]}">${n.online ? (n.gruende[0] ? esc(n.gruende[0]) : 'online') : 'OFFLINE'}</span></div>
+        ${n.online ? `
+          ${srvBalken('CPU', (n.cpu ?? 0) + ' %', n.cpu, n.cpu >= 90 ? 'gelb' : 'gruen')}
+          ${srvBalken('RAM', (n.ram ?? 0) + ' % von ' + fmtBytes(n.ram_gesamt), n.ram, n.ram >= 90 ? 'gelb' : 'gruen')}
+          <div class="noc-leise">Last ${esc(n.last ?? '—')} / ${esc(n.kerne ?? '?')} · up ${esc(fmtDauer(n.uptime_s))}</div>
+          <div class="noc-leise">HA ${esc(n.ha_lrm || '—')} · ${n.gaeste_laufend}/${n.gaeste_gesamt} Gäste</div>`
+        : '<div class="noc-big text-rose-400">DOWN</div>'}
+      </div>`);
+    }
+    const c = p.ceph || {};
+    k.push(`<div class="noc-tile">
+      <div class="noc-label flex items-center gap-2"><span class="noc-led ${LED[c.ampel] || 'led-grau'}"></span><span>Ceph</span></div>
+      <div class="noc-mid ${TEXT[c.ampel] || ''}">${esc(c.status ? c.status.replace('HEALTH_', '') : '—')}</div>
+      ${c.osd ? `<div class="noc-leise">OSD ${c.osd.up ?? '?'}/${c.osd.gesamt ?? '?'} up · ${c.belegt_prozent ?? '—'} % belegt (${esc(fmtBytes(c.belegt_bytes))} / ${esc(fmtBytes(c.gesamt_bytes))})</div>` : ''}
+      <div class="noc-st-tags">${(c.pruefungen || []).map((x) => `<span class="noc-tag ${x.stumm ? '' : 'tag-' + (x.stufe === 'rot' ? 'rot' : 'gelb')}" style="${x.stumm ? 'opacity:.55' : ''}" title="${esc(x.name + (x.stumm ? ' — stumm (Altlast), färbt die Ampel nicht' : ''))}">${esc(x.text || x.name)}${x.stumm ? ' · stumm' : ''}</span>`).join('')}</div>
+    </div>`);
+
+    const ssd = p.ssd || [];
+    k.push(`<div class="noc-tile noc-breit">
+      <div class="noc-label flex items-center gap-2"><span class="noc-led ${LED[p.ssd_ampel] || 'led-grau'}"></span><span>SSD-Abnutzung (SMART „Percentage Used“)</span></div>
+      ${ssd.length ? ssd.map((d) => srvBalken(
+        `${esc(d.knoten)} · ${esc(d.geraet)}${d.osd ? ' · <span class="text-cyan-300">osd.' + esc(d.osd_id) + '</span>' : ''}`,
+        d.verbraucht === null ? (d.gesund === false ? 'SMART!' : '—') : d.verbraucht + ' %', d.verbraucht, d.ampel,
+        [d.modell, ...d.gruende].filter(Boolean).join(' · '))).join('')
+        : '<div class="noc-leise">keine Angaben</div>'}
+    </div>`);
+
+    const h = p.ha || {};
+    k.push(`<div class="noc-tile"${h.gruende?.length ? ` title="${esc(h.gruende.join(' · '))}"` : ''}>
+      <div class="noc-label flex items-center gap-2"><span class="noc-led ${LED[h.ampel] || 'led-grau'}"></span><span>HA</span></div>
+      <div class="flex items-baseline gap-2"><span class="noc-big">${h.started ?? '—'}</span><span class="text-xs text-slate-400">/ ${h.dienste ?? 0} started</span></div>
+      <div class="noc-leise">Master ${esc(h.master || '—')}${h.wandernd ? ' · ' + h.wandernd + ' wandern' : ''}${h.stopped ? ' · ' + h.stopped + ' gestoppt' : ''}</div>
+      ${h.fehler?.length ? `<div class="noc-st-tags">${h.fehler.map((f) => `<span class="noc-tag tag-rot">${esc((f.sid || 'Gast') + ' ' + f.zustand)}</span>`).join('')}</div>` : ''}
+    </div>`);
+
+    const g = p.gaeste || {};
+    k.push(`<div class="noc-tile">
+      <div class="noc-label flex items-center gap-2"><span class="noc-led ${LED[g.ampel] || 'led-grau'}"></span><span>Gäste</span></div>
+      <div class="flex items-baseline gap-2"><span class="noc-big">${g.laufend ?? '—'}</span><span class="text-xs text-slate-400">/ ${g.gesamt ?? 0} laufen</span></div>
+      <div class="noc-leise">${g.soll_laufen?.length ? 'Autostart, aber aus:' : (g.gestoppt || 0) + ' gestoppt, keiner mit Autostart'}</div>
+      ${g.soll_laufen?.length ? `<div class="noc-st-tags">${g.soll_laufen.map((x) => `<span class="noc-tag tag-gelb" title="${esc(x.knoten || '')}">${esc([x.vmid, x.name].filter(Boolean).join(' '))}</span>`).join('')}</div>` : ''}
+    </div>`);
+    return k.join('');
+  }
+
+  function pbsKacheln(b) {
+    const k = [];
+    for (const d of b.datastores || []) {
+      k.push(`<div class="noc-tile"${d.gruende.length ? ` title="${esc(d.gruende.join(' · '))}"` : ''}>
+        <div class="noc-label flex items-center gap-2"><span class="noc-led ${LED[d.ampel]}"></span><span>Datastore ${esc(d.name)}</span></div>
+        <div class="flex items-baseline gap-2"><span class="noc-big ${TEXT[d.ampel]}">${d.belegt_prozent ?? '—'}<span class="text-base">%</span></span></div>
+        ${srvBalken(esc(fmtBytes(d.belegt_bytes)) + ' von ' + esc(fmtBytes(d.gesamt_bytes)), '', d.belegt_prozent, d.ampel)}
+        <div class="noc-leise">${d.tage_bis_voll !== null && d.tage_bis_voll >= 0 ? 'voll in ~' + d.tage_bis_voll + ' Tagen' : 'kein Ende absehbar'}</div>
+      </div>`);
+    }
+    const s = b.sicherungen || {};
+    k.push(`<div class="noc-tile">
+      <div class="noc-label flex items-center gap-2"><span class="noc-led ${LED[s.ampel] || 'led-grau'}"></span><span>Sicherungen je Gast</span></div>
+      <div class="flex items-baseline gap-2"><span class="noc-big">${s.gaeste ?? '—'}</span><span class="text-xs text-slate-400">Gäste · jüngste ${esc(fmtStunden(s.juengste_stunden))}</span></div>
+      <div class="noc-leise">${s.zu_alt?.length ? s.zu_alt.length + ' älter als ' + esc(b.sicherung_stunden || 36) + ' h' : 'alle jünger als ' + esc(b.sicherung_stunden || 36) + ' h'}${s.ohne?.length ? ' · ' + s.ohne.length + ' ohne Sicherung' : ''}</div>
+      ${s.zu_alt?.length ? `<div class="noc-st-tags">${s.zu_alt.map((x) => `<span class="noc-tag tag-gelb">${esc([x.gast, x.name].filter(Boolean).join(' '))} · ${esc(x.grund)}</span>`).join('')}</div>` : ''}
+      ${s.ohne?.length ? `<div class="noc-leise" title="${esc(s.ohne.map((x) => [x.gast, x.name].filter(Boolean).join(' ')).join(', '))}">ohne: ${esc(s.ohne.slice(0, 6).map((x) => x.name || x.gast).join(', '))}${s.ohne.length > 6 ? ' …' : ''}</div>` : ''}
+    </div>`);
+    const jobs = b.jobs || [];
+    const jobAmpel = jobs.some((j) => j.ampel === 'rot') ? 'rot' : jobs.some((j) => j.ampel === 'gelb') ? 'gelb' : jobs.length ? 'gruen' : 'grau';
+    k.push(`<div class="noc-tile">
+      <div class="noc-label flex items-center gap-2"><span class="noc-led ${LED[jobAmpel]}"></span><span>Jobs · GC · Prüfung · Aufräumen</span></div>
+      <div class="flex flex-wrap gap-1.5 mt-1">${jobs.map((j) => ampelPunkt(j.ampel, j.art + (j.ns && j.ns !== '(Wurzel)' ? ' ' + j.ns : ''),
+        j.zustand + (j.zuletzt ? ' · zuletzt ' + new Date(j.zuletzt).toLocaleString('de-CH') : ''))).join('') || '<span class="noc-leise">keine Jobs</span>'}</div>
+    </div>`);
+    const f = b.fehlgeschlagen || [];
+    k.push(`<div class="noc-tile">
+      <div class="noc-label flex items-center gap-2"><span class="noc-led ${f.length ? 'led-amber' : 'led-green'}"></span><span>Fehlgeschlagen · 24 h</span></div>
+      <div class="noc-big ${f.length ? 'text-amber-300' : 'text-emerald-300'}">${f.length}</div>
+      ${f.slice(0, 5).map((x) => `<div class="noc-leise" title="${esc(x.text || '')}">${esc(x.art)}${x.ziel ? ' ' + esc(x.ziel) : ''}${x.zeit ? ' · ' + esc(new Date(x.zeit).toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' })) : ''}${x.text ? ' · ' + esc(x.text.slice(0, 40)) : ''}</div>`).join('')}
+    </div>`);
+    return k.join('');
+  }
+
   function cssEinmal() {
     if (document.getElementById('noc-cockpit-css')) return;
     const st = document.createElement('style');
@@ -339,7 +470,7 @@
     }
 
     ziel.className = 'noc-cockpit' + (modus === 'wandbild' ? ' noc-wandbild' : '') + ' sm:rounded-2xl ' + (ziel.className || '');
-    ziel.innerHTML = `<div class="noc-inner">${KOPF(modus)}${MAIL}${UNIFI}${STATIONEN}</div>`;
+    ziel.innerHTML = `<div class="noc-inner">${KOPF(modus)}${MAIL}${UNIFI}${STATIONEN}${SERVER}</div>`;
     const el = (n) => ziel.querySelector(`[data-el="${n}"]`);
     const setz = (n, wert, klasse) => { const e = el(n); if (!e) return; e.textContent = wert; if (klasse) e.className = klasse; };
     // Eine Kachel in der Dienste-Leiste: Lampe, Wert, Erklaerung beim Draufzeigen.
@@ -575,6 +706,45 @@
       }
     }
 
+    function malServer(d) {
+      setz('srv-fehler', '');
+      sicher(() => {
+        const p = d.pve || {};
+        const ziel = el('pve');
+        if (p.eingerichtet === false) { el('led-pve').className = 'noc-led led-grau'; ziel.innerHTML = nichtEingerichtet(p); return; }
+        el('led-pve').className = 'noc-led ' + (LED[p.ampel] || 'led-grau');
+        if (p.fehler) { ziel.innerHTML = `<div class="noc-tile noc-breit"><div class="noc-label">Proxmox nicht lesbar</div><div class="noc-leise">${esc(p.fehler)}</div></div>`; setz('pve-kopf', ''); return; }
+        const q = p.quorum || {};
+        setz('pve-kopf', '· Quorum ' + (q.quorate ? 'OK' : q.quorate === false ? 'VERLOREN' : '?') + ' · ' + (q.online ?? '?') + '/' + (q.knoten ?? '?') + ' Knoten'
+          + (p.ha?.master ? ' · HA-Master ' + p.ha.master : ''));
+        ziel.innerHTML = pveKacheln(p);
+      }, 'pve');
+      sicher(() => {
+        const b = d.pbs || {};
+        const ziel = el('pbs');
+        if (b.eingerichtet === false) { el('led-pbs').className = 'noc-led led-grau'; ziel.innerHTML = nichtEingerichtet(b); return; }
+        el('led-pbs').className = 'noc-led ' + (LED[b.ampel] || 'led-grau');
+        if (b.fehler) { ziel.innerHTML = `<div class="noc-tile noc-breit"><div class="noc-label">PBS nicht lesbar</div><div class="noc-leise">${esc(b.fehler)}</div></div>`; return; }
+        ziel.innerHTML = pbsKacheln({ ...b, sicherung_stunden: d.schwellen?.sicherungStunden });
+      }, 'pbs');
+    }
+
+    async function server() {
+      if (document.hidden) return;
+      try {
+        const r = await holen('/api/isp/noc/public/server');
+        if (!r.ok) {
+          el('led-pve').className = 'noc-led led-red';
+          setz('srv-fehler', 'Server: HTTP ' + r.status);
+          return;
+        }
+        malServer(await r.json());
+      } catch (e) {
+        el('led-pve').className = 'noc-led led-red';
+        setz('srv-fehler', 'Server: ' + e.message);
+      }
+    }
+
     async function ampeln() {
       let s = { mail: true, web: true, internet: true };
       try {
@@ -621,16 +791,18 @@
       if (el('utc')) setz('utc', now.toISOString().slice(11, 19));
     }
 
-    el('jetzt').addEventListener('click', () => { laden(); ampeln(); stationen(); });
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) { laden(); stationen(); } });
+    el('jetzt').addEventListener('click', () => { laden(); ampeln(); stationen(); server(); });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { laden(); stationen(); server(); } });
 
-    uhr(); laden(); ampeln(); stationen();
+    uhr(); laden(); ampeln(); stationen(); server();
     const t1 = setInterval(uhr, 1000);
     const t2 = setInterval(laden, intervallMs);
     const t3 = setInterval(ampeln, Math.max(intervallMs, 60000));
     // Lebenszeichen kommen hoechstens jede Minute — die API cached 15 s.
     const t4 = setInterval(stationen, Math.max(intervallMs, 15000));
-    return { laden, ampeln, stationen, beenden: () => { [t1, t2, t3, t4].forEach(clearInterval); } };
+    // Server: die API cached 30 s (SMART 10 min) — oefter fragen bringt nichts.
+    const t5 = setInterval(server, Math.max(intervallMs, 30000));
+    return { laden, ampeln, stationen, server, beenden: () => { [t1, t2, t3, t4, t5].forEach(clearInterval); } };
   }
 
   global.NocCockpit = { starten };
