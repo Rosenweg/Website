@@ -44,9 +44,9 @@ class KartenUmzugTest(unittest.TestCase):
         db.init_db()
         conn = db.connect()
         try:
-            conn.execute("INSERT INTO sip_extensions (ext, name, secret, context) VALUES ('2099', 'Test', 'geheim', 'geteilt')")
-            conn.execute("INSERT INTO sip_extensions (ext, name, secret, context) VALUES ('2098', 'Leer', 'geheim2', 'geteilt')")
-            conn.execute("INSERT INTO telefon_sitzungen (ext, user_id, email, name) VALUES "
+            conn.execute("INSERT OR REPLACE INTO sip_extensions (ext, name, secret, context) VALUES ('2099', 'Test', 'geheim', 'geteilt')")
+            conn.execute("INSERT OR REPLACE INTO sip_extensions (ext, name, secret, context) VALUES ('2091', 'Leer', 'geheim2', 'geteilt')")
+            conn.execute("INSERT OR REPLACE INTO telefon_sitzungen (ext, user_id, email, name) VALUES "
                          "('2099', '7', 'technik@example.org', 'Erika Muster')")
             conn.commit()
         finally:
@@ -106,7 +106,7 @@ class KartenUmzugTest(unittest.TestCase):
         self.assertLessEqual(inhalt["exp"] - inhalt["iat"], 120)
 
     def test_geraet_ohne_angemeldete_person_403(self):
-        basic = "Basic " + base64.b64encode(b"2098:geheim2").decode()
+        basic = "Basic " + base64.b64encode(b"2091:geheim2").decode()
         with mock.patch.object(pbx, "PORTAL_ANLAGE_SECRET", "test-geheimnis"), self._haupt():
             r = self.client.get("/api/telefon/karten/personen", headers={"Authorization": basic})
         self.assertEqual(r.status_code, 403)
