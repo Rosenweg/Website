@@ -24,6 +24,7 @@ const projekteRechte = require('./lib/projekte-rechte');
 const rechteSchluessel = require('./lib/rechte-schluessel');
 const kontaktformular = require('./lib/kontaktformular');
 const stwegSichtLib = require('./lib/stweg-sicht');
+const { waschAdminErlaubt, waschRaumAenderbar } = require('./lib/wasch-admin');
 const verteilerVerwaltung = require('./lib/verteiler-verwaltung');
 
 const app = express();
@@ -2676,9 +2677,38 @@ app.get('/api/wasch/rooms', authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/api/wasch/rooms', authMiddleware, adminOnly, async (req, res) => {
+// Waschküchen-Verwaltung (Befund W10, lib/wasch-admin.js): Technik/Präsident
+// oder Seitenrecht „waschküche-admin“ + Ausschuss/Verwaltung der STWEG mit
+// Waschküche. Mit der Karte: Protokoll + Quittung wie adminOnly.
+function waschAdmin(stufe) {
+  return async (req, res, next) => {
+    try {
+      const g = req.user?.groups || [];
+      let recht = 'none';
+      let raumStwegs = [];
+      if (!isTechnik(g) && !isPraesident(g)) {
+        recht = (await getUserPermissions(g))['waschküche-admin'] || 'none';
+        const { rows } = await pool.query('SELECT DISTINCT stweg FROM wasch_rooms WHERE active = true');
+        raumStwegs = rows.map(r => (r.stweg == null ? null : Number(r.stweg)));
+      }
+      const r = waschAdminErlaubt(g, recht, stufe, raumStwegs);
+      if (!r.ok) return res.status(403).json({ error: r.grund });
+      kartenAdmin.vermerken(req, res);
+      next();
+    } catch (err) {
+      console.error('[wasch-admin] Rechte:', err.message);
+      res.status(500).json({ error: 'Fehler bei der Rechteprüfung' });
+    }
+  };
+}
+
+app.post('/api/wasch/rooms', authMiddleware, waschAdmin('write'), async (req, res) => {
   const { name, location, stweg, energy_meter_id, unifi_door_id } = req.body;
   if (!name) return res.status(400).json({ error: 'Name erforderlich' });
+  if (!waschRaumAenderbar(req.user?.groups, stweg)) return res.status(403).json({ error: 'Raum nur für die eigene STWEG' });
+  if (unifi_door_id && !isTechnik(req.user?.groups || []) && !isPraesident(req.user?.groups || [])) {
+    return res.status(403).json({ error: 'Das Türschloss stellt die Technik ein' });
+  }
   try {
     const result = await pool.query(
       `INSERT INTO wasch_rooms (name, location, stweg, energy_meter_id, unifi_door_id)
@@ -2691,9 +2721,21 @@ app.post('/api/wasch/rooms', authMiddleware, adminOnly, async (req, res) => {
   }
 });
 
-app.put('/api/wasch/rooms/:id', authMiddleware, adminOnly, async (req, res) => {
+app.put('/api/wasch/rooms/:id', authMiddleware, waschAdmin('write'), async (req, res) => {
   const { name, location, stweg, energy_meter_id, unifi_door_id, active } = req.body;
   try {
+    const g = req.user?.groups || [];
+    if (!isTechnik(g) && !isPraesident(g)) {
+      const alt = await pool.query('SELECT stweg, unifi_door_id FROM wasch_rooms WHERE id = $1', [req.params.id]);
+      if (alt.rows.length === 0) return res.status(404).json({ error: 'Raum nicht gefunden' });
+      if (!waschRaumAenderbar(g, alt.rows[0].stweg) || (stweg != null && !waschRaumAenderbar(g, stweg))) {
+        return res.status(403).json({ error: 'Raum nur für die eigene STWEG' });
+      }
+      // Türschloss (UniFi Access) setzt nur Technik/Präsident
+      if (String(unifi_door_id || '') !== String(alt.rows[0].unifi_door_id || '')) {
+        return res.status(403).json({ error: 'Das Türschloss stellt die Technik ein' });
+      }
+    }
     const result = await pool.query(
       `UPDATE wasch_rooms SET name=COALESCE($2,name), location=COALESCE($3,location),
        stweg=COALESCE($4,stweg), energy_meter_id=$5, unifi_door_id=$6, active=COALESCE($7,active)
@@ -2967,7 +3009,7 @@ app.get('/api/wasch/my/costs', authMiddleware, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════
 
 // Admin dashboard stats
-app.get('/api/wasch/admin/stats', authMiddleware, adminOnly, async (req, res) => {
+app.get('/api/wasch/admin/stats', authMiddleware, waschAdmin('read'), async (req, res) => {
   try {
     const rooms = await pool.query('SELECT COUNT(*) FROM wasch_rooms WHERE active=true');
     const sessions = await pool.query(
@@ -2995,7 +3037,7 @@ app.get('/api/wasch/admin/stats', authMiddleware, adminOnly, async (req, res) =>
 });
 
 // Admin: all sessions (with optional month filter)
-app.get('/api/wasch/admin/sessions', authMiddleware, adminOnly, async (req, res) => {
+app.get('/api/wasch/admin/sessions', authMiddleware, waschAdmin('read'), async (req, res) => {
   try {
     const { month } = req.query;
     let query = `SELECT s.*, u.name, u.wohnung, rm.name as room_name
@@ -3017,7 +3059,7 @@ app.get('/api/wasch/admin/sessions', authMiddleware, adminOnly, async (req, res)
 });
 
 // Admin: monthly cost breakdown per user
-app.get('/api/wasch/admin/costs', authMiddleware, adminOnly, async (req, res) => {
+app.get('/api/wasch/admin/costs', authMiddleware, waschAdmin('read'), async (req, res) => {
   try {
     const { month } = req.query;
     const monthStr = month || new Date().toISOString().slice(0, 7);
@@ -3044,7 +3086,7 @@ app.get('/api/wasch/admin/costs', authMiddleware, adminOnly, async (req, res) =>
 });
 
 // Admin: billing overview
-app.get('/api/wasch/admin/billing', authMiddleware, adminOnly, async (req, res) => {
+app.get('/api/wasch/admin/billing', authMiddleware, waschAdmin('read'), async (req, res) => {
   try {
     const result = await pool.query(
       'SELECT b.*, u.name, u.wohnung, u.email FROM wasch_billing b JOIN users u ON u.id = b.user_id ORDER BY b.month DESC, u.name'
@@ -3076,7 +3118,7 @@ app.get('/api/wasch/settings', authMiddleware, async (req, res) => {
   }
 });
 
-app.put('/api/wasch/settings', authMiddleware, adminOnly, async (req, res) => {
+app.put('/api/wasch/settings', authMiddleware, waschAdmin('write'), async (req, res) => {
   try {
     const settings = req.body;
     const ALLOWED_SETTINGS = ['cost_per_kwh', 'auto_billing', 'billing_day', 'reservation_max_days', 'reservation_max_per_user'];
@@ -3428,7 +3470,7 @@ function startWaschCron() {
 }
 
 // Manual trigger for billing (admin only)
-app.post('/api/wasch/admin/billing/run', authMiddleware, adminOnly, async (req, res) => {
+app.post('/api/wasch/admin/billing/run', authMiddleware, waschAdmin('write'), async (req, res) => {
   try {
     await runMonthlyBilling();
     res.json({ success: true, message: 'Abrechnung wurde ausgeführt' });
