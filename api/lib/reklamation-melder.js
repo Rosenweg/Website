@@ -50,10 +50,22 @@ function nachricht({ rekl, name, status, bemerkung, siteUrl }) {
 // Alles andere ist intern – Zuweisung, Handwerker, Notiz, Archiv,
 // Arbeitsschritte, Bot-Vermerke, Benachrichtigungen. Positivliste, damit ein
 // neuer interner Eintrag nicht von selbst beim Melder auftaucht.
+//
+// R1: Arbeitsschritte, die per WhatsApp/Push an die meldende Person gingen,
+// tragen an_melder = true und stehen ebenfalls in ihrem Verlauf. Interne
+// Schritte (ohne meldende Person, Technik-Bot) bleiben intern.
 const MELDER_EREIGNISSE = [/^Erstellt\b/, /^Status: /, /^💬 Nachricht an meldende Person: /];
-function melderSiehtEreignis(event) {
+function melderSiehtEreignis(event, anMelder = false) {
+  if (anMelder === true) return true;
   const e = String(event || '');
   return MELDER_EREIGNISSE.some(re => re.test(e));
 }
 
-module.exports = { melderBemerkung, statusLabel, mailBeiStatus, nachricht, melderSiehtEreignis, MAX_BEMERKUNG };
+// Zeilen aus reklamation_events fuer die meldende Person: gefiltert, ohne die
+// interne Spalte an_melder.
+function melderVerlauf(rows) {
+  return (rows || []).filter(e => melderSiehtEreignis(e.event, e.an_melder))
+    .map(({ created_at, who, event }) => ({ created_at, who, event }));
+}
+
+module.exports = { melderBemerkung, statusLabel, mailBeiStatus, nachricht, melderSiehtEreignis, melderVerlauf, MAX_BEMERKUNG };

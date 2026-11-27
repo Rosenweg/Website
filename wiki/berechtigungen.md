@@ -56,7 +56,7 @@ nur, wenn sie in der Rechteverwaltung Einträge hat.
 | `requireMqttTechnik` (MQTT-Verwaltung, Anzeigen) | Technik, Präsident (über `isAdmin`) |
 | `requireAusschussOrTechnik` | Technik, Präsident, Ausschuss **irgendeiner** STWEG |
 | `requireEigentuemer` | Technik, Präsident, jede Gruppe mit `eigentuemer` im Namen |
-| `canManageDocs` | Technik, Präsident, jede Gruppe, die auf `-ausschuss` endet |
+| `canManageDocs` | Technik, Präsident, jede Gruppe, die auf `-ausschuss` endet, jede Verwaltungsgruppe (nur Projekt-Dokumente, `canWriteDocPath`) |
 | `canViewKontakteHistory` | Technik, Präsident, jede Verwaltungsgruppe, jede `-ausschuss`-Gruppe |
 | `requireStwegAccess` | Technik, Präsident, jede Gruppe (Ausschuss/Eigentümer/Bewohner) **dieser** STWEG, Verwaltung **dieser** STWEG |
 | `requireStwegWrite` / `stwegSchreibErlaubt` | Technik, Präsident, Ausschuss **dieser** STWEG, Verwaltung **dieser** STWEG |
@@ -75,7 +75,7 @@ NOTHING` – geänderte Werte bleiben):
 | `stweg3-ausschuss`, `stweg6-ausschuss` | `bewohner-verwaltung` | write |
 | alle `*-eigentuemer` und `eigentuemer` | `auslagen` | read |
 | `technik`, `Präsident` | `pbx-admin`, `loeschungen` | write |
-| `stweg1-verwaltung` … `stweg7-verwaltung`, `meg-verwaltung` | `objektverwaltung`, `wohnungsverwaltung`, `reklamationen`, `handwerker`, `vollmachten` write; `auslagen`, `zähler`/`zaehler`, `energie-monitor`, `waschküche-admin`/`waschkueche-admin`, `projekte`, `kontakte`, `verwaltung`, `email-verteiler`, `bewohner-verwaltung` read | |
+| `stweg1-verwaltung` … `stweg7-verwaltung`, `meg-verwaltung` | `objektverwaltung`, `wohnungsverwaltung`, `reklamationen`, `handwerker`, `vollmachten`, `projekte`, `email-verteiler` write; `auslagen`, `zähler`/`zaehler`, `energie-monitor`, `waschküche-admin`/`waschkueche-admin`, `kontakte`, `verwaltung`, `bewohner-verwaltung` read | |
 | `Verwaltung` *(Übergang; nur wenn die Tabelle beim ersten Start leer war)* | `bewohner-verwaltung` write; `energie-monitor`, `email-verteiler`, `zähler`, `kontakte`, `verwaltung` read; dazu immer (falls fehlend) `vollmachten` write | |
 
 Alle weiteren Einträge (z. B. `handwerker`, `energie-config`, `energie-monitor` für
@@ -184,8 +184,8 @@ hat dort keine Rechte, auch wenn er dort wohnt oder Eigentümer ist.
 | Löschantrag bestätigen (4-Augen) | — | — | — | ✅ nicht den eigenen | — | ✅ nicht den eigenen | ✅ nicht den eigenen |
 | E-Mail-Log, Versandstatus, DMARC, SMTP-Kontingent | — | — | — | — | — | 👁 | 👁 |
 | Briefe (Fotos versendeter Briefe) | — | — | — | ✅ (jede STWEG) | — | ✅ | ✅ |
-| Dokumente lesen | — | 👁 `allgemein`, `scans`, eigene STWEG | + `projekte` | + `fotos_von_versendeten_briefen` | 👁 `allgemein`, `scans`, ihre STWEG(s) | 👁 alles | 👁 alles |
-| Dokumente schreiben, verschieben, löschen | — | — | — | ✅ `allgemein`, `projekte`, eigene STWEG | — | ✅ | ✅ |
+| Dokumente lesen | — | 👁 `allgemein`, `scans`, eigene STWEG | + `projekte` | + `fotos_von_versendeten_briefen` | 👁 `allgemein`, `scans`, ihre STWEG(s), mit Recht „projekte“ die Projekte ihrer STWEG(s) und ohne STWEG | 👁 alles | 👁 alles |
+| Dokumente schreiben, verschieben, löschen | — | — | — | ✅ `allgemein`, eigene STWEG, `projekte/<Projekt>` der eigenen STWEG bzw. ohne STWEG | ✅ `projekte/<Projekt>` ihrer STWEG(s) mit Recht „projekte“ = schreiben | ✅ | ✅ |
 | Gesperrte Ordner `auslagen/`, `anzeigen/`, `reklamationen/`, `unterschriftenlisten/`, `grundbuch-bilder/` über die Dokumenten-API | — | — | — | — | — | ✅ | ✅ |
 
 ### 2.5 Energie

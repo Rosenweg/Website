@@ -45,3 +45,24 @@ test('Poller setzt die abgeleitete STWEG, nicht bei fremdem Absender; Zuordnen n
   assert.match(block, /if \(stweg !== altStweg\)/);
   assert.match(block, /altStweg == null \|\| !eigene\.has\(altStweg\)/);
 });
+
+// Z7: In „Nur Ansicht“ ist der Abschnitt nicht bedienbar (kein Auswahlfeld, kein Knopf).
+test('Seite: Nicht zugeordnete Rechnungen ohne Bedienelemente in „Nur Ansicht“', () => {
+  const vm = require('node:vm');
+  const html = fs.readFileSync(path.join(__dirname, '..', '..', 'stweg3', 'pages', 'zev-smartme.html'), 'utf8');
+  const i = html.indexOf('function renderUnzugeordnet(');
+  const fn = html.slice(i, html.indexOf('\n    async function onAssign', i));
+  const render = (schreiben) => {
+    const body = { innerHTML: '', querySelectorAll: () => [] };
+    const sec = { classList: { add() {}, remove() {} } };
+    const ctx = { RECHTE: { schreiben }, STWEG: 3, WOHNUNGEN: [], wohnungOptions: () => '<option></option>',
+      esc: s => String(s ?? ''), $: id => (id === 'unz-body' ? body : sec), onAssign() {} };
+    vm.runInNewContext(fn + '\nrenderUnzugeordnet([{ id: 1, stweg: 3, alias_address: "zev.x@haus9.beispiel.ch", betrag_chf: 10 }]);', ctx);
+    return body.innerHTML;
+  };
+  const lesen = render(false);
+  assert.ok(!/unz-assign|unz-sel|unz-remail/.test(lesen), 'keine Bedienelemente');
+  assert.match(lesen, /zev\.x@haus9\.beispiel\.ch/);
+  assert.match(lesen, /Zuordnen nur Ausschuss\/Verwaltung/);
+  assert.match(render(true), /unz-assign/);
+});

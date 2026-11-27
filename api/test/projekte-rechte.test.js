@@ -88,3 +88,42 @@ test('projekte.html: Knopf „Neues Projekt“, Bearbeiten nach Server-Antwort',
   assert.match(html, /canEdit = currentProject\.darf_bearbeiten === true;/);
   assert.doesNotMatch(html, /gl\.endsWith\('-ausschuss'\) \|\| gl === 'präsident'/);
 });
+
+// P1: Projekt-Dokumente (projekte/<slug>/…) folgen den Projektrechten.
+test('Dokumente: Verwaltung liest und lädt in Projekte ihrer STWEG, Ausschuss nur eigene STWEG/Kooperation', () => {
+  const projekte = new Map([['dach-haus9', 3], ['fassade-haus5', 5], ['spielplatz', null]]);
+  const r = (g, perm, p) => pr.projektDokRecht(g, perm, p, projekte);
+  assert.equal(pr.projektDokRecht(['stweg3-ausschuss'], undefined, 'stweg3/x.pdf', projekte), null);
+  // Verwaltung STWEG 3
+  assert.deepEqual(r(['stweg3-verwaltung'], 'write', 'projekte/dach-haus9/offerte.pdf'), { lesen: true, schreiben: true });
+  assert.deepEqual(r(['stweg3-verwaltung'], 'read', 'projekte/dach-haus9/offerte.pdf'), { lesen: true, schreiben: false });
+  assert.deepEqual(r(['stweg3-verwaltung'], 'write', 'projekte/fassade-haus5/offerte.pdf'), { lesen: false, schreiben: false });
+  assert.deepEqual(r(['stweg3-verwaltung'], 'write', 'projekte/spielplatz/plan.pdf'), { lesen: true, schreiben: false });
+  assert.deepEqual(r(['stweg3-verwaltung'], undefined, 'projekte/dach-haus9/offerte.pdf'), { lesen: false, schreiben: false });
+  // Ausschuss STWEG 3
+  assert.equal(r(['stweg3-ausschuss'], undefined, 'projekte/dach-haus9/timeline/4/a.pdf').schreiben, true);
+  assert.equal(r(['stweg3-ausschuss'], undefined, 'projekte/fassade-haus5/a.pdf').schreiben, false);
+  assert.equal(r(['stweg3-ausschuss'], undefined, 'projekte/spielplatz/a.pdf').schreiben, true);
+  // Eigentümer lesen wie bisher alle Projekte, schreiben nicht
+  assert.deepEqual(r(['stweg5-eigentuemer'], undefined, 'projekte/dach-haus9/a.pdf'), { lesen: true, schreiben: false });
+  // Unbekanntes Projekt / Datei direkt unter projekte/: nur Technik/Präsident schreiben
+  assert.equal(r(['stweg3-ausschuss'], undefined, 'projekte/gibt-es-nicht/a.pdf').schreiben, false);
+  assert.equal(r(['stweg3-ausschuss'], undefined, 'projekte/liste.pdf').schreiben, false);
+  assert.deepEqual(r(['technik'], undefined, 'projekte/liste.pdf'), { lesen: true, schreiben: true });
+  // Ohne Projektliste (Fehler beim Laden): nichts schreiben
+  assert.equal(pr.projektDokRecht(['stweg3-ausschuss'], undefined, 'projekte/dach-haus9/a.pdf', undefined).schreiben, false);
+});
+
+test('server.js: Dokumenten-API prüft Projekt-Dokumente mit Kontext, Verwaltung kommt durch canManageDocs', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(src, /if \(folder === 'projekte'\) return projekteRechte\.projektDokRecht\(groups, ctx\.projektePerm, filePath, ctx\.projekte\)\.lesen;/);
+  assert.match(src, /if \(folder === 'projekte'\) return projekteRechte\.projektDokRecht\(groups, ctx\.projektePerm, filePath, ctx\.projekte\)\.schreiben;/);
+  assert.doesNotMatch(src, /folder === 'allgemein' \|\| folder === 'projekte'\) return true/);
+  const i = src.indexOf('function canManageDocs(');
+  assert.match(src.slice(i, i + 600), /istVerwaltungsGruppenName\(gl\)/);
+  // Jeder Aufruf ausser den Definitionen bekommt einen Kontext
+  const aufrufe = (src.match(/(isDocPathAllowed|canWriteDocPath)\((?:[^()]|\([^()]*\))*\)/g) || [])
+    .filter(a => !a.includes('ctx = {}') && !/^\w+\(filePath, groups\)$/.test(a));
+  assert.ok(aufrufe.length >= 8);
+  for (const a of aufrufe) assert.match(a, /, (ctx|await docRechteKontext\(req\))\)$/, a);
+});

@@ -66,10 +66,38 @@ function portalVerteilerStwegs(groups, perm) {
   return verwaltungStwegs(groups || []);
 }
 
+/** Darf die Verwaltung im Portal senden? Recht „email-verteiler“ = schreiben
+ *  (Entscheid Stefan 27.11.2026, Befund V10); lesen zeigt nur die Liste. */
+function portalDarfSendenRecht(perm) {
+  return (STUFE[perm] || 0) >= 2;
+}
+
 /** Darf die Verwaltung im Portal an diesen Verteiler senden? */
 function portalDarfSenden(groups, perm, verteiler) {
   const nr = verteilerStweg(verteiler);
-  return !!nr && !!(verteiler && verteiler.active !== false) && portalVerteilerStwegs(groups, perm).has(nr);
+  return portalDarfSendenRecht(perm) && !!nr && !!(verteiler && verteiler.active !== false)
+    && portalVerteilerStwegs(groups, perm).has(nr);
+}
+
+/** Anzeigename des Absenders („Ihr Name (optional)“, V10): ohne Steuerzeichen,
+ *  Anfuehrungszeichen und spitze Klammern, hoechstens 80 Zeichen; leer = Kontoname. */
+function absenderName(eingabe, kontoName) {
+  const sauber = (v) => String(v ?? '').replace(/[\u0000-\u001f\u007f"<>\\]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80).trim();
+  return sauber(eingabe) || sauber(kontoName) || 'Rosenweg';
+}
+
+/** Zeile fuer email_archive aus einer Portal-Rundmail (V10). An: die
+ *  Verteiler-Adresse, ohne Verteiler die Anzahl – nie die Empfaengerliste. */
+function portalRundmailArchiv({ absenderEmail, absenderName: name, verteilerAdresse, anzahl, subject, text, html, messageId }) {
+  return {
+    from_email: String(absenderEmail || '').slice(0, 255),
+    from_name: name || null,
+    to_addresses: verteilerAdresse || `${Number(anzahl) || 0} Empfänger (BCC)`,
+    subject: subject || '(kein Betreff)',
+    text_body: text || '',
+    html_body: html || '',
+    message_id: String(messageId || `<portal-verteiler-${require('crypto').randomUUID()}@rosenweg>`).slice(0, 500),
+  };
 }
 
 /** Felder eines Verteilers fuer die Verwaltung (ohne Mitglieder/Gruppen). */
@@ -82,5 +110,5 @@ function fuerVerwaltung(v) {
 
 module.exports = {
   istBewohnerRundmail, verwaltungsGruppeFuerVerteiler, verwaltungsGruppeDarfSenden, verteilerStweg,
-  portalVerteilerStwegs, portalDarfSenden, fuerVerwaltung,
+  portalVerteilerStwegs, portalDarfSenden, portalDarfSendenRecht, absenderName, portalRundmailArchiv, fuerVerwaltung,
 };

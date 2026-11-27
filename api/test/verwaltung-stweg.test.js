@@ -188,7 +188,7 @@ test('Seed: Seitenrechte für alle Verwaltungsgruppen, wie bisher „Verwaltung�
   const block = s.slice(s.indexOf('const VERWALTUNG_SEITENRECHTE'), s.indexOf('for (const groupName of Object.values(VERWALTUNG_GROUPS))'));
   for (const [page, access] of [['objektverwaltung', 'write'], ['wohnungsverwaltung', 'write'], ['reklamationen', 'write'], ['handwerker', 'write'],
     ['vollmachten', 'write'], ['auslagen', 'read'], ['energie-monitor', 'read'], ['projekte', 'write'], ['kontakte', 'read'], // projekte write: anlegen je STWEG (Entscheid 27.11.2026)
-    ['verwaltung', 'read'], ['email-verteiler', 'read'], ['bewohner-verwaltung', 'read']]) {
+    ['verwaltung', 'read'], ['email-verteiler', 'write'], ['bewohner-verwaltung', 'read']]) { // email-verteiler write: senden im Portal (V10)
     assert.ok(block.includes(`['${page}', '${access}']`), `${page}=${access} fehlt`);
   }
   assert.match(s, /ON CONFLICT \(group_name, page\) DO NOTHING`, \[groupName, page, access\]/);

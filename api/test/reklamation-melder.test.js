@@ -61,5 +61,26 @@ test('F2-7: Verlauf für die meldende Person nur Erfassung, Status und Nachricht
     '💰 Entschädigungs-Entwurf für A angelegt', '', null]) assert.equal(rm.melderSiehtEreignis(e), false, String(e));
   const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   // beide Wege, auf denen die meldende Person den Verlauf sieht
-  assert.equal((src.match(/reklMelder\.melderSiehtEreignis\(e\.event\)/g) || []).length, 2);
+  assert.equal((src.match(/reklMelder\.melderVerlauf\(r\.rows\)/g) || []).length, 2);
+  assert.equal((src.match(/SELECT created_at, who, event, an_melder FROM reklamation_events/g) || []).length, 2);
+});
+
+// R1: Arbeitsschritte, die per WhatsApp/Push an die meldende Person gingen, stehen
+// auch in ihrem Verlauf; interne Schritte (an_melder = false) nicht.
+test('R1: an die meldende Person geschickter Arbeitsschritt steht in ihrem Verlauf', () => {
+  const rows = [
+    { created_at: 1, who: 'System', event: 'Erstellt (Web-Formular)', an_melder: false },
+    { created_at: 2, who: 'Technik A', event: '🔧 Sicherung getauscht', an_melder: true },
+    { created_at: 3, who: 'Technik-Bot', event: '🔧 intern aus dem Chat', an_melder: false },
+    { created_at: 4, who: 'Technik A', event: 'Notiz geändert: "intern"', an_melder: false },
+  ];
+  const v = rm.melderVerlauf(rows);
+  assert.deepEqual(v.map(e => e.event), ['Erstellt (Web-Formular)', '🔧 Sicherung getauscht']);
+  assert.ok(v.every(e => !('an_melder' in e)));
+  assert.equal(rm.melderSiehtEreignis('🔧 Sicherung getauscht'), false);
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(src, /ALTER TABLE reklamation_events ADD COLUMN IF NOT EXISTS an_melder BOOLEAN NOT NULL DEFAULT false;/);
+  // Nur der Weg, der auch notifyMelderSchritt aufruft, setzt an_melder
+  assert.equal((src.match(/\{ anMelder \}\)/g) || []).length, 1);
+  assert.match(src, /const anMelder = !!rk\.person_id;[\s\S]{0,200}if \(anMelder\) notifyMelderSchritt\(rk, text\)/);
 });

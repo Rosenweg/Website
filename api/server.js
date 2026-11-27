@@ -22,6 +22,7 @@ const reklMelder = require('./lib/reklamation-melder');
 const vollmachtRechte = require('./lib/vollmacht-rechte');
 const projekteRechte = require('./lib/projekte-rechte');
 const rechteSchluessel = require('./lib/rechte-schluessel');
+const rechteMigrationen = require('./lib/rechte-migrationen');
 const kontaktformular = require('./lib/kontaktformular');
 const stwegSichtLib = require('./lib/stweg-sicht');
 const { waschAdminErlaubt, waschRaumAenderbar } = require('./lib/wasch-admin');
@@ -645,10 +646,32 @@ function canManageDocs(req, res, next) {
   const groups = req.user?.groups || [];
   const allowed = groups.some(g => {
     const gl = g.toLowerCase();
-    return gl === 'technik' || gl === 'präsident' || gl === 'praesident' || gl.endsWith('-ausschuss');
+    // Verwaltung nur fuer Projekt-Dokumente (P1); canWriteDocPath prueft den Ordner.
+    return gl === 'technik' || gl === 'präsident' || gl === 'praesident' || gl.endsWith('-ausschuss')
+      || istVerwaltungsGruppenName(gl);
   });
-  if (!allowed) return res.status(403).json({ error: 'Nur Technik, Präsident und Ausschuss dürfen Dokumente verwalten' });
+  if (!allowed) return res.status(403).json({ error: 'Nur Technik, Präsident, Ausschuss und Verwaltung dürfen Dokumente verwalten' });
   next();
+}
+
+// P1: STWEG je Projekt fuer die Rechte am Ordner projekte/<slug>/ (kurz
+// zwischengespeichert; Anlegen/Aendern eines Projekts leert den Speicher).
+let projektStwegSpeicher = { t: 0, map: null };
+async function projektStwegs() {
+  if (projektStwegSpeicher.map && Date.now() - projektStwegSpeicher.t < 30000) return projektStwegSpeicher.map;
+  const { rows } = await pool.query('SELECT slug, stweg FROM projects');
+  projektStwegSpeicher = { t: Date.now(), map: new Map(rows.map(r => [r.slug, r.stweg])) };
+  return projektStwegSpeicher.map;
+}
+function projektStwegsLeeren() { projektStwegSpeicher = { t: 0, map: null }; }
+
+// Kontext fuer isDocPathAllowed/canWriteDocPath: Projekte und Seitenrecht „projekte“.
+async function docRechteKontext(req) {
+  const groups = req.user?.groups || [];
+  if (isTechnik(groups) || isPraesident(groups)) return {};
+  let projekte;
+  try { projekte = await projektStwegs(); } catch (e) { console.warn('[docs] Projekte nicht geladen:', e.message); projekte = new Map(); }
+  return { projekte, projektePerm: await projektePerm(req) };
 }
 
 // History-Zugriff: Technik / Präsident / Ausschuss / Verwaltung-Mitglieder
@@ -667,7 +690,8 @@ function canViewKontakteHistory(req, res, next) {
 // isPraesident, normalizePhone -> lib/groups.js bzw. lib/utils.js
 
 /** Check if a document path is allowed for a user */
-function isDocPathAllowed(filePath, groups) {
+// ctx (docRechteKontext): Projekte + Seitenrecht „projekte“ fuer projekte/<slug>/ (P1).
+function isDocPathAllowed(filePath, groups, ctx = {}) {
   if (isTechnik(groups) || isPraesident(groups)) return true;
   // Belege/Fotos/PDFs mit eigener Route und eigener Rechtepruefung nicht
   // zusaetzlich ueber die allgemeine Dokumenten-API fuer alle freigeben.
@@ -676,8 +700,8 @@ function isDocPathAllowed(filePath, groups) {
   if (sperre === 'ausschuss' && !isAusschussForAny(groups)) return false;
   const folder = filePath.includes('/') ? filePath.split('/')[0] : 'allgemein';
   if (folder === 'allgemein' || folder.toLowerCase() === 'scans') return true;
-  // Projekte folder: accessible to all eigentuemer
-  if (folder === 'projekte' && groups.some(g => g.toLowerCase().includes('eigentuemer'))) return true;
+  // Projekte: Eigentuemer, wer das Projekt bearbeitet, Verwaltung der STWEG des Projekts
+  if (folder === 'projekte') return projekteRechte.projektDokRecht(groups, ctx.projektePerm, filePath, ctx.projekte).lesen;
   // Lesen: Bewohner/Eigentuemer/Ausschuss der STWEG und deren Hausverwaltung
   // (stwegN-verwaltung). Gleiche Regel wie die Fileserver-Tabelle
   // fileserver-lxc/ordnerrechte/tabelle.txt (Zeilen stweg1 … meg) – beide aendern.
@@ -705,7 +729,7 @@ function docSperrOrdner(filePath) {
 }
 
 /** Check if user can write to a document path */
-function canWriteDocPath(filePath, groups) {
+function canWriteDocPath(filePath, groups, ctx = {}) {
   if (isTechnik(groups) || isPraesident(groups)) return true;
   // Pfad ohne '/' ist ein Eintrag der obersten Ebene (z. B. ganzer Ordner
   // 'stweg5') – nicht als 'allgemein' werten, sonst ganze STWEG-Ordner
@@ -713,10 +737,13 @@ function canWriteDocPath(filePath, groups) {
   if (!String(filePath).includes('/')) return false;
   if (docSperrOrdner(filePath) === 'gesperrt') return false;
   const folder = filePath.includes('/') ? filePath.split('/')[0] : 'allgemein';
+  // Projekte (P1): wer das Projekt bearbeiten darf – Ausschuss der STWEG des
+  // Projekts (Kooperations-Projekte: jeder Ausschuss) bzw. deren Verwaltung.
+  if (folder === 'projekte') return projekteRechte.projektDokRecht(groups, ctx.projektePerm, filePath, ctx.projekte).schreiben;
   const isAusschuss = groups.some(g => g.toLowerCase().endsWith('-ausschuss'));
   if (!isAusschuss) return false;
-  // Ausschuss members can write to their own stweg + allgemein + projekte
-  if (folder === 'allgemein' || folder === 'projekte') return true;
+  // Ausschuss members can write to their own stweg + allgemein
+  if (folder === 'allgemein') return true;
   // Schreiben nur im Ordner der STWEG, in deren Ausschuss man ist — nicht in jeder STWEG,
   // in der man (z. B. als Eigentuemer/Bewohner) sonst Mitglied ist.
   const stwegs = getAusschussStwegs(groups);
@@ -4593,7 +4620,12 @@ app.post('/api/verteiler/send', authMiddleware, async (req, res) => {
     }
     try {
       const { rows: [vt] } = await pool.query('SELECT id, stweg, active FROM email_verteiler WHERE id = $1', [vid]);
-      if (!vt || !verteilerVerwaltung.portalDarfSenden(req.user?.groups || [], await verteilerPortalPerm(req), vt)) {
+      const perm = await verteilerPortalPerm(req);
+      // V10: Senden verlangt „email-verteiler“ = schreiben (lesen zeigt nur die Liste).
+      if (!verteilerVerwaltung.portalDarfSendenRecht(perm)) {
+        return res.status(403).json({ error: 'Senden braucht das Recht „E-Mail-Verteiler“ = schreiben' });
+      }
+      if (!vt || !verteilerVerwaltung.portalDarfSenden(req.user?.groups || [], perm, vt)) {
         return res.status(403).json({ error: 'Nur an Verteiler der eigenen STWEG' });
       }
     } catch (e) { return res.status(500).json({ error: 'Fehler' }); }
@@ -4610,6 +4642,9 @@ app.post('/api/verteiler/send', authMiddleware, async (req, res) => {
 
   const { verteiler_id, subject, body } = req.body;
   let recipients = Array.isArray(req.body.recipients) ? req.body.recipients : [];
+  // V10: „Ihr Name (optional)“ wird Anzeigename im From (Adresse bleibt die des Gateways).
+  const absName = verteilerVerwaltung.absenderName(req.body.sender_name, req.user?.name);
+  let verteilerAdresse = null;
   if (!subject || !body) {
     return res.status(400).json({ error: 'Betreff und Text erforderlich' });
   }
@@ -4619,6 +4654,7 @@ app.post('/api/verteiler/send', authMiddleware, async (req, res) => {
     try {
       const { rows: [vt] } = await pool.query('SELECT * FROM email_verteiler WHERE id = $1', [parseInt(verteiler_id)]);
       if (!vt) return res.status(404).json({ error: 'Verteiler nicht gefunden' });
+      verteilerAdresse = vt.email_address || null;
       recipients = await resolveVerteilerRecipients(vt);
     } catch (e) {
       console.error('resolveVerteilerRecipients failed:', e.message);
@@ -4640,16 +4676,19 @@ app.post('/api/verteiler/send', authMiddleware, async (req, res) => {
     let sent = 0;
     let failed = [];
     let gateway = null;
+    let messageId = null;
+    let htmlBody = '';
     // EINE Mail, alle Empfänger im BCC — so sehen sie sich gegenseitig NICHT (DSGVO).
     // To = MAIL_FROM (neutral); der Verteiler-Alias darf NICHT ins To (sonst Re-Fanout).
     try {
       // Body kommt als Plain-Text aus der Textarea — Zeilenumbrueche erhalten:
       // text-Teil 1:1, html-Teil escaped + \n -> <br>. Sonst schluckt HTML die Umbrueche.
-      const htmlBody = String(body)
+      htmlBody = String(body)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         .replace(/\r?\n/g, '<br>');
-      ({ gateway } = await mailSenden({
-        from: MAIL_FROM,
+      let result;
+      ({ result, gateway } = await mailSenden({
+        from: { name: absName, address: MAIL_FROM },
         to: MAIL_FROM,
         bcc: validRecipients,
         // Antworten gehen an den sendenden User, nicht an die generische From-Adresse.
@@ -4658,6 +4697,7 @@ app.post('/api/verteiler/send', authMiddleware, async (req, res) => {
         text: body,
         html: htmlBody,
       }, 'verteiler-direct'));
+      messageId = result?.messageId || null;
       sent = validRecipients.length;
     } catch (sendErr) {
       gateway = sendErr.gateway || null;
@@ -4670,10 +4710,24 @@ app.post('/api/verteiler/send', authMiddleware, async (req, res) => {
     await pool.query(
       `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments, recipients_list, failed_recipients, status, trigger, to_addresses, gateway)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-      [verteiler_id || null, req.user?.email || MAIL_FROM, req.user?.name || 'Admin', subject, sent, false,
+      [verteiler_id || null, req.user?.email || MAIL_FROM, absName, subject, sent, false,
        JSON.stringify(recipients), failed.length > 0 ? JSON.stringify(failed) : null, status,
        'verteiler-direct', recipients.join(', '), gateway]
     );
+
+    // V10: Portal-Rundmail ins E-Mail-Archiv (per Mail an den Alias erledigt das
+    // archiv@ im goto; hier geht der Versand direkt per BCC an die Mitglieder).
+    if (sent > 0) {
+      const a = verteilerVerwaltung.portalRundmailArchiv({
+        absenderEmail: req.user?.email || MAIL_FROM, absenderName: absName, verteilerAdresse,
+        anzahl: sent, subject, text: body, html: htmlBody, messageId,
+      });
+      await pool.query(
+        `INSERT INTO email_archive (from_email, from_name, to_addresses, subject, text_body, html_body, message_id, email_date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW()) ON CONFLICT (message_id) DO NOTHING`,
+        [a.from_email, a.from_name, a.to_addresses, a.subject, a.text_body, a.html_body, a.message_id],
+      ).catch(e => console.error('[verteiler-direct] Archivieren fehlgeschlagen:', e.message));
+    }
 
     res.json({ success: true, sent, failed: failed.length });
   } catch (err) {
@@ -8316,10 +8370,9 @@ app.put('/api/zev/config/:stweg', authMiddleware, requirePermission('wohnungsver
     if (alias.error) return res.status(alias.status).json({ error: alias.error });
     const aliasDomain = alias.domain, aliasPrefix = alias.prefix;
     // Empfaengeradressen landen als goto in Mailcow bzw. als Mail-Empfaenger.
-    for (const f of ['archiv_mailbox', 'invoice_email', 'axova_email', 'allgemein_email']) {
-      const v = trim(b[f]);
-      if (v && !require('./lib/zev').isValidEmail(v)) return res.status(400).json({ error: `Ungültige E-Mail in ${f}` });
-    }
+    // Meldung nennt die Beschriftung der Seite, nicht den Feldnamen (Z6).
+    const mailFehler = require('./lib/zev').zevMailFeldFehler(b);
+    if (mailFehler) return res.status(400).json({ error: mailFehler });
     await pool.query(
       `INSERT INTO zev_config (stweg, aktiv, alias_domain, alias_prefix, archiv_mailbox, invoice_email, axova_email, notizen, eigentuemer_sieht_mieter, allgemein_email, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
@@ -10029,8 +10082,11 @@ async function verteilerPortalPerm(req) {
 app.get('/api/verteiler', authMiddleware, async (req, res) => {
   try {
     let verwStwegs = null;
+    let darfSenden = true;
     if (!req.user?.isAdmin) {
-      verwStwegs = [...verteilerVerwaltung.portalVerteilerStwegs(req.user?.groups || [], await verteilerPortalPerm(req))];
+      const perm = await verteilerPortalPerm(req);
+      darfSenden = verteilerVerwaltung.portalDarfSendenRecht(perm); // V10: schreiben
+      verwStwegs = [...verteilerVerwaltung.portalVerteilerStwegs(req.user?.groups || [], perm)];
       if (!verwStwegs.length) return res.status(403).json({ error: 'Admin-Rechte erforderlich' });
     }
     const result = await pool.query(
@@ -10078,8 +10134,8 @@ app.get('/api/verteiler', authMiddleware, async (req, res) => {
       v.member_count = allEmails.size;
       v.resolved_emails = [...allEmails];
     }));
-    if (verwStwegs) return res.json({ verteiler: rows.map(verteilerVerwaltung.fuerVerwaltung), nur_lesen: true });
-    res.json({ verteiler: rows });
+    if (verwStwegs) return res.json({ verteiler: rows.map(verteilerVerwaltung.fuerVerwaltung), nur_lesen: true, darf_senden: darfSenden });
+    res.json({ verteiler: rows, darf_senden: true });
   } catch (err) {
     res.status(500).json({ error: 'Fehler beim Laden der Verteiler' });
   }
@@ -11531,8 +11587,9 @@ async function walkDocs(dir, prefix = '') {
 app.get('/api/documents', authMiddleware, async (req, res) => {
   try {
     const allDocs = await walkDocs(DOCS_PATH);
+    const ctx = await docRechteKontext(req);
     const groups = req.user?.groups || [];
-    const docs = allDocs.filter(f => isDocPathAllowed(f.path, groups));
+    const docs = allDocs.filter(f => isDocPathAllowed(f.path, groups, ctx));
     res.json(docs);
   } catch (err) {
     console.error('Documents list error:', err.message);
@@ -11559,7 +11616,7 @@ app.post('/api/documents-preview', authMiddleware, async (req, res) => {
     }
 
     const groups = req.user?.groups || [];
-    if (!isDocPathAllowed(filePath, groups)) {
+    if (!isDocPathAllowed(filePath, groups, await docRechteKontext(req))) {
       return res.status(403).json({ error: 'Kein Zugriff auf dieses Dokument' });
     }
 
@@ -11634,7 +11691,7 @@ app.get('/api/documents/:path(*)', authMiddleware, async (req, res) => {
     }
 
     const groups = req.user?.groups || [];
-    if (!isDocPathAllowed(filePath, groups)) {
+    if (!isDocPathAllowed(filePath, groups, await docRechteKontext(req))) {
       return res.status(403).json({ error: 'Kein Zugriff auf dieses Dokument' });
     }
 
@@ -11747,7 +11804,7 @@ app.post('/api/documents/folder', authMiddleware, canManageDocs, async (req, res
 
     const folderPath = `${parent}/${safeName}`;
     const groups = req.user?.groups || [];
-    if (!canWriteDocPath(folderPath + '/x', groups)) {
+    if (!canWriteDocPath(folderPath + '/x', groups, await docRechteKontext(req))) {
       return res.status(403).json({ error: 'Kein Schreibzugriff' });
     }
 
@@ -11787,7 +11844,7 @@ app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, re
     const filePath = parts.join('/');
 
     const groups = req.user?.groups || [];
-    if (!canWriteDocPath(filePath, groups)) {
+    if (!canWriteDocPath(filePath, groups, await docRechteKontext(req))) {
       return res.status(403).json({ error: 'Kein Schreibzugriff auf diesen Ordner' });
     }
 
@@ -11830,7 +11887,7 @@ app.delete('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req,
     }
 
     const groups = req.user?.groups || [];
-    if (!canWriteDocPath(filePath, groups)) {
+    if (!canWriteDocPath(filePath, groups, await docRechteKontext(req))) {
       return res.status(403).json({ error: 'Kein Schreibzugriff auf diesen Ordner' });
     }
 
@@ -11858,7 +11915,8 @@ function papierkorbDeps() { return { pool, fs, root: DOCS_PATH }; }
 app.get('/api/documents-papierkorb', authMiddleware, canManageDocs, async (req, res) => {
   try {
     const groups = req.user?.groups || [];
-    const liste = await papierkorb.liste(papierkorbDeps(), (pfad) => canWriteDocPath(pfad, groups));
+    const ctx = await docRechteKontext(req);
+    const liste = await papierkorb.liste(papierkorbDeps(), (pfad) => canWriteDocPath(pfad, groups, ctx));
     res.json({ eintraege: liste, tage: papierkorb.TAGE });
   } catch (err) {
     console.error('[DOCS] Papierkorb-Liste:', err.message);
@@ -11871,7 +11929,8 @@ app.post('/api/documents-papierkorb/:id/wiederherstellen', authMiddleware, canMa
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige ID' });
     const groups = req.user?.groups || [];
-    const r = await papierkorb.wiederherstellen(papierkorbDeps(), id, (pfad) => canWriteDocPath(pfad, groups));
+    const ctx = await docRechteKontext(req);
+    const r = await papierkorb.wiederherstellen(papierkorbDeps(), id, (pfad) => canWriteDocPath(pfad, groups, ctx));
     if (!r) return res.status(404).json({ error: 'Nicht im Papierkorb' });
     await adminProtokoll.eintragen(pool, null, req, { bereich: 'dokumente', aktion: 'wiederhergestellt', ziel: r.pfad, detail: r.umbenannt ? `ursprünglich ${r.eintrag.pfad}` : null })
       .catch(e => console.warn('[DOCS] Protokoll:', e.message));
@@ -11900,7 +11959,8 @@ app.post('/api/documents/move', authMiddleware, canManageDocs, async (req, res) 
     }
 
     const groups = req.user?.groups || [];
-    if (!canWriteDocPath(from, groups) || !canWriteDocPath(to, groups)) {
+    const ctx = await docRechteKontext(req);
+    if (!canWriteDocPath(from, groups, ctx) || !canWriteDocPath(to, groups, ctx)) {
       return res.status(403).json({ error: 'Kein Schreibzugriff' });
     }
 
@@ -12624,6 +12684,7 @@ app.post('/api/projects', authMiddleware, async (req, res) => {
         const r = await pool.query(
           'INSERT INTO projects (slug, title, description, status, stweg) VALUES ($1, $2, $3, $4, $5) RETURNING *',
           [slug, title, description, status, st.stweg]);
+        projektStwegsLeeren(); // P1: Dokumente gleich hochladbar
         return res.status(201).json(r.rows[0]);
       } catch (e) { if (e.code !== '23505') throw e; }
     }
@@ -12659,6 +12720,7 @@ app.put('/api/projects/:slug', authMiddleware, requireProjektBearbeiten, async (
     if (!sets.length) return res.status(400).json({ error: 'Keine Änderungen' });
     params.push(req.params.slug);
     const r = await pool.query(`UPDATE projects SET ${sets.join(', ')}, updated_at = NOW() WHERE slug = $${params.length} RETURNING *`, params);
+    if (b.stweg !== undefined) projektStwegsLeeren(); // P1: Dokumentrechte folgen der STWEG
     res.json(r.rows[0]);
   } catch (err) { console.error('[projekt-bearbeiten]', err.message); res.status(500).json({ error: 'Projekt konnte nicht gespeichert werden' }); }
 });
@@ -12787,7 +12849,7 @@ app.post('/api/projects/:slug/attachments', authMiddleware, requireProjektBearbe
     // Verknuepfen nur, was man selbst lesen darf — ein oeffentliches Projekt liefert
     // seine Anhaenge ohne Login aus (vorher: fremde STWEG-Dokumente veroeffentlichbar).
     const dp = String(doc_path);
-    if (dp.includes('..') || dp.startsWith('/') || dp.includes('\0') || !isDocPathAllowed(dp, req.user.groups || [])) {
+    if (dp.includes('..') || dp.startsWith('/') || dp.includes('\0') || !isDocPathAllowed(dp, req.user.groups || [], await docRechteKontext(req))) {
       return res.status(403).json({ error: 'Kein Zugriff auf dieses Dokument' });
     }
     const { rows: [row] } = await pool.query(
@@ -20670,8 +20732,9 @@ app.get('/api/technik/mitglieder', authMiddleware, requirePermission('reklamatio
   } catch (e) { console.error('[technik-mitglieder]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 // History/Verlauf einer Reklamation (wer hat wann was gemacht) — best-effort.
-async function logReklEvent(reklId, who, text) {
-  try { await pool.query('INSERT INTO reklamation_events (reklamation_id, who, event) VALUES ($1,$2,$3)', [reklId, String(who || '').slice(0, 200), String(text || '').slice(0, 500)]); } catch (e) { /* best-effort */ }
+// anMelder: der Eintrag ging so an die meldende Person (R1) und steht in ihrem Verlauf.
+async function logReklEvent(reklId, who, text, { anMelder = false } = {}) {
+  try { await pool.query('INSERT INTO reklamation_events (reklamation_id, who, event, an_melder) VALUES ($1,$2,$3,$4)', [reklId, String(who || '').slice(0, 200), String(text || '').slice(0, 500), anMelder === true]); } catch (e) { /* best-effort */ }
 }
 // Persoenliche Benachrichtigung an ein zugewiesenes Technik-Mitglied (per Name aufgeloest):
 // WhatsApp (falls Opt-In) + Web-Push. Gibt true zurueck, wenn ein Technik-User gefunden wurde.
@@ -20718,10 +20781,10 @@ app.get('/api/reklamationen/:id/history', authMiddleware, requirePermission('rek
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
     if (!(await darfReklamation(req.user, id))) return res.status(404).json({ error: 'Nicht gefunden' });
-    const r = await pool.query('SELECT created_at, who, event FROM reklamation_events WHERE reklamation_id = $1 ORDER BY created_at ASC, id ASC', [id]);
+    const r = await pool.query('SELECT created_at, who, event, an_melder FROM reklamation_events WHERE reklamation_id = $1 ORDER BY created_at ASC, id ASC', [id]);
     // Melder (weder Admin noch Ausschuss/Verwaltung) sieht nur Statuswechsel und
-    // Nachrichten an sie, wie /meine/:id/verlauf (lib/reklamation-melder.js, F2-7).
-    const events = reklNurMelder(req.user) ? r.rows.filter(e => reklMelder.melderSiehtEreignis(e.event)) : r.rows;
+    // Nachrichten an sie, wie /meine/:id/verlauf (lib/reklamation-melder.js, F2-7, R1).
+    const events = reklNurMelder(req.user) ? reklMelder.melderVerlauf(r.rows) : r.rows;
     res.json({ events });
   } catch (e) { console.error('[reklamation-history]', e); res.status(500).json({ error: 'Fehler' }); }
 });
@@ -20768,8 +20831,10 @@ app.post('/api/reklamationen/:id/history', authMiddleware, requirePermission('re
     const rk = (await pool.query('SELECT id, person_id, beschreibung FROM reklamationen WHERE id = $1', [id])).rows[0];
     if (!rk) return res.status(404).json({ error: 'Nicht gefunden' });
     const who = req.user.name || req.user.email || 'unbekannt';
-    await logReklEvent(id, who, `🔧 ${text.slice(0, 480)}`);
-    if (rk.person_id) notifyMelderSchritt(rk, text).catch((e) => console.warn('[reklamation-schritt-notify]', e.message));
+    // R1: Der Schritt geht per WhatsApp/Push an die meldende Person -> auch in ihren Verlauf.
+    const anMelder = !!rk.person_id;
+    await logReklEvent(id, who, `🔧 ${text.slice(0, 480)}`, { anMelder });
+    if (anMelder) notifyMelderSchritt(rk, text).catch((e) => console.warn('[reklamation-schritt-notify]', e.message));
     const r = await pool.query('SELECT created_at, who, event FROM reklamation_events WHERE reklamation_id = $1 ORDER BY created_at ASC, id ASC', [id]);
     res.json({ ok: true, events: r.rows });
   } catch (e) { console.error('[reklamation-history-post]', e); res.status(500).json({ error: 'Fehler' }); }
@@ -20889,7 +20954,10 @@ app.get('/api/melde-ort/:code', async (req, res) => {
 // sanitisiert (KEIN Melder-Name/-Email — Transparenz-Board, kein Datenleck).
 app.get('/api/reklamationen/uebersicht', authMiddleware, async (req, res) => {
   try {
-    const stwegs = [...getUserStwegs(req.user.groups || [])];
+    // R2: die STWEG-Seite uebergibt ?stweg=N (lib/rekl-uebersicht.js)
+    const auswahl = require('./lib/rekl-uebersicht').uebersichtStwegs(req.user.groups || [], req.query.stweg);
+    if (auswahl.error) return res.status(auswahl.status).json({ error: auswahl.error });
+    const stwegs = auswahl.stwegs;
     const params = [];
     let cond = 'r.stweg IS NULL';
     if (stwegs.length) { params.push(stwegs); cond = `(r.stweg = ANY($${params.length}::int[]) OR r.stweg IS NULL)`; }
@@ -21032,11 +21100,11 @@ app.get('/api/reklamationen/meine/:id/verlauf', authMiddleware, async (req, res)
       [id, email]);
     if (own.rows.length === 0) return res.status(404).json({ error: 'Nicht deine Meldung' });
     const r = await pool.query(
-      `SELECT created_at, who, event FROM reklamation_events
+      `SELECT created_at, who, event, an_melder FROM reklamation_events
         WHERE reklamation_id = $1
         ORDER BY created_at ASC, id ASC`, [id]);
-    // Nur Erfassung, Statuswechsel und Nachricht an sie (lib/reklamation-melder.js, F2-7)
-    res.json({ events: r.rows.filter(e => reklMelder.melderSiehtEreignis(e.event)) });
+    // Nur Erfassung, Statuswechsel und was an sie ging (lib/reklamation-melder.js, F2-7, R1)
+    res.json({ events: reklMelder.melderVerlauf(r.rows) });
   } catch (e) { console.error('[reklamation-meine-verlauf]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 // Melder-Benachrichtigung bei Status-Wechsel (E-Mail + WhatsApp + Web-Push) — gemeinsam
@@ -29644,6 +29712,8 @@ async function initDB() {
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_rekl_events ON reklamation_events(reklamation_id, created_at);
+      -- R1: Eintrag ging per WhatsApp/Push an die meldende Person -> in ihrem Verlauf
+      ALTER TABLE reklamation_events ADD COLUMN IF NOT EXISTS an_melder BOOLEAN NOT NULL DEFAULT false;
       -- Melde-Orte fuer QR-Code-Sticker: ein fester Ort (z.B. "Aufzug Haus 9")
       -- mit kurzem code im QR-Link -> Meldeformular mit vorausgefuelltem Ort.
       CREATE TABLE IF NOT EXISTS reklamation_orte (
@@ -30657,7 +30727,7 @@ async function initDB() {
         INSERT INTO permissions (group_name, page, access) VALUES
         ('Verwaltung', 'bewohner-verwaltung', 'write'),
         ('Verwaltung', 'energie-monitor', 'read'),
-        ('Verwaltung', 'email-verteiler', 'read'),
+        ('Verwaltung', 'email-verteiler', 'write'),
         ('Verwaltung', 'zähler', 'read'),
         ('Verwaltung', 'kontakte', 'read'),
         ('Verwaltung', 'verwaltung', 'read')
@@ -30707,7 +30777,8 @@ async function initDB() {
       // vollmachten write: fuer Dritte erfassen, Papier aktivieren (Entscheid Stefan 27.11.2026)
       ['vollmachten', 'write'], ['auslagen', 'read'], ['zähler', 'read'], ['energie-monitor', 'read'],
       ['waschküche-admin', 'read'], ['projekte', 'write'], ['kontakte', 'read'], ['verwaltung', 'read'],
-      ['email-verteiler', 'read'], ['bewohner-verwaltung', 'read'],
+      // email-verteiler write: im Portal an die Verteiler senden (Entscheid Stefan 27.11.2026, V10)
+      ['email-verteiler', 'write'], ['bewohner-verwaltung', 'read'],
     ];
     for (const groupName of Object.values(VERWALTUNG_GROUPS)) {
       for (const [page, access] of VERWALTUNG_SEITENRECHTE) {
@@ -30724,6 +30795,13 @@ async function initDB() {
     await client.query(
       `INSERT INTO permissions (group_name, page, access) VALUES ('Verwaltung', 'vollmachten', 'write')
        ON CONFLICT (group_name, page) DO NOTHING`);
+    // P2: neue Vorgaben fuer schon bestehende Gruppen einmalig und gezielt
+    // setzen (lib/rechte-migrationen.js, Tabelle rechte_migrationen).
+    try {
+      for (const m of await rechteMigrationen.rechteMigrationenAusfuehren(client)) {
+        console.log(`[rechte] Migration ${m.name}: ${m.geaendert} Zeile(n) gesetzt`);
+      }
+    } catch (e) { console.error('[rechte] Migration fehlgeschlagen (naechster Start versucht erneut):', e.message); }
 
     // Seed auslagen read für alle Eigentümer-Gruppen (eigene Auslagen einsehen/einreichen)
     const eigentuemerGroups = Object.values(STWEG_GROUPS).map(g => g.eigentuemer).filter(Boolean);

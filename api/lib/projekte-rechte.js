@@ -75,6 +75,33 @@ function darfAnlegen(auswahl) {
   return !!(auswahl && (auswahl.alle || auswahl.ohneStweg || auswahl.stwegs.length));
 }
 
+// ─── Dokumente eines Projekts (Ordner projekte/<slug>/…, Befund P1) ────
+// Gleiche Regel wie das Projekt selbst: hochladen, loeschen, verschieben darf,
+// wer das Projekt bearbeiten darf (projektBearbeiten: Ausschuss der eigenen
+// STWEG bzw. jeder Ausschuss bei Kooperations-Projekten, Verwaltung mit
+// „projekte“ = schreiben fuer ihre STWEG(s)). Lesen duerfen zusaetzlich alle
+// Eigentuemer (wie bisher) und die Verwaltung (ab lesen) fuer Projekte ihrer
+// STWEG(s) und Kooperations-Projekte.
+// projektStwegs: Map slug -> stweg|null der bestehenden Projekte.
+// Liefert null, wenn der Pfad nicht im Ordner projekte liegt.
+function projektDokRecht(groups, perm, filePath, projektStwegs) {
+  const seg = String(filePath || '').split('/').filter(x => x && x !== '.');
+  if (seg[0] !== 'projekte') return null;
+  const g = groups || [];
+  if (isTechnik(g) || isPraesident(g)) return { lesen: true, schreiben: true };
+  const eigentuemer = istEigentuemer(g);
+  // Datei direkt unter projekte/ oder unbekanntes Projekt: keinem Projekt
+  // zuzuordnen – lesen wie bisher die Eigentuemer, schreiben nur Technik/Praesident.
+  const slug = seg.length >= 3 ? seg[1] : null;
+  if (!slug || !projektStwegs || !projektStwegs.has(slug)) return { lesen: eigentuemer, schreiben: false };
+  const stweg = projektStwegs.get(slug);
+  const schreiben = projektBearbeiten(g, perm, stweg);
+  const ohneStweg = stweg === null || stweg === undefined || stweg === '';
+  const verwLesen = (STUFE[perm] || 0) >= 1
+    && (ohneStweg ? isVerwaltungForAny(g) : isVerwaltungFor(g, Number(stweg)));
+  return { lesen: eigentuemer || verwLesen || schreiben, schreiben };
+}
+
 // Adresskuerzel aus dem Titel (ae/oe/ue, nur a-z0-9 und Bindestrich, max. 60)
 function slugAusTitel(titel) {
   return String(titel || '').toLowerCase()
@@ -88,4 +115,5 @@ const PROJEKT_STATUS = ['geplant', 'aktiv', 'abgeschlossen', 'archiviert'];
 module.exports = {
   projekteLesen, projekteKommentieren, projektAuslagenSicht,
   projektBearbeiten, projektAnlegenAuswahl, darfAnlegen, slugAusTitel, PROJEKT_STATUS,
+  projektDokRecht,
 };
