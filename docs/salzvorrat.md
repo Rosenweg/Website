@@ -22,17 +22,29 @@ Einfüllen unter null wird abgewiesen (409, „zuerst Anlieferung buchen“).
 
 ## Reichweite und Meldung
 
-1. **Verbrauch** je Lager aus den Einfüllungen der letzten 26 Wochen. Ein am
-   Tag t eingefüllter Sack reicht bis zur nächsten Einfüllung; die Säcke der
-   Einfüllungen 1…n−1 decken also die Zeit von der ersten bis zur letzten
-   Einfüllung: `kg/Woche = kg(1…n−1) / Wochen(t_n − t_1)`.
-2. **Genug Daten** = mindestens 3 Einfüllungen, die mindestens 14 Tage
-   auseinanderliegen. Dann `Reichweite = Bestand kg / kg pro Woche`;
+1. **Zusammenfassen**: Buchungen „Sack eingefüllt“, die höchstens 6 Stunden
+   nach der vorherigen kommen, sind *eine* Einfüllung (kg zusammengezählt) —
+   wer 10 Säcke auf einmal einfüllt und einzeln scannt, hat einmal eingefüllt.
+2. **Datenlücken** zählen nicht: Ein Abstand zwischen zwei Einfüllungen ist
+   eine Lücke, wenn er länger ist als 3 × üblich (Median der Abstände, bei
+   einer grossen Einfüllung mindestens deren kg × Median der Tage je kg —
+   10 Säcke halten zu Recht länger), oder länger als 90 Tage je 25 kg der
+   vorherigen Einfüllung (gilt auch, wenn es für den Median noch keine 3
+   Abstände gibt). Die Lücken teilen den Verlauf in Abschnitte.
+3. **Verbrauch** aus dem jüngsten Abschnitt mit genug Daten — darin
+   bevorzugt die letzten 26 Wochen, sonst der ganze Abschnitt. Reicht der
+   jüngste nicht (etwa die erste Einfüllung nach einer Lücke), der letzte gute
+   Abschnitt davor. Eine Einfüllung reicht bis zur nächsten; die Einfüllungen
+   1…n−1 decken die Zeit von der ersten bis zur letzten:
+   `kg/Woche = kg(1…n−1) / Wochen(t_n − t_1)`. Die API nennt die Grundlage
+   (`verbrauch_grundlage`: von, bis, Anzahl, `aktuell`).
+4. **Genug Daten** = mindestens 3 (zusammengefasste) Einfüllungen, die
+   mindestens 14 Tage auseinanderliegen. Dann `Reichweite = Bestand kg / kg pro Woche`;
    knapp, wenn sie unter `schwelle_wochen` liegt.
-3. **Sonst Mindestbestand**: knapp bei `Bestand ≤ mindest_saecke`.
+5. **Sonst Mindestbestand**: knapp bei `Bestand ≤ mindest_saecke`.
    Ein leeres Lager ist immer knapp — aber erst, wenn darin je gebucht wurde
    (ein Lager ohne Buchungen ist „noch nicht in Betrieb“ und meldet nichts).
-4. **Mail** an `SALZ_MELDUNG_AN` (Vorgabe `technik@rosenweg4303.ch`) und an die
+6. **Mail** an `SALZ_MELDUNG_AN` (Vorgabe `technik@rosenweg4303.ch`) und an die
    Hauswart-Adressen des Lagers (im Portal je Lager), einmal je
    Unterschreitung. Bleibt es knapp, eine **Erinnerung** nach
    `wiederholung_tage`, gezählt ab der letzten Mail oder der letzten
@@ -43,19 +55,27 @@ Geprüft wird nach jeder Buchung und stündlich (Erinnerungen nur 7–20 Uhr).
 
 ## Nächster Sack
 
-Je Lager: **letzte Einfüllung + (kg dieser Einfüllung ÷ kg pro Woche)**, auf
-den Tag (Zürich) — angezeigt als „Nächster Sack etwa am …“ in der App und auf
-`salz.html`. Ohne Verbrauch (zu wenig Daten) kein Termin. Wer früher
-einfüllt, verschiebt ihn; wer eine Einfüllung rückgängig macht, holt den
-alten zurück.
+Je Lager: **letzte (zusammengefasste) Einfüllung + ein Sack (`kg_je_sack`) ÷
+kg pro Woche**, auf den Tag (Zürich) — dann ist in der Anlage wieder Platz für
+einen Sack (Präzisierung Stefan 27.11.2026). Auch nach 10 Säcken auf einmal
+zählt nur ein Sack; wie lange alles reicht, steht separat in
+`inhalt_reicht_bis`. Angezeigt als „Nächster Sack etwa am …“ (eine Schätzung)
+in der App und auf `salz.html`. Ohne genug Daten kein Termin, sondern
+`naechster_sack_hinweis` (z. B. „Noch zu wenig Daten für eine Schätzung …“).
+Nach jeder Einfüllung wird neu ab dieser gerechnet; wer eine Einfüllung
+rückgängig macht, holt den alten Termin zurück.
 
-Am fälligen Tag ab 8 Uhr (geprüft alle 15 Minuten) geht **einmal je
-Fälligkeit** eine Mail an die Hauswart-Adressen des Lagers, ohne Hauswart an
-`SALZ_MELDUNG_AN`. Dazu Web-Push (`lib/webpush.js`, dieselben Abos wie die
-Rosenweg-PWA) an die Hauswart-Konten. War der Server am Tag selbst weg, wird
-bis 2 Tage nachgeholt; ältere Fälligkeiten (z. B. aus importierten Listen)
-lösen nichts aus. Je Lager abschaltbar (`erinnerung_einfuellen`, Portal).
-Gemerkt wird in `einfuellen_gemeldet_fuer`.
+Ab dem Tag davor um 8 Uhr (geprüft alle 15 Minuten, Mails nur 8–20 Uhr) geht
+**einmal je Fälligkeit** — also einmal seit der letzten Einfüllung,
+gemerkt in `einfuellen_gemeldet_am` — eine Mail über denselben Weg wie die
+Nachbestell-Meldung (`loggedSendMail`, Mailcow-Gateway) an die
+Hauswart-Adressen des Lagers, ohne Hauswart an `SALZ_MELDUNG_AN`. Verschiebt
+sich der geschätzte Tag danach noch, kommt keine zweite Mail. Dazu Web-Push
+(`lib/webpush.js`, dieselben Abos wie die Rosenweg-PWA) an die Hauswart-Konten.
+War der Server weg, wird bis 2 Tage nach dem Tag nachgeholt; ältere
+Fälligkeiten (z. B. aus importierten Listen) lösen nichts aus. Je Lager
+abschaltbar (`erinnerung_einfuellen`, Portal). `einfuellen_gemeldet_fuer`
+zeigt den Tag der letzten Erinnerung.
 
 ## API (`/api/salz`)
 
@@ -88,7 +108,7 @@ Grenzen je Konto: 600 Lese- und 120 Schreibanfragen pro Stunde (429 mit
 | | |
 |---|---|
 | `GET /ich` | `{name, darf_buchen, darf_einstellen, darf_sorten_erfassen, lager_ids}` |
-| `GET /lager` | die Lager, in denen man buchen darf, mit Ort, Bestand, Verbrauch, Reichweite, `knapp` (Hauswart/Gruppen nur für Technik) |
+| `GET /lager` | die Lager, in denen man buchen darf, mit Ort, Bestand, Verbrauch (`verbrauch_kg_woche`, `verbrauch_grundlage`), Reichweite, `knapp`, `naechster_sack` (YYYY-MM-DD, Schätzung) bzw. `naechster_sack_hinweis`, `inhalt_reicht_bis`, `letzte_einfuellung_zusammen` (Hauswart/Gruppen nur für Technik) |
 | `GET /lager/:id/verlauf?anzahl=50` | Buchungen |
 | `PUT /lager/:id` | `{schwelle_wochen, mindest_saecke, wiederholung_tage, hauswart_emails, bewohner_gruppen, erinnerung_einfuellen}` |
 | `POST /lager/:id/inventur` | `{saecke}` gezählter Bestand |

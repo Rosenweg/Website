@@ -27,7 +27,7 @@ const { HAEUSER, stwegVonHaus } = require('../lib/haeuser');
 const { loggedSendMail, MAIL_FROM } = require('../lib/mail');
 const {
   verbrauchProWoche, lagerStand, meldeEntscheid, meldungsText, reichtText,
-  naechsterSack, einfuellErinnern, einfuellText, tagText,
+  naechsterSack, inhaltReichtBis, prognoseHinweis, einfuellErinnern, einfuellText, tagText,
 } = require('../lib/salz');
 const webpush = require('../lib/webpush');
 
@@ -138,7 +138,8 @@ function ensureSchema() {
           ADD COLUMN IF NOT EXISTS hauswart_emails TEXT[] NOT NULL DEFAULT '{}',
           ADD COLUMN IF NOT EXISTS bewohner_gruppen TEXT[],
           ADD COLUMN IF NOT EXISTS erinnerung_einfuellen BOOLEAN NOT NULL DEFAULT true,
-          ADD COLUMN IF NOT EXISTS einfuellen_gemeldet_fuer DATE`);
+          ADD COLUMN IF NOT EXISTS einfuellen_gemeldet_fuer DATE,
+          ADD COLUMN IF NOT EXISTS einfuellen_gemeldet_am TIMESTAMPTZ`);
       await pool.query(`
         CREATE TABLE IF NOT EXISTS salz_sorten (
           barcode TEXT PRIMARY KEY,
@@ -196,7 +197,8 @@ async function lagerUebersicht(lagerId = null, db = pool) {
       WHERE l.aktiv AND ($1::int IS NULL OR l.id = $1)
       GROUP BY l.id ORDER BY l.reihenfolge, l.id`, [lagerId]);
   const ein = await db.query(
-    `SELECT lager_id, gebucht_am AS am, (-saecke * kg_je_sack)::float AS kg
+    `SELECT lager_id, gebucht_am AS am, (-saecke * kg_je_sack)::float AS kg,
+            -saecke AS saecke, kg_je_sack::float AS kg_je_sack
        FROM salz_buchungen
       WHERE art = 'eingefuellt' AND storniert_am IS NULL
         AND ($1::int IS NULL OR lager_id = $1)`, [lagerId]);
@@ -211,22 +213,36 @@ async function lagerUebersicht(lagerId = null, db = pool) {
     // Ein Lager, in dem noch nie gebucht wurde, ist noch nicht in Betrieb:
     // kein Alarm für „0 Säcke“, bevor jemand die erste Lieferung erfasst hat.
     const inBetrieb = l.buchungen > 0;
-    // Nächster Sack: letzte Einfüllung + ihre kg ÷ Verbrauch pro Woche.
-    const letzte = ein.rows.filter(e => e.lager_id === l.id)
-      .reduce((m, e) => (!m || new Date(e.am) > new Date(m.am) ? e : m), null);
-    const faellig = naechsterSack({ letzteAm: letzte?.am, letzteKg: letzte?.kg, kgProWoche: v.kgProWoche });
+    // Nächster Sack: letzte (zusammengefasste) Einfüllung + ein Sack ÷ Verbrauch.
+    const letzte = v.letzte;
+    const letzteAm = letzte ? new Date(letzte.t) : null;
+    const faellig = naechsterSack({ letzteAm, sackKg: letzte?.kgJeSack, kgProWoche: v.kgProWoche });
+    const tag = t => (t == null ? null : new Date(t).toISOString().slice(0, 10));
     return {
       id: l.id, schluessel: l.schluessel, name: l.name, haus: l.haus, ort: l.ort || null, in_betrieb: inBetrieb,
       bestand_saecke: l.bestand_saecke, bestand_kg: Math.round(l.bestand_kg * 10) / 10,
       verbrauch_kg_woche: v.kgProWoche == null ? null : Math.round(v.kgProWoche * 10) / 10,
       einfuellungen_im_fenster: v.einfuellungen,
+      // Woraus der Verbrauch gerechnet ist: zusammengefasste Einfüllungen von–bis;
+      // aktuell=false heisst: aus einem älteren Abschnitt vor einer Datenlücke.
+      verbrauch_grundlage: v.kgProWoche == null ? null
+        : { von: tag(v.von), bis: tag(v.bis), einfuellungen: v.einfuellungen, aktuell: v.aktuell, luecken: v.luecken },
       modus: stand.modus, reichweite_wochen: stand.reichweiteWochen, knapp: inBetrieb && stand.knapp,
       schwelle_wochen: schwelle, mindest_saecke: l.mindest_saecke, wiederholung_tage: l.wiederholung_tage,
       meldung_seit: l.meldung_seit, meldung_zuletzt: l.meldung_zuletzt,
       letzte_anlieferung: l.letzte_anlieferung, letzte_einfuellung: l.letzte_einfuellung,
       hauswart_emails: l.hauswart_emails || [], bewohner_gruppen: l.bewohner_gruppen || [],
-      naechster_sack: faellig, erinnerung_einfuellen: l.erinnerung_einfuellen !== false,
+      // Geschätzter Tag, an dem wieder ein Sack in die Anlage passt; ohne
+      // genug Daten null und naechster_sack_hinweis sagt warum.
+      naechster_sack: faellig,
+      naechster_sack_hinweis: faellig ? null : prognoseHinweis({ letzte, kgProWoche: v.kgProWoche }),
+      inhalt_reicht_bis: inhaltReichtBis({ letzteAm, letzteKg: letzte?.kg, kgProWoche: v.kgProWoche }),
+      letzte_einfuellung_zusammen: letzte
+        ? { am: letzteAm.toISOString(), saecke: letzte.saecke, kg: Math.round(letzte.kg * 10) / 10, kg_je_sack: letzte.kgJeSack }
+        : null,
+      erinnerung_einfuellen: l.erinnerung_einfuellen !== false,
       einfuellen_gemeldet_fuer: l.gemeldet_fuer || null,
+      einfuellen_gemeldet_am: l.einfuellen_gemeldet_am || null,
     };
   });
 }
@@ -299,10 +315,13 @@ function meldelaufBald(lagerId) {
 
 // ─── Erinnerung: nächster Sack einfüllen ───────────────────────────
 //
-// Am fälligen Tag ab 8 Uhr, einmal je Fälligkeit, an die Hauswart-Adressen
-// des Lagers — ohne Hauswart an die Technik. Dazu Web-Push (lib/webpush.js,
-// dieselben Abos wie die Rosenweg-PWA) an die Hauswart-Konten. Wer früher
-// einfüllt, verschiebt die Fälligkeit; je Lager abschaltbar.
+// Ab dem Tag vor dem geschätzten Tag (8–20 Uhr), einmal je Fälligkeit (=
+// einmal seit der letzten Einfüllung, gemerkt in einfuellen_gemeldet_am), per
+// Mail über denselben Weg wie die Nachbestell-Meldung (loggedSendMail,
+// Mailcow-Gateway) an die Hauswart-Adressen des Lagers — ohne Hauswart an die
+// Technik. Dazu Web-Push (lib/webpush.js, dieselben Abos wie die Rosenweg-PWA)
+// an die Hauswart-Konten. Wer früher einfüllt, startet eine neue Fälligkeit;
+// je Lager abschaltbar.
 let einfuelllaufAktiv = false;
 async function einfuelllauf({ jetzt = new Date() } = {}) {
   if (einfuelllaufAktiv) return;
@@ -310,32 +329,36 @@ async function einfuelllauf({ jetzt = new Date() } = {}) {
   try {
     await ensureSchema();
     for (const l of await lagerUebersicht()) {
-      if (!einfuellErinnern({ faellig: l.naechster_sack, gemeldetFuer: l.einfuellen_gemeldet_fuer,
-        eingeschaltet: l.erinnerung_einfuellen, inBetrieb: l.in_betrieb, jetzt })) continue;
+      const letzteAm = l.letzte_einfuellung_zusammen?.am || null;
+      if (!einfuellErinnern({ faellig: l.naechster_sack, gemeldetAm: l.einfuellen_gemeldet_am,
+        letzteEinfuellung: letzteAm, eingeschaltet: l.erinnerung_einfuellen, inBetrieb: l.in_betrieb, jetzt })) continue;
       // Erst merken (bedingt, gegen doppelte Läufe), dann senden; bei Fehler zurück.
+      // Einmal je Fälligkeit = einmal seit der letzten Einfüllung.
       const gesetzt = await pool.query(
-        `UPDATE salz_lager SET einfuellen_gemeldet_fuer = $2::date
-          WHERE id = $1 AND einfuellen_gemeldet_fuer IS DISTINCT FROM $2::date RETURNING id`, [l.id, l.naechster_sack]);
+        `UPDATE salz_lager SET einfuellen_gemeldet_fuer = $2::date, einfuellen_gemeldet_am = NOW()
+          WHERE id = $1 AND (einfuellen_gemeldet_am IS NULL OR einfuellen_gemeldet_am < $3::timestamptz) RETURNING id`,
+        [l.id, l.naechster_sack, letzteAm]);
       if (!gesetzt.rowCount) continue;
       const hauswart = (l.hauswart_emails || []).map(e => String(e).trim().toLowerCase()).filter(Boolean);
       const an = hauswart.length ? hauswart : [MELDUNG_AN];
       try {
         await loggedSendMail({
           from: MAIL_FROM, to: an.join(', '),
-          subject: `Salz einfüllen – ${l.name} (${tagText(l.naechster_sack)})`,
+          subject: `Nächster Sack Salz – ${l.name} (etwa ${tagText(l.naechster_sack)})`,
           text: einfuellText({ lager: l.name, ort: l.ort, faellig: l.naechster_sack, bestandSaecke: l.bestand_saecke,
-            kgProWoche: l.verbrauch_kg_woche, portalUrl: PORTAL_URL }),
+            kgProWoche: l.verbrauch_kg_woche, sackKg: l.letzte_einfuellung_zusammen?.kg_je_sack, portalUrl: PORTAL_URL, jetzt }),
         }, 'salz-einfuellen');
         console.log(`[salz] ${l.name}: Einfüll-Erinnerung (${l.naechster_sack}) an ${an.length} Empfänger`);
       } catch (e) {
         console.error(`[salz] Einfüll-Mail ${l.name}:`, e.message);
-        await pool.query('UPDATE salz_lager SET einfuellen_gemeldet_fuer = $2::date WHERE id = $1', [l.id, l.einfuellen_gemeldet_fuer]);
+        await pool.query('UPDATE salz_lager SET einfuellen_gemeldet_fuer = $2::date, einfuellen_gemeldet_am = $3 WHERE id = $1',
+          [l.id, l.einfuellen_gemeldet_fuer, l.einfuellen_gemeldet_am]);
         continue;
       }
       if (hauswart.length) {
         webpush.sendToEmails(hauswart, {
           title: `Salz einfüllen – ${l.name}`,
-          body: `Heute müsste der nächste Sack in die Enthärtungsanlage${l.ort ? ` (${l.ort})` : ''}.`,
+          body: `Etwa ${tagText(l.naechster_sack)} ist in der Enthärtungsanlage wieder Platz für einen Sack${l.ort ? ` (${l.ort})` : ''}.`,
           url: PORTAL_URL, tag: `salz-einfuellen-${l.id}`,
         }).catch(e => console.warn('[salz] Push:', e.message));
       }
