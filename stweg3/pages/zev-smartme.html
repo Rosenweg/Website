@@ -204,7 +204,7 @@
             if (sr && sr.synced) status = '<span class="text-emerald-700">✓ gesynct</span>';
             else if (sr && sr.reason) status = `<span class="text-red-600">${esc(sr.reason)}</span>`;
             else if (w.sync_ready) status = '<span class="text-gray-400">bereit</span>';
-            else status = `<span class="text-amber-600">${w.alias_address ? 'kein Empfänger' : 'kein Eigentümer-Name'}</span>`;
+            else status = `<span class="text-amber-600">${w.alias_address ? 'kein Empfänger' : 'kein Bewohnername'}</span>`;
             const goto = (w.goto || []).map(g => `<span class="inline-block bg-gray-100 rounded px-1.5 py-0.5 text-xs font-mono mr-1 mb-1">${esc(g)}</span>`).join('');
             return `<tr class="border-b last:border-0 align-top">
                 <td class="py-2 pr-3 font-medium">${esc(w.bezeichnung || '—')}</td>
@@ -279,8 +279,10 @@
 
     // ── B3: nicht zugeordnete Rechnungen ──
     function wohnungOptions() {
+        // Z5: Allgemeinzähler mit in der Auswahl; Name = heutiger Bewohner (wie der Alias).
         return '<option value="">— Wohnung wählen —</option>' + WOHNUNGEN.filter(w => w.wohnung_id)
-            .map(w => `<option value="${w.wohnung_id}">${esc(w.bezeichnung || '')} — ${esc(w.bewohner_name || w.eigentuemer_name || '')}</option>`).join('');
+            .map(w => `<option value="${w.wohnung_id}">${esc(w.bezeichnung || '')} — ${esc(w.bewohner_name || w.eigentuemer_name || '')}</option>`).join('')
+            + '<option value="allgemein">Allgemeinzähler (keine Wohnung)</option>';
     }
     function renderUnzugeordnet(rows) {
         const sec = $('unz-section');
@@ -293,7 +295,7 @@
             <td class="py-2 pr-3 text-xs whitespace-nowrap">${esc((z.empfangen_am || '').slice(0, 10))}</td>
             <td class="py-2 pr-3"><span class="font-mono text-xs">${esc(z.alias_address || '—')}</span><br><span class="text-xs text-gray-500">${esc((z.betreff || '').slice(0, 60))}</span></td>
             <td class="py-2 pr-3 whitespace-nowrap">${z.betrag_chf != null ? ('CHF ' + Number(z.betrag_chf).toFixed(2)) : '<span class="text-amber-600 text-xs">kein Betrag</span>'}</td>
-            <td class="py-2 pr-3"><select class="unz-sel border rounded px-2 py-1 text-xs">${wohnungOptions()}</select><label class="block text-xs text-gray-500 mt-1"><input type="checkbox" class="unz-remail"> Re-Mail an Bewohner senden</label></td>
+            <td class="py-2 pr-3"><select class="unz-sel border rounded px-2 py-1 text-xs">${wohnungOptions()}</select><label class="block text-xs text-gray-500 mt-1"><input type="checkbox" class="unz-remail"> Re-Mail senden (an Bewohner bzw. Allgemeinzähler-Empfänger)</label></td>
             <td class="py-2"><button class="unz-assign bg-amber-600 text-white px-3 py-1 rounded text-xs font-semibold hover:bg-amber-700">Zuordnen</button></td>
         </tr>`).join('');
         $('unz-body').querySelectorAll('.unz-assign').forEach(btn => btn.addEventListener('click', onAssign));
@@ -303,15 +305,16 @@
         const id = tr.dataset.id;
         const wid = tr.querySelector('.unz-sel').value;
         const remail = tr.querySelector('.unz-remail').checked;
-        if (!wid) { alert('Bitte eine Wohnung wählen.'); return; }
+        if (!wid) { alert('Bitte eine Wohnung oder den Allgemeinzähler wählen.'); return; }
         e.target.disabled = true; e.target.textContent = '…';
         try {
             const r = await AuthentikAuth.apiFetch(`/api/zev/rechnung/${id}/zuordnen`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ wohnung_id: Number(wid), remail }),
+                body: JSON.stringify(wid === 'allgemein' ? { wohnung_id: 'allgemein', stweg: STWEG, remail } : { wohnung_id: Number(wid), remail }),
             });
             const d = await r.json().catch(() => ({}));
-            if (!r.ok) { alert('Fehler: ' + (d.error || r.status)); e.target.disabled = false; e.target.textContent = 'Zuordnen'; return; }
+            if (!r.ok) { alert('Nicht zugeordnet: ' + (d.error || ('Fehler ' + r.status))); e.target.disabled = false; e.target.textContent = 'Zuordnen'; return; }
+            if (remail && d.remail === false) alert('Zugeordnet, aber die Re-Mail ging nicht raus: ' + (d.remail_error || 'unbekannter Fehler'));
             tr.remove();
             if (!$('unz-body').children.length) $('unz-section').classList.add('hidden');
         } catch (err) { alert('Fehler: ' + err.message); e.target.disabled = false; e.target.textContent = 'Zuordnen'; }
