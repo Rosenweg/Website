@@ -11603,6 +11603,13 @@ app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, re
     const fullPath = safeDocPath(filePath);
     if (!fullPath) return res.status(400).json({ error: 'Ungültiger Pfad' });
 
+    // Befund F3-4: Mit „If-None-Match: *“ nie still ueberschreiben – gibt es die
+    // Datei schon, 412; die Seite fragt nach und schickt dann ohne die Kopfzeile.
+    if (String(req.headers['if-none-match'] || '').trim() === '*') {
+      const da = await fs.stat(fullPath).then(() => true, () => false);
+      if (da) return res.status(412).json({ error: 'Datei mit diesem Namen gibt es schon', path: filePath, vorhanden: true });
+    }
+
     await fs.mkdir(pathModule.dirname(fullPath), { recursive: true });
     await fs.writeFile(fullPath, req.body);
 

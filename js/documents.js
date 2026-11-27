@@ -710,7 +710,9 @@ const RosenwegDocs = {
     if (errorEl) { errorEl.textContent = msg; errorEl.classList.remove('hidden'); }
   },
 
-  async _uploadFile(url, file) {
+  // ohneUeberschreiben: Kopfzeile „If-None-Match: *“ – gibt es die Datei schon,
+  // antwortet der Server 412 und der Fehler traegt vorhanden = true (Befund F3-4).
+  async _uploadFile(url, file, { ohneUeberschreiben = false } = {}) {
     const buffer = await file.arrayBuffer();
     const fileName = this.sanitizeFileName(file.name);
 
@@ -725,6 +727,10 @@ const RosenwegDocs = {
         if (xhr.status >= 200 && xhr.status < 300) {
           this._showUploadSuccess();
           resolve(xhr);
+        } else if (xhr.status === 412) {
+          const e = new Error('Datei mit diesem Namen gibt es schon');
+          e.vorhanden = true;
+          reject(e);
         } else {
           reject(new Error(`Upload fehlgeschlagen (${xhr.status})`));
         }
@@ -736,6 +742,7 @@ const RosenwegDocs = {
       xhr.setRequestHeader('Content-Type', 'application/octet-stream');
       const token = AuthentikAuth.getToken();
       if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      if (ohneUeberschreiben) xhr.setRequestHeader('If-None-Match', '*');
       xhr.send(buffer);
     });
   },
@@ -763,7 +770,19 @@ const RosenwegDocs = {
     this._showProgress(file);
 
     try {
-      await this._uploadFile(`/api/documents/${path}`, file);
+      try {
+        await this._uploadFile(`/api/documents/${path}`, file, { ohneUeberschreiben: true });
+      } catch (err) {
+        if (!err.vorhanden) throw err;
+        // Gleicher Name im Ordner: erst fragen, nie still ueberschreiben (F3-4)
+        if (!confirm(`„${safeName}“ gibt es in diesem Ordner schon.\n\nDie bestehende Datei ersetzen?`)) {
+          this._showUploadError('Nicht hochgeladen – bitte die Datei umbenennen oder „Ersetzen“ wählen.');
+          btn.disabled = false;
+          btn.textContent = 'Hochladen';
+          return;
+        }
+        await this._uploadFile(`/api/documents/${path}`, file);
+      }
       setTimeout(() => { this.closeModal(); this.loadAndRender(true); }, 500);
     } catch (err) {
       this._showUploadError('Fehler: ' + err.message);
@@ -796,10 +815,26 @@ const RosenwegDocs = {
     this._showProgress(file);
 
     try {
+      // Erst die neue Datei hochladen, die alte erst danach loeschen (F3-4):
+      // scheitert der Upload, bleibt die alte Datei erhalten.
       if (uploadPath !== path) {
-        await AuthentikAuth.apiFetch(`/api/documents/${path}`, { method: 'DELETE' });
+        try {
+          await this._uploadFile(`/api/documents/${uploadPath}`, file, { ohneUeberschreiben: true });
+        } catch (err) {
+          if (!err.vorhanden) throw err;
+          if (!confirm(`„${safeName}“ gibt es in diesem Ordner schon.\n\nAuch diese Datei ersetzen?`)) {
+            this._showUploadError('Nicht ersetzt.');
+            btn.disabled = false;
+            btn.textContent = 'Ersetzen';
+            return;
+          }
+          await this._uploadFile(`/api/documents/${uploadPath}`, file);
+        }
+        const del = await AuthentikAuth.apiFetch(`/api/documents/${path}`, { method: 'DELETE' });
+        if (!del.ok && del.status !== 404) throw new Error('Neue Datei ist hochgeladen, die alte konnte nicht entfernt werden (' + del.status + ')');
+      } else {
+        await this._uploadFile(`/api/documents/${uploadPath}`, file);
       }
-      await this._uploadFile(`/api/documents/${uploadPath}`, file);
       setTimeout(() => { this.closeModal(); this.loadAndRender(true); }, 500);
     } catch (err) {
       this._showUploadError('Fehler: ' + err.message);
