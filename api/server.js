@@ -25,6 +25,7 @@ const rechteSchluessel = require('./lib/rechte-schluessel');
 const kontaktformular = require('./lib/kontaktformular');
 const stwegSichtLib = require('./lib/stweg-sicht');
 const { waschAdminErlaubt, waschRaumAenderbar } = require('./lib/wasch-admin');
+const adminProtokoll = require('./lib/admin-protokoll');
 const verteilerVerwaltung = require('./lib/verteiler-verwaltung');
 
 const app = express();
@@ -1016,6 +1017,16 @@ app.get('/api/permissions', authMiddleware, requirePermission('rechteverwaltung'
   }
 });
 
+// Verlauf der Rechte-Änderungen (Befund W15): wer, wann, was vorher/nachher
+app.get('/api/permissions/protokoll', authMiddleware, requirePermission('rechteverwaltung', 'read'), async (req, res) => {
+  try {
+    res.json({ eintraege: await adminProtokoll.lesen(pool, 'rechte', req.query.limit) });
+  } catch (err) {
+    console.error('[rechte-protokoll]', err.message);
+    res.status(500).json({ error: 'Protokoll konnte nicht geladen werden' });
+  }
+});
+
 app.put('/api/permissions', authMiddleware, requirePermission('rechteverwaltung', 'write'), kartenAdmin.bestaetigungVerlangen, async (req, res) => {
   const { permissions } = req.body; // [{ group_name, page, access }]
   if (!Array.isArray(permissions)) return res.status(400).json({ error: 'permissions Array erforderlich' });
@@ -1023,6 +1034,9 @@ app.put('/api/permissions', authMiddleware, requirePermission('rechteverwaltung'
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // Befund W15: festhalten, wer welches Recht geändert hat (nur echte Änderungen)
+    const vorher = await client.query('SELECT group_name, page, access FROM permissions');
+    const aenderungen = adminProtokoll.rechteAenderungen(vorher.rows, permissions);
     for (const p of permissions) {
       if (!p.group_name || !p.page || !['none', 'read', 'write'].includes(p.access)) continue;
       if (p.access === 'none') {
@@ -1035,9 +1049,13 @@ app.put('/api/permissions', authMiddleware, requirePermission('rechteverwaltung'
         );
       }
     }
+    await adminProtokoll.eintragen(pool, client, req, aenderungen.map(a => ({
+      bereich: 'rechte', aktion: 'geaendert', ziel: `${a.group_name} · ${a.page}`, alt: a.alt, neu: a.neu,
+    })));
     await client.query('COMMIT');
+    if (aenderungen.length) console.log(`[rechte] ${req.user?.email || '?'}: ${aenderungen.map(a => `${a.group_name}/${a.page} ${a.alt}->${a.neu}`).join(', ')}`);
     const result = await pool.query('SELECT group_name, page, access FROM permissions ORDER BY group_name, page');
-    res.json({ success: true, permissions: result.rows });
+    res.json({ success: true, permissions: result.rows, geaendert: aenderungen.length });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Permission update error:', err);

@@ -38,7 +38,7 @@
         <div id="no-permission" class="hidden">
             <div class="bg-yellow-50 border-l-4 border-yellow-500 p-6 rounded">
                 <p class="text-yellow-800 font-semibold">Kein Zugriff</p>
-                <p class="text-yellow-700 text-sm mt-1">Diese Seite ist nur für Technik-Mitglieder zugänglich.</p>
+                <p class="text-yellow-700 text-sm mt-1">Diese Seite braucht das Recht „Rechteverwaltung“ (Technik und Präsident haben es immer).</p>
             </div>
         </div>
 
@@ -52,7 +52,10 @@
 
         <!-- Main Content -->
         <div id="main-content" class="hidden">
-            <div class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded mb-6">
+            <div id="nur-lesen" class="hidden bg-gray-100 border-l-4 border-gray-400 p-4 rounded mb-4">
+                <p class="text-sm text-gray-700"><strong>Nur lesen.</strong> Ändern dürfen Technik, Präsident und wer die Rechteverwaltung mit Schreibrecht hat.</p>
+            </div>
+            <div id="hilfe-schreiben" class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded mb-6">
                 <p class="text-sm text-blue-800">
                     Klicken Sie auf eine Zelle um die Berechtigung zu ändern: <strong>none</strong> (kein Zugriff),
                     <strong>read</strong> (nur lesen), <strong>write</strong> (lesen & schreiben).
@@ -61,7 +64,7 @@
             </div>
 
             <!-- Add Group -->
-            <div class="flex gap-3 mb-6">
+            <div id="add-group-row" class="flex gap-3 mb-6">
                 <select id="add-group-select" class="flex-1 px-3 py-2 border rounded-lg text-sm">
                     <option value="">Gruppe hinzufügen...</option>
                 </select>
@@ -79,11 +82,25 @@
             </div>
 
             <!-- Save Button -->
-            <div class="mt-6 flex justify-end gap-3">
+            <div id="save-row" class="mt-6 flex justify-end gap-3">
                 <span id="save-status" class="text-sm text-gray-500 self-center"></span>
                 <button onclick="savePermissions()" id="save-btn" class="bg-purple-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-purple-700 transition">
                     Speichern
                 </button>
+            </div>
+
+            <!-- Verlauf (Befund W15) -->
+            <div class="mt-10">
+                <h2 class="text-lg font-semibold text-gray-800 mb-2">Letzte Änderungen</h2>
+                <p class="text-xs text-gray-500 mb-3">Wer wann welches Recht geändert hat (neueste zuerst).</p>
+                <div class="overflow-x-auto">
+                    <table class="w-full bg-white rounded-lg shadow border text-sm">
+                        <thead><tr class="bg-gray-50 border-b text-left text-gray-600">
+                            <th class="px-3 py-2">Wann</th><th class="px-3 py-2">Wer</th><th class="px-3 py-2">Gruppe · Seite</th><th class="px-3 py-2">Vorher → nachher</th>
+                        </tr></thead>
+                        <tbody id="protokoll-tbody"><tr><td colspan="4" class="px-3 py-4 text-center text-gray-400">Lade…</td></tr></tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -99,6 +116,8 @@
         let pages = [];
         let permMap = {}; // { "groupName::page": "access" }
         let configuredGroups = new Set();
+        // Befund W15: mit Leserecht nur ansehen (die API verlangt zum Speichern write)
+        let DARF_SCHREIBEN = false;
 
         window.addEventListener('DOMContentLoaded', async () => {
             const user = await AuthentikAuth.init({ requireAuth: false });
@@ -116,8 +135,12 @@
                 return;
             }
 
+            DARF_SCHREIBEN = AuthentikAuth.hasPermission('rechteverwaltung', 'write');
+            for (const id of ['add-group-row', 'save-row', 'hilfe-schreiben']) document.getElementById(id).classList.toggle('hidden', !DARF_SCHREIBEN);
+            document.getElementById('nur-lesen').classList.toggle('hidden', DARF_SCHREIBEN);
             document.getElementById('main-content').classList.remove('hidden');
             await loadData();
+            await loadProtokoll();
         });
 
         async function loadData() {
@@ -197,14 +220,14 @@
                         const key = `${group}::${p.id}`;
                         const access = permMap[key] || 'none';
                         return `<td class="px-3 py-2 text-center">
-                            <button data-aktion="cycle" data-gruppe="${esc(group)}" data-seite="${esc(p.id)}"
-                                class="perm-${esc(access)} px-3 py-1 rounded-full text-xs font-medium cursor-pointer hover:opacity-80 transition min-w-[60px]">
+                            <button data-aktion="cycle" data-gruppe="${esc(group)}" data-seite="${esc(p.id)}" ${DARF_SCHREIBEN ? '' : 'disabled'}
+                                class="perm-${esc(access)} px-3 py-1 rounded-full text-xs font-medium ${DARF_SCHREIBEN ? 'cursor-pointer hover:opacity-80' : 'cursor-default'} transition min-w-[60px]">
                                 ${esc(access)}
                             </button>
                         </td>`;
                     }).join('')}
                     <td class="px-3 py-2">
-                        <button data-aktion="remove" data-gruppe="${esc(group)}" class="text-gray-400 hover:text-red-500 p-1" title="Gruppe entfernen">
+                        <button data-aktion="remove" data-gruppe="${esc(group)}" class="${DARF_SCHREIBEN ? '' : 'hidden '}text-gray-400 hover:text-red-500 p-1" title="Gruppe entfernen">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                         </button>
                     </td>
@@ -215,7 +238,7 @@
         // Knoepfe der Matrix: Werte aus data-Attributen statt aus onclick-Strings (escAttr war unvollstaendig)
         document.addEventListener('click', (e) => {
             const b = e.target.closest('button[data-aktion]');
-            if (!b) return;
+            if (!b || !DARF_SCHREIBEN) return;
             if (b.dataset.aktion === 'cycle') cyclePermission(b.dataset.gruppe, b.dataset.seite);
             else if (b.dataset.aktion === 'remove') removeGroup(b.dataset.gruppe);
         });
@@ -262,7 +285,10 @@
                     method: 'PUT',
                     body: { permissions },
                 });
-                if (!resp.ok) throw new Error('Speichern fehlgeschlagen');
+                if (!resp.ok) {
+                    const d = await resp.json().catch(() => ({}));
+                    throw new Error(d.error || 'Speichern fehlgeschlagen');
+                }
                 if (resp.status === 202) {
                     // wartet auf Bestätigung per Mail (Karten-Anmeldung, W17) – noch nicht gespeichert
                     status.textContent = AuthentikAuth.bestaetigungsText(await resp.json().catch(() => ({})));
@@ -273,13 +299,31 @@
                 status.className = 'text-sm text-green-600 self-center font-medium';
                 // Reload to refresh from server
                 await loadData();
+                await loadProtokoll();
             } catch (err) {
                 status.textContent = 'Fehler: ' + err.message;
                 status.className = 'text-sm text-red-600 self-center font-medium';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Speichern';
             }
+        }
 
-            btn.disabled = false;
-            btn.textContent = 'Speichern';
+        async function loadProtokoll() {
+            const tbody = document.getElementById('protokoll-tbody');
+            try {
+                const r = await AuthentikAuth.apiFetch('/api/permissions/protokoll?limit=50');
+                if (!r.ok) throw new Error('Fehler ' + r.status);
+                const liste = (await r.json()).eintraege || [];
+                tbody.innerHTML = liste.length ? liste.map(e => `<tr class="border-b">
+                    <td class="px-3 py-2 whitespace-nowrap text-gray-600">${esc(new Date(e.zeit).toLocaleString('de-CH'))}</td>
+                    <td class="px-3 py-2">${esc(e.name || e.email || '–')}${e.art && e.art !== 'konto' && e.art !== 'authentik' ? ` <span class="text-xs text-amber-700">(${esc(e.art)})</span>` : ''}</td>
+                    <td class="px-3 py-2">${esc(e.ziel)}</td>
+                    <td class="px-3 py-2"><span class="perm-${esc(e.alt)} px-2 py-0.5 rounded-full text-xs">${esc(e.alt)}</span> → <span class="perm-${esc(e.neu)} px-2 py-0.5 rounded-full text-xs">${esc(e.neu)}</span></td>
+                </tr>`).join('') : '<tr><td colspan="4" class="px-3 py-4 text-center text-gray-400">Noch keine Änderungen festgehalten.</td></tr>';
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="4" class="px-3 py-4 text-center text-red-600">${esc(e.message)}</td></tr>`;
+            }
         }
 
         function esc(str) {
