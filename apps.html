@@ -4,202 +4,212 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Rosenweg-Apps</title>
+    <meta name="description" content="Alle Rosenweg-Apps zum Herunterladen: für dein Handy, den Computer und die geteilten Telefone.">
     <link rel="icon" href="/logo-rosenweg.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=5"></script>
+    <script src="/js/nav.js?v=3"></script>
+    <script src="/js/qrious.min.js"></script>
     <style>
-        :root { --rot: #b91c1c; --text: #1f2937; --leise: #6b7280; --flaeche: #ffffff; --grund: #f3f4f6; --linie: #e5e7eb; }
-        @media (prefers-color-scheme: dark) {
-            :root { --text: #e5e7eb; --leise: #9ca3af; --flaeche: #1f2937; --grund: #111827; --linie: #374151; --rot: #f87171; }
+        /* Farben wie im Portal (Tailwind slate/blue); eigene Namen, damit die Seite lesbar bleibt */
+        :root {
+            --grund: #f1f5f9; --flaeche: #ffffff; --text: #1e293b; --leise: #475569; --linie: #e2e8f0;
+            --akzent: #1d4ed8; --akzent-hell: #eff6ff; --akzent-rand: #bfdbfe;
+            --gruen: #166534; --gruen-hell: #f0fdf4; --gruen-rand: #bbf7d0;
+            --amber: #92400e; --amber-hell: #fffbeb; --amber-rand: #fde68a;
+            --rose: #be123c;
         }
-        * { box-sizing: border-box; }
-        body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--grund); color: var(--text); line-height: 1.55; }
-        main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
-        header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
-        header img { width: 64px; height: 64px; }
-        h1 { margin: 0; font-size: 1.6rem; }
-        h2 { font-size: 1.15rem; margin: 32px 0 8px; }
-        p { margin: 8px 0; }
-        a { color: var(--rot); }
-        .karte { background: var(--flaeche); border: 1px solid var(--linie); border-radius: 12px; padding: 16px 20px; margin-top: 16px; }
-        ul.apps { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 16px; }
-        ul.apps li { padding: 6px 0; border-bottom: 1px solid var(--linie); }
-        ul.apps b { display: block; }
-        ul.apps span { color: var(--leise); font-size: .9rem; }
-        .leise { color: var(--leise); font-size: .9rem; }
-        table.dl { width: 100%; border-collapse: collapse; }
-        table.dl td { padding: 8px 4px; border-bottom: 1px solid var(--linie); vertical-align: middle; }
-        table.dl td.v { color: var(--leise); font-size: .9rem; white-space: nowrap; }
-        a.knopf { display: inline-block; padding: 6px 12px; border-radius: 8px; background: var(--rot); color: #fff; text-decoration: none; font-size: .9rem; white-space: nowrap; }
-        code { font-size: .8rem; word-break: break-all; }
-        .app { display: flex; gap: 16px; align-items: flex-start; }
-        .app + .app { border-top: 1px solid var(--linie); margin-top: 16px; padding-top: 16px; }
-        .app img { width: 64px; height: 64px; flex: none; border-radius: 14px; }
-        .app h3 { margin: 0; font-size: 1.05rem; }
-        .app .rumpf { flex: 1; min-width: 0; }
-        .knoepfe { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-        .knoepfe a.knopf { display: inline-flex; flex-direction: column; line-height: 1.25; padding: 6px 12px; }
-        .knoepfe a.knopf small { opacity: .85; font-size: .75rem; }
-        details.neu { margin-top: 8px; font-size: .9rem; }
-        details.neu summary { cursor: pointer; color: var(--leise); }
-        details.neu div { white-space: pre-wrap; margin-top: 4px; }
+        body { background: var(--grund); color: var(--text); font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; line-height: 1.5; }
+        main { max-width: 1120px; margin: 0 auto; padding: 24px 16px 56px; }
+        /* main davor: Tailwind (CDN, fuer nav.js) setzt seine Grundstile nach diesen */
+        main a { color: var(--akzent); }
+        main a:hover { text-decoration: underline; }
+        :focus-visible { outline: 3px solid #2563eb; outline-offset: 2px; border-radius: 6px; }
+        .leise { color: var(--leise); }
+        .klein { font-size: .875rem; }
+
+        /* Kopf */
+        .kopf { display: flex; gap: 16px; align-items: center; }
+        .kopf img { width: 56px; height: 56px; flex: none; }
+        .kopf h1 { font-size: 1.75rem; font-weight: 700; line-height: 1.2; }
+        .einleitung { margin-top: 12px; max-width: 70ch; }
+
+        /* Filter und Suche */
+        .werkzeug { position: sticky; top: 64px; z-index: 10; margin: 20px -16px 0; padding: 12px 16px;
+                    background: color-mix(in srgb, var(--grund) 92%, transparent); backdrop-filter: blur(6px);
+                    display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+        .filter { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 auto; }
+        .filter button { border: 1px solid var(--linie); background: var(--flaeche); color: var(--text);
+                         border-radius: 999px; padding: 6px 14px; font-size: .9rem; font-weight: 500; cursor: pointer; }
+        .filter button:hover { border-color: var(--akzent-rand); }
+        .filter button[aria-pressed="true"] { background: var(--akzent); border-color: var(--akzent); color: #fff; }
+        .filter .zahl { opacity: .75; font-weight: 400; margin-left: 4px; }
+        .suche { flex: 0 1 260px; min-width: 180px; position: relative; }
+        .suche input { width: 100%; border: 1px solid #cbd5e1; border-radius: 999px; padding: 7px 14px 7px 36px;
+                       background: var(--flaeche); font-size: .95rem; }
+        .suche svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--leise); }
+        .hinweis-plattform { width: 100%; font-size: .85rem; color: var(--leise); }
+        @media (max-width: 640px) {
+            .werkzeug { position: static; backdrop-filter: none; background: none; }
+            .filter { flex-wrap: nowrap; overflow-x: auto; margin: 0 -16px; padding: 2px 16px 4px; scrollbar-width: none; }
+            .filter::-webkit-scrollbar { display: none; }
+            .filter button { flex: none; }
+            .suche { flex: 1 1 100%; }
+        }
+
+        /* Kacheln */
+        .kacheln { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; margin-top: 8px; }
+        @media (max-width: 400px) { .kacheln { grid-template-columns: 1fr; } }
+        .kachel { background: var(--flaeche); border: 1px solid var(--linie); border-radius: 16px; padding: 18px;
+                  display: flex; flex-direction: column; gap: 10px; box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+                  transition: box-shadow .15s, transform .15s; }
+        .kachel:hover { box-shadow: 0 8px 24px rgba(15, 23, 42, .08); }
+        .kachel .oben { display: flex; gap: 14px; align-items: flex-start; }
+        .kachel .oben img { width: 56px; height: 56px; border-radius: 14px; flex: none; background: var(--grund); }
+        .kachel h3 { font-size: 1.05rem; font-weight: 600; line-height: 1.3; }
+        .kachel .satz { margin-top: 2px; }
+        .kachel .fuer { font-size: .85rem; color: var(--leise); }
+        .marken { display: flex; flex-wrap: wrap; gap: 6px; }
+        .marke { font-size: .75rem; font-weight: 500; padding: 2px 8px; border-radius: 999px; border: 1px solid; }
+        .marke.telefone { color: var(--gruen); background: var(--gruen-hell); border-color: var(--gruen-rand); }
+        .marke.technik { color: var(--amber); background: var(--amber-hell); border-color: var(--amber-rand); }
+        .knoepfe { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 4px; }
+        a.knopf { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 10px;
+                  border: 1px solid var(--akzent-rand); background: var(--akzent-hell); color: var(--akzent);
+                  text-decoration: none; font-size: .9rem; font-weight: 500; line-height: 1.2; }
+        a.knopf:hover { text-decoration: none; border-color: var(--akzent); }
+        a.knopf.deins { background: var(--akzent); border-color: var(--akzent); color: #fff; }
+        a.knopf svg { width: 18px; height: 18px; flex: none; }
+        a.knopf small { display: block; font-size: .75rem; font-weight: 400; opacity: .85; }
+        .nur-telefone { display: flex; gap: 8px; align-items: center; margin-top: auto; padding: 8px 12px; border-radius: 10px;
+                        background: var(--gruen-hell); color: var(--gruen); font-size: .875rem; border: 1px solid var(--gruen-rand); }
+        .nur-telefone svg { width: 18px; height: 18px; flex: none; }
+        .meta { font-size: .8rem; color: var(--leise); display: flex; flex-wrap: wrap; gap: 4px 12px; }
+        details.mehr { font-size: .85rem; border-top: 1px solid var(--linie); padding-top: 8px; }
+        details.mehr summary { cursor: pointer; color: var(--leise); width: fit-content; }
+        details.mehr summary:hover { color: var(--text); }
+        details.mehr .innen { margin-top: 8px; display: grid; gap: 10px; }
+        .notiz { white-space: pre-wrap; }
+        .pruef { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .72rem; word-break: break-all; color: var(--leise); }
+        .qr { display: flex; gap: 12px; align-items: center; }
+        .qr canvas { width: 116px; height: 116px; border: 1px solid var(--linie); border-radius: 8px; padding: 4px; background: #fff; flex: none; }
+
+        /* Laden, Fehler, leer */
+        .platzhalter { height: 190px; border-radius: 16px; background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+                       background-size: 200% 100%; animation: schimmer 1.4s infinite linear; }
+        @keyframes schimmer { to { background-position: -200% 0; } }
+        @media (prefers-reduced-motion: reduce) { .platzhalter { animation: none; } .kachel { transition: none; } }
+        .meldung { grid-column: 1 / -1; background: var(--flaeche); border: 1px solid var(--linie); border-radius: 16px; padding: 24px; text-align: center; }
+        .meldung button { margin-top: 10px; padding: 6px 14px; border-radius: 8px; background: var(--akzent); color: #fff; font-weight: 500; }
+
+        /* Infokarten unten */
+        main h2 { font-size: 1.25rem; font-weight: 600; margin: 44px 0 12px; }
+        .infos { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+        .info { background: var(--flaeche); border: 1px solid var(--linie); border-radius: 16px; padding: 16px 18px; font-size: .9rem; }
+        .info h3 { font-weight: 600; margin-bottom: 4px; display: flex; gap: 8px; align-items: center; }
+        .info h3 svg { width: 18px; height: 18px; color: var(--leise); }
+        .info p + p { margin-top: 6px; }
+        .info code { font-size: .78rem; background: var(--grund); padding: 1px 4px; border-radius: 4px; word-break: break-all; }
+        @media (min-width: 900px) {
+            .infos { grid-template-columns: repeat(4, 1fr); }
+            .info[data-plattform="android"] { grid-column: span 2; }
+            .info.echt { grid-column: span 3; }
+        }
+        .info.deins { border-color: var(--akzent-rand); box-shadow: inset 4px 0 0 var(--akzent); }
+        .karte { background: var(--flaeche); border: 1px solid var(--linie); border-radius: 16px; padding: 16px 18px; font-size: .95rem; }
+        .karte p + p { margin-top: 8px; }
+        .unsichtbar { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
     </style>
 </head>
 <body>
+<nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+<script>RosenwegNav.init({ active: 'apps', basePath: '/' });</script>
+
 <main>
-    <header>
+    <header class="kopf">
         <img src="/logo-rosenweg.png" alt="">
         <div>
             <h1>Rosenweg-Apps</h1>
-            <div class="leise">Für die Rosenweg-Telefone, eigene Handys und Computer</div>
+            <p class="leise">Für dein Handy, den Computer und die geteilten Telefone der Siedlung</p>
         </div>
     </header>
+    <p class="einleitung">Die Rosenweg-Apps arbeiten mit der Rosenweg-Anlage zusammen: Telefonie über die eigene
+        Telefonanlage, Dateien, Kontakte und Kalender in der Rosenweg-Nextcloud, Nachrichten über den Rosenweg Messenger.
+        Ohne Werbung, ohne Daten an fremde Dienste. Auf den geteilten Telefonen kommen sie von selbst und bleiben aktuell.</p>
 
-    <div class="karte">
-        <p>Die Rosenweg-Apps laufen auf den geteilten Telefonen der Siedlung und auf privaten Handys.
-        Sie arbeiten mit der Rosenweg-Anlage zusammen: Telefonie über die eigene Telefonanlage,
-        Dateien, Kontakte und Kalender in der Rosenweg-Nextcloud, Nachrichten über den Rosenweg Messenger.
-        Sie enthalten keine Werbung und schicken keine Daten an fremde Dienste.</p>
-        <p>Auf einem geteilten Telefon meldest du dich mit deinem Rosenweg-Konto an. Deine Einstellungen
-        liegen auf der Anlage und kommen auf jedem Telefon mit. Beim Abmelden werden deine Daten vom Gerät entfernt.</p>
+    <div class="werkzeug" role="search">
+        <div class="filter" role="group" aria-label="Apps filtern" id="filter">
+            <button type="button" data-gruppe="" aria-pressed="true">Alle<span class="zahl"></span></button>
+            <button type="button" data-gruppe="handy" aria-pressed="false">Für dein Handy<span class="zahl"></span></button>
+            <button type="button" data-gruppe="computer" aria-pressed="false">Für den Computer<span class="zahl"></span></button>
+            <button type="button" data-gruppe="telefone" aria-pressed="false">Geteilte Telefone<span class="zahl"></span></button>
+            <button type="button" data-gruppe="technik" aria-pressed="false">Technik<span class="zahl"></span></button>
+        </div>
+        <label class="suche">
+            <span class="unsichtbar">App suchen</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input type="search" id="suche" placeholder="App suchen …" autocomplete="off">
+        </label>
+        <p class="hinweis-plattform" id="hinweisPlattform" hidden></p>
     </div>
 
-    <section id="kartenBereich" hidden>
-        <h2>Apps für Handy und Computer</h2>
-        <div class="karte" id="karten"></div>
-    </section>
-
-    <h2>Die Apps auf den Telefonen</h2>
-    <div class="karte">
-        <ul class="apps">
-            <li><b>Rosenweg Gerät</b><span>Anmeldung, Sperre, App-Verwaltung</span></li>
-            <li><b>Rosenweg Telefon</b><span>Telefonieren über die Anlage</span></li>
-            <li><b>Rosenweg Messenger</b><span>Chats, Ankündigungen, Notfall, SMS</span></li>
-            <li><b>Kontakte</b><span>Adressbuch aus der Nextcloud</span></li>
-            <li><b>Kalender</b><span>Termine aus der Nextcloud</span></li>
-            <li><b>Notizen</b><span>Notizen und Checklisten</span></li>
-            <li><b>Dateien</b><span>Nextcloud und Telefon</span></li>
-            <li><b>Dokumente</b><span>Dokumente ansehen und bearbeiten</span></li>
-            <li><b>Kamera</b><span>Fotos landen in deiner Nextcloud</span></li>
-            <li><b>Galerie</b><span>Fotos und Videos</span></li>
-            <li><b>Zeichnen</b><span>Skizzen</span></li>
-            <li><b>Sprachrekorder</b><span>Aufnahmen</span></li>
-            <li><b>Uhr</b><span>Wecker, Timer, Stoppuhr</span></li>
-            <li><b>Rechner</b><span>Rechner</span></li>
-            <li><b>Startseite</b><span>Startbildschirm, pro Person gespeichert</span></li>
-            <li><b>Tastatur</b><span>Tastatur ohne Datenweitergabe</span></li>
-        </ul>
+    <p class="unsichtbar" aria-live="polite" id="ansage"></p>
+    <div class="kacheln" id="kacheln" aria-busy="true">
+        <div class="platzhalter" aria-hidden="true"></div>
+        <div class="platzhalter" aria-hidden="true"></div>
+        <div class="platzhalter" aria-hidden="true"></div>
+        <p class="unsichtbar">Lade die Apps …</p>
     </div>
 
-    <h2>Herunterladen (Android)</h2>
+    <h2>So installierst du</h2>
+    <div class="infos" id="anleitungen">
+        <section class="info" data-plattform="android">
+            <h3>Android</h3>
+            <p>APK auf dem Handy laden und öffnen. Beim ersten Mal fragt Android, ob der Browser Apps installieren darf
+                („Unbekannte Apps installieren“) – einmal erlauben. Am Computer: unter einer App „Prüfsumme und QR-Code“
+                öffnen und den Code mit dem Handy scannen.</p>
+            <p>Updates holt jede App selbst von hier. Rosenweg Telefon: nach dem Installieren „Mit Rosenweg anmelden“.</p>
+        </section>
+        <section class="info" data-plattform="linux">
+            <h3>Linux</h3>
+            <p>Debian 13 (64 Bit). Installieren mit <code>sudo apt install ./Datei.deb</code>.</p>
+        </section>
+        <section class="info" data-plattform="macos">
+            <h3>macOS</h3>
+            <p>DMG öffnen und die App in „Programme“ ziehen.</p>
+        </section>
+        <section class="info" data-plattform="windows">
+            <h3>Windows</h3>
+            <p>Installationsprogramm starten.</p>
+        </section>
+        <section class="info echt">
+            <h3>Echtheit</h3>
+            <p>Alle Android-Apps sind mit dem Rosenweg-Schlüssel signiert. Updates lassen sich nur mit derselben Signatur einspielen.</p>
+            <p>SHA-256 des Zertifikats: <code id="signatur">7b3bac26e82b6103546b96861dcf1bb89b3239424ff11fdf684975cf78c5a5ae</code></p>
+        </section>
+    </div>
+
+    <h2>Geteilte Telefone</h2>
     <div class="karte">
-        <p>Für dein eigenes Android-Handy. Auf den geteilten Telefonen hält Rosenweg Gerät die Apps selbst aktuell.</p>
-        <table class="dl"><tbody id="downloads"><tr><td class="leise">Lade die Liste …</td></tr></tbody></table>
-        <p class="leise">Installieren: APK auf dem Handy öffnen; beim ersten Mal fragt Android, ob der Browser Apps
-        installieren darf. Alle Apps sind mit dem Rosenweg-Schlüssel signiert (SHA-256
-        <code id="signatur">7b3bac26e82b6103546b96861dcf1bb89b3239424ff11fdf684975cf78c5a5ae</code>);
-        Updates lassen sich nur über eine App mit derselben Signatur einspielen.
-        Rosenweg Telefon: nach dem Installieren im Menü „Mit Rosenweg anmelden“.</p>
-        <p class="leise">Neue Versionen kommen automatisch hierher, sobald eine App freigegeben wird.</p>
+        <p>Auf einem geteilten Telefon meldest du dich mit deinem Rosenweg-Konto an (oder hältst deine Karte daran).
+            Deine Einstellungen liegen auf der Anlage und kommen auf jedem Telefon mit. Beim Abmelden werden deine Daten
+            vom Gerät entfernt. Die Apps mit der Marke „Kommt automatisch“ spielt Rosenweg Gerät selbst ein und hält sie aktuell.</p>
     </div>
 
     <h2>Grundlage: Fossify</h2>
     <div class="karte">
         <p>Die meisten Rosenweg-Apps sind Anpassungen der freien Apps von
-        <a href="https://www.fossify.org" rel="noopener">Fossify</a>, einer Gemeinschaft, die einfache,
-        werbefreie Android-Apps als freie Software entwickelt. Ohne ihre Arbeit gäbe es die Rosenweg-Apps
-        in dieser Form nicht. Wer Fossify unterstützen möchte, findet auf fossify.org den Weg dazu.</p>
+            <a href="https://www.fossify.org" rel="noopener">Fossify</a>, einer Gemeinschaft, die einfache,
+            werbefreie Android-Apps als freie Software entwickelt. Ohne ihre Arbeit gäbe es die Rosenweg-Apps
+            in dieser Form nicht. Wer Fossify unterstützen möchte, findet auf fossify.org den Weg dazu.</p>
         <p>Rosenweg Gerät beruht auf <a href="https://github.com/i-p-tel/sipdroid" rel="noopener">Sipdroid</a>.</p>
         <p>Lizenz: GNU General Public License, Version 3 (GPL-3.0). Den Quellcode aller Anpassungen gibt es unter
-        <a href="https://github.com/Rosenweg" rel="noopener">github.com/Rosenweg</a>; die Lizenzen der verwendeten
-        Bibliotheken stehen in jeder App unter „Über“ → „Lizenzen von Drittanbietern“.</p>
+            <a href="https://github.com/Rosenweg" rel="noopener">github.com/Rosenweg</a>; die Lizenzen der verwendeten
+            Bibliotheken stehen in jeder App unter „Über“ → „Lizenzen von Drittanbietern“.</p>
     </div>
 
-    <p class="leise" style="margin-top:32px">Fragen und Probleme: Ressort Technik, <a href="/hilfe.html">Hilfe &amp; Anleitungen</a>.</p>
+    <p class="leise klein" style="margin-top:32px">Fragen und Probleme: Ressort Technik, <a href="/hilfe.html">Hilfe &amp; Anleitungen</a>.</p>
 </main>
-<script>
-(async () => {
-    const ziel = document.getElementById('downloads');
-    const basis = 'https://pbx.rosenweg4303.ch';
-    const mb = b => b ? (b / 1048576).toFixed(1) + ' MB' : '';
-    // Kurzer Hinweis je Plattform unter den Knöpfen
-    const HINWEIS = {
-        'android': 'Android: APK auf dem Handy öffnen.',
-        'linux-deb': 'Linux: Debian 13 (64 Bit), installieren mit „sudo apt install ./Datei.deb“.',
-        'macos': 'macOS: DMG öffnen und die App in „Programme“ ziehen.',
-        'windows': 'Windows: Installationsprogramm starten.'
-    };
-    function el(tag, cls, text) {
-        const e = document.createElement(tag);
-        if (cls) e.className = cls;
-        if (text) e.textContent = text;
-        return e;
-    }
-    try {
-        const r = await fetch(basis + '/api/apps/index.json', { cache: 'no-store' });
-        if (!r.ok) throw new Error(r.status);
-        const d = await r.json();
-        if (d.signatur_sha256) document.getElementById('signatur').textContent = d.signatur_sha256;
-
-        // Apps mit eigener Karte (Logo, Beschreibung, je Plattform ein Download)
-        const karten = d.karten || [];
-        const mitKarte = new Set(karten.map(k => k.paket));
-        if (karten.length) {
-            const box = document.getElementById('karten');
-            for (const k of karten) {
-                const app = el('div', 'app');
-                const logo = el('img');
-                logo.src = /^\/[A-Za-z0-9/_.-]+$/.test(k.logo || '') ? k.logo : '/logo-rosenweg.png';
-                logo.alt = '';
-                const rumpf = el('div', 'rumpf');
-                rumpf.append(el('h3', '', k.name), el('p', '', k.text));
-                if (k.fuer) rumpf.append(el('p', 'leise', k.fuer));
-                const knoepfe = el('div', 'knoepfe');
-                const hinweise = [];
-                for (const dl of k.downloads) {
-                    const a = el('a', 'knopf');
-                    a.href = basis + dl.url;
-                    a.setAttribute('download', '');
-                    a.append(el('span', '', dl.titel), el('small', '', ['Version ' + dl.version, mb(dl.groesse)].filter(Boolean).join(' · ')));
-                    knoepfe.append(a);
-                    if (HINWEIS[dl.plattform]) hinweise.push(HINWEIS[dl.plattform]);
-                }
-                rumpf.append(knoepfe);
-                if (hinweise.length) rumpf.append(el('p', 'leise', hinweise.join(' ')));
-                const neu = k.downloads.find(x => x.notiz);
-                if (neu) {
-                    const det = el('details', 'neu');
-                    det.append(el('summary', '', 'Neu in Version ' + neu.version), el('div', '', neu.notiz));
-                    rumpf.append(det);
-                }
-                app.append(logo, rumpf);
-                box.append(app);
-            }
-            document.getElementById('kartenBereich').hidden = false;
-        }
-
-        ziel.textContent = '';
-        for (const a of d.apps) {
-            if (mitKarte.has(a.paket)) continue;
-            const tr = document.createElement('tr');
-            const name = document.createElement('td');
-            name.textContent = a.name;
-            const v = document.createElement('td');
-            v.className = 'v';
-            v.textContent = [a.version_name ? 'Version ' + a.version_name : '', mb(a.groesse)].filter(Boolean).join(' · ');
-            const k = document.createElement('td');
-            k.style.textAlign = 'right';
-            const link = document.createElement('a');
-            link.className = 'knopf';
-            link.href = basis + a.url;
-            link.textContent = 'Laden';
-            link.setAttribute('download', '');
-            k.appendChild(link);
-            tr.append(name, v, k);
-            ziel.appendChild(tr);
-        }
-    } catch (e) {
-        ziel.innerHTML = '<tr><td class="leise">Die Liste ist gerade nicht erreichbar.</td></tr>';
-    }
-})();
-</script>
+<script src="/js/apps-seite.js?v=1"></script>
 </body>
 </html>
