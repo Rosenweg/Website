@@ -2173,7 +2173,8 @@ def telefon_apk(paket):
 # ─── Seite rosenweg4303.ch/smartphones (Stefan 25.11.2026) ───────────────────
 # Die Seite liegt auf www und ruft die Anlage direkt (Bearer-Token des Rosenweg-Logins,
 # keine Cookies). Erlaubt nur fuer die Website-Adressen und nur /api/telefon/* und /api/pbx/*.
-SEITEN_HERKUNFT = {"https://www.rosenweg4303.ch", "https://rosenweg4303.ch"}
+SEITEN_HERKUNFT = {"https://www.rosenweg4303.ch", "https://rosenweg4303.ch",
+                   "https://isp.rosenweg4303.ch"}   # ISP-Admin: Reiter App-Versionen (/api/pbx/apps-stand)
 
 
 @app.after_request
@@ -2719,6 +2720,165 @@ def apps_release():
     if plattform not in APPS_PLATTFORMEN:
         return jsonify({"error": "plattform: " + ", ".join(APPS_PLATTFORMEN)}), 400
     return _apps_einspielen(schluessel, plattform, f"{repo}@{tag}", version_soll=tag_version)
+
+
+# ─── Versionsstand der Apps auf den Geraeten (NOC, Stefan 27.11.2026) ─────────────────────
+# Die Updater der Apps (Kotlin: commons-rosenweg updater >= 0.1.6, Flutter-Desktop: rosenweg_basis
+# RosenwegAktualisierung) melden bei jeder Pruefung, welche Rosenweg-Apps in welcher Fassung
+# installiert sind. Oeffentlich (die Apps haben ohne Anmeldung keinen Schluessel), darum streng
+# geprueft und gebremst; keine Personendaten: nur die gehashte Geraetekennung, Pakete, Versionen.
+STAND_MAX_APPS = 60
+STAND_MAX_GERAETE = 20000
+STAND_MAX_STUNDE = 30            # Meldungen je Geraet und Stunde
+STAND_ALTER_TAGE = 90            # aeltere Geraete fallen aus der Liste
+_STAND_GEBREMST = {}             # geraet -> [Zeitpunkte]
+_GERAET_KENNUNG = re.compile(r"[0-9a-f]{64}")
+_STAND_VERSION = re.compile(r"[0-9A-Za-z.+_-]{1,40}")
+
+
+@app.post("/api/apps/stand")
+def apps_stand_melden():
+    """Body {geraet: sha256-hex, plattform, geteilt?, station?, system?, apps: [{paket, version, version_code?}]}"""
+    b = request.get_json(silent=True)
+    if not isinstance(b, dict):
+        return jsonify({"error": "JSON erwartet"}), 400
+    geraet = str(b.get("geraet") or "").lower()
+    plattform = str(b.get("plattform") or "")
+    apps = b.get("apps")
+    if not _GERAET_KENNUNG.fullmatch(geraet) or plattform not in APPS_PLATTFORMEN \
+            or not isinstance(apps, list) or not 0 < len(apps) <= STAND_MAX_APPS:
+        return jsonify({"error": "geraet (sha256), plattform und apps (1-60) noetig"}), 400
+    zeilen = {}
+    for a in apps:
+        if not isinstance(a, dict):
+            return jsonify({"error": "apps: Eintraege {paket, version}"}), 400
+        paket = str(a.get("paket") or "")
+        version = str(a.get("version") or "")
+        code = a.get("version_code")
+        if not _APP_PAKET.fullmatch(paket) or not paket.startswith("ch.rosenweg4303.") \
+                or (version and not _STAND_VERSION.fullmatch(version)) \
+                or (code is not None and (not isinstance(code, int) or isinstance(code, bool) or not 0 <= code < 2**31)):
+            return jsonify({"error": f"apps: ungueltig ({paket[:60]})"}), 400
+        zeilen[paket] = (version, code)
+    jetzt = time.time()
+    liste = [t for t in _STAND_GEBREMST.get(geraet, []) if jetzt - t < 3600]
+    if len(liste) >= STAND_MAX_STUNDE:
+        return jsonify({"error": "Zu viele Meldungen - bitte spaeter"}), 429
+    _STAND_GEBREMST[geraet] = liste + [jetzt]
+    if len(_STAND_GEBREMST) > 4 * STAND_MAX_GERAETE:
+        _STAND_GEBREMST.clear()
+    system = re.sub(r"[^\w .,()/+-]", "", str(b.get("system") or ""))[:60]
+    conn = db.connect()
+    try:
+        alt = int(jetzt) - STAND_ALTER_TAGE * 86400
+        conn.execute("DELETE FROM apps_stand WHERE zuletzt < ?", (alt,))
+        neu_geraet = not conn.execute("SELECT 1 FROM apps_stand WHERE geraet = ? LIMIT 1", (geraet,)).fetchone()
+        if neu_geraet and conn.execute("SELECT COUNT(DISTINCT geraet) FROM apps_stand").fetchone()[0] >= STAND_MAX_GERAETE:
+            return jsonify({"error": "voll"}), 503
+        conn.execute("DELETE FROM apps_stand WHERE geraet = ? AND plattform = ?", (geraet, plattform))
+        conn.executemany(
+            "INSERT INTO apps_stand (geraet, plattform, paket, version, version_code, geteilt, station, system, zuletzt) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            [(geraet, plattform, p, v, c, int(bool(b.get("geteilt"))), int(bool(b.get("station"))), system, int(jetzt))
+             for p, (v, c) in zeilen.items()])
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify({"ok": True, "apps": len(zeilen)})
+
+
+def _version_teile(v):
+    """'1.10.0+3' -> (1, 10, 0, 0); wie istNeuer in rosenweg_basis."""
+    teile = re.split(r"[+-]", str(v or ""))[0].split(".")
+    zahlen = [int(t) if t.strip().isdigit() else 0 for t in teile[:4]]
+    return tuple(zahlen + [0] * (4 - len(zahlen)))
+
+
+def _stand_aktuell(conn):
+    """(paket, plattform) -> {version, version_code, name} der neuesten freigegebenen Fassung."""
+    soll = {}
+    for r in conn.execute("SELECT paket, name, version_code, version_name FROM telefon_apps "
+                          "WHERE art = 'apk' AND aktiv = 1 AND apk_datei IS NOT NULL"):
+        soll[(r["paket"], "android")] = {"version": r["version_name"] or "", "version_code": r["version_code"],
+                                         "name": r["name"]}
+    for v in _apps_aktuell(conn):
+        e = APPS_REGISTER.get(v["schluessel"])
+        paket = e["paket"] if e else v["schluessel"]
+        name = e["name"] if e else paket
+        alt = soll.get((paket, v["plattform"]))
+        if v["plattform"] == "android" and alt and (alt["version_code"] or 0) >= (v["version_code"] or 0):
+            continue
+        soll[(paket, v["plattform"])] = {"version": v["version"], "version_code": v["version_code"], "name": name}
+    return soll
+
+
+def _stand_veraltet(ist_version, ist_code, s):
+    if not s:
+        return None   # nichts freigegeben: unbekannt
+    if ist_code is not None and s.get("version_code"):
+        return ist_code < s["version_code"]
+    return _version_teile(ist_version) < _version_teile(s["version"])
+
+
+@app.get("/api/pbx/apps-stand")
+def apps_stand_liste():
+    """Fuer das NOC (ISP-Admin, Reiter App-Versionen): je App und Plattform Anteil veralteter Geraete
+    und die Liste. Eigene Geraete nur mit gekuerzter Kennung; geteilte Telefone mit Nebenstelle."""
+    _, deny = require_admin()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        soll = _stand_aktuell(conn)
+        grenze = int(time.time()) - STAND_ALTER_TAGE * 86400
+        zeilen = conn.execute("SELECT * FROM apps_stand WHERE zuletzt >= ? ORDER BY paket, plattform, zuletzt DESC",
+                              (grenze,)).fetchall()
+        geteilt = conn.execute("SELECT i.ext, i.paket, i.version_code, i.geprueft FROM telefon_apps_ist i "
+                               "JOIN sip_extensions e ON e.ext = i.ext WHERE e.context = 'geteilt'").fetchall()
+        namen = {r["paket"]: r["name"] for r in conn.execute("SELECT paket, name FROM telefon_apps")}
+    finally:
+        conn.close()
+    gruppen = {}
+
+    def eintrag(paket, plattform):
+        k = (paket, plattform)
+        if k not in gruppen:
+            s = soll.get(k)
+            reg = next((e for e in APPS_REGISTER.values() if e["paket"] == paket), None)
+            gruppen[k] = {"paket": paket, "plattform": plattform,
+                          "name": (s or {}).get("name") or namen.get(paket) or (reg or {}).get("name") or paket,
+                          "aktuell": (s or {}).get("version", ""), "aktuell_code": (s or {}).get("version_code"),
+                          "geraete": 0, "veraltet": 0, "liste": []}
+        return gruppen[k]
+
+    gesehen_geteilt = set()
+    for r in zeilen:
+        g = eintrag(r["paket"], r["plattform"])
+        alt = _stand_veraltet(r["version"], r["version_code"], soll.get((r["paket"], r["plattform"])))
+        g["geraete"] += 1
+        g["veraltet"] += 1 if alt else 0
+        art = "geteilt" if r["geteilt"] else ("station" if r["station"] else "eigen")
+        g["liste"].append({"geraet": r["geraet"][:12], "art": art, "version": r["version"],
+                           "version_code": r["version_code"], "veraltet": alt, "system": r["system"],
+                           "zuletzt": r["zuletzt"]})
+    for r in geteilt:
+        k = (r["ext"], r["paket"])
+        if k in gesehen_geteilt:
+            continue
+        gesehen_geteilt.add(k)
+        g = eintrag(r["paket"], "android")
+        alt = _stand_veraltet("", r["version_code"], soll.get((r["paket"], "android")))
+        g["geraete"] += 1
+        g["veraltet"] += 1 if alt else 0
+        g["liste"].append({"geraet": f"Telefon {r['ext']}", "art": "telefon", "version": "",
+                           "version_code": r["version_code"], "veraltet": alt, "system": "",
+                           "zuletzt": r["geprueft"]})
+    apps = sorted(gruppen.values(), key=lambda g: (-g["veraltet"], g["name"].lower(), g["plattform"]))
+    for g in apps:
+        g["anteil_veraltet"] = round(g["veraltet"] / g["geraete"], 3) if g["geraete"] else 0
+        g["liste"].sort(key=lambda x: (not x["veraltet"], -(x["zuletzt"] or 0)))
+    geraete = {r["geraet"] for r in zeilen} | {r["ext"] for r in geteilt}
+    return jsonify({"apps": apps, "geraete": len(geraete), "alter_tage": STAND_ALTER_TAGE})
 
 
 @app.get("/api/pbx/apps-versionen")

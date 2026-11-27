@@ -37,6 +37,7 @@
           <button data-tab="mail" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">✉ Mailserver/PMG</button>
           <button data-tab="maint" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">🔔 Wartungen <span id="maint-active-badge" class="hidden text-xs bg-red-100 text-red-800 px-1.5 py-0.5 rounded">0</span></button>
           <button data-tab="pvemsg" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">🖥 Host-Meldungen <span id="pvemsg-badge" class="hidden text-xs bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">0</span></button>
+          <button data-tab="appstand" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">📱 App-Versionen <span id="appstand-badge" class="hidden text-xs bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">0</span></button>
         </nav>
       </div>
 
@@ -146,6 +147,16 @@
         </div>
         <div id="pvemsg-list" class="space-y-2"></div>
       </div>
+
+      <!-- Versionsstand der Rosenweg-Apps auf den Geraeten (Updater der Apps melden ihn an die
+           Telefonanlage, POST /api/apps/stand; ohne Personendaten, Geraet nur gehasht). -->
+      <div id="tab-appstand" class="tab-view hidden">
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <p class="text-sm text-gray-600">Welche Fassung der Rosenweg-Apps auf den Geräten läuft. Eigene Geräte melden sich beim Updater-Lauf (Gerät nur gehasht), geteilte Telefone über den adb-Updater (Nebenstelle). <span id="appstand-info" class="text-gray-400"></span></p>
+          <button onclick="loadAppStand()" class="text-sm bg-gray-100 px-3 py-1.5 rounded">↻ Aktualisieren</button>
+        </div>
+        <div id="appstand-list" class="space-y-2"></div>
+      </div>
     </div>
   </main>
 
@@ -171,6 +182,7 @@
     document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
     loadSubs(); loadVlans(); loadIps(); loadRp(); loadVpns(); loadRelays(); loadMailboxRequests(); loadRouters(); loadMaint(); checkMailcow();
     loadPveMessages(); setInterval(loadPveMessages, 60000);
+    loadAppStand();
     setInterval(loadMaint, 60000); // Wartungen aktualisieren (auto-detected updates)
     NocCockpit.starten(document.getElementById('noc-cockpit'), { modus: 'eingebettet', intervallMs: 30000 });
     setInterval(() => { document.getElementById('noc-time').textContent = new Date().toLocaleTimeString('de-CH'); }, 1000);
@@ -198,6 +210,50 @@
     });
     document.querySelectorAll('.tab-view').forEach(v => v.classList.add('hidden'));
     document.getElementById('tab-' + t).classList.remove('hidden');
+  }
+
+  // === App-Versionen (Telefonanlage /api/pbx/apps-stand) ===
+  const PLATTFORM_TITEL = { android: 'Android', 'linux-deb': 'Linux', macos: 'macOS', windows: 'Windows' };
+  const ART_TITEL = { eigen: 'eigenes Gerät', geteilt: 'geteiltes Telefon', telefon: 'geteiltes Telefon', station: 'Station/verwaltet' };
+  async function loadAppStand() {
+    const wrap = document.getElementById('appstand-list');
+    try {
+      const r = await AuthentikAuth.apiFetch('https://pbx.rosenweg4303.ch/api/pbx/apps-stand');
+      if (!r.ok) { wrap.innerHTML = `<p class="text-red-600 text-sm">Telefonanlage: Fehler ${r.status}</p>`; return; }
+      const d = await r.json();
+      const veraltet = (d.apps || []).reduce((n, a) => n + a.veraltet, 0);
+      const badge = document.getElementById('appstand-badge');
+      if (veraltet > 0) { badge.textContent = veraltet; badge.classList.remove('hidden'); } else badge.classList.add('hidden');
+      document.getElementById('appstand-info').textContent = `· ${d.geraete} Geräte, letzte ${d.alter_tage} Tage`;
+      renderAppStand(d.apps || []);
+    } catch (e) {
+      wrap.innerHTML = '<p class="text-red-600 text-sm">Telefonanlage nicht erreichbar.</p>';
+    }
+  }
+  function renderAppStand(apps) {
+    const wrap = document.getElementById('appstand-list');
+    if (!apps.length) { wrap.innerHTML = '<p class="text-gray-400 italic text-sm p-4 text-center">Noch keine Meldungen.</p>'; return; }
+    const zeit = t => t ? new Date(t * 1000).toLocaleString('de-CH', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+    const fassung = x => esc(x.version || '') + (x.version_code != null ? ` <span class="text-gray-400">(${esc(x.version_code)})</span>` : '');
+    wrap.innerHTML = apps.map(a => {
+      const pct = Math.round(a.anteil_veraltet * 100);
+      const farbe = a.veraltet === 0 ? 'bg-emerald-100 text-emerald-800' : pct >= 50 ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800';
+      return `<details class="border rounded bg-white p-3">
+        <summary class="cursor-pointer flex items-center gap-2 flex-wrap">
+          <span class="font-medium text-sm">${esc(a.name)}</span>
+          <span class="text-xs font-mono bg-slate-100 px-2 py-0.5 rounded">${esc(PLATTFORM_TITEL[a.plattform] || a.plattform)}</span>
+          <span class="text-xs text-gray-500">aktuell ${esc(a.aktuell || '?')}${a.aktuell_code ? ' (' + esc(a.aktuell_code) + ')' : ''}</span>
+          <span class="text-xs ${farbe} px-2 py-0.5 rounded">${a.veraltet} von ${a.geraete} veraltet (${pct} %)</span>
+        </summary>
+        <div class="overflow-x-auto mt-2"><table class="text-xs w-full">
+          <thead><tr class="text-left text-gray-500"><th class="pr-3">Gerät</th><th class="pr-3">Art</th><th class="pr-3">Fassung</th><th class="pr-3">System</th><th>zuletzt</th></tr></thead>
+          <tbody>${a.liste.map(x => `<tr class="${x.veraltet ? 'text-red-700' : ''}">
+            <td class="pr-3 font-mono">${esc(x.geraet)}</td><td class="pr-3">${esc(ART_TITEL[x.art] || x.art)}</td>
+            <td class="pr-3">${fassung(x)}${x.veraltet ? ' ⚠' : x.veraltet === null ? ' ?' : ''}</td>
+            <td class="pr-3">${esc(x.system || '')}</td><td>${zeit(x.zuletzt)}</td></tr>`).join('')}</tbody>
+        </table></div>
+      </details>`;
+    }).join('');
   }
 
   // === PVE-Host-Meldungen ===
