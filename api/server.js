@@ -21,6 +21,7 @@ const { zevAliasAddress, zevGotoTargets } = require('./lib/zev');
 const reklMelder = require('./lib/reklamation-melder');
 const vollmachtRechte = require('./lib/vollmacht-rechte');
 const projekteRechte = require('./lib/projekte-rechte');
+const rechteSchluessel = require('./lib/rechte-schluessel');
 const stwegSichtLib = require('./lib/stweg-sicht');
 const verteilerVerwaltung = require('./lib/verteiler-verwaltung');
 
@@ -276,7 +277,7 @@ app.post('/api/otp/verify', async (req, res) => {
 // Authentik/OAuth/PVE-Config + OAUTH_ALLOWED_HOSTS + oauthRedirectUri -> lib/config.js
 const { AUTHENTIK_URL, AUTHENTIK_EXTERNAL_URL, AUTHENTIK_CLIENT_ID, AUTHENTIK_CLIENT_SECRET, AUTHENTIK_API_TOKEN, SITE_URL, PVE_API_URL, PVE_API_TOKEN, OAUTH_ALLOWED_HOSTS, oauthRedirectUri, MQTT_PASSWORD_LOGIN } = require('./lib/config');
 // Auth-Helfer -> lib/auth.js
-const { authentikAPI, tokenCache, validateAuthentikToken, authentikPasswordLogin, appTokensVergessen, MANAGED_PAGES, ACCESS_LEVELS, resolveAncestorGroups, getUserPermissions } = require('./lib/auth');
+const { authentikAPI, tokenCache, validateAuthentikToken, authentikPasswordLogin, appTokensVergessen, MANAGED_PAGES, ACCESS_LEVELS, resolveAncestorGroups, getUserPermissions, rechteSpalten } = require('./lib/auth');
 // Auth-Middleware -> middleware/auth.js (authMiddleware/adminOnly/requirePermission/requireUserLogin)
 const { authMiddleware, adminOnly, requirePermission, requireUserLogin } = require('./middleware/auth');
 // Admin-Aktionen mit der Karte: Protokoll, Quittung, Bestaetigung per E-Mail (lib/kartenadmin.js)
@@ -1007,7 +1008,7 @@ app.get('/api/permissions/pages', authMiddleware, requirePermission('rechteverwa
 app.get('/api/permissions', authMiddleware, requirePermission('rechteverwaltung', 'read'), async (req, res) => {
   try {
     const result = await pool.query('SELECT group_name, page, access FROM permissions ORDER BY group_name, page');
-    res.json({ permissions: result.rows, pages: MANAGED_PAGES });
+    res.json({ permissions: result.rows, pages: rechteSpalten(result.rows) });
   } catch (err) {
     res.status(500).json({ error: 'Fehler beim Laden der Berechtigungen' });
   }
@@ -30234,13 +30235,12 @@ async function initDB() {
     // Trennung machen die Routen (requireStwegAccess, lib/stweg-sicht.js,
     // lib/vollmacht-rechte.js). ON CONFLICT DO NOTHING: in der Rechteverwaltung
     // geaenderte Werte bleiben. Weicht eine STWEG ab, dort je Gruppe anpassen.
-    // Schluessel mit Umlaut zusaetzlich in ASCII: die Tabelle fuehrt beide
-    // Schreibweisen (Code fragt 'zähler', die Rechte-Tabelle hatte 'zaehler').
+    // Schluessel nur mit Umlaut (lib/rechte-schluessel.js, Befund W18).
     const VERWALTUNG_SEITENRECHTE = [
       ['objektverwaltung', 'write'], ['wohnungsverwaltung', 'write'], ['reklamationen', 'write'], ['handwerker', 'write'],
       // vollmachten write: fuer Dritte erfassen, Papier aktivieren (Entscheid Stefan 27.11.2026)
-      ['vollmachten', 'write'], ['auslagen', 'read'], ['zähler', 'read'], ['zaehler', 'read'], ['energie-monitor', 'read'],
-      ['waschküche-admin', 'read'], ['waschkueche-admin', 'read'], ['projekte', 'read'], ['kontakte', 'read'], ['verwaltung', 'read'],
+      ['vollmachten', 'write'], ['auslagen', 'read'], ['zähler', 'read'], ['energie-monitor', 'read'],
+      ['waschküche-admin', 'read'], ['projekte', 'read'], ['kontakte', 'read'], ['verwaltung', 'read'],
       ['email-verteiler', 'read'], ['bewohner-verwaltung', 'read'],
     ];
     for (const groupName of Object.values(VERWALTUNG_GROUPS)) {
@@ -30250,6 +30250,9 @@ async function initDB() {
            ON CONFLICT (group_name, page) DO NOTHING`, [groupName, page, access]);
       }
     }
+    // Doppelte Rechte-Schluessel (zaehler/zähler …) auf die Umlaut-Form zusammenfuehren.
+    const vereinheitlicht = await rechteSchluessel.vereinheitlichen(client);
+    if (vereinheitlicht) console.log(`[rechte] ${vereinheitlicht} ASCII-Rechte-Schluessel auf Umlaut umgestellt`);
     // ÜBERGANG: die alte Gruppe „Verwaltung“ ebenso (bestehender Wert bleibt;
     // read -> write einmalig per SQL, siehe PR „Verwaltung je STWEG“).
     await client.query(

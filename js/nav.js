@@ -22,7 +22,7 @@ const WASCH_NAV_GRUPPEN = 'waschküche,bewohner,eigentuemer,technik,praesident';
 // api/lib/groups.js VERWALTUNG_GROUPS; ÜBERGANG: alte Gruppe „Verwaltung“). Das
 // Menü selbst erscheint nur für diese Gruppen (data-nur-gruppe, auch nicht für Technik –
 // die hat „Admin ↗“), jeder Eintrag nur mit dem Seitenrecht. Rechte-Schlüssel
-// mit Umlaut zusätzlich in ASCII, falls sie so in der Rechte-Tabelle stehen.
+// nur mit Umlaut (die API führt ASCII-Zeilen zusammen, api/lib/rechte-schluessel.js).
 // Ohne eigenen Eintrag: kontakte (Reiter in der Objektverwaltung), verwaltung
 // (öffentliche Seite „Hausverwaltung“ im Bewohner-Menü). Waschküche: die
 // Verwaltung sieht Räume und Belegung ihrer STWEG (nur lesen, reservieren
@@ -37,8 +37,8 @@ const VERWALTUNG_NAV = [
   { label: '📝 Vollmachten', href: 'vollmachten.html', key: 'vollmachten', permAny: 'vollmachten' },
   { label: '💸 Auslagen', href: 'auslagen.html', key: 'auslagen', permAny: 'auslagen' },
   { label: '🏗 Projekte', href: 'projekte.html', key: 'projekte', permAny: 'projekte' },
-  { label: '🧺 Waschküche (Belegung)', href: 'waschkueche.html', key: 'waschküche', permAny: 'waschküche-admin,waschkueche-admin' },
-  { label: '🔢 Zähler & Verbrauch', href: 'zaehler.html', key: 'zähler', permAny: 'zähler,zaehler' },
+  { label: '🧺 Waschküche (Belegung)', href: 'waschkueche.html', key: 'waschküche', permAny: 'waschküche-admin' },
+  { label: '🔢 Zähler & Verbrauch', href: 'zaehler.html', key: 'zähler', permAny: 'zähler' },
   { label: '⚡ Energie-Monitor', href: 'energie-monitor.html', key: 'energie', permAny: 'energie-monitor' },
   { label: '✉️ E-Mail-Verteiler', href: 'email-verteiler.html', key: 'verteiler', permAny: 'email-verteiler' },
 ];
@@ -366,7 +366,7 @@ const RosenwegNav = {
       { href: 'mail-templates.html', label: 'Vorlagen', group: 'Mail-Betrieb', perm: 'mail-templates' },
       { href: 'email-log.html', label: 'Mail-Log', group: 'Mail-Betrieb', perm: 'email-log' },
       { href: 'email-archiv.html', label: 'Mail-Archiv', group: 'Mail-Betrieb', perm: 'email-archiv' },
-      { href: 'mail-empfaenger-admin.html', label: 'Empfänger', group: 'Mail-Betrieb', perm: 'mail-empfaenger' },
+      { href: 'mail-empfaenger-admin.html', label: 'Empfänger', group: 'Mail-Betrieb', perm: 'mail-empfänger' },
       { href: 'verwaltung-mail-outbox.html', label: 'Mail-Outbox', group: 'Mail-Betrieb', perm: 'verwaltung-mail-outbox' },
       { href: 'email-verteiler.html', label: 'Mail-Verteiler', group: 'Mail-Betrieb', perm: 'email-verteiler', aud: ['admin'] },
       { href: 'rechteverwaltung.html', label: 'Rechte', group: 'System', perm: 'rechteverwaltung' },
