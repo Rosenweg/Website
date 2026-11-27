@@ -57,7 +57,7 @@
             </div>
             <label class="flex items-start gap-2 text-sm">
                 <input id="eEinfuellen" type="checkbox" class="mt-1">
-                <span>Am Tag, an dem der nächste Sack fällig ist, um 8 Uhr erinnern – per Mail an den Hauswart
+                <span>Am Tag, bevor der nächste Sack fällig ist, um 8 Uhr erinnern (einmal je Einfüllung) – per Mail an den Hauswart
                     (ohne Hauswart an die Technik), dazu Push an Hauswarte, die in der Rosenweg-Web-App (pwa.rosenweg4303.ch) Benachrichtigungen eingeschaltet haben.
                     <span id="dNaechster" class="text-slate-500"></span></span>
             </label>
@@ -125,17 +125,27 @@ function reichweiteText(l) {
     return 'Reichweite: noch zu wenig Daten';
 }
 
-// "Nächster Sack etwa am Do, 3. Dez." — war der Tag schon, "war … fällig".
+// "Nächster Sack etwa am Do, 3. Dez." — der Tag ist eine Schätzung: wann in
+// der Anlage wieder Platz für einen Sack ist. War er schon, "war etwa am … fällig".
+function tagKurz(iso) {
+    return new Date(iso + 'T12:00:00').toLocaleDateString('de-CH', { weekday: 'short', day: 'numeric', month: 'short' });
+}
 function naechsterSackText(l) {
     if (!l.naechster_sack) return '';
     const tag = new Date(l.naechster_sack + 'T12:00:00');
     const heute = new Date(); heute.setHours(12, 0, 0, 0);
-    const t = tag.toLocaleDateString('de-CH', { weekday: 'short', day: 'numeric', month: 'short' });
+    const t = tagKurz(l.naechster_sack);
     const diff = Math.round((tag - heute) / 86400000);
-    if (diff === 0) return 'Nächster Sack heute';
-    if (diff === 1) return 'Nächster Sack morgen (' + t + ')';
+    if (diff === 0) return 'Nächster Sack etwa heute';
+    if (diff === 1) return 'Nächster Sack etwa morgen (' + t + ')';
     return diff < 0 ? `Nächster Sack war etwa am ${t} fällig` : `Nächster Sack etwa am ${t}`;
 }
+// Ohne Termin: der Hinweis der API (warum es keine Schätzung gibt).
+function naechsterSackZeile(l) {
+    if (!l.in_betrieb) return '';
+    return l.naechster_sack ? naechsterSackText(l) : (l.naechster_sack_hinweis || 'Nächster Sack: noch keine Schätzung');
+}
+const datumKurz = iso => new Date(iso + 'T12:00:00').toLocaleDateString('de-CH', { day: 'numeric', month: 'numeric', year: 'numeric' });
 
 function zeichneKarten() {
     $('karten').innerHTML = lager.map(l => `
@@ -144,7 +154,7 @@ function zeichneKarten() {
             <div class="text-sm text-slate-500">${esc(l.name)}${l.ort ? ' · ' + esc(l.ort) : ''}</div>
             <div class="text-3xl font-bold">${Number(l.bestand_saecke)} <span class="text-base font-normal">${l.bestand_saecke === 1 ? 'Sack' : 'Säcke'}</span></div>
             <div class="text-sm">${esc(reichweiteText(l))}</div>
-            ${l.naechster_sack ? `<div class="text-sm">${esc(naechsterSackText(l))}</div>` : ''}
+            ${naechsterSackZeile(l) ? `<div class="text-sm ${l.naechster_sack ? 'font-semibold' : 'text-slate-500'}">${esc(naechsterSackZeile(l))}</div>` : ''}
             <div class="text-xs text-slate-500 mt-1">${l.verbrauch_kg_woche != null ? esc(l.verbrauch_kg_woche) + ' kg/Woche · ' : ''}${Math.round(l.bestand_kg)} kg</div>
             ${l.meldung_seit ? `<div class="text-xs text-red-700 mt-1">Nachbestellen gemeldet am ${esc(datum(l.meldung_seit))}</div>` : ''}
         </button>`).join('');
@@ -173,13 +183,22 @@ async function zeigeDetail() {
     $('eWiederholung').value = l.wiederholung_tage;
     $('iSaecke').value = '';
     $('eEinfuellen').checked = l.erinnerung_einfuellen !== false;
-    $('dNaechster').textContent = l.naechster_sack ? '(' + naechsterSackText(l) + ')' : '(noch kein Termin – zu wenig Verbrauchsdaten)';
+    $('dNaechster').textContent = '(' + (l.naechster_sack ? naechsterSackText(l) : (l.naechster_sack_hinweis || 'noch kein Termin')) + ')';
     for (const id of ['eSchwelle', 'eMindest', 'eWiederholung', 'eEinfuellen']) $(id).disabled = !darfEinstellen;
     $('verwalten').classList.toggle('hidden', !darfEinstellen);
+    const g = l.verbrauch_grundlage;
+    const letzte = l.letzte_einfuellung_zusammen;
     $('dErklaerung').textContent = l.modus === 'reichweite'
-        ? `Verbrauch aus ${l.einfuellungen_im_fenster} Einfüllungen der letzten 26 Wochen: ${l.verbrauch_kg_woche} kg pro Woche. `
+        ? `Verbrauch etwa ${l.verbrauch_kg_woche} kg pro Woche, geschätzt aus ${g.einfuellungen} Einfüllungen `
+          + `vom ${datumKurz(g.von)} bis ${datumKurz(g.bis)}`
+          + (g.aktuell ? '. ' : ' (danach fehlen Buchungen; die Lücke zählt nicht, und neuere Daten reichen noch nicht). ')
+          + 'Mehrere Säcke innert 6 Stunden gelten als eine Einfüllung. '
+          + (letzte && l.naechster_sack
+              ? `Zuletzt ${letzte.saecke} ${letzte.saecke === 1 ? 'Sack' : 'Säcke'} eingefüllt; nach etwa einem Sack Verbrauch ist wieder Platz für den nächsten`
+                + (letzte.saecke > 1 && l.inhalt_reicht_bis ? `, der ganze Inhalt reicht etwa bis ${datumKurz(l.inhalt_reicht_bis)}. ` : '. ')
+              : '')
           + `Die Technik bekommt eine Mail, sobald der Vorrat weniger als ${l.schwelle_wochen} Wochen reicht.`
-        : `Für eine Reichweite braucht es mindestens 3 Einfüllungen über 2 Wochen (bisher ${l.einfuellungen_im_fenster}). `
+        : `Für eine Reichweite braucht es mindestens 3 Einfüllungen an verschiedenen Tagen über 2 Wochen (bisher ${l.einfuellungen_im_fenster}). `
           + `Bis dahin kommt die Mail bei ${l.mindest_saecke} Säcken oder weniger.`;
     try {
         const v = await api(`/lager/${l.id}/verlauf?anzahl=100`);
