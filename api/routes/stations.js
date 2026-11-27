@@ -1318,8 +1318,9 @@ const castEmpfaenger = () => castw.empfaengerWahl(process.env.CAST_APP_ID);
 /**
  * Was die Anzeige dieses Geräts zeigt — wie bei einer display-Station, nur
  * die schlanke Seite (display-lite.html, siehe castw.castAdresse): an
- * display.html stürzt ein Chromecast 1 ab. overrides roles.display.cast_seite
- * = 'voll' lässt display.html stehen.
+ * display.html stürzt ein Chromecast 1 ab — und auf www.rosenweg4303.ch
+ * statt display.*, das nur intern auflösbar ist. overrides
+ * roles.display.cast_seite = 'voll' lässt Adresse und Seite unverändert.
  */
 function castZiel(st) {
   const cfg = buildConfig({ ...st, role: 'display' });
@@ -1328,7 +1329,9 @@ function castZiel(st) {
   return {
     url,
     reloadMinuten: Number(d.reload_interval_minutes) || 0,
-    erlaubt: castw.adresseErlaubt(url, d.allowed_domains),
+    // Dazu www.rosenweg4303.ch: dorthin bildet castAdresse display.* ab, weil
+    // ein Chromecast den nur intern bekannten Namen nicht auflöst.
+    erlaubt: castw.adresseErlaubt(url, [...(d.allowed_domains || []), ...castw.CAST_ERLAUBT]),
   };
 }
 

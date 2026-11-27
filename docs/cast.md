@@ -6,7 +6,7 @@ Ein Chromecast (1., 2. Generation, nur Cast-Firmware) ist für Technik eine
 
 | | Station `display` | Chromecast |
 |---|---|---|
-| Seite | `display.rosenweg4303.ch?haus=N` | `display-lite.html?haus=N` auf demselben Host (aus `buildConfig`, Rolle `display`, dann `castAdresse`) |
+| Seite | `display.rosenweg4303.ch?haus=N` | `www.rosenweg4303.ch/display-lite.html?haus=N` (aus `buildConfig`, Rolle `display`, dann `castAdresse`) |
 | Ankündigungen / Notfall | display.html abonniert `display/#` (retained) | display-lite.html fragt `/api/display/stand?haus=N` alle 10 s (dieselben retained Stände, von der API mitgeführt) |
 | Haus, Standort, Notiz, overrides | `/stationen` | `/stationen` (Art „Anzeige (Chromecast)") |
 | Neuladen | `station-display-reload`, `reload_interval_minutes` | der Empfänger, mit demselben Wert |
@@ -16,6 +16,23 @@ Ein Chromecast (1., 2. Generation, nur Cast-Firmware) ist für Technik eine
 Es gibt keine freie Adresse, keine Diashow und keine Lautstärke je Gerät —
 wer die Adresse ändern muss, tut es wie bei einer Station in den overrides
 (`roles.display.url`, nur Hosts aus `roles.display.allowed_domains`).
+
+### Warum www.rosenweg4303.ch und nicht display.*
+
+`display.rosenweg4303.ch` gibt es nur im internen DNS (Juro-DNS → Edge);
+öffentlich (8.8.8.8, 1.1.1.1) hat der Name keinen Eintrag. Ein Chromecast
+fragt (vermutlich, wie üblich) fest Googles DNS statt den aus dem DHCP — er findet display.* nicht, die
+Navigation scheitert, und die Firmware beendet die App nach rund zwei
+Sekunden. Am 27. November 2026 nachgestellt: schon ein 47-KB-PNG von
+display.* beendet die App nach 1,8 s, `https://www.rosenweg4303.ch/display-lite.html?haus=9`
+läuft. `castAdresse` bildet deshalb display.* auf www.* ab (`CAST_HOSTS`),
+und `castZiel` lässt www.* zusätzlich zu den `allowed_domains` zu. www.*
+liefert dasselbe Frontend und `/api/display/*` aus.
+
+Dasselbe gilt für `cast.rosenweg4303.ch` (eigener Empfänger): auch dieser
+Name ist öffentlich nicht auflösbar. Bevor der eigene Empfänger in der
+Cast Developer Console eingetragen wird, braucht er einen öffentlichen
+DNS-Eintrag (Cloudflare) — oder er liegt unter www.*.
 
 ### Warum display-lite.html
 
@@ -27,7 +44,7 @@ Bild stürzt genauso ab, mit demselben Bild auf 1520 Punkte verkleinert läuft
 sie. Syntax und MQTT sind es nicht (Chrome 90 kann ES2020).
 
 Der Wächter schickt Chromecasts deshalb auf `display-lite.html` (Abbildung in
-`castw.castAdresse`: `/` und `/display.html` → `/display-lite.html`, Haus und
+`castw.castAdresse`: `/` und `/display.html` → `/display-lite.html` auf www.*, Haus und
 übrige Parameter bleiben). Die Seite ist reines ES5 ohne Bibliothek, holt den
 Stand per XHR von `GET /api/display/stand?haus=N` (öffentlich wie der
 RSS-Feed) und die Aushangbilder mit `?dpi=150`. `overrides`
@@ -132,8 +149,8 @@ dabei nichts.
 ## Was einzurichten ist (nicht im PR erledigt)
 
 ### 1. DNS
-`cast.rosenweg4303.ch` wie `display.rosenweg4303.ch` (Cloudflare → Edge,
-CT 245). Intern (Juro-DNS/Unbound) ebenfalls auf den Edge, falls display
+`cast.rosenweg4303.ch` **öffentlich** in Cloudflare (→ Edge, CT 245) — nicht
+nur intern wie display.*: Chromecasts lösen über 8.8.8.8 auf (siehe oben). Intern (Juro-DNS/Unbound) ebenfalls auf den Edge, falls display
 dort einen internen Eintrag hat. Die Chromecasts holen den Empfänger per
 **HTTPS** mit gültigem Zertifikat — Cast verlangt das.
 

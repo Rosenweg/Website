@@ -217,12 +217,27 @@ function adresseErlaubt(url, erlaubt) {
  * roles.display.cast_seite) lässt display.html stehen — für neuere Geräte.
  */
 const LITE_PFAD = '/display-lite.html';
+
+/**
+ * Und auf welchem Host: display.rosenweg4303.ch steht nur im internen DNS
+ * (Juro-DNS → Edge), öffentlich gibt es den Namen nicht. Ein
+ * Chromecast fragt (vermutlich, wie üblich) fest Googles 8.8.8.8 statt den DHCP-DNS —
+ * er findet display.* nicht, die Navigation scheitert, und die Firmware
+ * beendet die App nach rund zwei Sekunden. Am 27. November 2026 am Gerät
+ * nachgestellt: schon ein kleines PNG von display.* beendet die App, dieselbe
+ * display-lite.html von www.* läuft. www.rosenweg4303.ch liefert dasselbe
+ * Frontend und /api/display/* aus und ist öffentlich auflösbar.
+ */
+const CAST_HOSTS = { 'display.rosenweg4303.ch': 'www.rosenweg4303.ch' };
+const CAST_ERLAUBT = Object.values(CAST_HOSTS);
+
 function castAdresse(url, seite) {
   if (seite === 'voll' || !url) return url;
   let u;
   try { u = new URL(url); } catch { return url; }
   if (u.pathname !== '/' && u.pathname !== '' && u.pathname !== '/display.html') return url;
-  return `${u.protocol}//${u.host}${LITE_PFAD}${u.search}${u.hash}`;
+  const host = CAST_HOSTS[u.hostname] ? CAST_HOSTS[u.hostname] + (u.port ? `:${u.port}` : '') : u.host;
+  return `${u.protocol}//${host}${LITE_PFAD}${u.search}${u.hash}`;
 }
 
 /** IPv4 oder Hostname — nichts, was nach Pfad, Port oder Schema aussieht. */
@@ -243,5 +258,5 @@ module.exports = {
   DASHCAST, EIGEN_NAMESPACE, LEERLAUF_APPS,
   empfaengerWahl, ladeNachricht, vordergrund, istLeerlauf, startpause,
   entscheiden, gestartet, gescheitert, adresseErlaubt, adressePruefen, macPruefen,
-  LITE_PFAD, castAdresse,
+  LITE_PFAD, CAST_HOSTS, CAST_ERLAUBT, castAdresse,
 };
