@@ -128,4 +128,28 @@ function zevAliasAusFormular({ darfAlias, prev, body }) {
   return { domain, prefix };
 }
 
-module.exports = { zevSlug, zevAliasAddress, isValidEmail, zevGotoTargets, zevBewohnendePartei, zevDarfRechnungSehen, zevStwegFuerEmpfaenger, zevAliasAusFormular };
+// ─── Aktueller Bewohner und Wechsel-Meldung (Z4) ─────────────────────────
+// Aktueller Bewohner einer Wohnung aus ihren aktiven Kontakten: Mieter >
+// Bewohner > Eigentuemer, innerhalb der Rolle nach sort_order, dann id. Nach
+// ihm heisst der ZEV-Alias. Gleiche Regel wie resolveZevForStweg.
+const ZEV_ROLLEN_RANG = { mieter: 1, bewohner: 2, eigentuemer: 3 };
+function zevAktuellerBewohner(kontakte) {
+  const ks = (kontakte || []).filter(k => k && ZEV_ROLLEN_RANG[k.rolle]);
+  const so = k => (k.sort_order == null ? Infinity : Number(k.sort_order));
+  ks.sort((a, b) => (ZEV_ROLLEN_RANG[a.rolle] - ZEV_ROLLEN_RANG[b.rolle]) || (so(a) - so(b)) || (Number(a.id) - Number(b.id)));
+  return ks[0] || null;
+}
+
+// Muss ein neuer Kontakt `k` dem Messdienst gemeldet werden? Mieter/Bewohner
+// wie bisher immer. Eigentuemer nur, wenn er heute der aktuelle Bewohner ist
+// (selbst bewohnte Wohnung, Wechsel nur mit Rolle Eigentuemer) – sonst aendert
+// sich der Alias nicht (vermietete Wohnung verkauft) und es gibt keine Meldung.
+function zevWechselMelden(k, kontakteDerWohnung) {
+  if (!k) return false;
+  if (k.rolle === 'mieter' || k.rolle === 'bewohner') return true;
+  if (k.rolle !== 'eigentuemer') return false;
+  const occ = zevAktuellerBewohner(kontakteDerWohnung);
+  return !!occ && Number(occ.id) === Number(k.id);
+}
+
+module.exports = { zevSlug, zevAliasAddress, isValidEmail, zevGotoTargets, zevBewohnendePartei, zevDarfRechnungSehen, zevStwegFuerEmpfaenger, zevAliasAusFormular, zevAktuellerBewohner, zevWechselMelden };

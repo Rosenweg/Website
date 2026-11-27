@@ -17,7 +17,7 @@ const druckApi = require('./lib/druckapi'); // Druck-API CT 111 und Gotenberg (D
 const { STWEG_GROUPS, parseStweg, getUserStwegs, stwegFolderName, folderStwegNr, isTechnik, isPraesident, getAusschussStwegs, isAusschussForAny, canSeeVerwaltungKontakte,
   VERWALTUNG_GROUPS, istVerwaltungUebergang, verwaltungStwegs, isVerwaltungFor, isVerwaltungForAny, verwaltetAlleStwegs, istVerwaltungsGruppenName, getStwegsMitVerwaltung } = require('./lib/groups');
 const { nummernKanal, darfEchteNummernSehen, istTechnikOderPraesident, interneNummerFinden, nummernAusgeben, nummernAusBodyEntfernen, interneNummernLaden, interneNummernCacheLeeren, interneNummernPruefen, nummernSicht } = require('./lib/nummernsicht');
-const { zevAliasAddress, zevGotoTargets, zevDarfRechnungSehen, zevStwegFuerEmpfaenger, zevAliasAusFormular } = require('./lib/zev');
+const { zevAliasAddress, zevGotoTargets, zevDarfRechnungSehen, zevStwegFuerEmpfaenger, zevAliasAusFormular, zevAktuellerBewohner, zevWechselMelden } = require('./lib/zev');
 const reklMelder = require('./lib/reklamation-melder');
 const vollmachtRechte = require('./lib/vollmacht-rechte');
 const projekteRechte = require('./lib/projekte-rechte');
@@ -5912,10 +5912,11 @@ async function buildZevAliasMap() {
       }
       // Kuerzlich ausgezogene Bewohner (archiviert < 6 Monate): Alias 6 Monate aktiv
       // halten (Schlussabrechnung) + Rechnungen weiter dem ALTEN Bewohner zuordnen.
+      // Auch Eigentuemer (Z4): Verkauf einer selbst bewohnten Wohnung.
       const recent = await pool.query(
         `SELECT k.name, k.email, k.wohnung_id
            FROM wohnungen_kontakte k JOIN wohnungen w ON k.wohnung_id = w.id
-          WHERE w.stweg = $1 AND k.rolle IN ('mieter','bewohner')
+          WHERE w.stweg = $1 AND k.rolle IN ('mieter','bewohner','eigentuemer')
             AND k.archiviert_am IS NOT NULL
             AND k.archiviert_am >= CURRENT_DATE - INTERVAL '6 months'`,
         [cfg.stweg]);
@@ -7924,7 +7925,7 @@ async function resolveZevForStweg(stweg, cfg) {
     const ks = byW[w.id] || [];
     const eig = ks.find(k => k.rolle === 'eigentuemer');
     const eigName = (eig && eig.name) || w.eigentuemer_name || null;
-    const occ = ks.find(k => k.rolle === 'mieter') || ks.find(k => k.rolle === 'bewohner') || eig;
+    const occ = zevAktuellerBewohner(ks);
     let bewEmail = (occ && occ.email) || null;
     let bewName = (occ && occ.name) || null;
     let bewRolle = (occ && occ.rolle) || null;
@@ -8050,7 +8051,7 @@ async function notifyZevWechsel(cfg, k) {
   try {
     const prev = await pool.query(
       `SELECT name FROM wohnungen_kontakte
-        WHERE wohnung_id = $1 AND rolle IN ('mieter','bewohner') AND archiviert_am IS NOT NULL
+        WHERE wohnung_id = $1 AND rolle IN ('mieter','bewohner','eigentuemer') AND archiviert_am IS NOT NULL
         ORDER BY archiviert_am DESC, id DESC LIMIT 1`, [k.wohnung_id]);
     if (prev.rows[0]?.name) alterAlias = zevAliasAddress(prev.rows[0].name, cfg.alias_prefix, cfg.alias_domain);
   } catch {}
@@ -8060,7 +8061,7 @@ async function notifyZevWechsel(cfg, k) {
   const body =
     `Hallo Axova-Team\n\n`
     + `In der Wohnung "${k.bezeichnung || '—'}" (STWEG ${cfg.stweg}) gibt es ab ${ab} einen neuen `
-    + `${k.rolle === 'mieter' ? 'Mieter' : 'Bewohner'}:\n\n`
+    + `${k.rolle === 'mieter' ? 'Mieter' : k.rolle === 'eigentuemer' ? 'Eigentümer (selbst bewohnt)' : 'Bewohner'}:\n\n`
     + `  Name: ${k.name || '—'}\n`
     + (k.email ? `  Mail: ${k.email}\n` : '')
     + (k.telefon ? `  Tel:  ${k.telefon}\n` : '')
@@ -8113,7 +8114,8 @@ async function checkZevPollerHealth() {
 }
 
 // Taeglich (nach Auto-Archive): je aktiver STWEG Aliase neu syncen + neue Bewohner-/
-// Mieter-Kontakte (ab gueltig_ab, noch nicht gemeldet) an Axova/Immosense melden.
+// Mieter-Kontakte und neue selbst bewohnende Eigentuemer (ab gueltig_ab, noch nicht
+// gemeldet) an Axova/Immosense melden.
 async function processZevDaily() {
   let cfgs;
   try { cfgs = await pool.query('SELECT * FROM zev_config WHERE aktiv = true'); }
@@ -8125,12 +8127,23 @@ async function processZevDaily() {
         `SELECT k.*, w.bezeichnung, w.eigentuemer_name
            FROM wohnungen_kontakte k JOIN wohnungen w ON k.wohnung_id = w.id
           WHERE w.stweg = $1 AND k.archiviert_am IS NULL
-            AND k.rolle IN ('mieter','bewohner')
+            AND k.rolle IN ('mieter','bewohner','eigentuemer')
             AND (k.gueltig_ab IS NULL OR k.gueltig_ab <= CURRENT_DATE)
             AND NOT EXISTS (SELECT 1 FROM zev_wechsel_processed p WHERE p.kontakt_id = k.id)`,
         [cfg.stweg]);
-      for (const k of neu.rows) await notifyZevWechsel(cfg, k);
-      if (neu.rows.length) console.log(`[zev-daily] STWEG ${cfg.stweg}: ${neu.rows.length} Wechsel an Axova gemeldet`);
+      // Z4: Eigentuemer nur melden, wenn er heute der Bewohner ist (Alias wechselt).
+      // Sonst bleibt er unverarbeitet und wird erneut geprueft (z. B. nach Auszug
+      // der Mieter, dann wechselt der Alias auf ihn).
+      const aktiveJeWohnung = {};
+      if (neu.rows.some(k => k.rolle === 'eigentuemer')) {
+        const ak = await pool.query(
+          `SELECT k.id, k.wohnung_id, k.rolle, k.sort_order FROM wohnungen_kontakte k JOIN wohnungen w ON k.wohnung_id = w.id
+            WHERE w.stweg = $1 AND k.archiviert_am IS NULL AND (k.gueltig_ab IS NULL OR k.gueltig_ab <= CURRENT_DATE)`, [cfg.stweg]);
+        for (const x of ak.rows) (aktiveJeWohnung[x.wohnung_id] = aktiveJeWohnung[x.wohnung_id] || []).push(x);
+      }
+      const melden = neu.rows.filter(k => zevWechselMelden(k, aktiveJeWohnung[k.wohnung_id] || []));
+      for (const k of melden) await notifyZevWechsel(cfg, k);
+      if (melden.length) console.log(`[zev-daily] STWEG ${cfg.stweg}: ${melden.length} Wechsel an Axova gemeldet`);
     } catch (e) { console.warn('[zev-daily]', cfg.stweg, e.message); }
   }
   try { await retryZevRemails(); } catch (e) { console.warn('[zev-remail-retry]', e.message); }
