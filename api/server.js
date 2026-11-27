@@ -21029,7 +21029,10 @@ app.get('/api/melde-ort/:code', async (req, res) => {
 // sanitisiert (KEIN Melder-Name/-Email — Transparenz-Board, kein Datenleck).
 app.get('/api/reklamationen/uebersicht', authMiddleware, async (req, res) => {
   try {
-    const stwegs = [...getUserStwegs(req.user.groups || [])];
+    // R2: die STWEG-Seite uebergibt ?stweg=N (lib/rekl-uebersicht.js)
+    const auswahl = require('./lib/rekl-uebersicht').uebersichtStwegs(req.user.groups || [], req.query.stweg);
+    if (auswahl.error) return res.status(auswahl.status).json({ error: auswahl.error });
+    const stwegs = auswahl.stwegs;
     const params = [];
     let cond = 'r.stweg IS NULL';
     if (stwegs.length) { params.push(stwegs); cond = `(r.stweg = ANY($${params.length}::int[]) OR r.stweg IS NULL)`; }

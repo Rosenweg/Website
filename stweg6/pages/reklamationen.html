@@ -56,7 +56,7 @@
         <!-- Inhalt -->
         <div id="content" class="hidden space-y-8">
             <p class="text-sm text-gray-600">
-                Hier sehen Sie die aktuellen Reklamationen Ihrer STWEG sowie übergreifende Meldungen — jeweils mit Bearbeitungsstatus. Aus Datenschutzgründen ohne Namen der meldenden Person.
+                Hier sehen Sie die aktuellen Reklamationen dieser STWEG sowie übergreifende Meldungen — jeweils mit Bearbeitungsstatus. Aus Datenschutzgründen ohne Namen der meldenden Person.
             </p>
 
             <!-- Leerzustand -->
@@ -88,6 +88,8 @@
         abgewiesen: 'abgewiesen',
     };
     const ACTIVE = new Set(['offen', 'weitergeleitet']);
+    // R2: STWEG dieser Seite (nicht die des Kontos); der Server prueft das Recht.
+    const SEITEN_STWEG = 6;
 
     document.addEventListener('DOMContentLoaded', async () => {
         const user = await AuthentikAuth.init({ requireAuth: true });
@@ -98,11 +100,11 @@
 
     async function load() {
         try {
-            const r = await AuthentikAuth.apiFetch('/api/reklamationen/uebersicht');
+            const r = await AuthentikAuth.apiFetch('/api/reklamationen/uebersicht?stweg=' + SEITEN_STWEG);
             if (!r.ok) {
-                let m = 'HTTP ' + r.status;
-                if (r.status === 403) m = 'Keine Berechtigung (403).';
-                else { try { const j = await r.json(); if (j && j.error) m = j.error; } catch {} }
+                // Servertext zeigen (z. B. „… sehen nur Bewohner, Eigentümer, Ausschuss und Verwaltung dieser STWEG.“)
+                let m = r.status === 403 ? 'Keine Berechtigung für diese STWEG.' : 'Fehler ' + r.status;
+                try { const j = await r.json(); if (j && j.error) m = j.error; } catch {}
                 showError(m);
                 return;
             }
@@ -210,7 +212,7 @@
         }
         const stwegKeys = Array.from(byStweg.keys()).sort((a, b) => Number(a) - Number(b));
         for (const k of stwegKeys) {
-            html += renderGroup('STWEG ' + k, byStweg.get(k));
+            html += renderGroup(Number(k) === 8 ? 'MEG' : 'STWEG ' + k, byStweg.get(k));
         }
         groupsEl.innerHTML = html;
     }

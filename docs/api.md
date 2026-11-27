@@ -278,7 +278,7 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `POST /api/reklamationen` | angemeldet, 5 / 10 Min. je Person |
 | `GET /api/reklamationen/meine…`, `POST …/:id/meine-archivieren` | angemeldet, eigene |
 | `GET /api/reklamationen`, `PUT /api/reklamationen/:id`, `…/:id/history`, `…/:id/foto`, `…/auto-assign`, `/api/reklamation-orte*` | Recht `reklamationen`; A🅢 sieht seine STWEG und Meldungen ohne STWEG; fremde `:id` → **404** |
-| `GET /api/reklamationen/uebersicht` | angemeldet, eigene STWEG(s) |
+| `GET /api/reklamationen/uebersicht[?stweg=N]` | angemeldet, eigene STWEG(s); mit `stweg` nur diese STWEG, wenn das Konto sie sehen darf (sonst 403) |
 | `/api/wasch/rooms`, `reservations`, `my/*`, `settings` | angemeldet; Räume und Reservationen nur eigener STWEG(s); Serien höchstens 1 Jahr; höchstens 120 offene Reservationen (429) |
 | `/api/wasch/admin/*`, `POST/PUT /api/wasch/rooms`, `PUT /api/wasch/settings` | T/P |
 | `/api/access/me/*` | angemeldet; Türen nach Policy, Öffnen 10 / 10 Min. (429), Protokoll in `access_tueroeffnungen`; NFC-Sitzungen nur der eigenen (10 / 10 Min.) |
