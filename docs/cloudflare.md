@@ -26,10 +26,9 @@ Beim Rotieren alle Stellen nachführen, Werte nur in diese Dateien:
 | API (CT 128) | `/opt/rosenweg-core/.env`: `CF_DDNS_TOKEN`, `CF_DDNS_ALLOWLIST` | DynDNS-Endpunkt `/api/cf-ddns` (eigenes Geheimnis) |
 | edge-traefik (CT 245) | `/etc/default/traefik`: `CF_DNS_API_TOKEN` | Let's-Encrypt-Zertifikate per DNS-01 |
 | PBX (CT 220) | `/root/.cloudflare.ini` | Zertifikat `sip.rosenweg4303.ch` |
-| Z-Push (CT 115) | certbot-Zugangsdatei | Zertifikat `contacts.rosenweg4303.ch` (zurzeit abgelaufen) |
 
 Prüfen nach der Rotation: in CT 245 `journalctl -u traefik | grep -i acme`, in
-CT 220 und CT 115 `certbot renew --dry-run`, im ISP-Bereich eine DNS-Prüfung
+CT 220 `certbot renew --dry-run`, im ISP-Bereich eine DNS-Prüfung
 für einen Namen in einer eigenen Zone.
 
 Nie automatisch freigegeben werden Mail-Relays, Reverse-Proxy-Routen und

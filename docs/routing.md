@@ -33,7 +33,7 @@ DNS (Cloudflare) → öffentliche Adresse (public.rosenweg4303.ch) → UDM-DNAT
 | `pwa.rosenweg4303.ch` | CT 130 `fe-pwa` `100.64.2.54` | `extra-routes.yml` (`pwa-lxc-svc`) |
 | `whatsapp.rosenweg4303.ch` | CT 116 `http://100.64.2.39:8090` | DB, id=25 |
 | `heizung.rosenweg9.ch`, `heizung.rosenweg4303.ch` | ioBroker `100.64.90.50:8082`, **immer** über Authentik | `extra-routes.yml` |
-| `contacts.rosenweg4303.ch` | CT 115 `100.64.2.38:443`, TLS-Passthrough | `extra-routes.yml` (TCP) |
+| `contacts.rosenweg4303.ch` | CT 115 `http://100.64.2.38` (TLS endet am Edge, seit 18.11.2026) | `extra-routes.yml` (`contacts-zpush-svc`) |
 
 ## Pfad-Routing innerhalb der Frontends (nginx)
 
@@ -70,7 +70,7 @@ Gilt für `frontends-lxc/nginx/{website,stweg,isp,pwa}.conf`:
 | Mailcow | CT 240 / .33 | mailcow.rosenweg9.ch |
 | PMG | CT 230 / .31 | pmg.rosenweg4303.ch |
 | WhatsApp-Bridge | CT 116 / .39 | whatsapp.rosenweg4303.ch |
-| Z-Push (Kontakte) | CT 115 / .38 | contacts.rosenweg4303.ch (Zertifikat abgelaufen, offener Punkt) |
+| Z-Push (Kontakte) | CT 115 / .38 | contacts.rosenweg4303.ch (Zertifikat am Edge, siehe `zpush/README.md`) |
 | Nextcloud | CT 104 / .36 | (eigenes LXC) |
 | Authentik (SSO) | CT 114 / .37 | OAuth/OIDC für alle Frontends |
 | PBX | CT 220 / .55 (pve3) | pbx.rosenweg4303.ch |
