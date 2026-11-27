@@ -1,0 +1,11 @@
+# Stuendlich, leicht gestreut (pve2: GitHub-Runner und win-runner laufen auf demselben Knoten).
+[Unit]
+Description=Android-Dauertest stuendlich
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=10min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

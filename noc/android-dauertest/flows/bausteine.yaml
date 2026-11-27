@@ -1,0 +1,18 @@
+# Rosenweg Bausteine (Beispiel aus rosenweg-basis): ohne Anmeldung, Vorfuehrdaten.
+# Flutter fasst Beschriftungen zu einer Semantik zusammen ("Liste\nTab 2 von 6"),
+# Maestro vergleicht den ganzen Text als Regex - darum ".*" am Ende.
+appId: ch.rosenweg4303.rosenweg_basis_beispiel
+name: Rosenweg Bausteine
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible: "Rosenweg Bausteine"
+    timeout: 30000
+- assertVisible: "Vorführung einstellen.*"
+- tapOn: "Liste.*Tab 2 von 6"
+- tapOn: "Formular.*Tab 3 von 6"
+- tapOn: "PDF.*Tab 6 von 6"
+- tapOn: "Rechte.*Tab 1 von 6"
+- assertVisible: "Keine Berechtigung"
+# Schirmbild macht lauf.sh danach per adb (ein Ort fuer alle Apps).
