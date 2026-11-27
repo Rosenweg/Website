@@ -23,7 +23,7 @@
 
     <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
     <script src="/js/nav.js?v=3"></script>
-    <script src="/js/meine-geraete.js?v=1"></script>
+    <script src="/js/meine-geraete.js?v=2"></script>
     <script src="/js/phone-helpers.js?v=1"></script>
 
     <div class="max-w-4xl mx-auto px-4 py-8 space-y-6">
@@ -323,7 +323,7 @@
             <h2 class="text-lg font-semibold text-gray-800 mb-2 flex items-center gap-2">
                 📱 Deine Handys mit Rosenweg-Apps
             </h2>
-            <p class="text-sm text-gray-500 mb-4">Jedes eigene Handy steht hier einmal, darunter die Rosenweg-Apps, die darauf angemeldet sind (Telefon, Messenger und die Apps, in denen du dich mit der Karte angemeldet hast). Kennst du ein Handy nicht: alle Apps darauf abmelden und der Technik melden, damit sie die Karte sperrt. Geteilte Telefone: unter <a href="/smartphones" class="text-blue-600 hover:underline">Smartphones</a>.</p>
+            <p class="text-sm text-gray-500 mb-4">Jedes eigene Handy steht hier einmal, darunter die Rosenweg-Apps, die darauf angemeldet sind (Telefon, Messenger und die Apps, in denen du dich mit der Karte oder dem Anmelde-QR angemeldet hast). Kennst du ein Handy nicht: alle Apps darauf abmelden und der Technik melden, damit sie die Karte sperrt. Eine App ohne Karte anmelden: in der App „QR-Code scannen“ und den App-QR unter <a href="/smartphones#app-qr" class="text-blue-600 hover:underline">Smartphones</a> zeigen; dort auch die geteilten Telefone.</p>
             <div class="flex flex-wrap items-center gap-3 mb-3">
                 <label id="aks-alle-wahl" class="hidden text-sm text-gray-700 flex items-center gap-2">
                     <input type="checkbox" id="aks-alle" onchange="ladeAppSitzungen()"> Alle Personen (Technik)
@@ -1532,7 +1532,7 @@
                         <div class="min-w-0">
                             <div class="font-semibold">${esc(s.app_name)} <span class="font-normal text-gray-500">auf ${esc(s.geraet_name)}${s.plattform ? ' · ' + esc(s.plattform) : ''}</span></div>
                             ${d.alle ? `<div class="text-sm text-gray-700">${esc(s.name)} &lt;${esc(s.email)}&gt;</div>` : ''}
-                            <div class="text-xs text-gray-500">Karte …${esc(s.karte_anzeige)} · Gerät ${esc(s.geraet)}</div>
+                            <div class="text-xs text-gray-500">${s.art === 'qr' ? 'Anmelde-QR' : 'Karte …' + esc(s.karte_anzeige)} · Gerät ${esc(s.geraet)}</div>
                         </div>
                         <button onclick="appSitzungAbmelden('${esc(s.id)}')" class="text-xs text-red-600 hover:underline shrink-0">Abmelden</button>
                     </div>
@@ -1541,7 +1541,7 @@
                         <div><span class="text-gray-400">Zuletzt:</span> ${fmt(s.last_used_at)}${s.last_used_ip ? ' · ' + esc(s.last_used_ip) : ''}</div>
                         <div><span class="text-gray-400">Gilt bis:</span> ${fmt(s.expires_at)}</div>
                     </div>
-                </div>`).join('') + `<p class="text-xs text-gray-400 mt-1">Höchstens ${d.max_je_person} Karten-Anmeldungen je Person; eine neue löst die am längsten unbenutzte ab. Nach ${d.laufzeit_tage} Tagen Karte erneut hinhalten.</p>`;
+                </div>`).join('') + `<p class="text-xs text-gray-400 mt-1">Höchstens ${d.max_je_person} App-Anmeldungen (Karte oder QR) je Person; eine neue löst die am längsten unbenutzte ab. Nach ${d.laufzeit_tage} Tagen erneut anmelden.</p>`;
             } catch (e) {
                 liste.innerHTML = `<div class="text-red-600 text-sm p-2">Fehler: ${String(e.message).replace(/</g, '&lt;')}</div>`;
             }

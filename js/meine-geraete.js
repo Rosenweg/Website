@@ -37,7 +37,7 @@
         karten.forEach(s => xs.push({
             quelle: 'karte', id: s.id, app: s.app, appName: s.app_name || s.app,
             geraet: s.geraet_name, gruppe: s.geraet_gruppe || null, seit: s.created_at, zuletzt: s.last_used_at,
-            text: `mit der Karte …${s.karte_anzeige || ''}` + (s.expires_at ? ` · gilt bis ${zeit(s.expires_at).slice(0, 6)}` : ''),
+            text: (s.art === 'qr' ? 'mit Anmelde-QR' : `mit der Karte …${s.karte_anzeige || ''}`) + (s.expires_at ? ` · gilt bis ${zeit(s.expires_at).slice(0, 6)}` : ''),
         }));
         return xs;
     }

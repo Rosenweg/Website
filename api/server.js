@@ -22987,7 +22987,7 @@ require('./routes/app-tunnel').appTunnelRoutes(app, { pool, rateLimitGuard });
 require('./routes/app-karte').appKarteRoutes(app, {
   pool, authMiddleware, requireUserLogin, absenderIp: require('./middleware/auth').absenderIp,
   loggedSendMail, MAIL_FROM, karteNachschlagen, accessKarteLive, accessKartenBesitzerId, kartenPerson,
-  kartenProtokollieren,
+  kartenProtokollieren, authentikUserByEmail,
 });
 
 app.post('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {

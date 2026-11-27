@@ -77,3 +77,23 @@ test('Token und Sitzungs-Id haben ihr Format', () => {
   assert.match(ak.neueSitzungsId(), ak.SITZUNG_RE);
   assert.notEqual(ak.neuesZugangsToken(), ak.neuesZugangsToken());
 });
+
+test('QR-Anmeldung: Praefix RWAPP1, Token-Form, Telefon-QR mit Hinweis', () => {
+  const t = ak.neuesQrToken();
+  assert.equal(ak.qrToken(ak.QR_PRAEFIX + t), t);
+  assert.equal(ak.qrToken(t), t);
+  assert.equal(ak.qrToken('RWAPP1:kurz'), null);
+  assert.equal(ak.qrToken('https://example.org/' + t), null);
+  const { uid, ...ohneKarte } = gueltig();
+  const p = ak.qrAnmeldungPruefen({ ...ohneKarte, token: ak.QR_PRAEFIX + t });
+  assert.equal(p.ok, true);
+  assert.equal(p.werte.token, t);
+  assert.equal(p.werte.app, 'ch.rosenweg4303.telefon');
+  assert.equal(p.werte.uid, undefined);
+  const tel = ak.qrAnmeldungPruefen({ ...ohneKarte, token: 'RWTEL1:' + t });
+  assert.equal(tel.ok, false);
+  assert.match(tel.fehler, /geteilte Telefone/);
+  assert.equal(ak.qrAnmeldungPruefen({ ...ohneKarte, token: 'irgendwas' }).ok, false);
+  assert.equal(ak.qrAnmeldungPruefen({ ...ohneKarte, token: t, schluessel: 'x' }).ok, false);
+  assert.equal(ak.qrAnmeldungPruefen({ token: t }).ok, false);
+});
