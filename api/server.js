@@ -30199,13 +30199,16 @@ async function initDB() {
       console.log('Seeded default permissions');
     }
 
-    // Ensure Ausschuss groups have bewohner-verwaltung write access
-    await client.query(`
-      INSERT INTO permissions (group_name, page, access) VALUES
-      ('stweg3-ausschuss', 'bewohner-verwaltung', 'write'),
-      ('stweg6-ausschuss', 'bewohner-verwaltung', 'write')
-      ON CONFLICT (group_name, page) DO NOTHING
-    `);
+    // Konten anlegen: ALLE Ausschuesse (stweg1..7-ausschuss, meg-ausschuss;
+    // Entscheid Stefan 27.11.2026, Befund W2/F3-8). Vorher nur STWEG 3 und 6 –
+    // die Oberflaeche (getUserPermissions) zeigte den Knopf jedem Ausschuss, die
+    // API (requirePermission) lehnte ab. Vergeben darf der Ausschuss nur die
+    // Bewohner-/Eigentuemergruppen der eigenen STWEG (vergebbareGruppen).
+    for (const groupName of Object.values(STWEG_GROUPS).map(g => g.ausschuss).filter(Boolean)) {
+      await client.query(
+        `INSERT INTO permissions (group_name, page, access) VALUES ($1, 'bewohner-verwaltung', 'write')
+         ON CONFLICT (group_name, page) DO NOTHING`, [groupName]);
+    }
 
     // Seed wohnungsverwaltung and email-archiv permissions for all Ausschuss groups
     const ausschussGroups = Object.values(STWEG_GROUPS).map(g => g.ausschuss).filter(Boolean);
