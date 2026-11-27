@@ -49,7 +49,7 @@
       "text": "Rosenweg-Karten nachschlagen, Personen zuordnen, entziehen und aus dem Bestand löschen; Kartenprotokoll und Karten-Anmeldungen der Apps.",
       "fuer": "Für die Technik und den Präsidenten.",
       "technik": true,
-      "_notiz": "Ab 2.0.0 Flutter-App für alle Plattformen (ersetzt die Java-App 1.6.2, gleiche Kennung und Signatur, versionCode 10). Bis 1.6.2 stand sie unter katalog."
+      "_notiz": "Ab 2.0.0 Flutter-App für alle Plattformen (ersetzt die Java-App 1.6.3, gleiche Kennung und Signatur, versionCode 11). Bis 1.6.3 stand sie unter katalog."
     }
   },
   "katalog": {
