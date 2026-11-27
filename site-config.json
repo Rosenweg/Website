@@ -123,8 +123,9 @@
   },
   "technischer_dienst": {
     "email": "technik@rosenweg9.ch",
-    "telefon": "+41 61 551 01 42",
-    "beschreibung": "Sammel-E-Mail und zentrale Rufnummer für technische Anliegen"
+    "telefon": "+41 61 551 01 52",
+    "intern": "2000",
+    "beschreibung": "Sammel-E-Mail und zentrale Rufnummer für technische Anliegen (Amtsnummer der Anlage = Dienst Technik, intern 2000)"
   },
   "ausschuss": {
     "email": "ausschuss@rosenweg4303.ch",

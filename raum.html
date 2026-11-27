@@ -62,7 +62,7 @@ const B = {
         return `<div class="rounded-lg border p-4">
             <p class="font-bold text-gray-900">Technischer Dienst</p>
             <p class="text-sm text-gray-600">Hauswartung, Störungen, Schlüssel und Zutritt</p>
-            <p class="mt-2">Telefon: ${tel(t.telefon)}</p>
+            <p class="mt-2">Telefon: ${tel(t.telefon)}${t.intern ? ` <span class="text-xs text-gray-500">(intern ${ESC(t.intern)})</span>` : ''}</p>
             <p>E-Mail: ${mail(t.email)}</p>${namen}
             <p class="text-xs text-gray-500 mt-2">Anfragen über die zentrale Adresse werden im Team verteilt.</p>
         </div>`;
@@ -119,8 +119,11 @@ async function block(b) {
         case 'personen': {
             if (!b.personen?.length) return `<div class="rounded-lg border p-4"><p class="font-bold text-gray-900">${ESC(b.titel)}</p>
                 <p class="text-sm text-gray-600">Schlüssel erhalten Sie über den Technischen Dienst.</p></div>`;
+            // Interne Nummern (3HHWWP) sind nur von Rosenweg-Telefonen waehlbar; von
+            // aussen geht es ueber die Amtsnummer, der Technische Dienst verbindet.
             return `<div class="rounded-lg border p-4"><p class="font-bold text-gray-900 mb-2">${ESC(b.titel)}</p>
-                ${b.personen.map(x => `<p>${ESC(x.name)}${x.telefon ? ` · ${tel(x.telefon)}` : ''}</p>`).join('')}</div>`;
+                ${b.personen.map(x => `<p>${ESC(x.name)}${x.intern ? ` · intern ${tel(x.intern)}` : ''}</p>`).join('')}
+                ${b.amtsnummer ? `<p class="text-xs text-gray-500 mt-2">Interne Nummern erreichen Sie von einem Rosenweg-Telefon. Von aussen: ${tel(b.amtsnummer)} (Technischer Dienst, verbindet weiter).</p>` : ''}</div>`;
         }
         case 'link': return `<a href="${ESC(b.href)}" class="inline-block rounded-lg px-4 py-3 font-semibold text-white bg-green-700">${ESC(b.text)}</a>`;
         default: return '';

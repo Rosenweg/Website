@@ -2865,6 +2865,7 @@ def telefon_app_loeschen(paket):
 # schlanke Liste und schreiben es ins Android-Adressbuch (eigenes Konto
 # "Rosenweg"). Die CardDAV-Zugangsdaten bleiben hier auf der Anlage.
 _KONTAKTE_CACHE = {"zeit": 0.0, "daten": None}
+INTERN_PERSON_RE = re.compile(r"3[0-9]{5}")
 _KONTAKTE_TTL_S = 600
 
 
@@ -2880,11 +2881,16 @@ def _vcards_lesen(text):
             zeilen[-1] += z[1:]
         else:
             zeilen.append(z)
-    karten, k = [], None
+    karten, k, kategorien = [], None, set()
     for z in zeilen:
         if z.upper() == "BEGIN:VCARD":
             k = {"name": "", "org": "", "nummern": [], "emails": []}
+            kategorien = set()
         elif z.upper() == "END:VCARD" and k is not None:
+            if "bewohner" in kategorien:
+                # Personen der Siedlung: nur interne Nummern 3HHWWP, auch wenn im
+                # Adressbuch (noch) echte stehen (Stefan 27.11.2026, contacts-sync)
+                k["nummern"] = [n for n in k["nummern"] if INTERN_PERSON_RE.fullmatch(n["nummer"])]
             if k["name"] and (k["nummern"] or k["emails"]):
                 karten.append(k)
             k = None
@@ -2900,9 +2906,12 @@ def _vcards_lesen(text):
             elif feld == "TEL":
                 nummer = re.sub(r"[^0-9+*#]", "", wert)
                 if 3 <= len(nummer) <= 25:
-                    typ = ("mobil" if "CELL" in params else "arbeit" if "WORK" in params
+                    typ = ("rosenweg" if INTERN_PERSON_RE.fullmatch(nummer)
+                           else "mobil" if "CELL" in params else "arbeit" if "WORK" in params
                            else "privat" if "HOME" in params else "andere")
                     k["nummern"].append({"nummer": nummer, "typ": typ})
+            elif feld == "CATEGORIES":
+                kategorien |= {c.strip().lower() for c in wert.split(",")}
             elif feld == "EMAIL":
                 mail = _vcard_wert(wert)
                 if "@" in mail and len(mail) <= 200:
@@ -3251,9 +3260,28 @@ def personen_abgleichen(probe=False):
             conn.commit()
         for p in probleme:
             app.logger.warning("Nummernvergabe: %s", p)
+        if not probe:
+            personen_nummern_melden(conn)
         return {"neu": neu, "probleme": probleme, "probe": probe}
     finally:
         conn.close()
+
+
+def personen_nummern_melden(conn):
+    """Vergebene Nummern an die Website (Stefan 27.11.2026): Telefonbuch und
+    Nextcloud-Sync zeigen statt der echten Nummern nur noch 3HHWWP. Nur Nummer,
+    E-Mail, Name, Wohnung, Haus, aktiv — keine Weiterleitungsziele."""
+    rows = db.rows_to_dicts(conn.execute(
+        "SELECT nummer, email, name, wohnung, haus, aktiv FROM personen_nummern ORDER BY nummer").fetchall())
+    if not rows:
+        return
+    try:
+        r = requests.put(f"{MAIN_API_BASE}/api/pbx/personen/nummern", json={"nummern": rows},
+                         headers={"X-PBX-Secret": PBX_SHARED_SECRET}, timeout=20)
+        if not r.ok:
+            app.logger.warning("Nummern an die Website: HTTP %s", r.status_code)
+    except requests.RequestException as e:
+        app.logger.warning("Nummern an die Website: %s", type(e).__name__)
 
 
 def _personen_abgleich_schleife():

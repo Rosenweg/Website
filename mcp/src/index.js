@@ -16,7 +16,8 @@ if (!TOKEN) {
 }
 
 async function api(method, path, body) {
-  const headers = { 'Authorization': 'Bearer ' + TOKEN };
+  // X-Rosenweg-Kanal: kein Portal — echte Telefonnummern nur Technik/Praesident/selbst (api/lib/nummernsicht.js)
+  const headers = { 'Authorization': 'Bearer ' + TOKEN, 'X-Rosenweg-Kanal': 'mcp' };
   let bodyInit;
   if (body !== undefined && body !== null) {
     if (Buffer.isBuffer(body)) {

@@ -48,6 +48,9 @@ jobs:
       - name: API-Tests ohne Datenbank (node --test api/test/)
         run: node --test api/test/
 
+      - name: Kontakte-Sync (Verzeichnis ohne echte Nummern)
+        run: python3 -m unittest discover -s contacts-sync -v
+
   kerberos-pruefer:
     # Prueft Kerberos-Tickets der Agent-Anmeldung (api/kerberos-pruefer, Protokoll v2)
     runs-on: ubuntu-latest

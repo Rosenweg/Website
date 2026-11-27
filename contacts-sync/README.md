@@ -64,6 +64,32 @@ Timer: täglich **04:30 UTC** + `RandomizedDelaySec=600` + `Persistent=true`.
   `/var/lib/zpush-contacts/`, danach `chown www-data`. Der SSH-Schlüssel des
   ausführenden Hosts muss in `/root/.ssh/authorized_keys` von CT 115 stehen.
 
+## Nur interne Nummern bei Personen (seit 27.11.2026)
+
+Personen der Siedlung stehen im Verzeichnis **nur mit ihrer internen Nummer
+3HHWWP** (vCard `item1.TEL` + `X-ABLabel:Rosenweg intern`, Kategorie
+`Rosenweg,Bewohner`), nicht mehr mit Handy/Festnetz — das Verzeichnis ist mit
+allen geteilt, sonst könnte jeder jede Nummer suchen (Stefan). Wer 3HHWWP wählt,
+erreicht die Person auf ihren Geräten, inkl. Weiterleitung. Die echten Nummern
+bleiben in der Personenverwaltung des Portals (`api/lib/nummernsicht.js`).
+
+- Quelle der internen Nummern: Tabelle `telefon_interne_nummern` in der
+  Rosenweg-Datenbank, ein Abbild der Anlage. Die pbx-api schickt die Liste nach
+  jedem stündlichen Abgleich (`PUT /api/pbx/personen/nummern`).
+- Zuordnung Person ↔ Nummer: E-Mail **und** Name (Paare teilen sich oft eine
+  E-Mail), gleiche Regel wie die Anlage.
+- Personen ohne interne Nummer: nur noch E-Mail; ohne E-Mail keine Karte.
+- Verwaltungen und ihre Mitarbeitenden behalten ihre Geschäftsnummern.
+- Die Anlage gibt Karten der Kategorie `Bewohner` an die geteilten Telefone
+  ohnehin nur mit 3HHWWP weiter (`pbx/api/app.py`, `_vcards_lesen`).
+- SOGo inbox@ und Z-Push bekommen dieselben Karten; gleiche UIDs, also werden
+  die alten Personenkarten mit echten Nummern dabei ersetzt.
+- **Ausnahme praesident@** (Entscheid Stefan 27.11.2026): das persönliche
+  SOGo-Adressbuch des Präsidenten bekommt die volle Fassung, also interne
+  **und** echte Nummern.
+
+Tests: `python3 -m unittest discover -s contacts-sync` (auch in der CI).
+
 ## Logik
 
 - UIDs **deterministisch**: `uuid5(name)` für Personen, `rosenweg-pbx`,

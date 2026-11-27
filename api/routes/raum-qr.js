@@ -20,6 +20,7 @@ const { pool } = require('../lib/db');
 const { authMiddleware, requirePermission } = require('../middleware/auth');
 const { SITE_URL } = require('../lib/config');
 const { authentikAPI } = require('../lib/auth');
+const { interneNummernLaden, interneNummerFinden, AMTSNUMMER } = require('../lib/nummernsicht');
 
 const router = express.Router();
 const VORLAGEN_DIR = path.join(__dirname, '..', 'vorlagen', 'aushaenge');
@@ -205,7 +206,10 @@ async function tokensFuer(ort, wer) {
 }
 
 // Mitglieder einer Gruppe schluessel-… aus Authentik, 5 Minuten zwischengespeichert
-// (wie /api/public/technik). Nur Name und Telefon; ohne Gruppe/Mitglieder: leere Liste.
+// (wie /api/public/technik). Die Seite ist oeffentlich: keine Privatnummern
+// (Stefan 27.11.2026), nur Name und die interne Nummer 3HHWWP. Von aussen ist nur
+// die Amtsnummer waehlbar (Dienst Technik verbindet) — die Seite sagt das dazu.
+// Ohne Gruppe/Mitglieder: leere Liste.
 const halterCache = { at: 0, data: null };
 async function schluesselhalter(gruppe) {
   try {
@@ -219,9 +223,10 @@ async function schluesselhalter(gruppe) {
     }
     const grp = halterCache.data.groups.find(x => x.name.toLowerCase() === gruppe);
     if (!grp) return [];
+    const interne = await interneNummernLaden(pool);
     return halterCache.data.users
       .filter(x => x.is_active && (x.groups_obj ? x.groups_obj.map(o => o.pk) : (x.groups || [])).includes(grp.pk))
-      .map(x => ({ name: x.name, telefon: x.attributes?.telefon || null }))
+      .map(x => ({ name: x.name, intern: interneNummerFinden(interne, { email: x.email, name: x.name }) }))
       .sort((a, b) => a.name.localeCompare(b.name, 'de'));
   } catch (e) {
     console.error('[raum-qr-schluessel]', e.message);
@@ -404,7 +409,7 @@ router.get('/info/:token', async (req, res) => {
     if (!row || !TYPEN[row.typ]) return res.status(404).json({ error: 'Ungültiger Code' });
     const { titel, org, teile } = TYPEN[row.typ];
     const halter = await schluesselhalter(gruppeVon(row));
-    const mitHaltern = teile.map(t => ({ ...t, bloecke: t.bloecke.map(bl => bl.t === 'schluessel' ? { t: 'personen', titel: '🔑 Schlüsselhalter', personen: halter } : bl) }));
+    const mitHaltern = teile.map(t => ({ ...t, bloecke: t.bloecke.map(bl => bl.t === 'schluessel' ? { t: 'personen', titel: '🔑 Schlüsselhalter', personen: halter, amtsnummer: AMTSNUMMER } : bl) }));
     res.set('Cache-Control', 'no-store');
     res.json({ thema: row.thema, titel, sub: row.standort, org: org || null, teile: mitHaltern });
   } catch (e) { console.error('[raum-qr-info]', e); res.status(500).json({ error: 'Fehler' }); }
