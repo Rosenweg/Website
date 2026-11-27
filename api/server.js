@@ -23096,6 +23096,10 @@ app.delete('/api/stations/:id/tunnel', stationsRouter.stationAuth, async (req, r
 // rosenweg-apps). Begruendung und Grenzen in routes/app-tunnel.js.
 require('./routes/app-tunnel').appTunnelRoutes(app, { pool, rateLimitGuard });
 
+// Persoenliche App-Daten (z.B. Wecker der Rosenweg Uhr) auf allen Geraeten einer Person gleich:
+// GET/PUT /api/me/app-daten/:app -> routes/app-daten.js (Modell und Konfliktregel: lib/app-daten.js)
+require('./routes/app-daten').appDatenRoutes(app, { pool, authMiddleware });
+
 // Karten-Anmeldung der Rosenweg-Apps auf privaten Geraeten (Entscheid Stefan 26.11.2026):
 // Rosenweg-Karte ans Handy -> eigene, widerrufbare Sitzung je App. Begruendung in routes/app-karte.js.
 require('./routes/app-karte').appKarteRoutes(app, {
