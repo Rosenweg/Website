@@ -48,6 +48,21 @@ jobs:
       - name: API-Tests ohne Datenbank (node --test api/test/)
         run: node --test api/test/
 
+  kerberos-pruefer:
+    # Prueft Kerberos-Tickets der Agent-Anmeldung (api/kerberos-pruefer, Protokoll v2)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api/kerberos-pruefer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test -count=1 ./...
+
   edge-plugin:
     # Eigenes Traefik-Plugin (edge-traefik/plugins/echteip): Format, vet, Tests
     runs-on: ubuntu-latest

@@ -1,3 +1,13 @@
+# Kerberos-Prüfer fuer die Agent-Anmeldung (Protokoll v2, lib/kerberos.js):
+# reines Go (gokrb5), statisch gebaut, damit im Node-Image weder libkrb5 noch
+# ein Compiler noetig sind. Begruendung: api/kerberos-pruefer/main.go.
+FROM golang:1.26-alpine AS kerberos-pruefer
+WORKDIR /src
+COPY api/kerberos-pruefer/go.mod api/kerberos-pruefer/go.sum ./
+RUN go mod download
+COPY api/kerberos-pruefer/*.go ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /kerberos-pruefer .
+
 FROM node:22-alpine
 
 # poppler-utils -> pdftotext, fuer ZEV-Rechnungs-Parsing (Textlayer auslesen)
@@ -7,6 +17,8 @@ FROM node:22-alpine
 RUN apk add --no-cache poppler-utils openssl openssh-client
 
 WORKDIR /app
+
+COPY --from=kerberos-pruefer /kerberos-pruefer /usr/local/bin/kerberos-pruefer
 
 COPY api/package.json ./
 RUN npm install --production
