@@ -16,7 +16,7 @@
 # Auf dc1 als root, im Verzeichnis mit agent-installieren.ps1:
 #
 #   ./einrichten.sh --exe rosenweg-agent-windows-amd64.exe --netzstart netzstart-einmal.ps1
-#   ./einrichten.sh --version 0.1.0 --netzstart …   (Release von GitHub holen)
+#   ./einrichten.sh --version 0.1.1 --netzstart …   (Release von GitHub holen)
 #   ./einrichten.sh --aus                            (Agent auf allen PCs entfernen)
 #   ./einrichten.sh --an                             (AUS wieder wegnehmen)
 #
@@ -48,6 +48,7 @@ REPO="Rosenweg/rosenweg-agent"
 # ergaenzen (steht in SHA256SUMS des Releases).
 declare -A AGENT_SHA256=(
     [0.1.0]="0a440c8811ff4caff4fe1dea55f6882dd02192a4ccf97d9a0c91917d32c2223c"
+    [0.1.1]="8e077dff4f77fdaeceb25a628544c6a18059d5fbe1f5807b5dae93bd8d1c6e83"
 )
 # os-stationen sicherung/windows/netzstart-einmal.ps1, Stand 4856e6f (27.11.2026).
 NETZSTART_SHA256="89b3d88450a877fb1d9d58a9a3f39f1a51ff14bff4750cd6bc9aaec6b91120e6"
