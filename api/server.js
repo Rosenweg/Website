@@ -22,6 +22,7 @@ const reklMelder = require('./lib/reklamation-melder');
 const vollmachtRechte = require('./lib/vollmacht-rechte');
 const projekteRechte = require('./lib/projekte-rechte');
 const rechteSchluessel = require('./lib/rechte-schluessel');
+const rechteMigrationen = require('./lib/rechte-migrationen');
 const kontaktformular = require('./lib/kontaktformular');
 const stwegSichtLib = require('./lib/stweg-sicht');
 const { waschAdminErlaubt, waschRaumAenderbar } = require('./lib/wasch-admin');
@@ -30790,6 +30791,13 @@ async function initDB() {
     await client.query(
       `INSERT INTO permissions (group_name, page, access) VALUES ('Verwaltung', 'vollmachten', 'write')
        ON CONFLICT (group_name, page) DO NOTHING`);
+    // P2: neue Vorgaben fuer schon bestehende Gruppen einmalig und gezielt
+    // setzen (lib/rechte-migrationen.js, Tabelle rechte_migrationen).
+    try {
+      for (const m of await rechteMigrationen.rechteMigrationenAusfuehren(client)) {
+        console.log(`[rechte] Migration ${m.name}: ${m.geaendert} Zeile(n) gesetzt`);
+      }
+    } catch (e) { console.error('[rechte] Migration fehlgeschlagen (naechster Start versucht erneut):', e.message); }
 
     // Seed auslagen read für alle Eigentümer-Gruppen (eigene Auslagen einsehen/einreichen)
     const eigentuemerGroups = Object.values(STWEG_GROUPS).map(g => g.eigentuemer).filter(Boolean);
