@@ -146,6 +146,7 @@ Technik sie auf /smartphones gesetzt hat. Erster Eintrag also: Zeile auf /smartp
 | Rosenweg Salz | `ch.rosenweg4303.salz` | `technik,präsident,praesident` + die `bewohner_gruppen` der Salzlager | aktiv |
 | Rosenweg Virtuelle Computer | `ch.rosenweg4303.vm` | `technik,präsident,praesident,vm` | aktiv |
 | Rosenweg Zutritt | `ch.rosenweg4303.zutritt` | `technik,präsident,praesident` | vorbereitet, **inaktiv** bis zum ersten Release |
+| Rosenweg Waschküche | `ch.rosenweg4303.waschkueche` | Bewohner/Eigentümer der STWEG mit Waschküche (heute `stweg3-*`), `technik,präsident,praesident` | noch keine Zeile; nach dem ersten Release auf /smartphones anlegen |
 
 - **Salz:** Eine Hauswart-Gruppe gibt es nicht; der Hauswart steht je Lager als Mailadresse
   (`salz_lager.hauswart_emails`). Die Gruppen im Katalog entsprechen `buchungsGruppen()` in
@@ -153,6 +154,8 @@ Technik sie auf /smartphones gesetzt hat. Erster Eintrag also: Zeile auf /smartp
 - **Virtuelle Computer:** Die Rechte selbst kommen aus Proxmox (ACL je VM). Die
   Authentik-Gruppe `vm` steuert nur, wem das Telefon die App zeigt: wer in Proxmox eine VM
   bekommt, gehört auch in `vm`.
+- **Waschküche:** `portal_pfade` `/api/wasch/` (alles darunter); Räume, STWEG und das Recht
+  „waschküche-admin“ prüft die Haupt-API selbst.
 - **Zutritt:** Die Zeile steht schon (inaktiv, ohne APK). Das erste Release legt die APK
   von selbst hinein; danach auf /smartphones „aktiv“ setzen.
 

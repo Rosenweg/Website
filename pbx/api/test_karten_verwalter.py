@@ -137,6 +137,16 @@ class KartenUmzugTest(unittest.TestCase):
         self.assertFalse(pbx._portal_erlaubt(regeln, z, "PUT", "/api/permissions"))
         self.assertFalse(pbx._portal_erlaubt(regeln, "ch.rosenweg4303.salz", "POST", "/api/karten/info"))
 
+    def test_waschkueche_darf_nur_wasch(self):
+        regeln = pbx.PORTAL_PFADE_STANDARD
+        w = "ch.rosenweg4303.waschkueche"
+        self.assertTrue(pbx._portal_erlaubt(regeln, w, "GET", "/api/wasch/rooms"))
+        self.assertTrue(pbx._portal_erlaubt(regeln, w, "POST", "/api/wasch/reservations"))
+        self.assertTrue(pbx._portal_erlaubt(regeln, w, "DELETE", "/api/wasch/reservations/5/series"))
+        self.assertTrue(pbx._portal_erlaubt(regeln, w, "GET", "/api/auth/me"))
+        self.assertFalse(pbx._portal_erlaubt(regeln, w, "GET", "/api/access/users"))
+        self.assertFalse(pbx._portal_erlaubt(regeln, "ch.rosenweg4303.salz", "GET", "/api/wasch/rooms"))
+
 
 class KartenProtokollUebernahmeTest(unittest.TestCase):
     @classmethod

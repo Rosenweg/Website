@@ -71,6 +71,16 @@
       "fuer": "Für alle Bewohner und Eigentümer. Bearbeiten: Technik, Präsident, Ausschuss und Verwaltung (für ihre STWEG).",
       "technik": false,
       "_notiz": "Flutter, alle Plattformen (Plan Welle 1). Ersetzt in der App pwa/reparatur (angemeldet), reklamationen.html und stwegN/pages/reklamationen.html; die Web-Seiten bleiben, auch der oeffentliche Melde-Ort-QR. Push ohne ntfy (Entscheid Stefan 27.11.2026): Abfrage beim Oeffnen."
+    },
+    "waschkueche": {
+      "name": "Rosenweg Waschküche",
+      "repo": "Rosenweg/rosenweg-waschkueche",
+      "paket": "ch.rosenweg4303.waschkueche",
+      "logo": "/img/apps/rosenweg-waschkueche.png",
+      "reihenfolge": 70,
+      "text": "Waschküche reservieren: Belegung als Wochenraster, freie Zeit antippen, einmal oder jede Woche; eigene Termine stornieren, Erinnerung beim Öffnen. Für den Ausschuss STWEG 3: Räume, Nutzungen, Abrechnung und Preis.",
+      "fuer": "Für die Bewohnerinnen und Bewohner einer STWEG mit Waschküche (heute STWEG 3, Rosenweg 9). Verwalten mit dem Recht „Waschküche-Admin“.",
+      "_notiz": "Flutter, alle Plattformen (Welle 1). Web-Seiten waschkueche.html und stweg3/pages/waschkueche-*.html bleiben. Erinnerung ohne Push (Entscheid Stefan 27.11.2026: kein ntfy)."
     }
   },
   "katalog": {
