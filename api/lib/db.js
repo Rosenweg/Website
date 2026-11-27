@@ -38,6 +38,9 @@ pool.query = async function (sqlOrCfg, params) {
   try {
     await client.query('BEGIN');
     await client.query(`SELECT set_config('app.user_email', $1, true)`, [userEmail]);
+    // App-Kennung (X-Rosenweg-App, lib/appkennung.js) fuer kuenftige Audit-Auswertung
+    const appKennung = auditCtx.getStore()?.app;
+    if (appKennung) await client.query(`SELECT set_config('app.client', $1, true)`, [appKennung]);
     const r = await client.query(sqlOrCfg, params);
     await client.query('COMMIT');
     return r;

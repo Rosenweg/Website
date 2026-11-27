@@ -29,6 +29,7 @@ lässt `manager.conf` **nur** diese zwei Adressen zu (`permit 127.0.0.1` und
 |---|---|---|
 | `api/app.py`, `db.py`, `ami.py`, `apk.py`, `adb_updater.py` | `/opt/pbx-api/` | Flask-Service (waitress); `adb_updater.py` auch als Timer (3b) |
 | `api/requirements.txt` | (venv) | Flask + requests + waitress |
+| `../apps-register.json` (Repo-Wurzel) | `/opt/pbx-api/apps-register.json` | Rückfall für das App-Register, falls die Haupt-API beim Start nicht erreichbar ist (sonst holt `app.py` es dort, siehe README „Register der Apps“) |
 | `api/pbx-api.service` | `/etc/systemd/system/` | systemd-Unit |
 | `api/pbx-api.env.example` | `/etc/default/pbx-api` | Config (Pfade, MAIN_API_BASE) |
 | `web/pbx-admin.html` | `/opt/pbx-api/web/` | Admin-UI (an pbx.rosenweg4303.ch) |
@@ -60,6 +61,8 @@ tar -C pbx/api -cf - app.py db.py ami.py apk.py adb_updater.py voicemail.py numm
   | ssh root@100.64.2.22 'pct exec 220 -- tar -C /opt/pbx-api -xf -'
 tar -C pbx/web -cf - pbx-admin.html \
   | ssh root@100.64.2.22 'pct exec 220 -- tar -C /opt/pbx-api/web -xf -'
+# Rueckfall fuer das App-Register (sonst holt app.py es von der Haupt-API)
+tar -cf - apps-register.json | ssh root@100.64.2.22 'pct exec 220 -- tar -C /opt/pbx-api -xf -'
 
 ssh root@100.64.2.22 'pct exec 220 -- bash -lc "
   cd /opt/pbx-api

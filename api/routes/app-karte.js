@@ -65,6 +65,8 @@
 //  - Wer nur den Benutzer-Code kennt, kann ihn höchstens für sein EIGENES
 //    Konto bestätigen; abholen kann nur, wer den Abhol-Code hat (die App).
 const ak = require('../lib/appkarte');
+const appregister = require('../lib/appregister');
+const appkennung = require('../lib/appkennung');
 const gg = require('../lib/geraet-gruppe');
 
 const MAX_SITZUNGEN = Math.max(1, parseInt(process.env.APP_KARTE_MAX_SITZUNGEN || '20', 10) || 20);
@@ -236,6 +238,31 @@ function appKarteRoutes(app, deps) {
   }
 
   // ── Anmelden mit der Karte (ohne Anmeldung: die Karte IST der Ausweis) ──
+  // Register der Rosenweg-Apps (apps-register.json, lib/appregister.js) — oeffentlich,
+  // die PBX baut daraus /apps und prueft Releases; Inhalt steht ohnehin auf /apps.
+  app.get('/api/apps/register', (req, res) => {
+    res.set('Cache-Control', 'public, max-age=300');
+    res.json(appregister.oeffentlich());
+  });
+
+  // Welche App-Fassungen sind unterwegs (X-Rosenweg-App, lib/appkennung.js)? Technik.
+  app.get('/api/apps/kennungen', authMiddleware, requireUserLogin, async (req, res) => {
+    if (!ak.istTechnikOderPraesident(req.user.groups)) return res.status(403).json({ error: 'Nur Technik' });
+    try {
+      await appkennung.tabelleAnlegen(pool);
+      const tage = Math.min(365, Math.max(1, parseInt(req.query.tage, 10) || 30));
+      const r = await pool.query(
+        `SELECT paket, version, COUNT(DISTINCT email)::int AS personen, MAX(zuletzt_gesehen) AS zuletzt,
+                ARRAY_AGG(DISTINCT ausweis) FILTER (WHERE ausweis <> '') AS ausweise
+           FROM app_kennungen WHERE zuletzt_gesehen > NOW() - make_interval(days => $1)
+          GROUP BY paket, version ORDER BY paket, zuletzt DESC`, [tage]);
+      res.json({ tage, kennungen: r.rows.map(z => ({ ...z, app: appregister.nachPaket(z.paket) })) });
+    } catch (e) {
+      console.error('[app-kennung] liste:', e.message);
+      res.status(500).json({ error: 'Abfrage fehlgeschlagen' });
+    }
+  });
+
   app.post('/api/apps/karte-anmelden', async (req, res) => {
     const ip = absenderIp(req);
     const p = ak.anmeldungPruefen(req.body);

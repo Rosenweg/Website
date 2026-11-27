@@ -2177,7 +2177,6 @@ def _cors_seite(res):
 # Stefan 25.11.2026: "auf die apps seite die releases zum download anbieten" und "alle apps
 # brauchen updater wenn geraet nicht da ist". Quelle ist der App-Katalog der geteilten Telefone;
 # Rosenweg Geraet gehoert nur auf verwaltete Telefone und ist darum nicht dabei.
-APPS_OEFFENTLICH_OHNE = {"ch.rosenweg4303.telefon"}
 APPS_HERKUNFT = {"https://www.rosenweg4303.ch", "https://rosenweg4303.ch"}
 
 
@@ -2193,42 +2192,10 @@ APPS_SIGNATUR_SHA256 = apk.SIGNATUR_SHA256
 # Register tragen. Steht die App auch im Katalog der geteilten Telefone, wird dort dieselbe
 # APK eingespielt (die Freigabe fuer die Telefone und ihre Gruppen bleibt Sache der Technik).
 #
-# Neue App: Eintrag hier, Logo nach www img/apps/<app>.png, Schritt "Auf /apps" in der CI
-# (Action Rosenweg/Website/.github/actions/apps-release). Erst mit einer Datei erscheint sie.
-APPS_REGISTER = {
-    "vm": {
-        "name": "Rosenweg Virtuelle Computer", "repo": "Rosenweg/rosenweg-vm", "paket": "ch.rosenweg4303.vm",
-        "logo": "/img/apps/rosenweg-vm.png", "reihenfolge": 10,
-        "text": "Die eigenen virtuellen Computer der Anlage öffnen – im Haus und unterwegs, "
-                "mit Ton, USB-Geräten und freigegebenen Ordnern.",
-        "fuer": "Für alle, denen die Technik einen virtuellen Computer eingerichtet hat.",
-    },
-    "salz": {
-        "name": "Rosenweg Salz", "repo": "Rosenweg/rosenweg-salz", "paket": "ch.rosenweg4303.salz",
-        "logo": "/img/apps/rosenweg-salz.png", "reihenfolge": 20,
-        "text": "Salzvorrat der Enthärtungsanlagen: Anlieferung und eingefüllte Säcke mit dem "
-                "Barcode buchen, Bestand und Reichweite je Lager.",
-        "fuer": "Buchen dürfen die Bewohner von Rosenweg 2, 4 und 9, die Kooperation (Lager im "
-                "Rosenweg 10) und die Technik. Alle anderen sehen nur einen Hinweis.",
-    },
-    # Stefan 26.11.2026: Android-TV-Startseite mit PIN (Diashow im Heizungsraum). Nur /apps,
-    # NICHT im Katalog der geteilten Telefone: eine Startseiten-App gehoert nie auf ein Telefon.
-    "kiosk": {
-        "name": "Rosenweg Kiosk", "repo": "Rosenweg/rosenweg-tv-kiosk", "paket": "ch.rosenweg4303.kiosk",
-        "logo": "/img/apps/rosenweg-kiosk.png", "reihenfolge": 40,
-        "text": "Startseite für Android-TV-Geräte (z.B. Chromecast mit Google TV): zeigt dauernd die "
-                "Diashow, das Menü dahinter nur mit PIN.",
-        "fuer": "Für die Technik beim Einrichten eines Fernsehers als Anzeige.",
-        "technik": True,
-    },
-    # Noch kein Repo/Release (26.11.2026): steht bereit, erscheint mit der ersten Datei.
-    "profil": {
-        "name": "Rosenweg Profil", "repo": "Rosenweg/rosenweg-profil", "paket": "ch.rosenweg4303.profil",
-        "logo": "/img/apps/rosenweg-profil.png", "reihenfolge": 30,
-        "text": "Die eigenen Angaben im Rosenweg-Portal ansehen und ändern.",
-        "fuer": "",
-    },
-}
+# Welche Apps es gibt, steht im Register apps-register.json des Website-Repos (siehe unten,
+# _apps_register_auffrischen). Neue App: Eintrag dort, Logo nach www img/apps/<app>.png,
+# Haupt-API ausrollen, Schritt "Auf /apps" in der CI (Action Rosenweg/Website/.github/actions/
+# apps-release). Kein PBX-Deploy mehr. Erst mit einer Datei erscheint sie.
 APPS_PLATTFORMEN = {
     # endung -> Kennbytes am Anfang (DMG: Kennung "koly" im letzten 512-Byte-Block)
     "android":   {"titel": "Android", "endungen": {".apk": b"PK\x03\x04"},
@@ -2239,65 +2206,113 @@ APPS_PLATTFORMEN = {
     "windows":   {"titel": "Windows", "endungen": {".exe": b"MZ", ".msi": b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"},
                   "mime": "application/octet-stream"},
 }
-# Katalog-Apps (geteilte Telefone + Tabelle auf /apps): Repo -> Paketname. Ihre Releases ersetzen
-# die APK im Katalog; anlegen, Gruppen und "aktiv" bleiben Sache der Technik (/smartphones).
-APPS_KATALOG_REPOS = {
-    "Rosenweg/calculator-rosenweg": "ch.rosenweg4303.math",
-    "Rosenweg/calendar-rosenweg": "ch.rosenweg4303.calendar",
-    "Rosenweg/camera-rosenweg": "ch.rosenweg4303.camera",
-    "Rosenweg/clock-rosenweg": "ch.rosenweg4303.clock",
-    "Rosenweg/contacts-rosenweg": "ch.rosenweg4303.contacts",
-    "Rosenweg/documents-rosenweg": "ch.rosenweg4303.documents",
-    "Rosenweg/file-manager-rosenweg": "ch.rosenweg4303.filemanager",
-    "Rosenweg/gallery-rosenweg": "ch.rosenweg4303.gallery",
-    "Rosenweg/launcher-rosenweg": "ch.rosenweg4303.home",
-    "Rosenweg/messages-rosenweg": "ch.rosenweg4303.messages",
-    "Rosenweg/notes-rosenweg": "ch.rosenweg4303.notes",
-    "Rosenweg/paint-rosenweg": "ch.rosenweg4303.paint",
-    "Rosenweg/phone-rosenweg": "ch.rosenweg4303.phone",
-    "Rosenweg/voice-recorder-rosenweg": "ch.rosenweg4303.voicerecorder",
-    "Rosenweg/keyboard-rosenweg": "ch.rosenweg4303.keyboard",
-    "Rosenweg/rosenweg-karten": "ch.rosenweg4303.karten",
-    "Rosenweg/android-sip-rosenweg": "ch.rosenweg4303.telefon",   # Rosenweg Geraet: nur Katalog, nicht oeffentlich
-}
-# Anzeige der Katalog-Apps auf /apps (Liste 'liste' im Index): Logo, ein Satz, fuer wen.
-# Welche Apps es gibt, Name, Version und Stand kommen immer live aus dem Katalog (telefon_apps);
-# fehlt hier ein Eintrag, zeigt /apps die App trotzdem (mit dem Rosenweg-Logo, ohne Satz).
-# Logos: assets/logo/<name>-512.png des App-Repos, verkleinert auf 192 px nach www img/apps/.
+# ─── Register der Rosenweg-Apps (Flutter-Plan 4.2.7) ───────────────────────────────────────
+# Eine Quelle: apps-register.json im Website-Repo (auch fuer die Karten-Sitzungen der Haupt-API).
+# Die Haupt-API liefert es unter GET /api/apps/register; hier alle APPS_REGISTER_ALTER Sekunden
+# neu geholt und auf der Platte gemerkt. Ohne Netz: die gemerkte Kopie, sonst die beim Deploy
+# mitgelieferte Datei neben app.py. Daraus entstehen dieselben Namen wie frueher im Code:
+#   APPS_REGISTER         "apps":    Apps mit eigenem Repo fuer mehrere Plattformen (vm, salz, ...)
+#   APPS_KATALOG_REPOS    "katalog": Repo -> Paketname der Katalog-Apps (geteilte Telefone)
+#   APPS_KATALOG_INFO     "katalog": Logo, Name, Satz, fuer wen, technik je Paketname
+#   APPS_OEFFENTLICH_OHNE "katalog": nicht_oeffentlich (z.B. Rosenweg Geraet: kein Download)
+# Welche Katalog-Apps es gibt, Name, Version und Stand kommen weiter live aus telefon_apps;
+# fehlt ein Info-Eintrag, zeigt /apps die App trotzdem (Rosenweg-Logo, ohne Satz).
 # technik: gehoert in die Gruppe "Technik" auf /apps.
-APPS_KATALOG_INFO = {
-    "ch.rosenweg4303.telefon": {
-        "logo": "/img/apps/rosenweg-geraet.png", "name": "Rosenweg Gerät",
-        "text": "App der geteilten Rosenweg-Telefone: Sperrbildschirm, Anmeldung mit Karte, Telefonie."},
-    "ch.rosenweg4303.phone": {"logo": "/img/apps/rosenweg-telefon.png", "name": "Rosenweg Telefon",
-                              "text": "Telefonieren über die Rosenweg-Telefonanlage, mit deiner Nummer."},
-    "ch.rosenweg4303.messages": {"logo": "/img/apps/rosenweg-messenger.png",
-                                 "text": "Chats, Ankündigungen, Notfall-Meldungen und SMS."},
-    "ch.rosenweg4303.contacts": {"logo": "/img/apps/rosenweg-kontakte.png",
-                                 "text": "Adressbuch aus der Rosenweg-Nextcloud."},
-    "ch.rosenweg4303.calendar": {"logo": "/img/apps/rosenweg-kalender.png",
-                                 "text": "Termine aus der Rosenweg-Nextcloud."},
-    "ch.rosenweg4303.notes": {"logo": "/img/apps/rosenweg-notizen.png", "text": "Notizen und Checklisten."},
-    "ch.rosenweg4303.filemanager": {"logo": "/img/apps/rosenweg-dateimanager.png",
-                                    "text": "Dateien auf dem Telefon und in der Nextcloud."},
-    "ch.rosenweg4303.documents": {"logo": "/img/apps/rosenweg-dokumente.png",
-                                  "text": "Dokumente ansehen und bearbeiten."},
-    "ch.rosenweg4303.camera": {"logo": "/img/apps/rosenweg-kamera.png",
-                               "text": "Fotos und Videos; auf den geteilten Telefonen landen sie in deiner Nextcloud."},
-    "ch.rosenweg4303.gallery": {"logo": "/img/apps/rosenweg-galerie.png", "text": "Fotos und Videos ansehen."},
-    "ch.rosenweg4303.paint": {"logo": "/img/apps/rosenweg-paint.png", "text": "Skizzen und Zeichnungen."},
-    "ch.rosenweg4303.voicerecorder": {"logo": "/img/apps/rosenweg-diktiergeraet.png",
-                                      "name": "Rosenweg Diktiergerät", "text": "Sprachaufnahmen."},
-    "ch.rosenweg4303.clock": {"logo": "/img/apps/rosenweg-uhr.png", "text": "Wecker, Timer und Stoppuhr."},
-    "ch.rosenweg4303.math": {"logo": "/img/apps/rosenweg-rechner.png", "text": "Ein einfacher Rechner."},
-    "ch.rosenweg4303.home": {"logo": "/img/apps/rosenweg-launcher.png", "name": "Rosenweg Startseite",
-                             "text": "Startbildschirm; auf den geteilten Telefonen je Person gespeichert."},
-    "ch.rosenweg4303.keyboard": {"logo": "/img/apps/rosenweg-tastatur.png",
-                                 "text": "Tastatur ohne Datenweitergabe."},
-    "ch.rosenweg4303.karten": {"logo": "/img/apps/rosenweg-karten.png", "technik": True,
-                               "text": "NFC-Karten nachschlagen, Personen zuordnen und entziehen.",
-                               "fuer": "Für die Technik."},
-}
+APPS_REGISTER_URL = os.environ.get("PBX_APPS_REGISTER_URL", f"{MAIN_API_BASE}/api/apps/register")
+APPS_REGISTER_KOPIE = os.environ.get("PBX_APPS_REGISTER_KOPIE", "/var/lib/pbx-api/apps-register.json")
+APPS_REGISTER_MITGELIEFERT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "apps-register.json")
+APPS_REGISTER_ALTER = int(os.environ.get("PBX_APPS_REGISTER_ALTER", "300"))
+APPS_REGISTER = {}
+APPS_KATALOG_REPOS = {}
+APPS_KATALOG_INFO = {}
+APPS_OEFFENTLICH_OHNE = set()
+_APPS_REGISTER_STAND = {"zeit": 0.0, "quelle": "", "fehler": ""}
+_APP_SCHLUESSEL = re.compile(r"[a-z][a-z0-9-]{0,30}")
+_APP_PAKET = re.compile(r"[a-z][a-z0-9_]*(\.[a-z0-9_]+){1,6}")
+_APP_REPO = re.compile(r"Rosenweg/[A-Za-z0-9._-]{1,100}")
+
+
+def _apps_register_uebernehmen(d, quelle):
+    """Register pruefen und die vier Namen neu binden (atomar je Name). True = uebernommen."""
+    global APPS_REGISTER, APPS_KATALOG_REPOS, APPS_KATALOG_INFO, APPS_OEFFENTLICH_OHNE
+    try:
+        if d.get("version") != 1:
+            raise ValueError("version")
+        register = {}
+        for k, e in d["apps"].items():
+            if not _APP_SCHLUESSEL.fullmatch(k) or not _APP_PAKET.fullmatch(e["paket"]) \
+                    or not _APP_REPO.fullmatch(e["repo"]) or not isinstance(e["reihenfolge"], int):
+                raise ValueError(f"apps.{k}")
+            register[k] = {f: v for f, v in e.items() if not f.startswith("_")}
+            register[k].setdefault("text", "")
+            register[k].setdefault("fuer", "")
+            register[k].setdefault("logo", "")
+        repos, info, ohne = {}, {}, set()
+        for paket, e in d["katalog"].items():
+            if not _APP_PAKET.fullmatch(paket) or not _APP_REPO.fullmatch(e["repo"]):
+                raise ValueError(f"katalog.{paket}")
+            repos[e["repo"]] = paket
+            i = {f: v for f, v in e.items() if f in ("logo", "name", "text", "fuer", "technik")}
+            if i:
+                info[paket] = i
+            if e.get("nicht_oeffentlich"):
+                ohne.add(paket)
+    except (AttributeError, KeyError, TypeError, ValueError) as e:
+        _APPS_REGISTER_STAND["fehler"] = f"{quelle}: ungueltig ({e})"
+        app.logger.warning("Apps-Register aus %s ungueltig: %s", quelle, e)
+        return False
+    APPS_REGISTER, APPS_KATALOG_REPOS, APPS_KATALOG_INFO, APPS_OEFFENTLICH_OHNE = register, repos, info, ohne
+    _APPS_REGISTER_STAND.update(quelle=quelle, fehler="")
+    return True
+
+
+def _apps_register_datei(pfad):
+    try:
+        with open(pfad, encoding="utf-8") as f:
+            return _apps_register_uebernehmen(json.load(f), pfad)
+    except (OSError, ValueError):
+        return False
+
+
+def _apps_register_auffrischen(erzwingen=False):
+    """Hoechstens alle APPS_REGISTER_ALTER Sekunden von der Haupt-API holen (3 s Zeitlimit)."""
+    jetzt = time.time()
+    if not erzwingen and jetzt - _APPS_REGISTER_STAND["zeit"] < APPS_REGISTER_ALTER:
+        return
+    _APPS_REGISTER_STAND["zeit"] = jetzt  # auch bei Fehlschlag: nicht bei jeder Anfrage erneut
+    try:
+        r = requests.get(APPS_REGISTER_URL, timeout=3)
+        r.raise_for_status()
+        d = r.json()
+        if _apps_register_uebernehmen(d, APPS_REGISTER_URL):
+            try:
+                os.makedirs(os.path.dirname(APPS_REGISTER_KOPIE), exist_ok=True)
+                tmp = APPS_REGISTER_KOPIE + ".neu"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(d, f, ensure_ascii=False, indent=1)
+                os.replace(tmp, APPS_REGISTER_KOPIE)
+            except OSError as e:
+                app.logger.warning("Apps-Register: Kopie nicht geschrieben: %s", e)
+            return
+    except (requests.RequestException, ValueError) as e:
+        _APPS_REGISTER_STAND["fehler"] = f"{APPS_REGISTER_URL}: {e}"
+        app.logger.warning("Apps-Register nicht ladbar (%s), bleibe bei %s", e, _APPS_REGISTER_STAND["quelle"] or "nichts")
+    if not _APPS_REGISTER_STAND["quelle"]:
+        _apps_register_datei(APPS_REGISTER_KOPIE) or _apps_register_datei(APPS_REGISTER_MITGELIEFERT)
+
+
+# Beim Start ohne Netz: gemerkte Kopie, sonst mitgelieferte Datei. Die Haupt-API fragt die
+# erste Anfrage an /api/apps*.
+if not _apps_register_datei(APPS_REGISTER_KOPIE):
+    _apps_register_datei(APPS_REGISTER_MITGELIEFERT)
+
+
+@app.before_request
+def _apps_register_vor_anfrage():
+    if request.path.startswith(("/api/apps/", "/api/pbx/apps-versionen")):
+        _apps_register_auffrischen()
+
+
 APPS_BEHALTEN = 3          # Fassungen je App und Plattform (die aktuelle eingeschlossen)
 APPS_DATEIEN_DIR = os.path.join(TELEFON_APPS_DIR, "dateien")
 APPS_DATEI_MAX = 600 * 1024 * 1024
@@ -2704,6 +2719,7 @@ def apps_versionen_liste():
     return jsonify({"register": [{"app": k, "name": e["name"], "repo": e["repo"], "paket": e["paket"]}
                                  for k, e in APPS_REGISTER.items()],
                     "katalog_repos": APPS_KATALOG_REPOS, "behalten": APPS_BEHALTEN,
+                    "register_quelle": {k: v for k, v in _APPS_REGISTER_STAND.items() if k != "zeit"},
                     "versionen": [dict(r) for r in rows]})
 
 
