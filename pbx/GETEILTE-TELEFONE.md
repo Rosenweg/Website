@@ -145,8 +145,10 @@ Technik sie auf /smartphones gesetzt hat. Erster Eintrag also: Zeile auf /smartp
 | Rosenweg Profil | `ch.rosenweg4303.profil` | leer = alle, die sich anmelden dürfen (`telefon_gruppen`) | aktiv |
 | Rosenweg Salz | `ch.rosenweg4303.salz` | `technik,präsident,praesident` + die `bewohner_gruppen` der Salzlager | aktiv |
 | Rosenweg Virtuelle Computer | `ch.rosenweg4303.vm` | `technik,präsident,praesident,vm` | aktiv |
-| Rosenweg Zutritt | `ch.rosenweg4303.zutritt` | `technik,präsident,praesident` | vorbereitet, **inaktiv** bis zum ersten Release |
-| Rosenweg Waschküche | `ch.rosenweg4303.waschkueche` | Bewohner/Eigentümer der STWEG mit Waschküche (heute `stweg3-*`), `technik,präsident,praesident` | noch keine Zeile; nach dem ersten Release auf /smartphones anlegen |
+| Rosenweg Mein Telefon | `ch.rosenweg4303.meintelefon` | leer = alle, die sich anmelden dürfen | aktiv (1.0.1) |
+| Rosenweg Reparatur | `ch.rosenweg4303.reparatur` | leer = alle, die sich anmelden dürfen | aktiv (1.0.0) |
+| Rosenweg Zutritt | `ch.rosenweg4303.zutritt` | `technik,präsident,praesident` | aktiv (1.0.0) |
+| Rosenweg Waschküche | `ch.rosenweg4303.waschkueche` | `technik,präsident,praesident,r9-bewohner,r9-eigentuemer,stweg3-ausschuss` | aktiv (1.0.0) |
 
 - **Salz:** Eine Hauswart-Gruppe gibt es nicht; der Hauswart steht je Lager als Mailadresse
   (`salz_lager.hauswart_emails`). Die Gruppen im Katalog entsprechen `buchungsGruppen()` in
@@ -154,10 +156,14 @@ Technik sie auf /smartphones gesetzt hat. Erster Eintrag also: Zeile auf /smartp
 - **Virtuelle Computer:** Die Rechte selbst kommen aus Proxmox (ACL je VM). Die
   Authentik-Gruppe `vm` steuert nur, wem das Telefon die App zeigt: wer in Proxmox eine VM
   bekommt, gehört auch in `vm`.
-- **Waschküche:** `portal_pfade` `/api/wasch/` (alles darunter); Räume, STWEG und das Recht
-  „waschküche-admin“ prüft die Haupt-API selbst.
-- **Zutritt:** Die Zeile steht schon (inaktiv, ohne APK). Das erste Release legt die APK
-  von selbst hinein; danach auf /smartphones „aktiv“ setzen.
+- **Waschküche:** Reservieren dürfen Technik/Präsident und wer zu einer STWEG gehört, die eine
+  Waschküche hat (`getUserStwegs` in `api/lib/groups.js`, Prüfung in `POST /api/wasch/reservations`).
+  Heute haben nur die zwei Räume der STWEG 3 eine Waschküche, also deren Gruppen `r9-bewohner`,
+  `r9-eigentuemer` und `stweg3-ausschuss`. Bekommt eine andere STWEG eine Waschküche
+  (`wasch_rooms`), ihre drei Gruppen hier dazunehmen. Die Hausverwaltung (`stwegN-verwaltung`)
+  darf nur lesen und meldet sich an geteilten Telefonen nicht an. `portal_pfade` `/api/wasch/`;
+  Räume, STWEG und das Recht „waschküche-admin“ prüft die Haupt-API selbst.
+- **Zutritt:** Seit dem ersten Release (1.0.0) aktiv; die APK kam von selbst in die vorbereitete Zeile.
 
 ## Wartung per USB
 
