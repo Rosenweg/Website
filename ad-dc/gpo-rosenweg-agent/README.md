@@ -68,7 +68,7 @@ curl --negotiate -u : -X POST https://www.rosenweg4303.ch/api/stations/v2/anmeld
 ```sh
 # dc1, im Verzeichnis dieses Ordners; netzstart-einmal.ps1 aus os-stationen
 # (sicherung/windows/) daneben legen - das Repo ist privat und wird nicht geladen
-./einrichten.sh --version 0.1.0 --netzstart netzstart-einmal.ps1
+./einrichten.sh --version 0.1.1 --netzstart netzstart-einmal.ps1
 ```
 
 Wirkt beim nächsten Start der PCs in OU=Windows. Vorher prüfen, wer dort
