@@ -1,5 +1,5 @@
 {
-  "_hinweis": "Apps im Android-Dauertest (CT 149). quelle 'index' = /apps (pbx.rosenweg4303.ch/api/apps/index.json, Pruefsumme der Datei und Signatur aus dem Index); 'github' = neuestes Release mit tag_praefix aus repo (APK + .sha256); 'datei' = APK liegt schon im CT. signatur: erwarteter SHA-256 des Signaturzertifikats; 'index' = signatur_sha256 aus index.json. aktiv=false: erst mit Konto apptest.",
+  "_hinweis": "Apps im Android-Dauertest (CT 149). quelle 'index' = /apps (pbx.rosenweg4303.ch/api/apps/index.json, Pruefsumme der Datei und Signatur aus dem Index); 'github' = neuestes Release mit tag_praefix aus repo (APK + .sha256); 'datei' = APK liegt schon im CT. signatur: erwarteter SHA-256 des Signaturzertifikats; 'index' = signatur_sha256 aus index.json. anmeldung=true: Konto apptest (flows/anmelden.yaml), App wird als Update installiert, damit die Anmeldung bleibt.",
   "apps": [
     {
       "kennung": "bausteine",
@@ -22,7 +22,7 @@
       "signatur": "index",
       "flow": "flows/vm.yaml",
       "anmeldung": true,
-      "aktiv": false
+      "aktiv": true
     },
     {
       "kennung": "salz",
@@ -32,7 +32,7 @@
       "signatur": "index",
       "flow": "flows/salz.yaml",
       "anmeldung": true,
-      "aktiv": false
+      "aktiv": true
     },
     {
       "kennung": "profil",
@@ -42,7 +42,7 @@
       "signatur": "index",
       "flow": "flows/profil.yaml",
       "anmeldung": true,
-      "aktiv": false
+      "aktiv": true
     }
   ]
 }

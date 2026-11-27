@@ -14,10 +14,10 @@ nach einem neuen Release, wenn eine App wieder grün ist, und wenn 3 h lang kein
 |---|---|
 | `ct-anlegen.sh` | CT auf dem Knoten anlegen (root auf pve2) |
 | `einrichten.sh` | im CT als root: Pakete, Benutzer `android`, SDK, Maestro, AVD, Schnappschuss `sauber` |
-| `emulator.sh` | `start` (Schnappschuss, ~21 s) / `kalt` (~31 s) / `stopp`, headless mit swiftshader |
+| `emulator.sh` | `start` (Schnappschuss `dauer`, sonst `sauber`; 8–21 s) / `kalt` (~31 s) / `stopp` (sichert `dauer`) / `neu` (zurück auf `sauber`), headless mit swiftshader |
 | `lauf.sh` | ein Lauf über alle aktiven Apps aus `apps.json`; `--nur-neu` nur bei neuer Version auf /apps |
 | `apps.json` | welche Apps, Quelle, erwartete Signatur, Ablauf |
-| `flows/*.yaml` | Maestro-Abläufe (Flutter-Semantik: ganze Texte als Regex, darum `.*`) |
+| `flows/*.yaml` | Maestro-Abläufe (Flutter-Semantik: ganze Texte als Regex, darum `.*`); `anmelden.yaml` meldet `apptest` im Browser an, `aufwaermen.yaml` weckt Maestro nach dem Schnappschuss |
 | `systemd/` | Timer stündlich und alle 5 min Abfrage der Quellen (/apps-Index, GitHub-Releases) |
 
 ## Von Hand
@@ -31,6 +31,19 @@ su - android
 
 Ergebnis je App: `~/ergebnis/<kennung>.json` (`ok`, `grund`, `version`, `dauer_s`) und
 `<kennung>.png`; Gesamtstand `~/ergebnis/stand.json`.
+
+## Anmeldung `apptest`
+
+Profil, Salz und VM melden sich mit dem Konto `apptest` an (Authentik, Gruppe `apptest`, nur
+Anwendung `rosenweg-apps`, nur von CT 149: Richtlinie `apptest-nur-ct149` mit 100.64.2.69 und
+der SLAAC-Adresse 2a02:16a:1400:9:be24:11ff:fea2:11ae – bei neuer MAC anpassen!). Der Weg ist
+derselbe wie bei Bewohnern: „Mit Rosenweg-Konto anmelden“ → Chrome → Authentik → Rücksprung
+(„Continue to …?“). Der Emulator-Stand `dauer` hält die Anmeldung von Lauf zu Lauf; nur wenn
+der Anmeldeschirm kommt, meldet `flows/anmelden.yaml` neu an. Diese Apps installiert `lauf.sh`
+als Update statt frisch.
+
+Maestro schreibt unter `~/.maestro/tests` Protokolle **mit** den `-e`-Werten (Passwort) –
+`lauf.sh` löscht den Ordner nach jedem Ablauf. Beim Ausprobieren von Hand ebenso.
 
 ## Signatur
 

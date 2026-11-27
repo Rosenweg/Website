@@ -1,0 +1,23 @@
+# Rosenweg Profil (von /apps) mit Konto apptest: Anmeldung hält im Emulator; nur wenn
+# der Anmeldeschirm kommt, meldet anmelden.yaml neu an. Prüft, dass /api/auth/me das
+# Konto liefert (Name, Gruppe apptest) und die Reiter gehen.
+appId: ch.rosenweg4303.profil
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Mit Rosenweg-Konto anmelden|Mein Profil"
+    timeout: 30000
+- runFlow:
+    when:
+      visible: "Mit Rosenweg-Konto anmelden"
+    file: anmelden.yaml
+    env:
+      APP: ch.rosenweg4303.profil
+- extendedWaitUntil:
+    visible: ".*apptest@rosenweg4303.ch.*"
+    timeout: 30000
+- assertVisible: "Meine Gruppen.*apptest.*"
+- tapOn: "Angaben.*Tab 2 von 3"
+- tapOn: "Zugang.*Tab 3 von 3"
+- tapOn: "Übersicht.*Tab 1 von 3"
+- assertVisible: ".*App Test.*"

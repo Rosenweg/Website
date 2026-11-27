@@ -1,0 +1,24 @@
+# Rosenweg Virtuelle Computer (von /apps) mit Konto apptest: Liste "Meine Computer"
+# muss laden (apptest hat keinen Computer freigegeben), dann neu laden.
+appId: ch.rosenweg4303.vm
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Mit Rosenweg-Konto anmelden|Meine Computer"
+    timeout: 30000
+- runFlow:
+    when:
+      visible: "Mit Rosenweg-Konto anmelden"
+    file: anmelden.yaml
+    env:
+      APP: ch.rosenweg4303.vm
+- extendedWaitUntil:
+    visible: "Meine Computer"
+    timeout: 30000
+- extendedWaitUntil:
+    visible: "Für Sie ist noch kein Computer freigegeben.|.*verbunden.*"
+    timeout: 30000
+- tapOn: "Liste neu laden"
+- extendedWaitUntil:
+    visible: "Für Sie ist noch kein Computer freigegeben."
+    timeout: 30000

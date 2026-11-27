@@ -1,0 +1,19 @@
+# Rosenweg Salz (von /apps) mit Konto apptest. apptest darf nicht buchen (keine
+# Bewohner-/Technik-Gruppe): die App muss das Konto erkennen und den Hinweis zeigen.
+# Das beweist Anmeldung + /api/salz/ich. Gibt die Technik apptest später Lesen, hier
+# stattdessen den Bestand eines Lagers prüfen.
+appId: ch.rosenweg4303.salz
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Mit Rosenweg-Konto anmelden|Nicht freigeschaltet|.*Bestand.*"
+    timeout: 30000
+- runFlow:
+    when:
+      visible: "Mit Rosenweg-Konto anmelden"
+    file: anmelden.yaml
+    env:
+      APP: ch.rosenweg4303.salz
+- extendedWaitUntil:
+    visible: "Du bist angemeldet als App Test.*|.*Bestand.*"
+    timeout: 30000

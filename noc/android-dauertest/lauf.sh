@@ -46,6 +46,9 @@ mv "$ERG/index.json.neu" "$ERG/index.json"; mv "$ERG/quellen.neu" "$ERG/quellen"
 SIG_INDEX=$(jq -r '.signatur_sha256 // empty' "$ERG/index.json")
 
 "$HIER/emulator.sh" start || { echo "Emulator startet nicht"; exit 1; }
+timeout 300 maestro test "$HIER/flows/aufwaermen.yaml" --no-ansi >"$ERG/aufwaermen.log" 2>&1 </dev/null \
+  || timeout 300 maestro test "$HIER/flows/aufwaermen.yaml" --no-ansi >>"$ERG/aufwaermen.log" 2>&1 </dev/null || true
+rm -rf "$HOME/.maestro/tests"
 
 pruefe_app() {   # $1 = JSON-Eintrag aus apps.json; schreibt $ERG/<kennung>.json
   local e=$1 k paket quelle flow sig apk soll_sha ist_sha ist_sig version="" grund="" t0=$SECONDS
@@ -61,6 +64,13 @@ pruefe_app() {   # $1 = JSON-Eintrag aus apps.json; schreibt $ERG/<kennung>.json
       if ! curl -fsS --max-time 300 -o "$apk.neu" "$BASIS$(jq -r .url <<<"$z")"; then grund="Download fehlgeschlagen"
       else
         ist_sha=$(sha256sum "$apk.neu" | cut -c1-64)
+        if [ "$ist_sha" != "$soll_sha" ]; then
+          # Erschien gerade ein Release (Index am Laufanfang geholt)? Einmal neu fragen.
+          z=$(curl -fsS --max-time 30 "$INDEX_URL" | jq -c --arg p "$paket" '.apps[] | select(.paket == $p)')
+          soll_sha=$(jq -r '.sha256 // empty' <<<"$z"); version=$(jq -r '.version_name // empty' <<<"$z")
+          [ "$ist_sha" != "$soll_sha" ] && curl -fsS --max-time 300 -o "$apk.neu" "$BASIS$(jq -r .url <<<"$z")" \
+            && ist_sha=$(sha256sum "$apk.neu" | cut -c1-64)
+        fi
         if [ "$ist_sha" != "$soll_sha" ]; then grund="Pruefsumme passt nicht zum Index"; rm -f "$apk.neu"
         else mv "$apk.neu" "$apk"; fi
       fi
@@ -97,14 +107,38 @@ pruefe_app() {   # $1 = JSON-Eintrag aus apps.json; schreibt $ERG/<kennung>.json
   fi
 
   if [ -z "$grund" ]; then
-    adb uninstall "$paket" >/dev/null 2>&1
+    # Ohne Anmeldung: immer frisch. Mit Anmeldung: als Update installieren, damit die
+    # Anmeldung von apptest erhalten bleibt (sonst stuendlich eine neue Anmeldung).
+    # Passt die Signatur der installierten App nicht (install -r scheitert), frisch.
+    if [ "$(jq -r .anmeldung <<<"$e")" != true ]; then adb uninstall "$paket" >/dev/null 2>&1; fi
     adb logcat -b crash -c >/dev/null 2>&1
-    if ! adb install -r "$apk" >"$ERG/$k.install.log" 2>&1; then grund="Installation fehlgeschlagen: $(tail -1 "$ERG/$k.install.log")"
-    elif ! timeout 600 maestro test "$flow" --no-ansi --format junit --output "$ERG/$k.junit.xml" >"$ERG/$k.maestro.log" 2>&1; then
-      grund="Ablauf: $(grep -m1 -E 'FAILED|Assertion is false|Element not found' "$ERG/$k.maestro.log" | cut -c1-200)"
-      [ "$grund" = "Ablauf: " ] && grund="Ablauf fehlgeschlagen (Log $ERG/$k.maestro.log)"
+    if ! adb install -r "$apk" >"$ERG/$k.install.log" 2>&1 \
+       && ! { adb uninstall "$paket" >/dev/null 2>&1; adb install "$apk" >>"$ERG/$k.install.log" 2>&1; }; then
+      grund="Installation fehlgeschlagen: $(tail -1 "$ERG/$k.install.log")"
+    else
+      # Einmal wiederholen, bevor rot gilt: Maestro meldet beim ersten Kontakt mit dem
+      # Treiber gelegentlich "Unknown error" nach 1 s (27.11.2026). Echte Fehler kommen zweimal.
+      local versuch
+      for versuch in 1 2; do
+        if timeout 600 maestro test "$flow" -e BENUTZER="${APPTEST_BENUTZER:-}" -e PASSWORT="${APPTEST_PASSWORT:-}" \
+             --no-ansi --format junit --output "$ERG/$k.junit.xml" >"$ERG/$k.maestro.log" 2>&1; then
+          grund=""
+          [ "$versuch" = 2 ] && echo "(im 2. Versuch gruen)" >>"$ERG/$k.maestro.log"
+          break
+        fi
+        grund="Ablauf: $(grep -m1 -E 'FAILED|Assertion is false|Element not found' "$ERG/$k.maestro.log" | cut -c1-200)"
+        [ "$grund" = "Ablauf: " ] && grund="Ablauf: $(grep -m1 -oE '<failure>[^<]*' "$ERG/$k.junit.xml" | sed 's/<failure>//' | cut -c1-200)"
+        [ "$grund" = "Ablauf: " ] && grund="Ablauf fehlgeschlagen (Log $ERG/$k.maestro.log)"
+      done
+      # Maestro legt unter ~/.maestro/tests Protokolle MIT den -e-Werten (Passwort) ab
+      rm -rf "$HOME/.maestro/tests"
     fi
-    adb exec-out screencap -p >"$ERG/$k.png" 2>/dev/null
+    local _
+    for _ in 1 2 3; do
+      adb exec-out screencap -p >"$ERG/$k.png" 2>/dev/null
+      [ "$(head -c 4 "$ERG/$k.png" | od -An -tx1 | tr -d ' ')" = 89504e47 ] && break
+      sleep 2
+    done
     if adb logcat -b crash -d 2>/dev/null | grep -q "Process: $paket"; then
       [ -z "$grund" ] && grund="Absturz im Hintergrund (logcat crash)"
     fi
@@ -140,7 +174,8 @@ erg = sys.argv[1]
 stand = json.load(open(os.path.join(erg, 'stand.json')))
 for a in stand['apps']:
     p = os.path.join(erg, a['kennung'] + '.png')
-    a['schirmbild_png'] = base64.b64encode(open(p, 'rb').read()).decode() if os.path.exists(p) else None
+    b = open(p, 'rb').read() if os.path.exists(p) else b''
+    a['schirmbild_png'] = base64.b64encode(b).decode() if b.startswith(b'\x89PNG\r\n\x1a\n') else None
 print(json.dumps(stand))
 PY
 fi

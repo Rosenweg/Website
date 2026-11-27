@@ -1,0 +1,6 @@
+# Vor der ersten App: der erste Maestro-Aufruf nach dem Laden des Schnappschusses scheitert
+# oft mit "Unknown error" (Treiber im Emulator noch vom gesicherten Stand). Ergebnis egal.
+appId: com.android.settings
+---
+- launchApp
+- pressKey: Home
