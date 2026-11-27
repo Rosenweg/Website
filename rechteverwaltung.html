@@ -263,6 +263,12 @@
                     body: { permissions },
                 });
                 if (!resp.ok) throw new Error('Speichern fehlgeschlagen');
+                if (resp.status === 202) {
+                    // wartet auf Bestätigung per Mail (Karten-Anmeldung, W17) – noch nicht gespeichert
+                    status.textContent = AuthentikAuth.bestaetigungsText(await resp.json().catch(() => ({})));
+                    status.className = 'text-sm text-amber-700 self-center font-medium';
+                    return;
+                }
                 status.textContent = 'Gespeichert';
                 status.className = 'text-sm text-green-600 self-center font-medium';
                 // Reload to refresh from server

@@ -409,7 +409,9 @@
         const data = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
         close();
-        alert(`Merge erfolgreich: ${data.reassigned_kontakte} Kontakte umgehängt.`);
+        // 202: wartet auf Bestätigung per Mail (Karten-Anmeldung, W17/N5)
+        if (r.status === 202) { alert(AuthentikAuth.bestaetigungsText(data)); return; }
+        alert(`Zusammengeführt: ${data.reassigned_kontakte} Kontakte umgehängt.`);
         await openDedup();
         await loadList();
       } catch (e) {

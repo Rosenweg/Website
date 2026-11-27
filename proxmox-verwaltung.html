@@ -167,7 +167,10 @@
                 const err = await res.json().catch(() => ({ error: res.statusText }));
                 throw new Error(err.error || 'API-Fehler');
             }
-            return res.json();
+            const d = await res.json().catch(() => ({}));
+            // 202: Aktion wartet auf Bestätigung per Mail (Karten-Anmeldung, W17)
+            if (res.status === 202 && d && d.bestaetigung) d._wartet = true;
+            return d;
         }
 
         async function loadData() {
@@ -304,11 +307,12 @@
                 });
 
                 // Grant ACL
-                await api('/api/proxmox/acl', {
+                const erg = await api('/api/proxmox/acl', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ path: `/vms/${vmid}`, userid, roleid }),
                 });
+                if (erg && erg._wartet) { showStatus('grant-status', AuthentikAuth.bestaetigungsText(erg), false); return; }
 
                 showStatus('grant-status', `Zugriff für ${userid} auf VM ${vmid} gewährt.`, true);
                 await loadData();
@@ -321,11 +325,12 @@
             if (!confirm(`Zugriff von ${userid} auf ${path} (${roleid}) wirklich entziehen?`)) return;
 
             try {
-                await api('/api/proxmox/acl', {
+                const erg = await api('/api/proxmox/acl', {
                     method: 'DELETE',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ path, userid, roleid }),
                 });
+                if (erg && erg._wartet) return; // Hinweis-Kasten kommt aus apiFetch
                 await loadData();
             } catch (err) {
                 alert('Fehler: ' + err.message);

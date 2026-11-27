@@ -666,7 +666,10 @@
                 const err = await res.json().catch(() => ({ error: res.statusText }));
                 throw new Error(err.error || 'API-Fehler');
             }
-            return res.json();
+            const d = await res.json().catch(() => ({}));
+            // 202: Aktion wartet auf Bestätigung per Mail (Karten-Anmeldung, W17)
+            if (res.status === 202 && d && d.bestaetigung) d._wartet = true;
+            return d;
         }
 
         async function ladeDaten() {
@@ -2657,8 +2660,9 @@
             const label = document.getElementById('wartung-label').value.trim();
             if (!schluessel) return;
             try {
-                await api('/api/stations/admin/wartungsschluessel', {
+                const d = await api('/api/stations/admin/wartungsschluessel', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { schluessel, label } });
+                if (d && d._wartet) { zeigeStatus(AuthentikAuth.bestaetigungsText(d), false); return; }
                 document.getElementById('wartung-neu').value = '';
                 document.getElementById('wartung-label').value = '';
                 zeigeStatus('Wartungsschlüssel hinterlegt.', true);
@@ -2693,10 +2697,11 @@
 
         async function tuUnd(pfad, opts, meldung) {
             try {
-                await api(pfad, {
+                const d = await api(pfad, {
                     ...opts,
                     headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
                 });
+                if (d && d._wartet) { zeigeStatus(AuthentikAuth.bestaetigungsText(d), false); return; }
                 zeigeStatus(meldung, true);
                 await ladeDaten();
             } catch (err) {
