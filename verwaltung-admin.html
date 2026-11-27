@@ -135,7 +135,7 @@
                             <input type="text" id="m-platt-user" class="w-full border border-gray-300 rounded px-3 py-1.5">
                         </div>
                         <div>
-                            <label class="block text-xs font-medium text-gray-600 mb-1">Passwort <span class="text-amber-600">(nur Admin-sichtbar)</span></label>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Passwort <span class="text-amber-600">(sichtbar für Technik, Präsident und den Ausschuss dieser STWEG)</span></label>
                             <input type="text" id="m-platt-pass" class="w-full border border-gray-300 rounded px-3 py-1.5 font-mono">
                         </div>
                     </div>
@@ -312,6 +312,8 @@
         document.getElementById('m-platt-url').value = v.plattform_url || '';
         document.getElementById('m-platt-user').value = v.plattform_user || '';
         document.getElementById('m-platt-pass').value = v.plattform_pass || '';
+        // W9: STWEG-übergreifende Einträge liefert die API dem Ausschuss ohne Passwort
+        document.getElementById('m-platt-pass').placeholder = v.plattform_pass_verborgen ? 'hinterlegt – nur für Technik/Präsident sichtbar' : '';
         document.getElementById('m-vertrag-von').value = v.vertrag_von ? String(v.vertrag_von).slice(0,10) : '';
         document.getElementById('m-vertrag-bis').value = v.vertrag_bis ? String(v.vertrag_bis).slice(0,10) : '';
         document.getElementById('m-kuend-frist').value = v.kuendigungsfrist_monate || '';

@@ -26,6 +26,7 @@ import os
 import re
 import secrets as pysecrets
 import shutil
+import threading
 from datetime import datetime, timedelta, timezone
 from xml.sax.saxutils import escape as xesc
 from zoneinfo import ZoneInfo
@@ -35,7 +36,7 @@ import segno
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
-from flask import Flask, Response, jsonify, request, send_file, send_from_directory
+from flask import Flask, Response, g as flask_g, jsonify, request, send_file, send_from_directory
 
 import adb_updater
 import ami
@@ -147,7 +148,31 @@ def require_admin():
         return None, (jsonify({"error": "Nicht angemeldet"}), 401)
     if not is_admin(user):
         return None, (jsonify({"error": "Nur fuer Technik / Praesident"}), 403)
+    flask_g.karten_vermerk = True  # Befund W26: schreibende Admin-Aktion nach der Antwort melden
     return user, None
+
+
+# Befund W26 ("Karte wie Schluessel"): Mit der Rosenweg-Karte (rw_app_) hat man hier
+# volle Admin-Rechte. Jede schreibende Admin-Aktion meldet die Anlage der Haupt-API
+# (POST /api/karten-admin/vermerk, Bearer der Person); dort entsteht der Eintrag im
+# Kartenprotokoll und die Quittung per Mail. Gesperrt wird nichts, Fehler stoeren nicht.
+def _karten_vermerk_senden(token, methode, pfad, status):
+    try:
+        requests.post(f"{MAIN_API_BASE}/api/karten-admin/vermerk",
+                      headers={"Authorization": f"Bearer {token}"},
+                      json={"dienst": "pbx", "methode": methode, "pfad": pfad, "status": status}, timeout=5)
+    except requests.RequestException:
+        pass
+
+
+@app.after_request
+def _karten_vermerk(res):
+    token = _bearer() or ""
+    if (getattr(flask_g, "karten_vermerk", False) and token.startswith("rw_app_")
+            and request.method in ("POST", "PUT", "PATCH", "DELETE")):
+        threading.Thread(target=_karten_vermerk_senden,
+                         args=(token, request.method, request.path, res.status_code), daemon=True).start()
+    return res
 
 
 def require_agi():

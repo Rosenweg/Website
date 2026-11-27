@@ -47,12 +47,29 @@
         </div>
       </div>
 
+      <!-- Verlauf (Befund W16) -->
+      <div class="mt-6 bg-white rounded-lg shadow overflow-hidden">
+        <div class="px-4 py-3 border-b">
+          <h2 class="text-lg font-semibold">Verlauf</h2>
+          <p class="text-xs text-gray-500">Wer hat wann eine Löschung gestoppt, den Timer verlängert oder einen Eintrag entfernt.</p>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm">
+            <thead class="text-xs text-gray-500 uppercase border-b">
+              <tr><th class="px-3 py-2 text-left">Wann</th><th class="px-3 py-2 text-left">Wer</th><th class="px-3 py-2 text-left">Aktion</th><th class="px-3 py-2 text-left">Konto</th><th class="px-3 py-2 text-left">Vorher → nachher</th></tr>
+            </thead>
+            <tbody id="verlauf" class="divide-y divide-gray-100"><tr><td colspan="5" class="text-center py-4 text-gray-400">Lade…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="mt-6 bg-blue-50 border border-blue-200 rounded p-4 text-sm text-blue-900">
         <p><strong>So funktioniert's:</strong></p>
         <ul class="list-disc list-inside mt-2 space-y-1 text-xs">
           <li><strong>Cancellen:</strong> Loeschung wird gestoppt. Eintrag bleibt in der Liste (cancelled=true), Authentik-Account bleibt aktiv.</li>
           <li><strong>Timer +30 Tage:</strong> Reaktiviert die Loeschung, schiebt das Datum 30 Tage in die Zukunft. Reminder wird neu gesendet.</li>
           <li><strong>Entfernen:</strong> Loescht den Eintrag aus der Liste komplett — kein automatischer Job mehr für diesen User.</li>
+          <li>Jede dieser Aktionen steht im <strong>Verlauf</strong> (mit Name und Zeit). Ohne Schreibrecht „Konto-Löschungen“ ist die Liste nur zum Ansehen.</li>
         </ul>
       </div>
     </div>
@@ -67,8 +84,32 @@
     if (!u) return;
     document.getElementById('auth-gate').classList.add('hidden');
     document.getElementById('content').classList.remove('hidden');
+    // Befund W16: Aktionen nur mit Schreibrecht, Mail-Chain nur Technik/Präsident (wie die API)
+    DARF_SCHREIBEN = AuthentikAuth.hasPermission('loeschungen', 'write');
+    TECHNIK = (u.groups || []).some(g => ['technik', 'präsident', 'praesident'].includes(String(g).toLowerCase()));
     await load();
+    await loadVerlauf();
   });
+  let DARF_SCHREIBEN = false, TECHNIK = false;
+  const AKTION_TEXT = { 'gestoppt': '✕ Löschung gestoppt', 'timer-30-tage': '⏱ Timer +30 Tage', 'entfernt': '🗑 Eintrag entfernt' };
+
+  async function loadVerlauf() {
+    const tb = document.getElementById('verlauf');
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/admin/pending-deletions/protokoll?limit=50');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const liste = (await r.json()).eintraege || [];
+      tb.innerHTML = liste.length ? liste.map(e => `<tr>
+          <td class="px-3 py-2 text-xs whitespace-nowrap">${fmtDt(e.zeit)}</td>
+          <td class="px-3 py-2">${esc(e.name || e.email || '–')}${e.art && e.art !== 'konto' && e.art !== 'authentik' ? ` <span class="text-xs text-amber-700">(${esc(e.art)})</span>` : ''}</td>
+          <td class="px-3 py-2">${esc(AKTION_TEXT[e.aktion] || e.aktion)}</td>
+          <td class="px-3 py-2 font-mono text-xs">${esc(e.ziel)}</td>
+          <td class="px-3 py-2 text-xs">${esc(e.alt || '')} → ${esc(e.neu || '')}</td>
+        </tr>`).join('') : '<tr><td colspan="5" class="text-center py-4 text-gray-400 italic">Noch keine Aktionen festgehalten.</td></tr>';
+    } catch (e) {
+      tb.innerHTML = `<tr><td colspan="5" class="text-red-600 py-3 px-3">Fehler: ${esc(e.message)}</td></tr>`;
+    }
+  }
 
   async function load() {
     try {
@@ -99,13 +140,13 @@
           <td class="px-3 py-2">${status}</td>
           <td class="px-3 py-2">${stillIn}</td>
           <td class="px-3 py-2 text-right whitespace-nowrap">
-            <select data-id="${esc(d.id)}" data-email="${esc(d.email)}" class="text-xs border rounded px-2 py-1 bg-white">
+            ${(TECHNIK || DARF_SCHREIBEN) ? `<select data-id="${esc(d.id)}" data-email="${esc(d.email)}" class="text-xs border rounded px-2 py-1 bg-white">
               <option value="">⋯ Aktion</option>
-              <option value="chain">📨 Mail-Chain anzeigen</option>
-              ${!d.cancelled ? '<option value="cancel">✕ Loeschung cancellen</option>' : ''}
-              ${d.cancelled ? '<option value="reactivate">⏱ Timer +30 Tage</option>' : ''}
-              <option value="remove">🗑 Eintrag entfernen</option>
-            </select>
+              ${TECHNIK ? '<option value="chain">📨 Mail-Chain anzeigen</option>' : ''}
+              ${DARF_SCHREIBEN && !d.cancelled ? '<option value="cancel">✕ Loeschung cancellen</option>' : ''}
+              ${DARF_SCHREIBEN && d.cancelled ? '<option value="reactivate">⏱ Timer +30 Tage</option>' : ''}
+              ${DARF_SCHREIBEN ? '<option value="remove">🗑 Eintrag entfernen</option>' : ''}
+            </select>` : '<span class="text-xs text-gray-400">nur ansehen</span>'}
           </td>
         </tr>`;
       }).join('');
@@ -132,6 +173,7 @@
       const r = await AuthentikAuth.apiFetch(`/api/admin/pending-deletions/${id}/cancel`, { method: 'PUT' });
       if (!r.ok) throw new Error(await r.text());
       await load();
+      await loadVerlauf();
     } catch (e) { alert('Fehler: ' + e.message); }
   }
 
@@ -141,6 +183,7 @@
       const r = await AuthentikAuth.apiFetch(`/api/admin/pending-deletions/${id}/reactivate`, { method: 'PUT' });
       if (!r.ok) throw new Error(await r.text());
       await load();
+      await loadVerlauf();
     } catch (e) { alert('Fehler: ' + e.message); }
   }
 
@@ -150,6 +193,7 @@
       const r = await AuthentikAuth.apiFetch(`/api/admin/pending-deletions/${id}`, { method: 'DELETE' });
       if (!r.ok) throw new Error(await r.text());
       await load();
+      await loadVerlauf();
     } catch (e) { alert('Fehler: ' + e.message); }
   }
 

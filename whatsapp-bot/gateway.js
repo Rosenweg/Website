@@ -443,6 +443,17 @@ function startGateway(botCore) {
       const ok = me.is_admin || groups.includes('technik') || groups.includes('präsident') || groups.includes('praesident');
       if (!ok) return res.status(403).json({ error: 'Nur Technik/Präsident' });
       req.uiUser = me;
+      // Befund W26: mit der Rosenweg-Karte (rw_app_) schreibende Aktionen der Haupt-API
+      // melden -> Kartenprotokoll + Quittung. Nach der Antwort, Fehler stoeren nicht.
+      if (/^Bearer\s+rw_app_/i.test(auth) && req.method !== 'GET' && req.method !== 'HEAD') {
+        res.once('finish', () => {
+          fetch(`${MAIN_API_BASE}/api/karten-admin/vermerk`, {
+            method: 'POST', headers: { Authorization: auth, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dienst: 'whatsapp', methode: req.method, pfad: req.path, status: res.statusCode }),
+            signal: AbortSignal.timeout(5000),
+          }).catch(() => {});
+        });
+      }
       next();
     } catch (e) {
       return res.status(502).json({ error: 'Auth-Backend nicht erreichbar' });

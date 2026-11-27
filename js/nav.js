@@ -75,7 +75,7 @@ const SERVICES_GROUPS = [
     title: 'Mail-Outbox (Genehmigung)',
     icon: '🟡',
     items: [
-      { label: 'Mail Outbox', href: 'verwaltung-mail-outbox.html', activeKey: 'verwaltung-mail-outbox', permAny: 'technik,praesident', badgeIds: ['nav-vmq-badge', 'nav-vmq-badge-mobile'] },
+      { label: 'Mail Outbox', href: 'verwaltung-mail-outbox.html', activeKey: 'verwaltung-mail-outbox', permAny: 'technik,praesident,mail-compose', badgeIds: ['nav-vmq-badge', 'nav-vmq-badge-mobile'] },
       { label: 'Mail schreiben (Ad-hoc)', href: 'mail-compose.html', activeKey: 'mail-compose', perm: 'mail-compose' },
       { label: 'Empfänger-Stammdaten', href: 'mail-empfaenger-admin.html', activeKey: 'mail-empfänger', perm: 'mail-empfänger' },
       { label: 'Freigabe-Regeln', href: 'mail-approval-config.html', activeKey: 'mail-approval-config', permAny: 'technik,praesident' },

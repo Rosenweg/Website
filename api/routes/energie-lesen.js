@@ -12,6 +12,8 @@
 // ═══════════════════════════════════════════════════════════════════
 const express = require('express');
 const { authMiddleware, requirePermission } = require('../middleware/auth');
+const { stwegSicht } = require('../lib/stweg-sicht');
+const { stwegVonHaus } = require('../lib/haeuser');
 
 const router = express.Router();
 const COLLECTOR = (process.env.ENERGY_COLLECTOR_URL || 'http://energy-collector:3001').replace(/\/+$/, '');
@@ -75,16 +77,78 @@ for (const p of OFFEN) {
 // ─── Ab hier nur mit Anmeldung ───────────────────────────────────────
 router.use(authMiddleware);
 
-// Voller Lesezugriff: Technik/Praesident (requirePermission laesst die immer
-// durch) oder Recht energie-config:read. requirePermission ist eine
-// Middleware -> mit einer Ersatz-Antwort als Ja/Nein-Abfrage benutzen.
+// requirePermission ist eine Middleware -> mit einer Ersatz-Antwort als
+// Ja/Nein-Abfrage benutzen (Technik/Praesident laesst sie immer durch).
+function hatRecht(req, seite, stufe) {
+  return new Promise((resolve) => {
+    const ersatz = { status() { return ersatz; }, json() { resolve(false); return ersatz; } };
+    requirePermission(seite, stufe)(req, ersatz, () => resolve(true));
+  });
+}
+
+// Voller Lesezugriff: Technik/Praesident oder Recht energie-config:read.
 function vollerZugriff(req) {
   if (req._energieVoll !== undefined) return Promise.resolve(req._energieVoll);
   if (req.user?.isAdmin) { req._energieVoll = true; return Promise.resolve(true); }
-  return new Promise((resolve) => {
-    const ersatz = { status() { return ersatz; }, json() { resolve(false); return ersatz; } };
-    requirePermission('energie-config', 'read')(req, ersatz, () => resolve(true));
-  }).then((ok) => { req._energieVoll = ok; return ok; });
+  return hatRecht(req, 'energie-config', 'read').then((ok) => { req._energieVoll = ok; return ok; });
+}
+
+// ─── STWEG-Sicht (Befund W11) ─────────────────────────────────────────
+// Das Seitenrecht „energie-monitor“ (z. B. der Hausverwaltung) gab bisher keine
+// Daten frei: gelesen wurden nur persoenlich zugeordnete Zaehler. Jetzt sehen
+// Ausschuss und Hausverwaltung mit energie-monitor:read zusaetzlich die Zaehler
+// ihrer STWEG(s) (lib/stweg-sicht.js), ohne Technikfelder. Die STWEG eines
+// Zaehlers kommt aus seiner Gruppe (group_id): 'rN' = Haus N (lib/haeuser.js),
+// 'stwegN' = STWEG N, 'meg' = STWEG 8; sonst unbekannt (dann nur Technik).
+function zaehlerStweg(m) {
+  const g = String(m?.group_id || '').trim().toLowerCase();
+  let t = g.match(/^r(?:w)?(\d+)$/);
+  if (t) return stwegVonHaus(Number(t[1]));
+  t = g.match(/^stweg(\d+)$/);
+  if (t) return Number(t[1]);
+  return g === 'meg' ? 8 : null;
+}
+
+let alleZaehlerCache = null;
+async function alleZaehler() {
+  if (alleZaehlerCache && alleZaehlerCache.bis > Date.now()) return alleZaehlerCache.liste;
+  const r = await collector('/meters', 8000);
+  if (!r.ok) throw new Error(`Collector ${r.status}`);
+  const liste = await r.json();
+  if (!Array.isArray(liste)) throw new Error('Collector-Antwort ungueltig');
+  alleZaehlerCache = { liste, bis: Date.now() + 60000 };
+  return liste;
+}
+
+// Die Seiten pollen alle paar Sekunden: das Recht je Konto 60 s merken
+const monitorRechtCache = new Map();
+async function monitorRecht(req) {
+  const key = `${String(req.user?.email || '').toLowerCase()}|${(req.user?.groups || []).join(',')}`;
+  const hit = monitorRechtCache.get(key);
+  if (hit && hit.bis > Date.now()) return hit.ok;
+  const ok = await hatRecht(req, 'energie-monitor', 'read');
+  if (monitorRechtCache.size > 2000) monitorRechtCache.clear();
+  monitorRechtCache.set(key, { ok, bis: Date.now() + 60000 });
+  return ok;
+}
+
+/** Zaehler der STWEG(s), die das Konto als Ausschuss/Verwaltung mit energie-monitor:read sieht. */
+async function stwegZaehler(req) {
+  if (req._energieStweg !== undefined) return req._energieStweg;
+  let liste = [];
+  const sicht = stwegSicht(req.user?.groups || []);
+  if (!sicht.alle && sicht.stwegs.length && await monitorRecht(req)) {
+    liste = (await alleZaehler()).filter(m => sicht.stwegs.includes(zaehlerStweg(m)));
+  }
+  req._energieStweg = liste;
+  return liste;
+}
+
+/** Eigene Zaehler plus STWEG-Zaehler, ohne Doppelte. */
+async function sichtbareZaehler(req, mitGruppen = true) {
+  const eigene = await zaehlerDerPerson(req.user, mitGruppen);
+  const ids = new Set(eigene.map(m => String(m.id)));
+  return eigene.concat((await stwegZaehler(req)).filter(m => !ids.has(String(m.id))));
 }
 
 // Zaehler der angemeldeten Person — E-Mail und Gruppen kommen aus der Sitzung,
@@ -115,7 +179,7 @@ function ohneTechnik(m) {
 
 async function erlaubteIds(req) {
   if (await vollerZugriff(req)) return null; // null = alle
-  return new Set((await zaehlerDerPerson(req.user)).map(m => String(m.id)));
+  return new Set((await sichtbareZaehler(req)).map(m => String(m.id)));
 }
 
 // Prueft :meterId gegen die zugeordneten Zaehler (403 statt 404, damit man
@@ -134,7 +198,10 @@ async function zaehlerErlaubt(req, res, next) {
 // nimmt die Gruppen-Zaehler (meter_groups) dazu.
 router.get('/meine-zaehler', async (req, res) => {
   try {
-    const liste = await zaehlerDerPerson(req.user, req.query.gemeinschaft === '1');
+    // ?stweg=1: dazu die Zaehler der STWEG (Ausschuss/Verwaltung mit energie-monitor)
+    const liste = req.query.stweg === '1'
+      ? await sichtbareZaehler(req, req.query.gemeinschaft === '1')
+      : await zaehlerDerPerson(req.user, req.query.gemeinschaft === '1');
     res.json(liste.map(ohneTechnik));
   } catch (err) { fehler(res, err, 'meine-zaehler'); }
 });
@@ -152,7 +219,7 @@ router.get('/user/:email/meters', async (req, res) => {
 router.get('/meters', async (req, res) => {
   try {
     if (await vollerZugriff(req)) return durchreichen(res, await collector('/meters'));
-    res.json((await zaehlerDerPerson(req.user)).map(ohneTechnik));
+    res.json((await sichtbareZaehler(req)).map(ohneTechnik));
   } catch (err) { fehler(res, err, 'meters'); }
 });
 
@@ -253,3 +320,4 @@ router.get('/alerts', async (req, res) => {
 router.use((req, res) => res.status(404).json({ error: 'Unbekannter Energie-Endpunkt' }));
 
 module.exports = router;
+module.exports.zaehlerStweg = zaehlerStweg; // fuer api/test

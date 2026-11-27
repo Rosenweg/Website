@@ -341,6 +341,11 @@
                 <div class="bg-gray-100 rounded-lg p-8 text-center text-gray-400 animate-pulse">Laden...</div>
             </div>
 
+            <!-- Waschküchen-Verwaltung (Recht „waschküche-admin“, Befund W10) -->
+            <div id="wasch-verwaltung-link" class="hidden mb-4">
+                <a href="pages/waschkueche-admin.html" class="text-sm text-blue-600 hover:underline">Waschküchen-Verwaltung: Übersicht, Sessions, Abrechnung →</a>
+            </div>
+
             <!-- Admin: Raum hinzufuegen -->
             <div id="wasch-admin-section" class="hidden mb-8">
                 <button onclick="showAddRoomModal()" class="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700">+ Raum hinzufügen</button>
@@ -455,6 +460,9 @@
                 document.getElementById('wasch-admin-section').classList.remove('hidden');
             }
 
+            if (AuthentikAuth.hasPermission('waschküche-admin', 'read')) {
+                document.getElementById('wasch-verwaltung-link').classList.remove('hidden');
+            }
             renderRooms();
         }
 

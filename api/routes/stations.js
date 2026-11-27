@@ -525,8 +525,10 @@ function nurTechnik(req, res, next) {
 // nicht ein Admin ohne diese Gruppen (Stefan, 26.11.2026).
 function nurTechnikOderPraesident(req, res, next) {
   const groups = req.user?.groups || [];
-  if (isTechnik(groups) || isPraesident(groups)) return next();
-  return res.status(403).json({ error: 'Nur Technik oder Präsident' });
+  if (!isTechnik(groups) && !isPraesident(groups)) return res.status(403).json({ error: 'Nur Technik oder Präsident' });
+  // Kiosk-PIN setzen/anzeigen mit der Karte: Protokoll + Quittung (Befund W26)
+  kartenAdmin.vermerken(req, res);
+  next();
 }
 
 // ─── Anmeldung (Installer) ──────────────────────────────────────────

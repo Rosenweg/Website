@@ -158,15 +158,19 @@
   const KAT_LABEL = Object.fromEntries(KATEGORIEN.map(k => [k.v, k.l]));
 
   let orte = [];
+  // STWEGs, für die das Konto Orte anlegen/ändern darf ('alle' = Technik/Präsident)
+  let SCHREIB_STWEGS = 'alle';
   let qrCurrent = null; // im QR-Modal angezeigter Ort
 
   function ortUrl(code) { return REPARATUR_URL + '?ort=' + encodeURIComponent(code); }
   function stwegLabel(v) { const o = STWEG_OPTIONS.find(x => x.v === v); return o ? o.l : '—'; }
 
+  // Nur STWEGs anbieten, die das Konto ändern darf; „Allgemein“ nur Technik/Präsident
   function fillSelect(sel, withEmpty, emptyLabel) {
+    const alle = SCHREIB_STWEGS === 'alle';
     const opts = [];
-    if (withEmpty) opts.push(`<option value="">${esc(emptyLabel || '—')}</option>`);
-    for (const o of STWEG_OPTIONS) opts.push(`<option value="${o.v}">${esc(o.l)}</option>`);
+    if (withEmpty && alle) opts.push(`<option value="">${esc(emptyLabel || '—')}</option>`);
+    for (const o of STWEG_OPTIONS) if (alle || SCHREIB_STWEGS.includes(o.v)) opts.push(`<option value="${o.v}">${esc(o.l)}</option>`);
     sel.innerHTML = opts.join('');
   }
   function fillKatSelect(sel) {
@@ -180,20 +184,25 @@
     if (!u) return;
     document.getElementById('auth-gate').classList.add('hidden');
     document.getElementById('content').classList.remove('hidden');
-    fillSelect(document.getElementById('nf-stweg'), true, 'Allgemein / keiner');
     fillKatSelect(document.getElementById('nf-kat'));
-    fillSelect(document.getElementById('em-stweg'), true, 'Allgemein / keiner');
     fillKatSelect(document.getElementById('em-kat'));
     document.getElementById('newForm').addEventListener('submit', onCreate);
     document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeQr(); closeEdit(); } });
     await load();
   });
 
+  function stwegAuswahlFuellen() {
+    fillSelect(document.getElementById('nf-stweg'), true, 'Allgemein / keiner');
+    fillSelect(document.getElementById('em-stweg'), true, 'Allgemein / keiner');
+  }
+
   async function load() {
     const r = await AuthentikAuth.apiFetch('/api/reklamation-orte');
     if (!r.ok) { document.getElementById('tbody').innerHTML = `<tr><td colspan="5" class="text-red-600 p-4">Fehler ${r.status}</td></tr>`; return; }
     const d = await r.json();
     orte = d.orte || [];
+    SCHREIB_STWEGS = d.schreib_stwegs === undefined ? 'alle' : d.schreib_stwegs;
+    stwegAuswahlFuellen();
     render();
   }
 
@@ -211,8 +220,8 @@
         <td class="px-3 py-2">${o.aktiv ? '<span class="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700">aktiv</span>' : '<span class="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-500">inaktiv</span>'}</td>
         <td class="px-3 py-2 whitespace-nowrap text-xs space-x-1">
           <button onclick="showQr(${o.id})" class="px-2 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700">📱 QR</button>
-          <button onclick="openEdit(${o.id})" class="px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">✏️</button>
-          <button onclick="delOrt(${o.id})" class="px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200">🗑</button>
+          ${o.darf_aendern === false ? '' : `<button onclick="openEdit(${o.id})" class="px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">✏️</button>
+          <button onclick="delOrt(${o.id})" class="px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200">🗑</button>`}
         </td>
       </tr>`).join('');
   }
