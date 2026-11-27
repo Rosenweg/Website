@@ -13,6 +13,7 @@ Windows-Rechner der Domäne sehen damit aus wie die Stationen:
 - die Drucker DruckerR9 und DruckerR13 über den CUPS-Server (IPP, ohne Herstellertreiber, A4)
 - aufgeräumte Drucker im Benutzerprofil und der Standarddrucker der Station (gepflegt auf /stationen): Siehe unten
 - Google Chrome als Browser und Standard für Webseiten und PDF; Edge und OneDrive gesperrt: Siehe unten
+- IrfanView (deutsch, mit Plugins) als Standard für Bilder, VLC für Audio und Video, auch für die Aufnahmen des Diktiergeräts: Siehe unten
 - Windows 11: das klassische Startmenü Open-Shell mit dem Rosenweg-Wappen als Start-Knopf: Siehe unten
 
 Gilt für alle Rechner in `OU=Windows`. Seit dem 22.11.2026 liegt dort `WIN11-1` (VM 107 auf pve3, Windows 11 Enterprise).
@@ -23,10 +24,10 @@ Gilt für alle Rechner in `OU=Windows`. Seit dem 22.11.2026 liegt dort `WIN11-1`
 | `rosenweg-look.ps1` | Startskript, läuft beim Start als SYSTEM und setzt alles; Protokoll in `C:\ProgramData\Rosenweg\look.log` |
 | `bilder/` | `hintergrund.png` (aus dem Stationsbild von os-stationen, Logo und Schriftzug für Windows vertikal mittig gesetzt, damit die Stationsinfo oben rechts nichts verdeckt), `sperrbild.png` aus os-stationen, `logo.png` von der Website, `startknopf.png` (aus dem Logo, `startknopf-erzeugen.py`) |
 | `programme.ps1` | baut die AppLocker-Regeln aus der Liste auf /stationen und wertet aus, was sie blockiert (hätte); beim Start und alle 30 min |
-| `aufraeumen.ps1` | bei jeder Anmeldung im Namen der Person: Autostarts von Edge/OneDrive und Edge-Verknüpfungen aus dem (servergespeicherten) Profil |
+| `aufraeumen.ps1` | bei jeder Anmeldung im Namen der Person: Autostarts von Edge/OneDrive und Edge-Verknüpfungen aus dem (servergespeicherten) Profil; VLC ohne Update-Hinweis und Netz-Metadaten, IrfanView auf Deutsch |
 | `drucker.ps1` | räumt die Drucker im Profil auf und setzt den Standarddrucker, bei jeder An- und Abmeldung |
 | `startknopf-erzeugen.py` | erzeugt `bilder/startknopf.png` neu, falls sich das Logo ändert (braucht Pillow) |
-| `programme/` | nicht im Git: der Open-Shell-Installer (mit Prüfsumme) und das Chrome-Enterprise-MSI (Signatur wird auf Windows geprüft), beide holt `einrichten.sh` einmal |
+| `programme/` | nicht im Git: der Open-Shell-Installer (mit Prüfsumme) und das Chrome-Enterprise-MSI (Signatur wird auf Windows geprüft), beide holt `einrichten.sh` einmal; das VLC-MSI (Prüfsumme, holt `einrichten.sh`) und die beiden IrfanView-Installer (Prüfsumme, **von Hand** hierher, siehe unten) |
 
 ## Ändern
 
@@ -83,7 +84,7 @@ Seit dem 26.11.2026 auf allen Rechnern in OU=Windows.
   - keine Werbe-Tabs, kein Chrome im Hintergrund
   - Startseite `www.rosenweg4303.ch` (beim Start nur empfohlen) mit Home-Knopf
   - Der Passwortmanager bleibt an, wie auf den Stationen.
-- **Chrome als Standard** für http, https, .htm, .html und .pdf. Dafür sorgt die Richtlinie «Standardzuordnungen» (`standardprogramme.xml`), die Windows bei jeder Anmeldung anwendet.
+- **Chrome als Standard** für http, https, .htm, .html und .pdf. Dafür sorgt die Richtlinie «Standardzuordnungen» (`standardprogramme.xml`), die Windows bei jeder Anmeldung anwendet. Dieselbe Datei trägt seit 27.11.2026 auch IrfanView und VLC (unten).
 - **Taskleiste** (nur Windows 11): Explorer und Chrome statt Edge und Store, über die Richtlinie «Startlayout» (`taskleiste.xml`). Selbst Angeheftetes bleibt. Unter Windows 10 sperrte dieselbe Richtlinie die Kacheln, darum dort nicht.
 - **Edge**:
   - keine Erstausführung, kein Import, nicht im Hintergrund, keine Frage nach dem Standardbrowser
@@ -107,6 +108,63 @@ Bis zum Durchsetzen zeigt /stationen unter «Wäre blockiert», wo Edge oder One
 - `msedge.exe` (auch unter `EdgeCore`), `MicrosoftEdgeUpdate.exe`, `OneDrive.exe` und `OneDriveSetup.exe` werden abgelehnt.
 - `msedgewebview2.exe` (unter `EdgeWebView` und `EdgeCore`) ist erlaubt.
 - Auch der Copilot-Installer fällt unter «Microsoft Edge Installer».
+
+## Bilder und Medien: IrfanView und VLC
+
+Seit dem 27.11.2026 auf allen Rechnern in OU=Windows (Stefan): Bilder öffnen in **IrfanView**, Audio und Video in **VLC**, auch die Aufnahmen des Rosenweg Diktiergeräts (m4a, aac, ogg). Chrome bleibt Browser und PDF-Programm.
+
+**Versionen** (feste Versionen mit Prüfsumme, wie Open-Shell):
+
+| Datei | Quelle | SHA-256 |
+|---|---|---|
+| `iview476g_x64_setup.exe` – IrfanView 4.76, 64 bit, deutscher Installer | [irfanview.com/64bit.htm](https://www.irfanview.com/64bit.htm) | `f4041d0dd55d0020b6725cf650765269ddcfdbd2d74993f566fe5ac733656050` |
+| `iview476_plugins_x64_setup.exe` – die offiziellen Plugins 4.76, 64 bit | ebenda | `ebc0c4b8bbd25b17f025d56d52fdb92d040e1f7f9215880ff1227ecba15ef713` |
+| `vlc-3.0.24-win64.msi` – VLC 3.0.24, 64 bit | [download.videolan.org](https://download.videolan.org/pub/videolan/vlc/3.0.24/win64/) | `22172095ce4c2d5f5b600bb4c142d78105db29a77fa59a931941876f3b20f6d0` |
+
+Die IrfanView-Prüfsummen sind die, die irfanview.com neben den Downloads angibt. Die VLC-Prüfsumme stimmt mit der veröffentlichten `.sha256` überein (selbst geladen und nachgerechnet am 27.11.2026); VideoLAN signiert zusätzlich mit PGP (`.asc`).
+
+**Lizenz:** VLC ist freie Software (GPL). IrfanView ist Freeware für private und nicht-kommerzielle Nutzung, kommerziell braucht es eine Lizenz. Der Rosenweg ist eine Stockwerkeigentümergemeinschaft und gilt dabei wie Privatpersonen; die kostenlose Nutzung ist damit in Ordnung (Stefan, 27.11.2026). Eine Lizenzdatei gibt es nicht und braucht es nicht. Käme eine kommerzielle Nutzung dazu (Firma, Verein mit Erwerbszweck), wäre das neu zu prüfen.
+
+**Wie es auf den Rechner kommt:**
+
+1. `einrichten.sh` holt das VLC-MSI einmal nach `programme/` und prüft alle drei Prüfsummen, bevor es die Dateien ins sysvol legt. Ältere Versionen dort entfernt es.
+   - **IrfanView von Hand:** irfanview.info gibt die Dateien nur nach einem Klick auf der Download-Seite heraus, ein `curl` bekommt eine HTML-Seite («Click again to start Download»). Darum beide Dateien im Browser von [irfanview.com/64bit.htm](https://www.irfanview.com/64bit.htm) laden («IrfanView-64 Deutsch/German, EXE-Installer» und «IrfanView-64 PlugIns, EXE-Installer») und nach `programme/` legen. Fehlen sie, bricht `einrichten.sh` mit einem Hinweis ab; stimmt die Prüfsumme nicht, ebenso.
+2. `rosenweg-look.ps1` installiert beim Start, wenn das Programm fehlt oder der notierte Stand (`C:\Program Files\Rosenweg\medien.stand`) nicht die verlangte Version ist. Vorher kopiert es den Installer nach `C:\Windows\Temp` und prüft die Prüfsumme erneut.
+   - **IrfanView:** `/silent /folder="C:\Program Files\IrfanView" /desktop=0 /thumbs=0 /group=1 /allusers=1 /assoc=1 /assocallusers=1 /ini="%APPDATA%\IrfanView"`. Startmenü-Eintrag für alle, keine Desktop-Verknüpfung, kein «IrfanView Thumbnails». `/assoc=1` meldet die Bildformate bei Windows an; die Einstellungen liegen je Person im servergespeicherten `%APPDATA%\IrfanView`.
+   - **Plugins:** danach `/silent /folder="C:\Program Files\IrfanView"`.
+   - **VLC:** `msiexec /i … /qn /norestart`. Ein VLC aus dem EXE-Installer (mit `uninstall.exe`) wird vorher still entfernt, sonst lägen zwei Pakete im selben Ordner. Die Desktop-Verknüpfung, die das MSI anlegt, entfernt das Skript bei jedem Start.
+3. `aufraeumen.ps1` stellt bei jeder Anmeldung im Profil ein (nur diese Werte, der Rest bleibt):
+   - VLC (`%APPDATA%\vlc\vlcrc`): `qt-privacy-ask=0` (keine Frage zu Datenschutz und Netz beim ersten Start), `qt-updates-notif=0` (keine Update-Hinweise, die Version kommt von hier), `metadata-network-access=0` (keine Titel und Cover aus dem Netz).
+   - IrfanView (`%APPDATA%\IrfanView\i_view64.ini`): `[Language] DLL=Deutsch.dll`, sofern `Languages\Deutsch.dll` installiert ist. Hat der deutsche Installer Deutsch fest eingebaut und keine solche Datei, ist nichts zu tun; was zutrifft, zeigt der erste Test auf win11-1.
+   - VLC folgt der Sprache von Windows.
+
+**Standard für Dateien:** In `standardprogramme.xml` stehen neben Chrome:
+
+- IrfanView: .jpg .jpeg .jpe .jfif .png .gif .bmp .dib .tif .tiff .webp .ico .heic .heif .avif
+- VLC: .mp3 .m4a .aac .ogg .oga .opus .wav .flac .wma .mka .amr .3ga .mp4 .m4v .mkv .avi .mov .wmv .webm .mpg .mpeg .3gp .ts .mts .m2ts .flv .ogv .vob
+
+Die ProgId zu jeder Endung liest das Skript aus dem, was das Programm bei Windows angemeldet hat (`RegisteredApplications` → `Capabilities\FileAssociations`, sonst die Endung selbst). Bei VLC heissen sie `VLC.<endung>.Document`. Meldet ein Programm eine Endung nicht an (VLC 3.0.24 etwa kennt `.opus` im MSI nicht), bleibt sie weg, und `look.log` nennt sie («nicht angemeldet: …»). Ein Programm, das fehlt, bekommt keine Zuordnung.
+
+**Programm-Whitelist:** IrfanView (`%PROGRAMFILES%\IrfanView\*`) und VLC (`%PROGRAMFILES%\VideoLAN\*`) stehen in `api/lib/windowsprogramme.js` als **Pflicht** («Immer erlaubt»), nicht nur als Vorgabe wie Chrome. Die Richtlinie verteilt sie auf jeden Rechner und macht sie zum Standard; eine schon gespeicherte Vorgabe auf /stationen kennte sie sonst nicht, und mit «Durchsetzen» liefen Doppelklicks auf Fotos und Aufnahmen ins Leere. Pfadregeln wie bei Chrome: unter Programme schreiben nur Admins.
+
+**Prüfen** auf dem Rechner (als Admin):
+
+```powershell
+Get-Content C:\ProgramData\Rosenweg\look.log -Tail 30
+Get-Content 'C:\Program Files\Rosenweg\medien.stand'
+Get-Content 'C:\Program Files\Rosenweg\standardprogramme.xml'
+Test-AppLockerPolicy -XmlPolicy 'C:\Program Files\Rosenweg\programme\positivliste.xml' -User S-1-1-0 `
+    -Path 'C:\Program Files\IrfanView\i_view64.exe', 'C:\Program Files\VideoLAN\VLC\vlc.exe'
+```
+
+**Neue Version:**
+
+1. Version, Dateinamen und Prüfsummen in `rosenweg-look.ps1` **und** `einrichten.sh` ändern. IrfanView: Prüfsummen von irfanview.com/64bit.htm, Dateien von Hand nach `programme/` (die Plugins haben dieselbe Versionsnummer und werden mit aktualisiert). VLC: Prüfsumme aus der `.sha256` neben dem MSI auf download.videolan.org und selbst nachrechnen (`sha256sum`).
+2. Auf dc1 `./einrichten.sh` ausführen. Beim nächsten Start installiert jeder Rechner über die alte Version; das sysvol behält nur die neuen Installer.
+
+Sicherheitsupdates von VLC (Medien-Parser) gelegentlich nachsehen: [videolan.org/security](https://www.videolan.org/security/). Für IrfanView: [Versionsgeschichte](https://www.irfanview.com/main_history.htm).
+
+**Zurücknehmen:** In `rosenweg-look.ps1` `$MedienAn = $false` setzen und `./einrichten.sh` ausführen. Beim nächsten Start deinstalliert das Skript beide still (IrfanView mit `iv_uninstall.exe /silent`, VLC mit `msiexec /x`) und löscht `medien.stand`. Die Zuordnungen fallen aus `standardprogramme.xml` weg, Windows nimmt wieder seine eigenen Apps (Fotos, Medienwiedergabe). Die Einstellungen in den Profilen bleiben liegen, sie stören nicht. Die Freigaben im Katalog können bleiben oder per Pull Request zurück auf «abwählbar».
 
 ## Drucker im Profil und Standarddrucker
 
