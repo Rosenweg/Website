@@ -122,6 +122,13 @@
             </div>
         </section>
 
+        <!-- Hintergrund der geteilten Telefone (nur sichtbar, wenn einer gespeichert ist) -->
+        <section class="bg-white rounded-xl shadow p-5 hidden" id="hintergrundBox">
+            <h2 class="font-semibold mb-2">Hintergrundbild</h2>
+            <p class="text-sm text-slate-600">Dein Hintergrundbild folgt dir auf jedes geteilte Telefon. Ein neues setzt du einfach am Telefon, z.B. in der Galerie mit „Als Hintergrund“.</p>
+            <div class="mt-3"><button class="knopf" onclick="hintergrundZuruecksetzen()">Hintergrund zurücksetzen</button></div>
+        </section>
+
         <!-- Gruppen -->
         <section class="bg-white rounded-xl shadow p-5" id="gruppenBox">
             <h2 class="font-semibold mb-2">Meine Gruppen</h2>
@@ -165,6 +172,7 @@ async function lade() {
     zeigeGeraete(d.geraete || []);
     zeigeErreichbarkeit(d.erreichbarkeit, d.zuletzt_geaendert);
     zeigeGruppen(d.gruppen || []);
+    $('hintergrundBox').classList.toggle('hidden', !d.hintergrund);
 }
 
 function zeigeGeraete(gs) {
@@ -208,6 +216,14 @@ function zeigeGruppen(gs) {
     $('gruppen').innerHTML = gs.map(g => `<li>Du klingelst in der <b>${esc(g.name)} (${esc(g.nummer)})</b>` +
         (g.dienste && g.dienste.length ? ` und damit für ${esc(g.dienste.join(' und '))}` : '') +
         (g.immer ? ', auch ausserhalb der Geschäftszeiten' : ', während der Geschäftszeiten') + '.</li>').join('');
+}
+
+async function hintergrundZuruecksetzen() {
+    if (!confirm('Hintergrundbild auf den geteilten Telefonen auf den Standard zurücksetzen?')) return;
+    const r = await api('/api/telefon/ich/hintergrund', {method: 'DELETE'});
+    melde(r.ok ? 'Zurückgesetzt – ein angemeldetes Telefon zeigt in spätestens einer halben Minute den Standard.'
+               : ((await json(r)).error || 'Zurücksetzen fehlgeschlagen.'), !r.ok);
+    lade().catch(() => {});
 }
 
 // ── Geräte ──

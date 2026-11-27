@@ -171,7 +171,7 @@ if a shell pm path ch.rosenweg4303.messages >/dev/null 2>&1; then
 else
   echo "später   Rosenweg Messenger noch nicht installiert (Katalog) — Skript danach nochmals laufen lassen"
 fi
-schritt "Zugriff auf alle Dateien (Aufräumen beim Abmelden)" a shell appops set $GERAET MANAGE_EXTERNAL_STORAGE allow
+schritt "Zugriff auf alle Dateien (Aufräumen beim Abmelden, Hintergrund lesen)" a shell appops set $GERAET MANAGE_EXTERNAL_STORAGE allow
 # Fernwartung (dauerhafter adb-Tunnel, pbx/adb-zentrale): Band "Fernwartung aktiv - Technik (Name)"
 # über allen Apps, im Kiosk und über dem Sperrbildschirm von Rosenweg Gerät
 schritt "Fernwartung: Band über allen Apps (Rosenweg Gerät)" a shell appops set $GERAET SYSTEM_ALERT_WINDOW allow

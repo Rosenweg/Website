@@ -176,6 +176,20 @@ CREATE TABLE IF NOT EXISTS telefon_einstellungen (
     PRIMARY KEY (email, paket)
 );
 
+-- Hintergrundbild des Startbildschirms pro Person auf den geteilten Telefonen
+-- (Stefan 27.11.2026: "Pro Person synchronisieren"). Das Bild selbst liegt als JPEG
+-- ausserhalb der DB (PBX_HINTERGRUND_DIR, Dateiname = Hash der E-Mail); hier nur die
+-- Fassung (Hash des Inhalts), an der die Telefone eine Aenderung erkennen.
+CREATE TABLE IF NOT EXISTS telefon_hintergrund (
+    email        TEXT PRIMARY KEY,
+    version      TEXT NOT NULL,
+    groesse      INTEGER NOT NULL,
+    breite       INTEGER,
+    hoehe        INTEGER,
+    ext          TEXT,                     -- von welchem geteilten Telefon zuletzt hochgeladen
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Persoenliche PIN fuer die Bildschirmsperre geteilter Telefone (Entscheid
 -- 24.11.2026: auf der Anlage, verschluesselt). Die Geraete-App braucht die PIN im
 -- Klartext, um sie als Sperre zu setzen (resetPasswordWithToken) — darum kein Hash,

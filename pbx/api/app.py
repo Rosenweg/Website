@@ -1390,8 +1390,19 @@ def _sitzung_json(row):
         gruppen = json.loads(row["gruppen"] or "[]")
     except (ValueError, IndexError, KeyError):
         gruppen = []
+    # Hintergrund des Startbildschirms der Person ("" = Standard); Rosenweg Geraet laedt ihn
+    # bei einer neuen Fassung mit GET /api/telefon/hintergrund
+    hintergrund = ""
+    try:
+        c = db.connect()
+        try:
+            hintergrund = _hintergrund_version(c, row["email"])
+        finally:
+            c.close()
+    except Exception as e:  # noqa: BLE001 - Status soll daran nicht scheitern
+        app.logger.warning("Hintergrund der Person: %s", type(e).__name__)
     return {"angemeldet": True, "name": row["name"], "email": row["email"], "seit": row["seit"],
-            "nummer": str(nummer), "sperrbild": _sperrbild(gruppen)}
+            "nummer": str(nummer), "sperrbild": _sperrbild(gruppen), "hintergrund": hintergrund}
 
 
 
@@ -3434,6 +3445,147 @@ def telefon_einstellungen():
         conn.close()
 
 
+# ─── Hintergrundbild des Startbildschirms pro Person (geteilte Telefone) ─────
+# Stefan 27.11.2026: "Pro Person synchronisieren". Rosenweg Geraet merkt, wenn die
+# angemeldete Person einen neuen Hintergrund setzt (Galerie "Als Hintergrund" o.ae.),
+# verkleinert ihn auf Bildschirmgroesse und laedt ihn als JPEG hoch. Nach dem Anmelden
+# an irgendeinem geteilten Telefon setzt Geraet ihn wieder, beim Abmelden den Standard.
+# Nur ueber den Geraetezugang und nur fuer die Person der Sitzung dieses Telefons
+# (keine E-Mail im Pfad: niemand kommt an das Bild einer anderen Person). Das Bild liegt
+# als Datei ausserhalb der DB, die Fassung (Hash) in telefon_hintergrund; /api/telefon/status
+# meldet sie als "hintergrund" ("" = Standard).
+HINTERGRUND_DIR = os.environ.get("PBX_HINTERGRUND_DIR", "/var/lib/pbx-api/hintergruende")
+HINTERGRUND_MAX = int(os.environ.get("PBX_HINTERGRUND_MAX", str(600 * 1024)))
+HINTERGRUND_SEITE_MAX = 4096
+
+
+def _hintergrund_datei(email):
+    name = hashlib.sha256(email.strip().lower().encode()).hexdigest()[:32]
+    return os.path.join(HINTERGRUND_DIR, name + ".jpg")
+
+
+def _jpeg_masse(daten):
+    """(breite, hoehe) eines JPEG aus dem SOF-Marker, sonst None (kein JPEG)."""
+    if len(daten) < 4 or daten[:3] != b"\xff\xd8\xff":
+        return None
+    i = 2
+    while i + 4 <= len(daten):
+        if daten[i] != 0xFF:
+            return None
+        marker = daten[i + 1]
+        if marker == 0xFF:          # Fuellbyte
+            i += 1
+            continue
+        if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
+            i += 2
+            continue
+        laenge = int.from_bytes(daten[i + 2:i + 4], "big")
+        if laenge < 2:
+            return None
+        if marker in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
+            if i + 9 > len(daten):
+                return None
+            hoehe = int.from_bytes(daten[i + 5:i + 7], "big")
+            breite = int.from_bytes(daten[i + 7:i + 9], "big")
+            return (breite, hoehe) if breite and hoehe else None
+        if marker == 0xDA:          # Bilddaten ohne SOF davor
+            return None
+        i += 2 + laenge
+    return None
+
+
+def _hintergrund_version(conn, email):
+    if not email:
+        return ""
+    r = conn.execute("SELECT version FROM telefon_hintergrund WHERE email = ?", (email.lower(),)).fetchone()
+    return r["version"] if r and os.path.isfile(_hintergrund_datei(email)) else ""
+
+
+def _hintergrund_loeschen(conn, email):
+    conn.execute("DELETE FROM telefon_hintergrund WHERE email = ?", (email.lower(),))
+    try:
+        os.remove(_hintergrund_datei(email))
+    except FileNotFoundError:
+        pass
+
+
+@app.route("/api/telefon/hintergrund", methods=["GET", "PUT", "DELETE"])
+def telefon_hintergrund():
+    """Rosenweg Geraet (Geraetezugang): Hintergrund der hier angemeldeten Person.
+    GET -> image/jpeg (Header X-Hintergrund-Version) | 404 keiner (Standard);
+    PUT Rohdaten image/jpeg (hoechstens HINTERGRUND_MAX) -> {ok, version};
+    DELETE -> {ok} (zurueck auf den Standard). 409: niemand angemeldet."""
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        email, _ = _person_der_nebenstelle(conn, ext)
+        if not email:
+            return jsonify({"error": "Niemand angemeldet"}), 409
+        email = email.lower()
+        if request.method == "GET":
+            version = _hintergrund_version(conn, email)
+            if not version:
+                return jsonify({"error": "Kein Hintergrund", "version": ""}), 404
+            r = send_file(_hintergrund_datei(email), mimetype="image/jpeg")
+            r.headers["X-Hintergrund-Version"] = version
+            r.headers["Cache-Control"] = "no-store"
+            return r
+        if request.method == "DELETE":
+            _hintergrund_loeschen(conn, email)
+            conn.commit()
+            return jsonify({"ok": True, "version": ""})
+        if not request.content_length:
+            return jsonify({"error": "Bild fehlt"}), 400
+        if request.content_length > HINTERGRUND_MAX:
+            return jsonify({"error": "Bild zu gross", "max": HINTERGRUND_MAX}), 413
+        daten = request.stream.read(HINTERGRUND_MAX + 1)
+        if len(daten) > HINTERGRUND_MAX:
+            return jsonify({"error": "Bild zu gross", "max": HINTERGRUND_MAX}), 413
+        masse = _jpeg_masse(daten)
+        if not masse:
+            return jsonify({"error": "Kein JPEG"}), 400
+        if max(masse) > HINTERGRUND_SEITE_MAX:
+            return jsonify({"error": "Bild zu gross (Pixel)"}), 400
+        version = hashlib.sha256(daten).hexdigest()[:16]
+        os.makedirs(HINTERGRUND_DIR, mode=0o700, exist_ok=True)
+        ziel = _hintergrund_datei(email)
+        tmp = ziel + ".teil"
+        with open(tmp, "wb") as f:
+            f.write(daten)
+        os.replace(tmp, ziel)
+        conn.execute(
+            "INSERT INTO telefon_hintergrund (email, version, groesse, breite, hoehe, ext, updated_at) "
+            "VALUES (?,?,?,?,?,?, datetime('now')) ON CONFLICT(email) DO UPDATE SET version = excluded.version, "
+            "groesse = excluded.groesse, breite = excluded.breite, hoehe = excluded.hoehe, ext = excluded.ext, "
+            "updated_at = excluded.updated_at",
+            (email, version, len(daten), masse[0], masse[1], str(ext)))
+        conn.commit()
+        return jsonify({"ok": True, "version": version})
+    finally:
+        conn.close()
+
+
+@app.delete("/api/telefon/ich/hintergrund")
+def telefon_ich_hintergrund_loeschen():
+    """Mein Telefon: eigenen Hintergrund der geteilten Telefone zuruecksetzen (Standard).
+    Ein angemeldetes Telefon uebernimmt das mit dem naechsten Status (bis 30 s)."""
+    user = current_user()
+    if not user:
+        return jsonify({"error": "Nicht angemeldet"}), 401
+    email = (user.get("email") or "").lower()
+    if not email:
+        return jsonify({"error": "Konto ohne E-Mail"}), 400
+    conn = db.connect()
+    try:
+        _hintergrund_loeschen(conn, email)
+        conn.commit()
+        return jsonify({"ok": True})
+    finally:
+        conn.close()
+
+
 def _pin_fernet():
     """Fernet mit PBX_PIN_KEY, oder None wenn nicht eingerichtet."""
     key = os.environ.get("PBX_PIN_KEY", "")
@@ -4013,6 +4165,7 @@ def telefon_ich():
             "gruppen": _gruppen_der_nummer(conn, nummer),
             "zuletzt_geaendert": dict(letzte) if letzte else None,
             "darf": _telefon_darf(conn, user),
+            "hintergrund": bool(_hintergrund_version(conn, email)),
         })
     finally:
         conn.close()

@@ -102,7 +102,7 @@ Wichtig für die geplante Einrichtung per QR ohne Kabel.
 | Messenger darf „Nicht stören“ für den Notfall-Alarm kurz ausschalten | `adb shell cmd notification allow_dnd ch.rosenweg4303.messages` | dito |
 | Rotes Notfall-Fenster über dem Sperrbildschirm (Android 14 erteilt es nicht von selbst) | `adb shell appops set ch.rosenweg4303.messages USE_FULL_SCREEN_INTENT allow` | dito |
 | Exakte Wecker: Notfall-Erinnerung alle 2 min bis gelesen, auch im Tiefschlaf | `adb shell appops set ch.rosenweg4303.messages SCHEDULE_EXACT_ALARM allow` | dito |
-| Zugriff auf alle Dateien (Aufräumen beim Abmelden) | `adb shell appops set ch.rosenweg4303.telefon MANAGE_EXTERNAL_STORAGE allow` | dito |
+| Zugriff auf alle Dateien (Aufräumen beim Abmelden, ab Android 14 auch Hintergrund der Person lesen) | `adb shell appops set ch.rosenweg4303.telefon MANAGE_EXTERNAL_STORAGE allow` | dito |
 | Fernwartung: Band „Fernwartung aktiv – Technik (Name)“ über allen Apps, im Kiosk und auf dem Sperrbild von Rosenweg Gerät | `adb shell appops set ch.rosenweg4303.telefon SYSTEM_ALERT_WINDOW allow` | dito; ohne: nur die Benachrichtigung „Fernwartung aktiv“, kein Band |
 | Geräte-App darf „Nicht stören“ kurz ausschalten (Telefon suchen: klingelt auch bei Nicht stören) | `adb shell cmd notification allow_dnd ch.rosenweg4303.telefon` | dito; ohne: Suchanruf klingelt nur bei stumm/vibrieren, nicht bei „Nicht stören“ |
 | Rosenweg Launcher darf Widgets ohne Rückfrage einbinden (Uhr-Widget auf der Startseite, die sich nicht bearbeiten lässt) | `adb shell appwidget grantbind --package ch.rosenweg4303.home --user 0` | dito; ohne: Android fragt einmal nach |
@@ -352,6 +352,52 @@ Gruppen live aus Authentik, sonst `users.groups_json` (wie `/api/auth/me`).
   den Wecker-Kanal (auch bei stumm und „Nicht stören“), je Alarm 30 s, Wiederholung alle 2 min bis
   „Verstanden“ (= Lesebestätigung), höchstens 60 min. Schreiben dürfen im Kanal Notfall nur Technik
   und Präsident, in Ankündigungen zusätzlich der Ausschuss.
+
+## Hintergrundbild pro Person, Sperrbild gehört Gerät (27.11.2026, ab Gerät v247)
+
+Stefan: „Pro Person synchronisieren“. Der **Startbildschirm** (`FLAG_SYSTEM`) gehört der Person,
+das **Sperrbild** (`FLAG_LOCK`) Rosenweg Gerät (Logo der Gruppe/des Hauses, `Sperrbild.java`).
+
+- **Bedienung:** keine. Wer angemeldet ist, setzt einen Hintergrund wie gewohnt (Rosenweg Galerie
+  „Als Hintergrund“, Einstellungen, jede App). Gerät merkt das, verkleinert das Bild auf
+  Bildschirmgröße, speichert es als JPEG (≤ 500 KB) und lädt es hoch. Nach dem Anmelden an
+  **irgendeinem** geteilten Telefon setzt Gerät das Bild der Person; beim Abmelden den Standard
+  (`WallpaperManager.clear(FLAG_SYSTEM)` = Hersteller-Hintergrund, wie auf einem frisch
+  eingerichteten Telefon – das Einrichten setzt keinen eigenen).
+- **Zurücksetzen:** auf `/mein-telefon` „Hintergrund zurücksetzen“ (nur sichtbar, wenn einer
+  gespeichert ist). Ein angemeldetes Telefon übernimmt den Standard mit dem nächsten Status (≤ 30 s).
+- **Sperrbild:** Ändert jemand das Sperrbild (Galerie/Einstellungen „Sperrbildschirm“ oder
+  „Start- und Sperrbildschirm“ – dann teilen sich beide ein Bild, auf Samsung `mWhich=0x5`), setzt
+  Gerät sofort wieder das Logo als eigenes Sperrbild. Hochgeladen wird nur der Startbildschirm.
+  Logcat: `RosenwegSperrbild: Sperrbild von aussen geaendert (lock …, eigen …, system …)`.
+  Schleifenschutz: höchstens 3 erzwungene Sperrbilder je 10 Minuten.
+- **Erkennen (Android 13–15):** `WallpaperManager.OnColorsChangedListener` (meldet System und
+  Sperrbild) und `ACTION_WALLPAPER_CHANGED` (nur zur Laufzeit registriert, im Manifest kommt er seit
+  Android 8 nicht an) stoßen nur eine Prüfung an. Entschieden wird an den Wallpaper-IDs
+  (`getWallpaperId`): Gerät merkt sich die ID jedes Bildes, das es selbst gesetzt oder hochgeladen
+  hat, zurückgelesen nach dem Setzen. Eine andere ID = jemand anderes hat geändert. So löst das
+  eigene Setzen beim Anmelden nie ein Hochladen aus. Rückfall: jeder Status (alle 30 s angemeldet)
+  prüft mit. Hochgeladen wird erst, wenn das Bild der Person gesetzt ist (nie das der vorigen Sitzung).
+- **Lesen des Bildes** braucht ab Android 14 „Zugriff auf alle Dateien“ (`MANAGE_EXTERNAL_STORAGE`,
+  steht schon im Einrichtungsskript), auf Android 13 „Fotos“ (`READ_MEDIA_IMAGES`, setzt Gerät als
+  Device Owner selbst). Ohne: Logcat `RosenwegHintergrund: … nicht synchronisiert`, sonst nichts.
+  Live-Hintergründe werden nicht synchronisiert.
+- **Eigene Handys** ohne Rosenweg Gerät: nichts (wie die übrige Synchronisierung).
+
+Anlage (PBX-API, nur Gerätezugang eines geteilten Telefons, immer die Person der Sitzung dieses
+Telefons – keine E-Mail im Pfad, kein Zugriff auf fremde Bilder):
+
+| Endpunkt | |
+|---|---|
+| `GET /api/telefon/hintergrund` | `image/jpeg` + Header `X-Hintergrund-Version`; 404 = keiner (Standard); 409 = niemand angemeldet |
+| `PUT /api/telefon/hintergrund` | Rohdaten `image/jpeg`, höchstens `PBX_HINTERGRUND_MAX` (600 KB), höchstens 4096 px je Seite → `{ok, version}` |
+| `DELETE /api/telefon/hintergrund` | zurück auf den Standard |
+| `DELETE /api/telefon/ich/hintergrund` | dasselbe für `/mein-telefon` (Authentik-Anmeldung der Person) |
+| `GET /api/telefon/status` | Feld `hintergrund` = Fassung (Hash) oder `""` |
+
+Dateien: `PBX_HINTERGRUND_DIR` (Standard `/var/lib/pbx-api/hintergruende/`, legt die API selbst mit
+0700 an), Name = Hash der E-Mail; Fassung und Größe in der Tabelle `telefon_hintergrund`.
+Tests: `cd pbx/api && python3 -m unittest test_hintergrund -v`.
 
 ## Anzeige in Rosenweg Gerät
 
