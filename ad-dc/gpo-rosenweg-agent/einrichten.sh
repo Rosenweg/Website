@@ -47,7 +47,7 @@ REPO="Rosenweg/rosenweg-agent"
 # Bekannte Fassungen: Version -> sha256 der Windows-exe. Beim Release
 # ergaenzen (steht in SHA256SUMS des Releases).
 declare -A AGENT_SHA256=(
-    # [0.1.0]="…"
+    [0.1.0]="0a440c8811ff4caff4fe1dea55f6882dd02192a4ccf97d9a0c91917d32c2223c"
 )
 # os-stationen sicherung/windows/netzstart-einmal.ps1, Stand 4856e6f (27.11.2026).
 NETZSTART_SHA256="89b3d88450a877fb1d9d58a9a3f39f1a51ff14bff4750cd6bc9aaec6b91120e6"

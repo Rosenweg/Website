@@ -21,28 +21,28 @@ Testplan für win11-1: rosenweg-agent `docs/windows.md`.
 
 ```sh
 # dc1
-./kerberos-dienstkonto.sh /root/stationen-api.keytab
-scp /root/stationen-api.keytab root@docker-pve1:/root/   # Knoten der API
-rm /root/stationen-api.keytab
+./kerberos-dienstkonto.sh /root/stationen-api.keytab   # auf dc1 (CT 108)
 ```
 
-Auf dem Docker-Knoten als Swarm-Secret und in `docker-stack.yml` beim
-Dienst `api` einhängen:
+Die API läuft auf CT 128 mit docker compose (`/opt/rosenweg-core/compose.yml`).
+Die Keytab kommt als Datei dorthin – nie anzeigen, nur weiterleiten – und wird
+beim Dienst `api` read-only eingehängt:
 
 ```sh
-docker secret create stationen-api.keytab /root/stationen-api.keytab && rm /root/stationen-api.keytab
+# vom Mac aus, Datei wird nirgends zwischengespeichert:
+ssh root@100.64.2.21 'pct pull 108 /root/stationen-api.keytab /root/sa.keytab && cat /root/sa.keytab && rm /root/sa.keytab' \
+  | ssh root@100.64.2.20 'umask 077; cat > /root/sa.keytab && pct push 128 /root/sa.keytab /opt/rosenweg-core/secrets/stationen-api.keytab --perms 600 && rm /root/sa.keytab'
+ssh root@100.64.2.21 'pct exec 108 -- rm -f /root/stationen-api.keytab'
 ```
 
 ```yaml
   api:
-    secrets:
-      - source: stationen-api.keytab
-        target: stationen-api.keytab     # -> /run/secrets/stationen-api.keytab
-...
-secrets:
-  stationen-api.keytab:
-    external: true
+    volumes:
+      - /opt/rosenweg-core/secrets/stationen-api.keytab:/run/secrets/stationen-api.keytab:ro
 ```
+
+Danach `docker compose up -d api`. Eingerichtet am 27.11.2026 (Konto
+`stationen-api`, nur AES, KVNO 2).
 
 `STATION_KRB5_KEYTAB` ist mit `/run/secrets/stationen-api.keytab`
 vorbelegt; `STATION_KRB5_SPN` (`HTTP/www.rosenweg4303.ch`) und
