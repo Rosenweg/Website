@@ -19626,6 +19626,9 @@ async function pushWhatsappBroadcast({ emails, body, sourceType, sourceId }) {
 
 // queueWhatsappMessage -> lib/whatsapp.js
 
+// Reparatur-Meldung mit Foto (PWA), für Hinweise des Bots
+const REPARATUR_URL = 'https://pwa.rosenweg4303.ch/reparatur/';
+
 // Command-Handler: parst Body und antwortet entsprechend.
 function buildWhatsappMenu(person) {
   const first = (person?.name || '').split(' ')[0] || '';
@@ -19643,7 +19646,7 @@ Antworte mit der *Zahl* oder dem *Befehl*:
 5️⃣  Webseite oeffnen
 6️⃣  Alle Befehle (Hilfe)
 
-Tipp: Du kannst auch einfach in eigenen Worten beschreiben, was du brauchst — oder einen Beleg als Foto senden. Schreib *menu* für dieses Menue jederzeit erneut.`;
+Schreib *menu* für dieses Menue jederzeit erneut. Fotos und freie Texte versteht der Bot (noch) nicht: Schäden mit Foto bitte über ${REPARATUR_URL} melden, Belege unter ${SITE_URL}/auslagen.html hochladen.`;
 }
 
 async function handleWhatsappCommand(person, body) {
@@ -19665,13 +19668,13 @@ async function handleWhatsappCommand(person, body) {
     if (choice === '4') {
       return `📝 *Schaden / Reklamation melden*
 
-Schreibe in einer Nachricht was passiert ist — am besten mit *Ort* und *was los ist*. Z.B.:
+Schreibe *\`/reklamation\`* und dahinter, was passiert ist — am besten mit *Ort* und *was los ist*. Z.B.:
 
 \`/reklamation Aufzug im Haus 9 steht still seit heute morgen\`
 
-Oder schick ein Foto vom Schaden mit kurzer Beschreibung als Bildunterschrift.
+Fotos nimmt der Bot nicht an. Mit Foto: ${REPARATUR_URL}
 
-Der Ausschuss bekommt sofort eine Mail und WhatsApp-Push.
+Die Technik bekommt die Meldung sofort, der Ausschuss deiner STWEG eine Mail.
 
 🔙 Zurueck zum Menue: *menu*`;
     }
@@ -19681,7 +19684,7 @@ Der Ausschuss bekommt sofort eine Mail und WhatsApp-Push.
 ${SITE_URL}
 
 • Auslagen einreichen: ${SITE_URL}/auslagen.html
-• Reservationen: ${SITE_URL}/reservationen.html
+• Waschküche reservieren: ${SITE_URL}/waschkueche.html
 • Hilfe & FAQ: ${SITE_URL}/hilfe.html
 • Verwaltung: ${SITE_URL}/verwaltung.html
 
@@ -19701,7 +19704,7 @@ ${SITE_URL}
 /reklamation <text> — Schaden melden
 /hilfe — diese Liste
 
-Du kannst auch einfach beschreiben was du brauchst, oder einen Beleg als Foto schicken.`;
+Fotos und freie Texte versteht der Bot (noch) nicht — bitte einen der Befehle verwenden.`;
   }
   if (lower === '/meineauslagen' || lower === '/auslagen') {
     if (!person) return '⚠ Du bist nicht in der Personen-Datenbank — bitte beim Ausschuss melden, damit deine Nummer hinterlegt wird.';
@@ -19809,7 +19812,13 @@ ${SITE_URL}/verwaltung.html`;
         }).catch(() => {});
       }
     } catch (e) { console.warn('[whatsapp] Reklamation Mail Fehler:', e.message); }
-    return `✓ Reklamation #${ins.rows[0].id} aufgenommen und an den Ausschuss weitergeleitet. Du wirst über den Status informiert.`;
+    // Befund W24: Ohne verknüpfte Wohnung (keine STWEG) erreichte die Meldung
+    // niemanden. Die Technik bekommt sie jetzt immer (wie Meldungen aus der
+    // Reparatur-App), der Ausschuss zusätzlich, wenn die STWEG bekannt ist.
+    notifyTechnik(`🔧 *Neue Reklamation per WhatsApp* #${ins.rows[0].id}${stweg ? ` · STWEG ${stweg}` : ' · ohne STWEG (keine Wohnung verknüpft)'}\n${person.name || ''}\n${beschreibung.slice(0, 200)}\n\n→ ${SITE_URL}/reklamationen.html`, 'reklamation-neu').catch(() => {});
+    return stweg
+      ? `✓ Reklamation #${ins.rows[0].id} aufgenommen und an Technik und Ausschuss weitergeleitet. Du wirst über den Status informiert.`
+      : `✓ Reklamation #${ins.rows[0].id} aufgenommen und an die Technik weitergeleitet (deine Nummer ist mit keiner Wohnung verknüpft). Du wirst über den Status informiert.`;
   }
   return null; // Kein Befehl — leer = keine Antwort, oder Default-Help
 }
