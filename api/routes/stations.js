@@ -2733,6 +2733,18 @@ router.get('/:id/persist-key', stationAuth, a(async (req, res) => {
 //
 // Das ist die Rückmeldung, von der die Verwaltung lebt: was für ein Gerät,
 // welche Rolle, welche Version, hat die Einrichtung geklappt.
+// Die Station wiederholt „wartung-dauert-lange" jede Minute, bis die Meldung
+// ankommt, und schickt sie bei einer neuen Stille wieder. In die Gruppe soll
+// je Station und Zeitfenster nur eine.
+const WARTUNG_MELDUNG_MINUTEN = Number(process.env.STATION_WARTUNG_MELDUNG_MINUTEN ?? 30);
+const wartungGemeldet = new Map();
+function wartungMeldungFaellig(stationId, jetzt = Date.now()) {
+  const zuletzt = wartungGemeldet.get(stationId);
+  if (zuletzt && jetzt - zuletzt < WARTUNG_MELDUNG_MINUTEN * 60_000) return false;
+  wartungGemeldet.set(stationId, jetzt);
+  return true;
+}
+
 router.post('/:id/seen', stationAuth, a(async (req, res) => {
   const state = req.body?.state || {};
   await pool.query(
@@ -2744,8 +2756,18 @@ router.post('/:id/seen', stationAuth, a(async (req, res) => {
   await lebenszeichenPruefen(req.station, state, clientIp(req))
     .catch((e) => console.error('[stations] Doppel-Prüfung:', e.message));
   if (state.ereignis) {
-    await ereignis(req.station.id, String(state.ereignis).slice(0, 40), null,
-      state.text ? String(state.text).slice(0, 500) : null);
+    const art = String(state.ereignis).slice(0, 40);
+    const text = state.text ? String(state.text).slice(0, 500) : null;
+    await ereignis(req.station.id, art, null, text);
+    // Steht eine Wartung ungewöhnlich lange still, sagt der Bildschirm
+    // „die Technik ist informiert" — also muss die Technik es auch erfahren.
+    // Nur diese eine Art geht an WhatsApp (die Station darf sonst beliebige
+    // Ereignisse ins Protokoll schreiben, aber nicht in die Gruppe), und
+    // höchstens einmal je Station und WARTUNG_MELDUNG_MINUTEN.
+    if (art === 'wartung-dauert-lange' && wartungMeldungFaellig(req.station.id)) {
+      technikMelden(`⏳ Station *${req.station.id}*: Wartung steht seit über 10 Minuten still`
+        + (text ? ` (${text})` : '') + `.\n${STATIONEN_URL}`, 'station-wartung-lange');
+    }
   }
 
   // Hat jemand in der Verwaltung ein Update angefordert? Dann hier ausliefern
