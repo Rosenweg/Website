@@ -33,7 +33,7 @@
     <div id="content" class="hidden">
       <div class="mb-6">
         <h1 class="text-2xl font-bold text-gray-900">Verwaltungs-Mail Outbox</h1>
-        <p class="text-sm text-gray-600 mt-1">Alle Mails an die externe Verwaltung warten hier auf manuelle Freigabe durch Technik oder Präsident. Inhalt kann vor dem Versand korrigiert werden.</p>
+        <p class="text-sm text-gray-600 mt-1">Mails an die externe Verwaltung und freie Mails warten hier auf Freigabe. Wer freigibt, steht in den Freigabe-Regeln (Standard: Technik oder Präsident); Freigebende können den Inhalt vor dem Versand korrigieren. Eigene Mails siehst du hier mit ihrem Stand.</p>
       </div>
 
       <div class="bg-white rounded-lg shadow p-3 mb-4 flex flex-wrap gap-3 items-center">
@@ -109,6 +109,9 @@
     document.getElementById('content').classList.remove('hidden');
     document.getElementById('filter-status').addEventListener('change', loadList);
     await loadList();
+    // Von „Mail schreiben“ kommend: die eben eingestellte Mail öffnen (#<id>)
+    const vonHash = parseInt(String(location.hash || '').slice(1), 10);
+    if (Number.isFinite(vonHash) && vonHash > 0) openDetail(vonHash);
   });
 
   async function loadList() {
@@ -119,7 +122,7 @@
       const q = status ? '?status=' + encodeURIComponent(status) : '';
       const r = await AuthentikAuth.apiFetch('/api/verwaltung-mail-queue' + q);
       if (r.status === 403) {
-        ul.innerHTML = '<li class="px-4 py-6 text-center text-red-600">Kein Zugriff (nur Technik / Präsident)</li>';
+        ul.innerHTML = '<li class="px-4 py-6 text-center text-red-600">Kein Zugriff</li>';
         return;
       }
       if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -193,6 +196,9 @@
     const m = CURRENT;
     if (!m) return;
     const isPending = m.status === 'pending';
+    // Befund W29: Knöpfe nur für Freigebende dieser Mail; wer sie eingestellt hat, sieht sie nur
+    const darfBearbeiten = isPending && m._can_edit !== false;
+    const darfFreigeben = isPending && !!m._can_approve;
     const attRows = (m.attachments || []).map((a, i) => `
       <div class="flex items-center gap-2 text-xs py-1">
         <span class="text-gray-500">📎</span>
@@ -200,8 +206,8 @@
         ${a.size ? `<span class="text-gray-400">(${Math.round(a.size / 1024)} KB)</span>` : ''}
         ${a.docs_path ? `<span class="text-gray-400">· live aus ${esc(a.docs_path)}</span>` : ''}
       </div>`).join('');
-    const editable = isPending ? '' : 'readonly disabled';
-    const editableCls = isPending ? '' : 'bg-gray-50';
+    const editable = darfBearbeiten ? '' : 'readonly disabled';
+    const editableCls = darfBearbeiten ? '' : 'bg-gray-50';
     const meta = [];
     if (m.created_by) meta.push(`Eingestellt von <b>${esc(m.created_by)}</b> am ${esc(fmtDt(m.created_at))}`);
     if (m.edited_by) meta.push(`<span class="text-amber-700">✎ Editiert</span> von <b>${esc(m.edited_by)}</b> am ${esc(fmtDt(m.edited_at))}`);
@@ -274,13 +280,13 @@
           : ''}
       </div>
 
-      ${isPending ? `
+      ${darfBearbeiten ? `
         <div class="flex flex-wrap justify-end gap-2 pt-4 border-t mt-4">
           <button onclick="saveEdit()" class="px-3 py-1.5 text-gray-700 hover:bg-gray-100 rounded text-sm border">Änderungen speichern</button>
           <button onclick="ablehnen()" class="px-3 py-1.5 bg-red-600 text-white rounded hover:bg-red-700 text-sm">Ablehnen</button>
-          <button onclick="freigeben()" class="px-3 py-1.5 bg-emerald-600 text-white rounded hover:bg-emerald-700 text-sm font-medium">Freigeben &amp; Senden</button>
+          ${darfFreigeben ? '<button onclick="freigeben()" class="px-3 py-1.5 bg-emerald-600 text-white rounded hover:bg-emerald-700 text-sm font-medium">Freigeben &amp; Senden</button>' : ''}
         </div>
-      ` : ''}
+      ` : (isPending ? '<p class="text-xs text-gray-500 pt-4 border-t mt-4">Wartet auf Freigabe. Den Stand siehst du hier.</p>' : '')}
     `;
     // Anhaenge mit Token laden; Folge-Mails ohne Daten im Inline-Handler
     const detEl = document.getElementById('detail');

@@ -18045,9 +18045,27 @@ app.get('/api/zaehler-technik', authMiddleware, requireZaehlerTechnik, async (re
   }
 });
 
+// ─── Zugang zur Mail-Outbox (Befunde W21, W29) ─────────────────────────
+// Die Freigabe-Regeln (mail_approval_config.required_groups) erlauben beliebige
+// Gruppen; Liste, Detail, Bearbeiten und Ablehnen sah aber nur Technik/Praesident.
+// Jetzt je Mail: Technik/Praesident alles; wer laut Regel dieser Mail freigeben
+// darf, sieht, bearbeitet, lehnt ab und gibt frei; wer die Mail eingestellt hat,
+// sieht sie (nur lesen) – so fuehrt „Mail schreiben“ nicht in eine leere Outbox.
+async function mailQueueZugang(req, row) {
+  const g = req.user?.groups || [];
+  if (isTechnik(g) || isPraesident(g)) return { sehen: true, freigeber: true };
+  const rule = await getApprovalRuleForQueueItem(row);
+  const freigeber = userHasAnyGroup(req.user, rule.required_groups);
+  const eigene = !!row.created_by && String(row.created_by).toLowerCase() === String(req.user?.email || '').toLowerCase();
+  return { sehen: freigeber || eigene, freigeber, eigene, rule };
+}
+const mailQueueSchreibend = [kartenAdmin.mitKarteProtokollieren];
+
 // Liste aller Mails in der Queue (mit Filter)
-app.get('/api/verwaltung-mail-queue', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+app.get('/api/verwaltung-mail-queue', authMiddleware, async (req, res) => {
   try {
+    const g = req.user?.groups || [];
+    const admin = isTechnik(g) || isPraesident(g);
     const status = String(req.query.status || '').trim();
     const params = [];
     let where = 'TRUE';
@@ -18072,8 +18090,20 @@ app.get('/api/verwaltung-mail-queue', authMiddleware, requireTechnikOrPraesident
         LIMIT 500`,
       params,
     );
-    const pendingCount = await pool.query(`SELECT COUNT(*) AS cnt FROM verwaltung_mail_queue WHERE status = 'pending'`);
-    res.json({ mails: r.rows, pending_count: parseInt(pendingCount.rows[0].cnt, 10) });
+    if (admin) {
+      const pendingCount = await pool.query(`SELECT COUNT(*) AS cnt FROM verwaltung_mail_queue WHERE status = 'pending'`);
+      return res.json({ mails: r.rows, pending_count: parseInt(pendingCount.rows[0].cnt, 10), darf_alle: true });
+    }
+    // Ohne Technik/Praesident: nur Mails, die man freigeben darf oder selbst eingestellt hat
+    const mails = [];
+    for (const m of r.rows) {
+      const z = await mailQueueZugang(req, m);
+      if (z.sehen) mails.push({ ...m, _can_approve: z.freigeber });
+    }
+    const pendingSql = await pool.query(`SELECT id, source_type, source_id, created_by FROM verwaltung_mail_queue WHERE status = 'pending' LIMIT 500`);
+    let pending = 0;
+    for (const m of pendingSql.rows) if ((await mailQueueZugang(req, m)).freigeber) pending++;
+    res.json({ mails, pending_count: pending, darf_alle: false });
   } catch (err) {
     console.error('Mail-Queue list error:', err);
     res.status(500).json({ error: 'Fehler beim Laden' });
@@ -18084,7 +18114,17 @@ app.get('/api/verwaltung-mail-queue', authMiddleware, requireTechnikOrPraesident
 app.get('/api/verwaltung-mail-queue/pending-count', authMiddleware, async (req, res) => {
   try {
     const groups = req.user?.groups || [];
-    if (!isTechnik(groups) && !isPraesident(groups)) return res.json({ count: 0 });
+    if (!isTechnik(groups) && !isPraesident(groups)) {
+      // Freigeber laut Regel (W29): nur die Mails zaehlen, die sie freigeben duerfen.
+      // Die Abfrage laeuft bei jedem Seitenaufruf (Menue-Badge): wer in keiner
+      // aktiven Regel vorkommt, bekommt sofort 0.
+      const regeln = await pool.query('SELECT required_groups FROM mail_approval_config WHERE aktiv = true');
+      if (!regeln.rows.some(x => userHasAnyGroup(req.user, x.required_groups))) return res.json({ count: 0 });
+      const r = await pool.query(`SELECT id, source_type, source_id, created_by FROM verwaltung_mail_queue WHERE status = 'pending' LIMIT 500`);
+      let n = 0;
+      for (const m of r.rows) if ((await mailQueueZugang(req, m)).freigeber) n++;
+      return res.json({ count: n });
+    }
     const r = await pool.query(`SELECT COUNT(*) AS cnt FROM verwaltung_mail_queue WHERE status = 'pending'`);
     res.json({ count: parseInt(r.rows[0].cnt, 10) });
   } catch (err) {
@@ -18093,13 +18133,15 @@ app.get('/api/verwaltung-mail-queue/pending-count', authMiddleware, async (req, 
 });
 
 // Detail (volle Mail inkl. body_text + Approval-Info)
-app.get('/api/verwaltung-mail-queue/:id', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+app.get('/api/verwaltung-mail-queue/:id', authMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
     const r = await pool.query('SELECT * FROM verwaltung_mail_queue WHERE id = $1', [id]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const row = r.rows[0];
+    const zugang = await mailQueueZugang(req, row);
+    if (!zugang.sehen) return res.status(404).json({ error: 'Nicht gefunden' });
     const rule = await getApprovalRuleForQueueItem(row);
     const approvals = await pool.query(
       `SELECT approver_email, approved_at FROM mail_approval_log WHERE queue_id = $1 ORDER BY approved_at`,
@@ -18119,6 +18161,7 @@ app.get('/api/verwaltung-mail-queue/:id', authMiddleware, requireTechnikOrPraesi
       _approvals: approvals.rows,
       _approvals_count: approvals.rows.length,
       _can_approve: userHasAnyGroup(req.user, rule.required_groups),
+      _can_edit: zugang.freigeber,
       _already_approved_by_me: approvals.rows.some(a => a.approver_email === req.user.email),
     });
   } catch (err) {
@@ -18130,7 +18173,7 @@ app.get('/api/verwaltung-mail-queue/:id', authMiddleware, requireTechnikOrPraesi
 // C2-Fix: Bei jeder inhaltlichen Änderung werden alle bisherigen Approvals
 // invalidiert, damit das 4-Augen-Prinzip nicht durch nachtraegliches Editieren
 // umgangen werden kann.
-app.put('/api/verwaltung-mail-queue/:id', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+app.put('/api/verwaltung-mail-queue/:id', authMiddleware, ...mailQueueSchreibend, async (req, res) => {
   const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
@@ -18142,6 +18185,11 @@ app.put('/api/verwaltung-mail-queue/:id', authMiddleware, requireTechnikOrPraesi
       return res.status(404).json({ error: 'Nicht gefunden' });
     }
     const row = cur.rows[0];
+    const zugang = await mailQueueZugang(req, row);
+    if (!zugang.freigeber) {
+      await client.query('ROLLBACK');
+      return res.status(zugang.sehen ? 403 : 404).json({ error: zugang.sehen ? 'Bearbeiten dürfen nur Freigebende dieser Mail' : 'Nicht gefunden' });
+    }
     if (row.status !== 'pending') {
       await client.query('ROLLBACK');
       return res.status(409).json({ error: `Editieren nur bei Status 'pending' möglich (aktuell: ${row.status})` });
@@ -18283,14 +18331,18 @@ app.post('/api/verwaltung-mail-queue/:id/freigeben', authMiddleware, kartenAdmin
 });
 
 // Ablehnen mit Grund
-app.post('/api/verwaltung-mail-queue/:id/ablehnen', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+app.post('/api/verwaltung-mail-queue/:id/ablehnen', authMiddleware, ...mailQueueSchreibend, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
     const grund = String(req.body?.grund || '').slice(0, 1000);
     if (!grund.trim()) return res.status(400).json({ error: 'Grund erforderlich' });
-    const cur = await pool.query('SELECT status, source_type, source_id, subject FROM verwaltung_mail_queue WHERE id = $1', [id]);
+    const cur = await pool.query('SELECT status, source_type, source_id, subject, created_by FROM verwaltung_mail_queue WHERE id = $1', [id]);
     if (cur.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const zugang = await mailQueueZugang(req, cur.rows[0]);
+    if (!zugang.freigeber) {
+      return res.status(zugang.sehen ? 403 : 404).json({ error: zugang.sehen ? 'Ablehnen dürfen nur Freigebende dieser Mail' : 'Nicht gefunden' });
+    }
     if (cur.rows[0].status !== 'pending') {
       return res.status(409).json({ error: `Status ist '${cur.rows[0].status}', erwartet 'pending'` });
     }
@@ -18340,11 +18392,13 @@ app.post('/api/verwaltung-mail-queue/:id/ablehnen', authMiddleware, requireTechn
 });
 
 // Attachment-Download zur Vorschau
-app.get('/api/verwaltung-mail-queue/:id/attachment/:idx', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+app.get('/api/verwaltung-mail-queue/:id/attachment/:idx', authMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const idx = parseInt(req.params.idx, 10);
     if (!Number.isFinite(id) || !Number.isFinite(idx)) return res.status(400).end();
+    const kopf = await pool.query('SELECT id, source_type, source_id, created_by FROM verwaltung_mail_queue WHERE id = $1', [id]);
+    if (kopf.rows.length === 0 || !(await mailQueueZugang(req, kopf.rows[0])).sehen) return res.status(404).end();
     // M7: separate Attachments-Tabelle, mit Fallback auf Legacy-JSONB
     let att = null;
     const sep = await pool.query(
