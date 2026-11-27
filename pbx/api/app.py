@@ -2995,7 +2995,7 @@ def _gleiche_person(a, b):
         return False
     firma = {"ag", "gmbh", "sa", "gemeinde", "einwohnergemeinde", "stiftung", "genossenschaft"}
     if bool(ta & firma) != bool(tb & firma):
-        return False   # "Mehmet Peker AG" ist nicht "Mehmet Peker"
+        return False   # "Max Muster AG" ist nicht "Max Muster"
     kurz, lang = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
     return kurz <= lang
 

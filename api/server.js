@@ -11746,6 +11746,9 @@ app.get('/api/briefe', authMiddleware, requireAusschussOrTechnik, async (req, re
 
 // POST /api/briefe/upload — Foto hochladen, OCR via Haiku 4.5, umbenennen, ablegen
 // Body: { bild_base64, bild_filename }
+// Absender der Briefe als Hinweis fuer die Texterkennung (Name, Adresse). Steht
+// in der Umgebung, nicht im Code: das Repo ist oeffentlich (Befund W28).
+const BRIEF_ABSENDER = String(process.env.BRIEF_ABSENDER || '').replace(/[`$\\]/g, '').slice(0, 200);
 app.post('/api/briefe/upload', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
   try {
     const { bild_base64, bild_filename } = req.body || {};
@@ -11767,13 +11770,13 @@ Antworte AUSSCHLIESSLICH mit gueltigem JSON, keine Markdown-Codebloecke, kein er
 Schema:
 {
   "tracking": string|null,    // Volle Tracking-Nr unter dem Barcode, Format "98.01.018499.705XXXXX". 8 Ziffern beginnend mit 705.
-  "empfänger": string|null,  // Vollstaendiger Empfänger-Name (Person ODER Firma), z.B. "Roland Britt" oder "Ulrich Brueckner & Christine Brueckner" oder "Mehmet Peker AG"
+  "empfänger": string|null,  // Vollstaendiger Empfänger-Name (Person ODER Firma), z.B. "Max Muster" oder "Anna Beispiel & Beat Beispiel" oder "Muster Immobilien AG"
   "strasse": string|null,
   "plz": string|null,
   "ort": string|null
 }
 
-WICHTIG: Der Empfänger ist NICHT Joerg Herrmann / Rosenweg 14 (das ist der Absender). Lies das Empfänger-Adressfeld.
+WICHTIG: Der Empfänger ist NICHT der Absender (Absenderzeile ueber dem Adressfeld bzw. oben links${BRIEF_ABSENDER ? ': ' + BRIEF_ABSENDER : ''}). Lies das Empfänger-Adressfeld.
 Wenn ein Feld nicht erkennbar ist, setze null.`;
 
     const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
