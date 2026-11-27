@@ -87,7 +87,6 @@ const SERVICES_GROUPS = [
     icon: '💬',
     items: [
       { label: 'WhatsApp-Gateway', href: 'https://whatsapp.rosenweg4303.ch/', activeKey: 'whatsapp-bot', permAny: 'technik,praesident' },
-      { label: 'PBX (Telefonanlage)', href: 'https://pbx.rosenweg4303.ch', activeKey: 'pbx-admin', perm: 'pbx-admin' },
       { label: 'Mein Telefon', href: 'mein-telefon.html', activeKey: 'mein-telefon', permAny: 'bewohner,eigentuemer,ausschuss,technik,praesident,verwaltung' },
       { label: 'Smartphones', href: 'smartphones.html', activeKey: 'smartphones', permAny: 'technik,praesident,bewohner' },
       { label: 'Reklamationen', href: 'reklamationen.html', activeKey: 'reklamationen', perm: 'reklamationen' },
@@ -110,6 +109,8 @@ const SERVICES_GROUPS = [
       // stehen (api/lib/stationapps.js, ZUSATZ_GRUPPEN).
       { label: 'Salzvorrat', href: 'salz.html', activeKey: 'salz', permAny: SALZ_NAV_GRUPPEN },
       { label: 'Proxmox', href: 'proxmox-verwaltung.html', activeKey: 'proxmox', perm: 'proxmox-verwaltung' },
+      // PBX-Admin (Asterisk, eigene Web-UI in CT 220): Seitenrecht pbx-admin = Technik + Präsident
+      { label: 'PBX-Admin (Telefonanlage)', href: 'https://pbx.rosenweg4303.ch/', activeKey: 'pbx-admin', perm: 'pbx-admin' },
       { label: 'Stationen', href: 'stationen.html', activeKey: 'stationen', permAny: 'technik,praesident' },
       { label: 'Sicherungen', href: 'sicherungen.html', activeKey: 'sicherungen', permAny: 'technik,praesident' },
       { label: 'Scanner', href: 'scanner.html', activeKey: 'scanner', permAny: 'technik,praesident' },
@@ -351,6 +352,7 @@ const RosenwegNav = {
       { href: 'energie-config.html', label: 'Zählerverwaltung', group: 'Infrastruktur', perm: 'energie-config' },
       { href: 'https://mqtt.rosenweg4303.ch/', label: 'MQTT-Browser', group: 'Infrastruktur', perm: 'mqtt' },
       { href: 'https://whatsapp.rosenweg4303.ch/', label: 'WhatsApp-Gateway', group: 'Infrastruktur', perm: 'whatsapp-bot', aud: ['admin'] },
+      { href: 'https://pbx.rosenweg4303.ch/', label: 'PBX-Admin (Telefonanlage)', group: 'Infrastruktur', perm: 'pbx-admin', aud: ['admin'] },
       { href: 'mail-approval-config.html', label: 'Mail-Freigabe-Regeln', group: 'Mail-Betrieb', perm: 'mail-approval-config' },
       { href: 'mail-templates.html', label: 'Vorlagen', group: 'Mail-Betrieb', perm: 'mail-templates' },
       { href: 'email-log.html', label: 'Mail-Log', group: 'Mail-Betrieb', perm: 'email-log' },
