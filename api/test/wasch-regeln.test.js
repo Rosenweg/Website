@@ -111,3 +111,31 @@ test('server.js: Sperrzeit mit Vorschau, Bestaetigung, Stornieren und Benachrich
   assert.match(route, /sendTemplated\('wasch-sperrzeit'/);
   assert.match(route, /webpushLib\.sendToEmails/);
 });
+
+test('Vorlage wasch-sperrzeit: ergibt denselben Text wie sperrMeldung, steht in den Standard-Vorlagen', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  // Die reinen Vorlagen-Funktionen aus server.js (tplGet, tplFormat, renderTemplate)
+  const teil = src.slice(src.indexOf('function tplGet('), src.indexOf('// Findet Template-Match.'));
+  const renderTemplate = new Function(`${teil}; return renderTemplate;`)();
+  const v = r.SPERR_VORLAGE;
+  for (const reservationen of [
+    [{ start_time: '2026-12-01T09:00:00', end_time: '2026-12-01T11:00:00' }],
+    [{ start_time: '2026-12-01T09:00:00', end_time: '2026-12-01T11:00:00' },
+      { start_time: '2026-12-02T08:00:00', end_time: '2026-12-02T10:00:00' }],
+  ]) {
+    const angaben = { name: 'Anna Beispiel', raum: 'Waschküche 1', grund: 'Reinigung',
+      von: '2026-12-01T08:00:00', bis: '2026-12-02T12:00:00', reservationen, url: 'https://example.org/waschkueche.html' };
+    const m = r.sperrMeldung(angaben);
+    const k = r.sperrKontext(angaben);
+    assert.equal(renderTemplate(v.subject_template, k), m.betreff);
+    assert.equal(renderTemplate(v.body_template, k), m.text);
+    assert.equal(k.anzahl, reservationen.length);
+    assert.equal(k.gesperrt_von, 'Di 1.12.2026 08:00');
+    assert.equal(k.gesperrt_bis, 'Mi 2.12.2026 12:00');
+  }
+  assert.equal(v.source_type, 'wasch-sperrzeit');
+  const defaults = src.slice(src.indexOf('const MAIL_TEMPLATE_DEFAULTS = ['), src.indexOf('async function seedMailTemplates'));
+  assert.match(defaults, /waschRegeln\.SPERR_VORLAGE/);
+  const route = src.slice(src.indexOf("app.post('/api/wasch/sperrzeiten'"), src.indexOf("app.delete('/api/wasch/sperrzeiten/:id'"));
+  assert.match(route, /sendTemplated\('wasch-sperrzeit', waschRegeln\.sperrKontext\(/);
+});
