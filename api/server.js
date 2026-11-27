@@ -16,6 +16,7 @@ const { escapeHtml, createSemaphore, normalizePhone, safeId, geheimnisGleich, fe
 const { STWEG_GROUPS, parseStweg, getUserStwegs, stwegFolderName, folderStwegNr, isTechnik, isPraesident, getAusschussStwegs, isAusschussForAny, canSeeVerwaltungKontakte } = require('./lib/groups');
 const { nummernKanal, darfEchteNummernSehen, istTechnikOderPraesident, interneNummerFinden, nummernAusgeben, nummernAusBodyEntfernen, interneNummernLaden, interneNummernCacheLeeren, interneNummernPruefen, nummernSicht } = require('./lib/nummernsicht');
 const { zevAliasAddress, zevGotoTargets } = require('./lib/zev');
+const reklMelder = require('./lib/reklamation-melder');
 
 const app = express();
 
@@ -15585,7 +15586,7 @@ const MAIL_TEMPLATE_DEFAULTS = [
       'Hallo {{person_name}},\n\ndeine Reklamation "{{beschreibung_kurz}}" wurde {{label}}.\n'
       + '{{#if notiz}}\nBemerkung: {{notiz}}\n{{/if}}'
       + '\nDetails: {{site_url}}/reklamationen.html',
-    notiz: 'An Melder bei Reklamations-Status-Wechsel. Variablen: person_name, reklamation_id, label, beschreibung_kurz, notiz, site_url',
+    notiz: 'An Melder bei Reklamations-Status-Wechsel. Variablen: person_name, reklamation_id, label, beschreibung_kurz, notiz (= Nachricht an die meldende Person, nie die interne Notiz), site_url',
   },
   {
     source_type: 'zev-rechnung-bewohner', empfaenger_kategorie: null,
@@ -20123,7 +20124,8 @@ async function updateReklamation(id, fields, actor) {
   // intern (Triage) und geht nie an den Melder; eine Bemerkung fuer ihn nur ausdruecklich
   // ueber melder_bemerkung (z. B. Arbeitsschritt des Technik-Bots).
   if (b.status !== undefined && b.status !== before.status && updated.person_id) {
-    const bemerkung = typeof b.melder_bemerkung === 'string' ? b.melder_bemerkung.slice(0, 500) : '';
+    const bemerkung = reklMelder.melderBemerkung(b);
+    if (bemerkung) logReklEvent(id, who, `💬 Nachricht an meldende Person: "${bemerkung.slice(0, 200)}"`).catch(() => {});
     notifyMelderStatus(updated, b.status, bemerkung).catch((e) => console.warn('[reklamation] Status-Mail:', e.message));
   }
   // Aufwandentschaedigung: beim Wechsel auf 'erledigt' Entwurf fuer die zugewiesene Technik anlegen.
@@ -20546,30 +20548,29 @@ app.get('/api/reklamationen/meine/:id/verlauf', authMiddleware, async (req, res)
 });
 // Melder-Benachrichtigung bei Status-Wechsel (E-Mail + WhatsApp + Web-Push) — gemeinsam
 // fuer manuelle (PUT) und automatische (Technik-Bot) Erledigung. rekl: {id, person_id, beschreibung}.
-async function notifyMelderStatus(rekl, status, notiz) {
+// bemerkung: NUR die ausdrueckliche Nachricht an die meldende Person
+// (reklMelder.melderBemerkung), nie die interne Notiz.
+async function notifyMelderStatus(rekl, status, bemerkung) {
   try {
     if (!rekl || !rekl.person_id) return;
     const p = await pool.query('SELECT name, email FROM personen WHERE id = $1', [rekl.person_id]);
     if (!p.rows[0]) return;
-    const labelMap = { weitergeleitet: 'an Handwerker weitergeleitet', erledigt: 'als erledigt markiert', abgewiesen: 'abgewiesen', offen: 'wieder geoeffnet' };
-    const label = labelMap[status] || status;
-    if (['erledigt', 'abgewiesen'].includes(status) && p.rows[0].email) {
+    const n = reklMelder.nachricht({ rekl, name: p.rows[0].name, status, bemerkung, siteUrl: SITE_URL });
+    const label = n.label;
+    if (reklMelder.mailBeiStatus(status) && p.rows[0].email) {
       await sendTemplated('reklamation-status', {
         person_name: p.rows[0].name, reklamation_id: rekl.id, label,
         beschreibung_kurz: (rekl.beschreibung || '').slice(0, 100),
-        notiz: notiz || '', site_url: SITE_URL,
+        notiz: bemerkung || '', site_url: SITE_URL,
       }, {
         from: MAIL_FROM, to: p.rows[0].email,
-        subject: `Deine Reklamation #${rekl.id} wurde ${label}`,
-        text: `Hallo ${p.rows[0].name},\n\ndeine Reklamation "${(rekl.beschreibung || '').slice(0, 100)}" wurde ${label}.\n`
-          + (notiz ? `\nBemerkung: ${notiz}\n` : '')
-          + `\nDetails: ${SITE_URL}/reklamationen.html`,
+        subject: n.subject,
+        text: n.text,
       });
     }
-    const emoji = status === 'erledigt' ? '✅' : status === 'abgewiesen' ? '❌' : status === 'weitergeleitet' ? '➡️' : '🔄';
     pushWhatsappIfOptIn({
       personId: rekl.person_id, sourceType: 'reklamation-status', sourceId: rekl.id,
-      body: `${emoji} *Reklamation #${rekl.id} ${label}*\n${(rekl.beschreibung || '').slice(0, 80)}` + (notiz ? `\n\n_Bemerkung:_ ${notiz}` : ''),
+      body: n.whatsapp,
     }).catch(() => {});
     if (p.rows[0].email) {
       webpushLib.sendToEmails([p.rows[0].email], {
