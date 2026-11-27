@@ -15,11 +15,14 @@ const daten = JSON.parse(fs.readFileSync(DATEI, 'utf8'));
 
 test('apps-register.json ist gueltig und kennt die bisherigen Apps', () => {
   assert.deepEqual(reg.pruefen(daten), []);
-  for (const k of ['vm', 'salz', 'kiosk', 'profil']) assert.ok(daten.apps[k], k);
+  for (const k of ['vm', 'salz', 'kiosk', 'profil', 'karten']) assert.ok(daten.apps[k], k);
   assert.equal(daten.apps.salz.paket, 'ch.rosenweg4303.salz');
-  assert.equal(Object.keys(daten.katalog).length >= 17, true);
+  assert.equal(Object.keys(daten.katalog).length >= 16, true);
   assert.equal(daten.katalog['ch.rosenweg4303.telefon'].nicht_oeffentlich, true);
-  assert.equal(daten.katalog['ch.rosenweg4303.karten'].technik, true);
+  // Rosenweg Karten ab 2.0.0 Flutter-App (alle Plattformen): unter apps, nicht mehr im Katalog
+  assert.equal(daten.apps.karten.paket, 'ch.rosenweg4303.karten');
+  assert.equal(daten.apps.karten.technik, true);
+  assert.equal(daten.katalog['ch.rosenweg4303.karten'], undefined);
 });
 
 test('pruefen findet Fehler', () => {
@@ -117,8 +120,10 @@ print(json.dumps({"ok": ok, "kaputt": kaputt, "register": g["APPS_REGISTER"], "r
   assert.equal(e.ok, true);
   assert.equal(e.kaputt, false);                       // ungueltig: alter Stand bleibt
   assert.equal(e.register.salz.repo, 'Rosenweg/rosenweg-salz');
-  assert.equal(e.repos['Rosenweg/rosenweg-karten'], 'ch.rosenweg4303.karten');
-  assert.equal(e.info['ch.rosenweg4303.karten'].technik, true);
+  assert.equal(e.register.karten.repo, 'Rosenweg/rosenweg-karten');
+  assert.equal(e.register.karten.technik, true);
+  assert.equal(e.repos['Rosenweg/rosenweg-karten'], undefined);
+  assert.equal(e.repos['Rosenweg/calendar-rosenweg'], 'ch.rosenweg4303.calendar');
   assert.deepEqual(e.ohne, ['ch.rosenweg4303.telefon']);
   assert.equal(e.register.kiosk._notiz, undefined);
 });
