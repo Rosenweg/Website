@@ -4,8 +4,11 @@ Android-Emulator im CT 149 `android-dauertest` (pve2, 100.64.2.69, Debian 13, un
 `/dev/kvm` per `dev0`). Installiert die Apps so, wie sie auf /apps liegen, prüft Prüfsumme und
 Signaturzertifikat, fährt je App einen Maestro-Ablauf und hält ein Schirmbild fest.
 
-Stand 27.11.2026: Test-CT steht, Rosenweg Bausteine läuft grün. **Nicht live:** keine Timer,
-kein Melden ans NOC, kein Konto `apptest`. Plan und offene Fragen: siehe PR.
+Ergebnisse gehen nach jedem Lauf per POST an die Haupt-API
+(`/api/isp/noc/android-dauertest`, `api/routes/android-dauertest.js`). Das NOC (Wandbild
+und ISP-Admin) zeigt sie im Abschnitt „Apps · Android-Dauertest“. Die Technik bekommt eine
+WhatsApp-Meldung (sonst Mail an technik@) nach zweimal rot in Folge, beim ersten Rot direkt
+nach einem neuen Release, wenn eine App wieder grün ist, und wenn 3 h lang kein Lauf kam.
 
 | Datei | Zweck |
 |---|---|
@@ -15,7 +18,7 @@ kein Melden ans NOC, kein Konto `apptest`. Plan und offene Fragen: siehe PR.
 | `lauf.sh` | ein Lauf über alle aktiven Apps aus `apps.json`; `--nur-neu` nur bei neuer Version auf /apps |
 | `apps.json` | welche Apps, Quelle, erwartete Signatur, Ablauf |
 | `flows/*.yaml` | Maestro-Abläufe (Flutter-Semantik: ganze Texte als Regex, darum `.*`) |
-| `systemd/` | Timer stündlich und alle 5 min Index-Abfrage – **nicht aktiviert** |
+| `systemd/` | Timer stündlich und alle 5 min Abfrage der Quellen (/apps-Index, GitHub-Releases) |
 
 ## Von Hand
 
@@ -33,8 +36,21 @@ Ergebnis je App: `~/ergebnis/<kennung>.json` (`ok`, `grund`, `version`, `dauer_s
 
 Bei `quelle: index` muss die Datei die Prüfsumme aus `index.json` haben und mit dem Zertifikat
 `signatur_sha256` aus dem Index signiert sein (geprüft mit `apksigner verify --print-certs`).
-Rosenweg Bausteine steht noch nicht auf /apps und hat kein Release: Bis dahin liegt ein lokal
-gebauter APK im CT (`quelle: datei`), festgenagelt auf dessen Debug-Zertifikat.
+Rosenweg Bausteine kommt nicht auf /apps (nur Technik): `quelle: github` nimmt das neueste
+Release `beispiel-v*` aus rosenweg-basis (APK + `.sha256`), signiert mit dem Rosenweg-Schlüssel.
+
+## Geheimnisse
+
+`/etc/android-dauertest.env` im CT (640 root:android): `APPTEST_BENUTZER`/`APPTEST_PASSWORT`
+(Konto `apptest`, Gruppe `apptest`, keine Person) und `MELDE_URL`/`MELDE_TOKEN`
+(= `ANDROID_DAUERTEST_TOKEN` in `/opt/rosenweg-core/.env` auf CT 128). Nie ausgeben.
+
+## Timer
+
+```sh
+cp ~android/dauertest/systemd/* /etc/systemd/system/ && systemctl daemon-reload
+systemctl enable --now android-dauertest.timer android-dauertest-neu.timer
+```
 
 ## Rückweg
 

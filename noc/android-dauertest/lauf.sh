@@ -10,8 +10,10 @@
 #                        5-Minuten-Abfrage nach einem Release); sonst still beenden
 #   lauf.sh bausteine    nur diese App
 #
-# Melden (aus, bis die API-Seite gebaut ist): in /etc/android-dauertest.env
-#   MELDE_URL=https://www.rosenweg4303.ch/api/isp/noc/android-dauertest  MELDE_TOKEN=...
+# Melden: in /etc/android-dauertest.env (600 root:android) - direkt an die Haupt-API, nicht
+# ueber den Proxy (die API prueft die Absender-Adresse 100.64.2.69):
+#   MELDE_URL=http://100.64.2.52:3000/api/isp/noc/android-dauertest  MELDE_TOKEN=...
+#   (= ANDROID_DAUERTEST_TOKEN in /opt/rosenweg-core/.env auf CT 128)
 set -uo pipefail
 HIER=$(cd "$(dirname "$0")" && pwd)
 export ANDROID_HOME=$HOME/android-sdk MAESTRO_CLI_NO_ANALYTICS=1 MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED=true
@@ -27,13 +29,20 @@ NUR_NEU=0; NUR=""
 for a in "$@"; do case "$a" in --nur-neu) NUR_NEU=1 ;; *) NUR=$a ;; esac; done
 
 curl -fsS --max-time 30 -o "$ERG/index.json.neu" "$INDEX_URL" || { echo "Index nicht lesbar: $INDEX_URL"; exit 1; }
-if [ $NUR_NEU = 1 ]; then
-  stempel() { jq -c '[.apps[] | {paket, version_code, sha256}] | sort_by(.paket)' "$1" 2>/dev/null; }
-  if [ -f "$ERG/index.json" ] && [ "$(stempel "$ERG/index.json")" = "$(stempel "$ERG/index.json.neu")" ]; then
-    rm -f "$ERG/index.json.neu"; exit 0
-  fi
+# Stand der Quellen: /apps-Index (Paket, Version, Pruefsumme) und je GitHub-Quelle das
+# neueste Release-Tag. --nur-neu testet nur, wenn sich daran etwas geaendert hat.
+{
+  jq -c '[.apps[] | {paket, version_code, sha256}] | sort_by(.paket)' "$ERG/index.json.neu"
+  jq -r '.apps[] | select(.aktiv and .quelle == "github") | "\(.repo) \(.tag_praefix)"' "$HIER/apps.json" | sort -u |
+    while read -r repo praefix; do
+      curl -fsS --max-time 30 "https://api.github.com/repos/$repo/releases?per_page=20" \
+        | jq -r --arg p "$praefix" '[.[] | select(.draft | not) | .tag_name | select(startswith($p))][0] // ""' | sed "s|^|$repo |"
+    done
+} >"$ERG/quellen.neu" 2>/dev/null
+if [ $NUR_NEU = 1 ] && [ -f "$ERG/quellen" ] && cmp -s "$ERG/quellen" "$ERG/quellen.neu"; then
+  rm -f "$ERG/index.json.neu" "$ERG/quellen.neu"; exit 0
 fi
-mv "$ERG/index.json.neu" "$ERG/index.json"
+mv "$ERG/index.json.neu" "$ERG/index.json"; mv "$ERG/quellen.neu" "$ERG/quellen"
 SIG_INDEX=$(jq -r '.signatur_sha256 // empty' "$ERG/index.json")
 
 "$HIER/emulator.sh" start || { echo "Emulator startet nicht"; exit 1; }
@@ -53,6 +62,25 @@ pruefe_app() {   # $1 = JSON-Eintrag aus apps.json; schreibt $ERG/<kennung>.json
       else
         ist_sha=$(sha256sum "$apk.neu" | cut -c1-64)
         if [ "$ist_sha" != "$soll_sha" ]; then grund="Pruefsumme passt nicht zum Index"; rm -f "$apk.neu"
+        else mv "$apk.neu" "$apk"; fi
+      fi
+    fi
+  elif [ "$quelle" = github ]; then
+    # Neuestes Release mit Tag-Praefix (z. B. beispiel-v) aus einem oeffentlichen Repo:
+    # APK und .sha256 daneben; Signatur wie bei index gegen das Rosenweg-Zertifikat.
+    local repo praefix rel url
+    repo=$(jq -r .repo <<<"$e"); praefix=$(jq -r .tag_praefix <<<"$e")
+    rel=$(curl -fsS --max-time 30 "https://api.github.com/repos/$repo/releases?per_page=20" \
+      | jq -c --arg p "$praefix" '[.[] | select(.draft | not) | select(.tag_name | startswith($p))][0] // empty')
+    if [ -z "$rel" ]; then grund="kein Release $praefix* in $repo"; else
+      version=$(jq -r --arg p "$praefix" '.tag_name | ltrimstr($p)' <<<"$rel")
+      url=$(jq -r '[.assets[] | select(.name | endswith(".apk"))][0].browser_download_url // empty' <<<"$rel")
+      if [ -z "$url" ] || ! curl -fsSL --max-time 300 -o "$apk.neu" "$url" \
+         || ! soll_sha=$(curl -fsSL --max-time 30 "$url.sha256" | cut -c1-64); then
+        grund="Download fehlgeschlagen"; rm -f "$apk.neu"
+      else
+        ist_sha=$(sha256sum "$apk.neu" | cut -c1-64)
+        if [ "$ist_sha" != "$soll_sha" ]; then grund="Pruefsumme passt nicht zum Release"; rm -f "$apk.neu"
         else mv "$apk.neu" "$apk"; fi
       fi
     fi

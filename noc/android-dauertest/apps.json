@@ -1,20 +1,48 @@
 {
-  "_hinweis": "Apps im Android-Dauertest (CT 149). quelle 'index' = /apps (pbx.rosenweg4303.ch/api/apps/index.json, Pruefsumme der Datei und Signatur aus dem Index); 'datei' = APK liegt schon im CT (nur bis die App auf /apps oder als GitHub-Release erscheint). signatur: erwarteter SHA-256 des Signaturzertifikats; 'index' = signatur_sha256 aus index.json. aktiv=false: erst mit Konto apptest.",
+  "_hinweis": "Apps im Android-Dauertest (CT 149). quelle 'index' = /apps (pbx.rosenweg4303.ch/api/apps/index.json, Pruefsumme der Datei und Signatur aus dem Index); 'github' = neuestes Release mit tag_praefix aus repo (APK + .sha256); 'datei' = APK liegt schon im CT. signatur: erwarteter SHA-256 des Signaturzertifikats; 'index' = signatur_sha256 aus index.json. aktiv=false: erst mit Konto apptest.",
   "apps": [
     {
       "kennung": "bausteine",
       "name": "Rosenweg Bausteine",
       "paket": "ch.rosenweg4303.rosenweg_basis_beispiel",
-      "quelle": "datei",
-      "datei": "apks/bausteine.apk",
-      "signatur": "baa567f3eca34083060fe5865fbdea92f8f12d722d9087af9622273c6370841f",
-      "_signatur": "Debug-Schluessel des lokalen Baus vom 27.11.2026 (rosenweg-basis 2eb8be9). Kommt die Beispiel-App auf /apps, quelle=index und signatur=index.",
+      "quelle": "github",
+      "repo": "Rosenweg/rosenweg-basis",
+      "tag_praefix": "beispiel-v",
+      "signatur": "index",
+      "_quelle": "Nicht auf /apps (nur Technik): signiertes GitHub-Release aus rosenweg-basis beispiel.yml, Tag beispiel-v<version>.",
       "flow": "flows/bausteine.yaml",
       "anmeldung": false,
       "aktiv": true
     },
-    { "kennung": "vm",     "name": "Rosenweg Virtuelle Computer", "paket": "ch.rosenweg4303.vm",     "quelle": "index", "signatur": "index", "flow": "flows/vm.yaml",     "anmeldung": true, "aktiv": false },
-    { "kennung": "salz",   "name": "Rosenweg Salz",               "paket": "ch.rosenweg4303.salz",   "quelle": "index", "signatur": "index", "flow": "flows/salz.yaml",   "anmeldung": true, "aktiv": false },
-    { "kennung": "profil", "name": "Rosenweg Profil",             "paket": "ch.rosenweg4303.profil", "quelle": "index", "signatur": "index", "flow": "flows/profil.yaml", "anmeldung": true, "aktiv": false }
+    {
+      "kennung": "vm",
+      "name": "Rosenweg Virtuelle Computer",
+      "paket": "ch.rosenweg4303.vm",
+      "quelle": "index",
+      "signatur": "index",
+      "flow": "flows/vm.yaml",
+      "anmeldung": true,
+      "aktiv": false
+    },
+    {
+      "kennung": "salz",
+      "name": "Rosenweg Salz",
+      "paket": "ch.rosenweg4303.salz",
+      "quelle": "index",
+      "signatur": "index",
+      "flow": "flows/salz.yaml",
+      "anmeldung": true,
+      "aktiv": false
+    },
+    {
+      "kennung": "profil",
+      "name": "Rosenweg Profil",
+      "paket": "ch.rosenweg4303.profil",
+      "quelle": "index",
+      "signatur": "index",
+      "flow": "flows/profil.yaml",
+      "anmeldung": true,
+      "aktiv": false
+    }
   ]
 }

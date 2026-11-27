@@ -265,6 +265,21 @@
     </div>
     <div data-el="fw-liste" class="noc-stationen"><div class="text-xs text-slate-500 font-mono">lade…</div></div>`;
 
+  // Android-Dauertest der Rosenweg-Apps (CT 149, api/routes/android-dauertest.js): eine Karte
+  // je App, rot zuerst; grau = letzter Lauf älter als 2 h (dann klemmt der Prüfer selbst).
+  // Schirmbild per Klick (nur mit Token bzw. angemeldet).
+  const APPS = `
+    <div class="flex items-center justify-between mt-5 mb-2">
+      <div class="flex items-center gap-2">
+        <span class="noc-led led-grau" data-el="led-apps"></span>
+        <span class="text-[11px] font-mono uppercase tracking-wider text-slate-300">Apps · Android-Dauertest</span>
+        <span class="text-[10px] text-slate-500 font-mono" data-el="apps-kopf"></span>
+      </div>
+      <span class="text-[10px] text-slate-500 font-mono" data-el="apps-fehler"></span>
+    </div>
+    <div data-el="apps-liste" class="noc-stationen"><div class="text-xs text-slate-500 font-mono">lade…</div></div>
+    <div data-el="apps-bild" class="mt-2" hidden></div>`;
+
   // Alter eines Lebenszeichens, kurz: 3 min, 2 h, 4 T.
   const fmtAlter = (min) => {
     if (min === null || min === undefined) return 'nie';
@@ -492,7 +507,7 @@
     }
 
     ziel.className = 'noc-cockpit' + (modus === 'wandbild' ? ' noc-wandbild' : '') + ' sm:rounded-2xl ' + (ziel.className || '');
-    ziel.innerHTML = `<div class="noc-inner">${KOPF(modus)}${MAIL}${UNIFI}${STATIONEN}${FERNWARTUNG}${SERVER}</div>`;
+    ziel.innerHTML = `<div class="noc-inner">${KOPF(modus)}${MAIL}${UNIFI}${STATIONEN}${FERNWARTUNG}${APPS}${SERVER}</div>`;
     const el = (n) => ziel.querySelector(`[data-el="${n}"]`);
     const setz = (n, wert, klasse) => { const e = el(n); if (!e) return; e.textContent = wert; if (klasse) e.className = klasse; };
     // Eine Kachel in der Dienste-Leiste: Lampe, Wert, Erklaerung beim Draufzeigen.
@@ -761,6 +776,66 @@
       }
     }
 
+    function appKarte(a) {
+      const ampel = a.veraltet ? 'grau' : a.ok ? 'gruen' : 'rot';
+      const zeit = fmtAlter(a.alter_min);
+      const was = [a.version, a.dauer_s != null ? a.dauer_s + ' s' : null].filter(Boolean).join(' · ');
+      const titel = [a.name, a.paket, a.grund].filter(Boolean).join('\n');
+      return `<div class="noc-st st-${ampel}" title="${esc(titel)}">
+        <div class="noc-st-kopf"><span class="noc-led ${LED[ampel]}"></span>
+          <span class="noc-st-name">${esc(a.name)}</span><span class="noc-st-zeit">${esc(zeit)}</span></div>
+        <div class="noc-st-was">${esc(was || '—')}</div>
+        ${!a.ok && a.grund ? `<div class="noc-st-was">${esc(a.grund)}</div>` : ''}
+        ${a.schirmbild ? `<button type="button" class="noc-st-was underline" data-schirmbild="${esc(a.kennung)}">Schirmbild</button>` : ''}
+      </div>`;
+    }
+
+    function malApps(d) {
+      sicher(() => {
+        setz('apps-fehler', '');
+        el('led-apps').className = 'noc-led ' + (LED[d.ampel] || 'led-grau');
+        const apps = d.apps || [];
+        setz('apps-kopf', apps.length ? '· ' + (d.gruen || 0) + ' grün' + (d.rot ? ' · ' + d.rot + ' rot' : '')
+          + ' · letzter Lauf ' + (d.letzter_lauf ? new Date(d.letzter_lauf).toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' }) : '—') : '');
+        el('apps-liste').innerHTML = apps.length ? apps.map(appKarte).join('')
+          : '<div class="text-xs text-slate-500 font-mono">noch kein Lauf</div>';
+      }, 'apps');
+    }
+
+    async function appsTest() {
+      if (document.hidden) return;
+      try {
+        const r = await holen('/api/isp/noc/public/android-dauertest');
+        if (!r.ok) {
+          el('led-apps').className = 'noc-led led-red';
+          setz('apps-fehler', 'Apps: HTTP ' + r.status);
+          return;
+        }
+        malApps(await r.json());
+      } catch (e) {
+        el('led-apps').className = 'noc-led led-red';
+        setz('apps-fehler', 'Apps: ' + e.message);
+      }
+    }
+
+    // Schirmbild: holen() sendet Token bzw. Anmeldung mit, ein <img src> könnte das nicht.
+    let bildUrl = null;
+    el('apps-liste').addEventListener('click', async (ev) => {
+      const k = ev.target.closest('[data-schirmbild]')?.dataset.schirmbild;
+      if (!k) return;
+      const ziel = el('apps-bild');
+      if (ziel.dataset.kennung === k && !ziel.hidden) { ziel.hidden = true; return; }
+      try {
+        const r = await holen('/api/isp/noc/public/android-dauertest/' + encodeURIComponent(k) + '/schirmbild');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        if (bildUrl) URL.revokeObjectURL(bildUrl);
+        bildUrl = URL.createObjectURL(await r.blob());
+        ziel.innerHTML = `<img src="${bildUrl}" alt="Schirmbild ${esc(k)}" style="max-height:28rem;border-radius:.5rem;border:1px solid #334155">`;
+        ziel.dataset.kennung = k;
+        ziel.hidden = false;
+      } catch (e) { setz('apps-fehler', 'Schirmbild: ' + e.message); }
+    });
+
     function malServer(d) {
       setz('srv-fehler', '');
       sicher(() => {
@@ -846,10 +921,10 @@
       if (el('utc')) setz('utc', now.toISOString().slice(11, 19));
     }
 
-    el('jetzt').addEventListener('click', () => { laden(); ampeln(); stationen(); fernwartung(); server(); });
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) { laden(); stationen(); fernwartung(); server(); } });
+    el('jetzt').addEventListener('click', () => { laden(); ampeln(); stationen(); fernwartung(); appsTest(); server(); });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { laden(); stationen(); fernwartung(); appsTest(); server(); } });
 
-    uhr(); laden(); ampeln(); stationen(); fernwartung(); server();
+    uhr(); laden(); ampeln(); stationen(); fernwartung(); appsTest(); server();
     const t1 = setInterval(uhr, 1000);
     const t2 = setInterval(laden, intervallMs);
     const t3 = setInterval(ampeln, Math.max(intervallMs, 60000));
@@ -859,7 +934,9 @@
     const t5 = setInterval(server, Math.max(intervallMs, 30000));
     // Fernwartung: die API merkt sich die Antwort der Anlage 20 s.
     const t6 = setInterval(fernwartung, Math.max(intervallMs, 30000));
-    return { laden, ampeln, stationen, fernwartung, server, beenden: () => { [t1, t2, t3, t4, t5, t6].forEach(clearInterval); } };
+    // Apps-Test: läuft stündlich - jede Minute nachsehen genügt.
+    const t7 = setInterval(appsTest, Math.max(intervallMs, 60000));
+    return { laden, ampeln, stationen, fernwartung, appsTest, server, beenden: () => { [t1, t2, t3, t4, t5, t6, t7].forEach(clearInterval); } };
   }
 
   global.NocCockpit = { starten };
