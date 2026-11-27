@@ -11289,6 +11289,9 @@ app.use('/api/messenger', messengerZugang.messengerZugangRouter({ rateLimitGuard
 // Browser und ohne Identität und meldet sich mit Benutzer + Passwort gegen
 // das AD an. Siehe os-stationen/docs/installer.md.
 const stationsRouter = require('./routes/stations');
+// Protokoll v2 (Rosenweg-Agent) VOR dem alten Router: dort fräße '/:id' sonst
+// das 'v2'. Die Helfer kommen aus stations.js (router.intern).
+app.use('/api/stations/v2', require('./routes/stationen-v2')(stationsRouter.intern));
 app.use('/api/stations', stationsRouter);
 // Das Schema gleich beim Start anlegen, nicht erst beim ersten Aufruf einer
 // Stationen-Route. Der Notfall-Zweig weiter unten fragt anzeigegeraete ab und

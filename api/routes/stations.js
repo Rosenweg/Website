@@ -50,6 +50,11 @@
 //     POST   /api/stations/admin/chromecast   Chromecast als Anzeige eintragen
 //     POST   /api/stations/admin/:id/cast-jetzt  Chromecast jetzt auf die Anzeige holen
 //
+//   Protokoll v2 (alle Geräte mit Rosenweg-Agent, auch Windows): routes/stationen-v2.js
+//     POST   /api/stations/v2/anmelden       Kerberos (Computerkonto) -> Token
+//     POST   /api/stations/v2/lebenszeichen  Inventar, Quittungen -> Sperre, Befehle
+//     GET/POST/DELETE /api/stations/v2/admin/:id/befehle[/:bid]
+//
 // Ablauf und Begründung: os-stationen/docs/installer.md
 // ═══════════════════════════════════════════════════════════════════
 const express = require('express');
@@ -321,6 +326,33 @@ async function ensureSchema() {
       boot       TIMESTAMPTZ
     );
     CREATE INDEX IF NOT EXISTS station_lebenszeichen_id_idx ON station_lebenszeichen (station_id, erstellt DESC);
+    -- Rosenweg-Agent, Protokoll v2 (routes/stationen-v2.js): welcher Agent
+    -- sich zuletzt gemeldet hat. agent_inventar ist das bereinigte Inventar —
+    -- auch im Modus 'parallel', in dem last_state dem alten Bash-Agenten gehört.
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS agent_protokoll INT;
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS agent_version TEXT;
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS agent_plattform TEXT;
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS agent_modus TEXT;
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS agent_angemeldet_am TIMESTAMPTZ;
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS agent_gesehen_am TIMESTAMPTZ;
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS agent_inventar JSONB;
+    -- Befehle aus /stationen (Protokoll v2). Jede Zeile bleibt stehen — das
+    -- ist das Protokoll: wer, wann, was, ob abgeholt, mit welchem Ergebnis.
+    CREATE TABLE IF NOT EXISTS station_befehle (
+      id             BIGSERIAL PRIMARY KEY,
+      station_id     TEXT NOT NULL,
+      art            TEXT NOT NULL,
+      parameter      JSONB NOT NULL DEFAULT '{}'::jsonb,
+      angelegt_von   TEXT NOT NULL,
+      angelegt_am    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      gueltig_bis    TIMESTAMPTZ NOT NULL,
+      abgeholt_am    TIMESTAMPTZ,
+      erledigt_am    TIMESTAMPTZ,
+      ergebnis       TEXT,
+      ergebnis_text  TEXT,
+      zurueckgezogen_von TEXT
+    );
+    CREATE INDEX IF NOT EXISTS station_befehle_id_idx ON station_befehle (station_id, angelegt_am DESC);
   `).catch((e) => { schemaReady = null; throw e; });
   return schemaReady;
 }
@@ -387,6 +419,12 @@ async function stationAuth(req, res, next) {
     // Das Token gilt nur für die eigene Station.
     if (req.params.id && req.params.id !== station.id) {
       return res.status(403).json({ error: 'Token gehört zu einer anderen Station' });
+    }
+    // Ein Windows-PC spricht nur Protokoll v2 (routes/stationen-v2.js). Hier
+    // gäbe es für ihn nur Linux-Dinge: eine Konfiguration mit WLAN-Schlüssel
+    // und Beitrittskonto, den Schlüssel der Datenpartition, das OS-Paket.
+    if (station.role === 'windows') {
+      return res.status(403).json({ error: 'Windows-PCs sprechen Protokoll v2 (/api/stations/v2/…)' });
     }
     // Gesperrt heisst gesperrt — aber das Lebenszeichen darf durch, sonst
     // sieht die Verwaltung nicht mehr, ob das Gerät noch läuft.
@@ -779,12 +817,23 @@ router.get('/admin/list', authMiddleware, nurTechnik, a(async (req, res) => {
            ad_gesehen_am, ad_aufgenommen_am, ad_standort_regel,
            anschluss, anschluss_gelernt_am, anschluss_jetzt, anschluss_jetzt_am,
            anschluss_abweichung, doppelt,
-           w.bis AS ssh_wartung_bis, w.erteilt_von AS ssh_wartung_von
+           agent_protokoll, agent_version, agent_plattform, agent_modus, agent_angemeldet_am,
+           agent_gesehen_am, agent_inventar,
+           w.bis AS ssh_wartung_bis, w.erteilt_von AS ssh_wartung_von,
+           b.befehl AS befehl_letzter
       FROM stations
       LEFT JOIN LATERAL (
         SELECT bis, erteilt_von FROM station_ssh_wartung
          WHERE station_id = stations.id AND beendet_am IS NULL AND bis > NOW()
          ORDER BY bis DESC LIMIT 1) w ON true
+      -- Der letzte Befehl (Protokoll v2), damit die Zeile „Neustart
+      -- angefordert" zeigen kann, ohne je Station nachzufragen.
+      LEFT JOIN LATERAL (
+        SELECT json_build_object('id', id, 'art', art, 'angelegt_von', angelegt_von,
+                 'angelegt_am', angelegt_am, 'abgeholt_am', abgeholt_am, 'erledigt_am', erledigt_am,
+                 'ergebnis', ergebnis, 'ergebnis_text', ergebnis_text) AS befehl
+          FROM station_befehle WHERE station_id = stations.id
+         ORDER BY angelegt_am DESC LIMIT 1) b ON true
      ORDER BY (revoked_at IS NOT NULL), registered_at DESC`);
 
   // In den overrides kann ein WLAN-Schlüssel stehen. Der Browser braucht ihn
@@ -1170,7 +1219,12 @@ const ANSCHLUSS_WER = 'Anschluss-Wächter';
 // Rollen ohne festen Anschluss. Ein Chromecast hängt im WLAN und hat kein
 // Inventar mit MACs (seine MAC steht unter hardware.mac, nicht .macs) — ihn an
 // einen AP zu binden hiesse, ihn beim ersten Roaming zu sperren.
-const ANSCHLUSS_OHNE = ['windows', 'laptop', 'chromecast'];
+//
+// Windows-PCs waren bis zum Rosenweg-Agenten (27.11.2026) auch hier: sie
+// kamen nur aus dem AD, ohne MACs. Seither meldet der Agent die MACs von
+// Kabel und WLAN (routes/stationen-v2.js -> hardware.macs); ein PC ohne
+// Agent hat keine und wird unten wie bisher übersprungen.
+const ANSCHLUSS_OHNE = ['laptop', 'chromecast'];
 let anschlussStand = { zuletzt: null, ergebnis: null, fehler: null };
 let anschlussLaeuft = null;
 
@@ -1215,8 +1269,8 @@ async function anschlussAbgleichDurchfuehren() {
 
 async function anschlussAbgleichSchreiben(clients, devices) {
   const ergebnis = { geprueft: 0, im_netz: 0, gelernt: [], gesperrt: [] };
-  // Nur, was fest steht. Windows-Rechner haben kein Inventar mit MACs (sie
-  // kommen aus dem AD); ein Laptop wandert von Raum zu Raum und nach Hause —
+  // Nur, was fest steht. Windows-Rechner ohne Agent haben kein Inventar mit
+  // MACs (sie kommen aus dem AD) und fallen unten heraus; ein Laptop wandert von Raum zu Raum und nach Hause —
   // an einen Anschluss binden hiesse, ihn bei jedem neuen AP zu sperren.
   const { rows } = await pool.query(
     `SELECT id, status, hardware, anschluss, anschluss_kandidat, anschluss_abweichung, gesperrt_von
@@ -1584,16 +1638,17 @@ async function lebenszeichenPruefen(station, state, quelleIp) {
   }
 }
 
-// Was es bei einem Windows-Rechner nicht gibt: er hat keinen Agenten, der
-// eine Aufforderung abholen würde. Ein Klick darauf täte nichts, ausser
-// glauben zu lassen, es sei etwas passiert.
+// Was es bei einem Windows-Rechner nicht gibt: Update, Zurücksetzen und
+// SSH-Wartung sind Dinge von os-stationen. Ein Windows-PC mit Rosenweg-Agent
+// bekommt stattdessen Befehle über Protokoll v2 (Nachricht, Abmelden,
+// Neustart, Netzstart); ohne Agent täte ein Klick gar nichts.
 // Dasselbe gilt für einen Chromecast: auf ihm läuft nichts von uns.
 async function nichtFuerWindows(req, res, next) {
   try {
     await ensureSchema();
     const r = await pool.query('SELECT role FROM stations WHERE id = $1', [req.params.id]);
     if (r.rows[0]?.role === 'windows') {
-      return res.status(400).json({ error: 'Ein Windows-Rechner hat keinen Agenten — das gibt es dort nicht' });
+      return res.status(400).json({ error: 'Das gibt es auf einem Windows-Rechner nicht' });
     }
     if (r.rows[0]?.role === 'chromecast') {
       return res.status(400).json({ error: 'Ein Chromecast hat keinen Agenten — das gibt es dort nicht' });
@@ -2909,6 +2964,13 @@ router.post('/:id/journal-zertifikat', stationAuth, a(async (req, res) => {
 }));
 
 router.stationAuth = stationAuth;
+// Für Protokoll v2 (routes/stationen-v2.js): dieselben Wege wie hier, damit
+// Ereignisse, Doppel-Erkennung, Hausnetz und AD-Abgleich nicht zweimal
+// geschrieben werden.
+router.intern = {
+  ensureSchema, ereignis, clientIp, nurAusDemHausnetz, lebenszeichenPruefen,
+  adAbgleichen, adLesbar,
+};
 // Cast-Wächter: von Hand anstossen, und woher er weiss, ob ein Notfall läuft
 // (server.js führt display/emergency im displayCache mit).
 router.castAbgleichen = castAbgleichen;
