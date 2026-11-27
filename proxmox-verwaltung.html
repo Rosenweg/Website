@@ -35,7 +35,7 @@
         <div id="no-permission" class="hidden">
             <div class="bg-yellow-50 border-l-4 border-yellow-500 p-6 rounded">
                 <p class="text-yellow-800 font-semibold">Kein Zugriff</p>
-                <p class="text-yellow-700 text-sm mt-1">Diese Seite ist nur für Technik-Mitglieder zugänglich.</p>
+                <p class="text-yellow-700 text-sm mt-1">Diese Seite ist nur für Technik und Präsident zugänglich.</p>
             </div>
         </div>
 
@@ -150,8 +150,9 @@
                 return;
             }
 
+            // Wie die API (adminOnly): Technik und Präsident (Befund W20)
             const groups = user.groups || [];
-            const isTechnik = groups.some(g => g.toLowerCase() === 'technik');
+            const isTechnik = groups.some(g => ['technik', 'präsident', 'praesident'].includes(String(g).toLowerCase()));
             if (!isTechnik) {
                 document.getElementById('no-permission').classList.remove('hidden');
                 return;
