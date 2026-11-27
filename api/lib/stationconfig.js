@@ -60,6 +60,15 @@ const VERWALTUNGS_TYPEN = [
     description: 'Chromecast ohne eigenes OS — der Cast-Wächter hält ihn auf display.rosenweg4303.ch.',
     ohne_agent: true,
   },
+  // Ein Google-TV-Fernseher mit der App Rosenweg Kiosk (Rosenweg/rosenweg-tv-kiosk):
+  // Diashow vorn, alles andere hinter einer PIN. Er hat einen eigenen Agenten
+  // (die App) mit Token und Lebenszeichen, aber kein Stations-OS — gekoppelt
+  // wird auf /stationen mit dem Code vom Bildschirm (lib/kiosk.js).
+  {
+    id: 'kiosk',
+    label: 'Kiosk-Fernseher (Google TV)',
+    description: 'Rosenweg Kiosk als Startseite: Diashow, PIN-Menü, gekoppelt über einen Code.',
+  },
 ];
 
 // Die Drucker, die als Standard je Station wählbar sind.
