@@ -55,7 +55,7 @@ jobs:
         run: |
           python3 -m venv "$RUNNER_TEMP/pbx"
           "$RUNNER_TEMP/pbx/bin/pip" install --quiet -r pbx/api/requirements.txt
-          cd pbx/api && "$RUNNER_TEMP/pbx/bin/python" -m unittest test_karten_verwalter test_apps_stand test_fernwartung -v
+          cd pbx/api && "$RUNNER_TEMP/pbx/bin/python" -m unittest test_karten_verwalter test_apps_stand test_fernwartung test_nextcloud_zugang -v
 
       - name: Z-Push-Sicht je Konto (PHP, Befund F1-7)
         run: |
