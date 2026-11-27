@@ -645,10 +645,32 @@ function canManageDocs(req, res, next) {
   const groups = req.user?.groups || [];
   const allowed = groups.some(g => {
     const gl = g.toLowerCase();
-    return gl === 'technik' || gl === 'präsident' || gl === 'praesident' || gl.endsWith('-ausschuss');
+    // Verwaltung nur fuer Projekt-Dokumente (P1); canWriteDocPath prueft den Ordner.
+    return gl === 'technik' || gl === 'präsident' || gl === 'praesident' || gl.endsWith('-ausschuss')
+      || istVerwaltungsGruppenName(gl);
   });
-  if (!allowed) return res.status(403).json({ error: 'Nur Technik, Präsident und Ausschuss dürfen Dokumente verwalten' });
+  if (!allowed) return res.status(403).json({ error: 'Nur Technik, Präsident, Ausschuss und Verwaltung dürfen Dokumente verwalten' });
   next();
+}
+
+// P1: STWEG je Projekt fuer die Rechte am Ordner projekte/<slug>/ (kurz
+// zwischengespeichert; Anlegen/Aendern eines Projekts leert den Speicher).
+let projektStwegSpeicher = { t: 0, map: null };
+async function projektStwegs() {
+  if (projektStwegSpeicher.map && Date.now() - projektStwegSpeicher.t < 30000) return projektStwegSpeicher.map;
+  const { rows } = await pool.query('SELECT slug, stweg FROM projects');
+  projektStwegSpeicher = { t: Date.now(), map: new Map(rows.map(r => [r.slug, r.stweg])) };
+  return projektStwegSpeicher.map;
+}
+function projektStwegsLeeren() { projektStwegSpeicher = { t: 0, map: null }; }
+
+// Kontext fuer isDocPathAllowed/canWriteDocPath: Projekte und Seitenrecht „projekte“.
+async function docRechteKontext(req) {
+  const groups = req.user?.groups || [];
+  if (isTechnik(groups) || isPraesident(groups)) return {};
+  let projekte;
+  try { projekte = await projektStwegs(); } catch (e) { console.warn('[docs] Projekte nicht geladen:', e.message); projekte = new Map(); }
+  return { projekte, projektePerm: await projektePerm(req) };
 }
 
 // History-Zugriff: Technik / Präsident / Ausschuss / Verwaltung-Mitglieder
@@ -667,7 +689,8 @@ function canViewKontakteHistory(req, res, next) {
 // isPraesident, normalizePhone -> lib/groups.js bzw. lib/utils.js
 
 /** Check if a document path is allowed for a user */
-function isDocPathAllowed(filePath, groups) {
+// ctx (docRechteKontext): Projekte + Seitenrecht „projekte“ fuer projekte/<slug>/ (P1).
+function isDocPathAllowed(filePath, groups, ctx = {}) {
   if (isTechnik(groups) || isPraesident(groups)) return true;
   // Belege/Fotos/PDFs mit eigener Route und eigener Rechtepruefung nicht
   // zusaetzlich ueber die allgemeine Dokumenten-API fuer alle freigeben.
@@ -676,8 +699,8 @@ function isDocPathAllowed(filePath, groups) {
   if (sperre === 'ausschuss' && !isAusschussForAny(groups)) return false;
   const folder = filePath.includes('/') ? filePath.split('/')[0] : 'allgemein';
   if (folder === 'allgemein' || folder.toLowerCase() === 'scans') return true;
-  // Projekte folder: accessible to all eigentuemer
-  if (folder === 'projekte' && groups.some(g => g.toLowerCase().includes('eigentuemer'))) return true;
+  // Projekte: Eigentuemer, wer das Projekt bearbeitet, Verwaltung der STWEG des Projekts
+  if (folder === 'projekte') return projekteRechte.projektDokRecht(groups, ctx.projektePerm, filePath, ctx.projekte).lesen;
   // Lesen: Bewohner/Eigentuemer/Ausschuss der STWEG und deren Hausverwaltung
   // (stwegN-verwaltung). Gleiche Regel wie die Fileserver-Tabelle
   // fileserver-lxc/ordnerrechte/tabelle.txt (Zeilen stweg1 … meg) – beide aendern.
@@ -705,7 +728,7 @@ function docSperrOrdner(filePath) {
 }
 
 /** Check if user can write to a document path */
-function canWriteDocPath(filePath, groups) {
+function canWriteDocPath(filePath, groups, ctx = {}) {
   if (isTechnik(groups) || isPraesident(groups)) return true;
   // Pfad ohne '/' ist ein Eintrag der obersten Ebene (z. B. ganzer Ordner
   // 'stweg5') – nicht als 'allgemein' werten, sonst ganze STWEG-Ordner
@@ -713,10 +736,13 @@ function canWriteDocPath(filePath, groups) {
   if (!String(filePath).includes('/')) return false;
   if (docSperrOrdner(filePath) === 'gesperrt') return false;
   const folder = filePath.includes('/') ? filePath.split('/')[0] : 'allgemein';
+  // Projekte (P1): wer das Projekt bearbeiten darf – Ausschuss der STWEG des
+  // Projekts (Kooperations-Projekte: jeder Ausschuss) bzw. deren Verwaltung.
+  if (folder === 'projekte') return projekteRechte.projektDokRecht(groups, ctx.projektePerm, filePath, ctx.projekte).schreiben;
   const isAusschuss = groups.some(g => g.toLowerCase().endsWith('-ausschuss'));
   if (!isAusschuss) return false;
-  // Ausschuss members can write to their own stweg + allgemein + projekte
-  if (folder === 'allgemein' || folder === 'projekte') return true;
+  // Ausschuss members can write to their own stweg + allgemein
+  if (folder === 'allgemein') return true;
   // Schreiben nur im Ordner der STWEG, in deren Ausschuss man ist — nicht in jeder STWEG,
   // in der man (z. B. als Eigentuemer/Bewohner) sonst Mitglied ist.
   const stwegs = getAusschussStwegs(groups);
@@ -11530,8 +11556,9 @@ async function walkDocs(dir, prefix = '') {
 app.get('/api/documents', authMiddleware, async (req, res) => {
   try {
     const allDocs = await walkDocs(DOCS_PATH);
+    const ctx = await docRechteKontext(req);
     const groups = req.user?.groups || [];
-    const docs = allDocs.filter(f => isDocPathAllowed(f.path, groups));
+    const docs = allDocs.filter(f => isDocPathAllowed(f.path, groups, ctx));
     res.json(docs);
   } catch (err) {
     console.error('Documents list error:', err.message);
@@ -11558,7 +11585,7 @@ app.post('/api/documents-preview', authMiddleware, async (req, res) => {
     }
 
     const groups = req.user?.groups || [];
-    if (!isDocPathAllowed(filePath, groups)) {
+    if (!isDocPathAllowed(filePath, groups, await docRechteKontext(req))) {
       return res.status(403).json({ error: 'Kein Zugriff auf dieses Dokument' });
     }
 
@@ -11633,7 +11660,7 @@ app.get('/api/documents/:path(*)', authMiddleware, async (req, res) => {
     }
 
     const groups = req.user?.groups || [];
-    if (!isDocPathAllowed(filePath, groups)) {
+    if (!isDocPathAllowed(filePath, groups, await docRechteKontext(req))) {
       return res.status(403).json({ error: 'Kein Zugriff auf dieses Dokument' });
     }
 
@@ -11746,7 +11773,7 @@ app.post('/api/documents/folder', authMiddleware, canManageDocs, async (req, res
 
     const folderPath = `${parent}/${safeName}`;
     const groups = req.user?.groups || [];
-    if (!canWriteDocPath(folderPath + '/x', groups)) {
+    if (!canWriteDocPath(folderPath + '/x', groups, await docRechteKontext(req))) {
       return res.status(403).json({ error: 'Kein Schreibzugriff' });
     }
 
@@ -11786,7 +11813,7 @@ app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, re
     const filePath = parts.join('/');
 
     const groups = req.user?.groups || [];
-    if (!canWriteDocPath(filePath, groups)) {
+    if (!canWriteDocPath(filePath, groups, await docRechteKontext(req))) {
       return res.status(403).json({ error: 'Kein Schreibzugriff auf diesen Ordner' });
     }
 
@@ -11829,7 +11856,7 @@ app.delete('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req,
     }
 
     const groups = req.user?.groups || [];
-    if (!canWriteDocPath(filePath, groups)) {
+    if (!canWriteDocPath(filePath, groups, await docRechteKontext(req))) {
       return res.status(403).json({ error: 'Kein Schreibzugriff auf diesen Ordner' });
     }
 
@@ -11857,7 +11884,8 @@ function papierkorbDeps() { return { pool, fs, root: DOCS_PATH }; }
 app.get('/api/documents-papierkorb', authMiddleware, canManageDocs, async (req, res) => {
   try {
     const groups = req.user?.groups || [];
-    const liste = await papierkorb.liste(papierkorbDeps(), (pfad) => canWriteDocPath(pfad, groups));
+    const ctx = await docRechteKontext(req);
+    const liste = await papierkorb.liste(papierkorbDeps(), (pfad) => canWriteDocPath(pfad, groups, ctx));
     res.json({ eintraege: liste, tage: papierkorb.TAGE });
   } catch (err) {
     console.error('[DOCS] Papierkorb-Liste:', err.message);
@@ -11870,7 +11898,8 @@ app.post('/api/documents-papierkorb/:id/wiederherstellen', authMiddleware, canMa
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige ID' });
     const groups = req.user?.groups || [];
-    const r = await papierkorb.wiederherstellen(papierkorbDeps(), id, (pfad) => canWriteDocPath(pfad, groups));
+    const ctx = await docRechteKontext(req);
+    const r = await papierkorb.wiederherstellen(papierkorbDeps(), id, (pfad) => canWriteDocPath(pfad, groups, ctx));
     if (!r) return res.status(404).json({ error: 'Nicht im Papierkorb' });
     await adminProtokoll.eintragen(pool, null, req, { bereich: 'dokumente', aktion: 'wiederhergestellt', ziel: r.pfad, detail: r.umbenannt ? `ursprünglich ${r.eintrag.pfad}` : null })
       .catch(e => console.warn('[DOCS] Protokoll:', e.message));
@@ -11899,7 +11928,8 @@ app.post('/api/documents/move', authMiddleware, canManageDocs, async (req, res) 
     }
 
     const groups = req.user?.groups || [];
-    if (!canWriteDocPath(from, groups) || !canWriteDocPath(to, groups)) {
+    const ctx = await docRechteKontext(req);
+    if (!canWriteDocPath(from, groups, ctx) || !canWriteDocPath(to, groups, ctx)) {
       return res.status(403).json({ error: 'Kein Schreibzugriff' });
     }
 
@@ -12623,6 +12653,7 @@ app.post('/api/projects', authMiddleware, async (req, res) => {
         const r = await pool.query(
           'INSERT INTO projects (slug, title, description, status, stweg) VALUES ($1, $2, $3, $4, $5) RETURNING *',
           [slug, title, description, status, st.stweg]);
+        projektStwegsLeeren(); // P1: Dokumente gleich hochladbar
         return res.status(201).json(r.rows[0]);
       } catch (e) { if (e.code !== '23505') throw e; }
     }
@@ -12658,6 +12689,7 @@ app.put('/api/projects/:slug', authMiddleware, requireProjektBearbeiten, async (
     if (!sets.length) return res.status(400).json({ error: 'Keine Änderungen' });
     params.push(req.params.slug);
     const r = await pool.query(`UPDATE projects SET ${sets.join(', ')}, updated_at = NOW() WHERE slug = $${params.length} RETURNING *`, params);
+    if (b.stweg !== undefined) projektStwegsLeeren(); // P1: Dokumentrechte folgen der STWEG
     res.json(r.rows[0]);
   } catch (err) { console.error('[projekt-bearbeiten]', err.message); res.status(500).json({ error: 'Projekt konnte nicht gespeichert werden' }); }
 });
@@ -12786,7 +12818,7 @@ app.post('/api/projects/:slug/attachments', authMiddleware, requireProjektBearbe
     // Verknuepfen nur, was man selbst lesen darf — ein oeffentliches Projekt liefert
     // seine Anhaenge ohne Login aus (vorher: fremde STWEG-Dokumente veroeffentlichbar).
     const dp = String(doc_path);
-    if (dp.includes('..') || dp.startsWith('/') || dp.includes('\0') || !isDocPathAllowed(dp, req.user.groups || [])) {
+    if (dp.includes('..') || dp.startsWith('/') || dp.includes('\0') || !isDocPathAllowed(dp, req.user.groups || [], await docRechteKontext(req))) {
       return res.status(403).json({ error: 'Kein Zugriff auf dieses Dokument' });
     }
     const { rows: [row] } = await pool.query(
