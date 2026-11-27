@@ -229,6 +229,7 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `PUT /api/auth/profile`, `PUT /api/auth/avatar` | Browser-Sitzung | Avatar nur PNG/JPEG/WebP ≤ 512 KB |
 | `/api/me/tokens`, `/api/me/passkeys` | Browser-Sitzung | siehe 2.3 |
 | `GET/PUT /api/me/einstellungen` | angemeldet | persönliche Einstellungen |
+| `GET/PUT /api/me/app-daten/:app` | angemeldet, nur die Person selbst; Karten-Sitzung und geteiltes Telefon nur für die eigene App | persönliche Daten einer Rosenweg-App (z. B. Wecker der Uhr) als Einträge; `?seit=<version>`, je Eintrag gilt die letzte Änderung, Löschen als Grabstein (`api/lib/app-daten.js`) |
 
 ### 4.3 Benutzer und Rechte (`admin`, `permissions`, `personen`)
 

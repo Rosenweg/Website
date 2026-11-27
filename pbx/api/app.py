@@ -3494,6 +3494,9 @@ PORTAL_METHODEN = ("GET", "POST", "PUT", "DELETE")
 PORTAL_PFADE_STANDARD = {
     "*": ["GET /api/auth/me", "GET /api/me"],
     "ch.rosenweg4303.salz": ["/api/salz/"],
+    # Rosenweg Uhr: Wecker, Weltuhren, Timer-Vorlagen der Person (Haupt-API routes/app-daten.js;
+    # die Haupt-API laesst je Anlage-Token ohnehin nur die App selbst an ihre Daten)
+    "ch.rosenweg4303.clock": ["GET,PUT /api/me/app-daten/ch.rosenweg4303.clock"],
 }
 _PORTAL_PFAD = re.compile(r"/api/[A-Za-z0-9._~!$&'()*+,;=:@%/-]{1,1000}(\?[A-Za-z0-9._~!$&'()*+,;=:@%/?-]{0,1000})?")
 _PORTAL_KODIERT_VERBOTEN = re.compile(r"%(2e|2f|5c|00)", re.I)
