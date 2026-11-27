@@ -43,6 +43,19 @@ schritt() {   # schritt "Beschreibung" befehl…
   if out=$("$@" 2>&1); then echo "ok      $was"; else echo "FEHLER  $was: $(echo "$out" | tail -1)"; FEHLER=$((FEHLER+1)); fi
 }
 
+# Vollbild über dem Sperrbildschirm: App-Op erst ab Android 14 (SDK 34). Bis Android 13 ist
+# USE_FULL_SCREEN_INTENT eine normale Berechtigung, mit der Installation erteilt (XCover Pro).
+SDK=$(a shell getprop ro.build.version.sdk 2>/dev/null | tr -d '\r')
+vollbild() {   # vollbild "Beschreibung" paket
+  if [ "${SDK:-0}" -ge 34 ]; then schritt "$1" a shell appops set "$2" USE_FULL_SCREEN_INTENT allow
+  elif a shell dumpsys package "$2" 2>/dev/null | grep -q "USE_FULL_SCREEN_INTENT: granted=true"; then
+    echo "ok      $1 (Android $SDK: mit der Installation erteilt)"
+  else echo "FEHLER  $1: USE_FULL_SCREEN_INTENT nicht erteilt"; FEHLER=$((FEHLER+1)); fi
+}
+# Rolleninhaber: "cmd role get-role-holders" gibt es erst ab Android 14
+rolle() { a shell cmd role get-role-holders "$1" 2>/dev/null | tr -d '\r' | grep -v "^Unknown" \
+  || a shell dumpsys role 2>/dev/null | grep -A1 "name=$1\$" | sed -n 's/.*holders=//p' | tr -d '\r'; }
+
 # Seriennummer eines Sitzungsports der adb-zentrale (127.0.0.1:2xxxx): über den Tunnel
 TUNNEL=0
 case "$SERIE" in 127.0.0.1:2[0-9][0-9][0-9][0-9]) TUNNEL=1 ;; esac
@@ -117,8 +130,13 @@ if [ -n "$NEBENSTELLE" ]; then
   PBX_EXEC=${PBX_EXEC:-ssh root@100.64.2.22 pct exec 220 --}
   a logcat -c >/dev/null 2>&1
   # Passwort nur von der Anlage über stdin ins Telefon; die adb-Shell liest es mit read
-  $PBX_EXEC python3 -c "import sqlite3,sys; r=sqlite3.connect('file:/var/lib/pbx-api/pbx.sqlite?mode=ro',uri=True).execute('select secret from sip_extensions where ext=? and enabled=1',(sys.argv[1],)).fetchone(); sys.exit(1) if not r or not r[0] else print(r[0])" "$NEBENSTELLE" \
-    | a shell "read -r pw; [ -n \"\$pw\" ] && am broadcast -a $GERAET.ADB_ZUGANG --es ext $NEBENSTELLE --es pw \"\$pw\" -n $GERAET/org.sipdroid.sipua.rosenweg.AdbFreigabe >/dev/null"
+  # Code über stdin: ssh setzt die Argumente zu einer Zeile zusammen, -c "…" überstünde das nicht
+  $PBX_EXEC python3 - "$NEBENSTELLE" <<'PY' | a shell "read -r pw; [ -n \"\$pw\" ] && am broadcast -a $GERAET.ADB_ZUGANG --es ext $NEBENSTELLE --es pw \"\$pw\" -n $GERAET/org.sipdroid.sipua.rosenweg.AdbFreigabe >/dev/null"
+import sqlite3, sys
+r = sqlite3.connect("file:/var/lib/pbx-api/pbx.sqlite?mode=ro", uri=True).execute(
+    "select secret from sip_extensions where ext=? and enabled=1", (sys.argv[1],)).fetchone()
+sys.exit(1) if not r or not r[0] else print(r[0])
+PY
   erg=""
   for _ in 1 2 3 4 5 6 7 8 9 10; do
     erg=$(a logcat -d -s RosenwegKatalog 2>/dev/null | grep -o "Zugang per adb eingerichtet.*\|ADB_ZUGANG: .*" | tail -1)
@@ -149,7 +167,7 @@ if a shell pm path ch.rosenweg4303.phone >/dev/null 2>&1; then
     schritt "SIP-Anrufkonto persönlich (Rosenweg Telefon) aktiv" a shell telecom set-phone-account-enabled ch.rosenweg4303.phone/$SIPKONTO SipdroidCallProvider 0
     schritt "Akku-Optimierung aus (Rosenweg Telefon: SIP bleibt im Ruhemodus registriert)" a shell dumpsys deviceidle whitelist +ch.rosenweg4303.phone
     schritt "Mikrofon für Rosenweg Telefon" a shell pm grant ch.rosenweg4303.phone android.permission.RECORD_AUDIO
-    schritt "Anruf-Vollbild über dem Sperrbildschirm (Rosenweg Telefon; ohne: Anruf nur als Symbol, nicht annehmbar)" a shell appops set ch.rosenweg4303.phone USE_FULL_SCREEN_INTENT allow
+    vollbild "Anruf-Vollbild über dem Sperrbildschirm (Rosenweg Telefon; ohne: Anruf nur als Symbol, nicht annehmbar)" ch.rosenweg4303.phone
     schritt "Bedienungshilfe Rosenweg Gerät (bestätigt Debugging über WLAN nur im WLAN Rosenweg)" a shell settings put secure enabled_accessibility_services ch.rosenweg4303.telefon/org.sipdroid.sipua.rosenweg.WlanBestaetiger
     schritt "Bedienungshilfen aktiv" a shell settings put secure accessibility_enabled 1
     schritt "Benachrichtigungs-Wächter Rosenweg Gerät (entfernt \"Beenden der Galaxy-Einrichtung\")" a shell cmd notification allow_listener ch.rosenweg4303.telefon/org.sipdroid.sipua.rosenweg.Benachrichtigungen
@@ -166,7 +184,7 @@ schritt "Akku-Optimierung aus (Geräte-App)" a shell dumpsys deviceidle whitelis
 if a shell pm path ch.rosenweg4303.messages >/dev/null 2>&1; then
   schritt "Akku-Optimierung aus (Rosenweg Messenger: Notfälle auch im Ruhemodus)" a shell dumpsys deviceidle whitelist +ch.rosenweg4303.messages
   schritt "\"Nicht stören\" kurz ausschalten (Notfall-Alarm im Messenger)" a shell cmd notification allow_dnd ch.rosenweg4303.messages
-  schritt "Notfall-Fenster über dem Sperrbildschirm (Messenger)" a shell appops set ch.rosenweg4303.messages USE_FULL_SCREEN_INTENT allow
+  vollbild "Notfall-Fenster über dem Sperrbildschirm (Messenger)" ch.rosenweg4303.messages
   schritt "Exakte Wecker (Notfall-Erinnerung alle 2 Minuten bis gelesen)" a shell appops set ch.rosenweg4303.messages SCHEDULE_EXACT_ALARM allow
 else
   echo "später   Rosenweg Messenger noch nicht installiert (Katalog) — Skript danach nochmals laufen lassen"
@@ -192,9 +210,9 @@ adb_selbst
 echo
 echo "Kontrolle:"
 echo "  Device Owner:     $(a shell dpm list-owners 2>/dev/null | grep -c DeviceOwner)"
-echo "  Telefon-App:      $(a shell cmd role get-role-holders android.app.role.DIALER | tr -d '\r')"
+echo "  Telefon-App:      $(rolle android.app.role.DIALER)"
 echo "  SIP-Konten:       $(a shell dumpsys telecom 2>/dev/null | grep -c "$SIPKONTO" | tr -d '\r') Einträge (Gerät + persönlich; Details: dumpsys telecom | grep -A3 SipdroidCallProvider)"
-echo "  Browser:          $(a shell cmd role get-role-holders android.app.role.BROWSER | tr -d '\r')"
+echo "  Browser:          $(rolle android.app.role.BROWSER)"
 echo "  Seitentaste:      $(a shell settings get global function_key_config_longpress_type | tr -d '\r')/$(a shell settings get global power_button_long_press | tr -d '\r') (soll 0/1)"
 echo "  Netz+Sicherheit:  $(a shell settings get secure lock_function_val | tr -d '\r') (soll 0)"
 echo "  adb über TCP:     Port $(a shell getprop service.adb.tcp.port | tr -d '\r') (soll 5555)"
