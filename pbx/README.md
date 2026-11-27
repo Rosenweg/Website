@@ -361,6 +361,13 @@ mit einem Klick widerrufbar.
 - `karten`: Apps aus `APPS_REGISTER` in `api/app.py` (Rosenweg Virtuelle Computer, Rosenweg Salz,
   vorbereitet Rosenweg Profil) mit Logo, Text und je Plattform einem Download
   (Android, Linux-.deb, macOS-.dmg, Windows). Erscheint erst mit der ersten Datei.
+- `liste` (seit 27.11.2026, davon lebt die Seite): alle Apps in einer Liste – Register-Apps und
+  Katalog-Apps – mit `name`, `text`, `fuer`, `logo`, `version`, `stand`, `downloads` und `gruppen`
+  (`handy`, `computer`, `telefone` = im Katalog der geteilten Telefone, `technik`). Rosenweg Gerät
+  steht mit `nur_anzeige: true` und ohne Downloads drin (Datei bleibt gesperrt, `APPS_OEFFENTLICH_OHNE`).
+  Welche Katalog-Apps es gibt, Name und Version kommen live aus `telefon_apps`; Logo und Satz aus
+  `APPS_KATALOG_INFO` (fehlt ein Eintrag, erscheint die App mit dem Rosenweg-Logo ohne Satz).
+  Logos: `assets/logo/<name>-512.png` des App-Repos, auf 192 px verkleinert nach `img/apps/`.
 
 **Neue Versionen kommen automatisch:** Die CI eines App-Repos schickt beim Release-Tag die Dateien an
 `POST /api/apps/release` (Action `.github/actions/apps-release` bzw. wiederverwendbarer Workflow

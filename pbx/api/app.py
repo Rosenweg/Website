@@ -2216,6 +2216,7 @@ APPS_REGISTER = {
         "text": "Startseite für Android-TV-Geräte (z.B. Chromecast mit Google TV): zeigt dauernd die "
                 "Diashow, das Menü dahinter nur mit PIN.",
         "fuer": "Für die Technik beim Einrichten eines Fernsehers als Anzeige.",
+        "technik": True,
     },
     # Noch kein Repo/Release (26.11.2026): steht bereit, erscheint mit der ersten Datei.
     "profil": {
@@ -2255,6 +2256,44 @@ APPS_KATALOG_REPOS = {
     "Rosenweg/keyboard-rosenweg": "ch.rosenweg4303.keyboard",
     "Rosenweg/rosenweg-karten": "ch.rosenweg4303.karten",
     "Rosenweg/android-sip-rosenweg": "ch.rosenweg4303.telefon",   # Rosenweg Geraet: nur Katalog, nicht oeffentlich
+}
+# Anzeige der Katalog-Apps auf /apps (Liste 'liste' im Index): Logo, ein Satz, fuer wen.
+# Welche Apps es gibt, Name, Version und Stand kommen immer live aus dem Katalog (telefon_apps);
+# fehlt hier ein Eintrag, zeigt /apps die App trotzdem (mit dem Rosenweg-Logo, ohne Satz).
+# Logos: assets/logo/<name>-512.png des App-Repos, verkleinert auf 192 px nach www img/apps/.
+# technik: gehoert in die Gruppe "Technik" auf /apps.
+APPS_KATALOG_INFO = {
+    "ch.rosenweg4303.telefon": {
+        "logo": "/img/apps/rosenweg-geraet.png", "name": "Rosenweg Gerät",
+        "text": "App der geteilten Rosenweg-Telefone: Sperrbildschirm, Anmeldung mit Karte, Telefonie."},
+    "ch.rosenweg4303.phone": {"logo": "/img/apps/rosenweg-telefon.png", "name": "Rosenweg Telefon",
+                              "text": "Telefonieren über die Rosenweg-Telefonanlage, mit deiner Nummer."},
+    "ch.rosenweg4303.messages": {"logo": "/img/apps/rosenweg-messenger.png",
+                                 "text": "Chats, Ankündigungen, Notfall-Meldungen und SMS."},
+    "ch.rosenweg4303.contacts": {"logo": "/img/apps/rosenweg-kontakte.png",
+                                 "text": "Adressbuch aus der Rosenweg-Nextcloud."},
+    "ch.rosenweg4303.calendar": {"logo": "/img/apps/rosenweg-kalender.png",
+                                 "text": "Termine aus der Rosenweg-Nextcloud."},
+    "ch.rosenweg4303.notes": {"logo": "/img/apps/rosenweg-notizen.png", "text": "Notizen und Checklisten."},
+    "ch.rosenweg4303.filemanager": {"logo": "/img/apps/rosenweg-dateimanager.png",
+                                    "text": "Dateien auf dem Telefon und in der Nextcloud."},
+    "ch.rosenweg4303.documents": {"logo": "/img/apps/rosenweg-dokumente.png",
+                                  "text": "Dokumente ansehen und bearbeiten."},
+    "ch.rosenweg4303.camera": {"logo": "/img/apps/rosenweg-kamera.png",
+                               "text": "Fotos und Videos; auf den geteilten Telefonen landen sie in deiner Nextcloud."},
+    "ch.rosenweg4303.gallery": {"logo": "/img/apps/rosenweg-galerie.png", "text": "Fotos und Videos ansehen."},
+    "ch.rosenweg4303.paint": {"logo": "/img/apps/rosenweg-paint.png", "text": "Skizzen und Zeichnungen."},
+    "ch.rosenweg4303.voicerecorder": {"logo": "/img/apps/rosenweg-diktiergeraet.png",
+                                      "name": "Rosenweg Diktiergerät", "text": "Sprachaufnahmen."},
+    "ch.rosenweg4303.clock": {"logo": "/img/apps/rosenweg-uhr.png", "text": "Wecker, Timer und Stoppuhr."},
+    "ch.rosenweg4303.math": {"logo": "/img/apps/rosenweg-rechner.png", "text": "Ein einfacher Rechner."},
+    "ch.rosenweg4303.home": {"logo": "/img/apps/rosenweg-launcher.png", "name": "Rosenweg Startseite",
+                             "text": "Startbildschirm; auf den geteilten Telefonen je Person gespeichert."},
+    "ch.rosenweg4303.keyboard": {"logo": "/img/apps/rosenweg-tastatur.png",
+                                 "text": "Tastatur ohne Datenweitergabe."},
+    "ch.rosenweg4303.karten": {"logo": "/img/apps/rosenweg-karten.png", "technik": True,
+                               "text": "NFC-Karten nachschlagen, Personen zuordnen und entziehen.",
+                               "fuer": "Für die Technik."},
 }
 APPS_BEHALTEN = 3          # Fassungen je App und Plattform (die aktuelle eingeschlossen)
 APPS_DATEIEN_DIR = os.path.join(TELEFON_APPS_DIR, "dateien")
@@ -2351,8 +2390,9 @@ def _register_nach_paket(paket):
 
 @app.get("/api/apps/index.json")
 def apps_index():
-    """apps: alle Android-APKs (Updater der Apps, Tabelle auf /apps) — Form wie bisher, dazu notiz.
-    karten: Apps aus APPS_REGISTER mit mindestens einer Datei, je Plattform ein Download."""
+    """apps: alle Android-APKs (Updater der Apps) — Form wie bisher, dazu notiz.
+    karten: Apps aus APPS_REGISTER mit mindestens einer Datei, je Plattform ein Download.
+    liste: alle Apps fuer die Seite /apps in einer Liste (siehe _apps_liste)."""
     conn = db.connect()
     try:
         rows = conn.execute("SELECT paket, name, sha256, groesse, version_code, version_name, updated_at "
@@ -2363,8 +2403,10 @@ def apps_index():
         conn.close()
     neu = {(v["schluessel"], v["plattform"]): v for v in aktuell}
     apps = []
+    nur_anzeige = []
     for r in rows:
         if r["paket"] in APPS_OEFFENTLICH_OHNE:
+            nur_anzeige.append(r)   # auf /apps zeigen, aber ohne Datei (Stefan 27.11.2026)
             continue
         v = neu.get((_register_nach_paket(r["paket"]) or r["paket"], "android"))
         apps.append({"paket": r["paket"], "name": r["name"], "sha256": r["sha256"], "groesse": r["groesse"],
@@ -2397,7 +2439,58 @@ def apps_index():
         if downloads:
             karten.append({"app": app_id, "name": e["name"], "text": e["text"], "fuer": e["fuer"],
                            "logo": e["logo"], "paket": e["paket"], "downloads": downloads})
-    return _oeffentlich(jsonify({"apps": apps, "karten": karten, "signatur_sha256": APPS_SIGNATUR_SHA256}))
+    liste = _apps_liste(rows, apps, karten, nur_anzeige)
+    return _oeffentlich(jsonify({"apps": apps, "karten": karten, "liste": liste,
+                                 "signatur_sha256": APPS_SIGNATUR_SHA256}))
+
+
+def _apps_liste(rows, apps, karten, nur_anzeige):
+    """Eine Liste aller Rosenweg-Apps fuer /apps: Register-Apps (alle Plattformen) und Katalog-Apps
+    (Android) zusammen. gruppen: 'handy' (Android-Download), 'computer' (Linux/macOS/Windows),
+    'telefone' (im Katalog der geteilten Telefone, kommt dort automatisch), 'technik'.
+    nur_anzeige: ohne Download (APPS_OEFFENTLICH_OHNE, z.B. Rosenweg Geraet); dann fehlen url/sha256."""
+    im_katalog = {r["paket"] for r in rows}
+    karte_nach_paket = {k["paket"]: k for k in karten}
+    reihe = {r["paket"]: i for i, r in enumerate(rows)}
+    liste = []
+
+    def eintrag(paket, name, text, fuer, logo, downloads, technik, version, stand, nur=False):
+        gruppen = []
+        if not nur and any(d["plattform"] == "android" for d in downloads) and not technik:
+            gruppen.append("handy")
+        if any(d["plattform"] != "android" for d in downloads):
+            gruppen.append("computer")
+        if paket in im_katalog:
+            gruppen.append("telefone")
+        if technik:
+            gruppen.append("technik")
+        return {"paket": paket, "name": name, "text": text or "", "fuer": fuer or "",
+                "logo": logo or "/logo-rosenweg.png", "gruppen": gruppen, "geteilte_telefone": paket in im_katalog,
+                "nur_anzeige": nur, "version": version or "", "stand": stand or "", "downloads": downloads}
+
+    for app_id, e in sorted(APPS_REGISTER.items(), key=lambda x: x[1]["reihenfolge"]):
+        k = karte_nach_paket.get(e["paket"])
+        if not k:
+            continue
+        haupt = max(k["downloads"], key=lambda d: d["stand"] or "")
+        liste.append(eintrag(e["paket"], e["name"], e["text"], e["fuer"], e["logo"], k["downloads"],
+                             bool(e.get("technik")), haupt["version"], haupt["stand"]))
+    for a in apps:
+        if a["paket"] in karte_nach_paket:
+            continue
+        info = APPS_KATALOG_INFO.get(a["paket"], {})
+        dl = {"plattform": "android", "titel": "Android", "version": a["version_name"], "groesse": a["groesse"],
+              "sha256": a["sha256"], "stand": a["stand"], "url": a["url"], "notiz": a["notiz"]}
+        liste.append(eintrag(a["paket"], info.get("name") or a["name"], info.get("text"), info.get("fuer"),
+                             info.get("logo"), [dl], bool(info.get("technik")), a["version_name"], a["stand"]))
+    for r in nur_anzeige:
+        info = APPS_KATALOG_INFO.get(r["paket"], {})
+        liste.append(eintrag(r["paket"], info.get("name") or r["name"], info.get("text"), info.get("fuer"),
+                             info.get("logo"), [], bool(info.get("technik")), r["version_name"], r["updated_at"],
+                             nur=True))
+    # Register-Apps vorne (nach 'reihenfolge'), danach die Katalog-Apps in der Reihenfolge der Telefone
+    n = sum(1 for x in liste if x["paket"] in karte_nach_paket)
+    return liste[:n] + sorted(liste[n:], key=lambda x: reihe.get(x["paket"], 10**6))
 
 
 @app.get("/api/apps/<paket>.apk")
