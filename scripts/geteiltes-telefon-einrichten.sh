@@ -3,10 +3,17 @@
 # "Was der Device Owner nicht selbst darf"). Darf beliebig oft laufen.
 #
 #   scripts/geteiltes-telefon-einrichten.sh <adb-seriennummer> [--device-owner] [--browser <paket>]
+#                                           [--nebenstelle <21xx>]
 #
 #   --device-owner   Rosenweg Gerät als Device Owner setzen (nur frisch zurückgesetzt,
 #                    ohne Google-/Samsung-Konto; Geräte-App muss installiert sein)
 #   --browser        Standard-Browser (Vorgabe: com.android.chrome)
+#   --nebenstelle    erstes Einrichten: Nebenstelle und SIP-Passwort an Rosenweg Gerät geben
+#                    (ab Gerät v246, ADB_ZUGANG). Das Passwort kommt aus sip_extensions auf
+#                    CT 220 und geht nur per Pipe ans Telefon, nie auf die Kommandozeile oder
+#                    ins Log. Zugang zur Anlage: PBX_EXEC (Vorgabe "ssh root@100.64.2.22 pct exec 220 --").
+#                    Nötig, wenn der Device Owner vor den SIP-Einstellungen gesetzt wurde: als
+#                    Device Owner ist die SIP-Einstellungsseite nicht mehr erreichbar.
 #   --nur-adb        nur adb über TCP Port 5555 wieder setzen (nach einem Neustart des
 #                    Telefons ist er weg; per USB: Seriennummer aus "adb devices")
 #
@@ -17,12 +24,13 @@
 # Notrufe werden nie getestet. Das Telefon wird nicht neu gestartet.
 set -u
 SERIE=${1:?Seriennummer fehlt (adb devices)}; shift
-DO=0; BROWSER=com.android.chrome; NUR_ADB=0
+DO=0; BROWSER=com.android.chrome; NUR_ADB=0; NEBENSTELLE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --device-owner) DO=1 ;;
     --browser) BROWSER=$2; shift ;;
     --nur-adb) NUR_ADB=1 ;;
+    --nebenstelle) NEBENSTELLE=${2:-}; shift ;;
     *) echo "Unbekannt: $1"; exit 2 ;;
   esac; shift
 done
@@ -101,6 +109,25 @@ a shell pm path $GERAET >/dev/null 2>&1 || { echo "Rosenweg Gerät ($GERAET) ist
 
 if [ $DO = 1 ]; then
   schritt "Device Owner: Rosenweg Gerät" a shell dpm set-device-owner $GERAET/org.sipdroid.sipua.rosenweg.AdminReceiver
+fi
+# Erstes Einrichten: Nebenstelle + SIP-Passwort (ohne sie bleibt der Sperrbildschirm bei
+# "Dieses Telefon ist noch nicht eingerichtet." und der Katalog installiert nichts)
+if [ -n "$NEBENSTELLE" ]; then
+  case "$NEBENSTELLE" in 21[0-9][0-9]) ;; *) echo "Nebenstelle $NEBENSTELLE: Geräte haben 2100-2199"; exit 2 ;; esac
+  PBX_EXEC=${PBX_EXEC:-ssh root@100.64.2.22 pct exec 220 --}
+  a logcat -c >/dev/null 2>&1
+  # Passwort nur von der Anlage über stdin ins Telefon; die adb-Shell liest es mit read
+  $PBX_EXEC python3 -c "import sqlite3,sys; r=sqlite3.connect('file:/var/lib/pbx-api/pbx.sqlite?mode=ro',uri=True).execute('select secret from sip_extensions where ext=? and enabled=1',(sys.argv[1],)).fetchone(); sys.exit(1) if not r or not r[0] else print(r[0])" "$NEBENSTELLE" \
+    | a shell "read -r pw; [ -n \"\$pw\" ] && am broadcast -a $GERAET.ADB_ZUGANG --es ext $NEBENSTELLE --es pw \"\$pw\" -n $GERAET/org.sipdroid.sipua.rosenweg.AdbFreigabe >/dev/null"
+  erg=""
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    erg=$(a logcat -d -s RosenwegKatalog 2>/dev/null | grep -o "Zugang per adb eingerichtet.*\|ADB_ZUGANG: .*" | tail -1)
+    [ -n "$erg" ] && break; sleep 1
+  done
+  case "$erg" in
+    Zugang*) echo "ok      SIP-Zugang Nebenstelle $NEBENSTELLE (Rosenweg Gerät)" ;;
+    *) echo "FEHLER  SIP-Zugang Nebenstelle $NEBENSTELLE: ${erg:-keine Antwort (Nebenstelle in sip_extensions? Gerät ab v246?)}"; FEHLER=$((FEHLER+1)) ;;
+  esac
 fi
 a shell dpm list-owners 2>/dev/null | grep -q "$GERAET.*DeviceOwner" \
   || echo "WARNUNG  Rosenweg Gerät ist nicht Device Owner — mit --device-owner auf frisch zurückgesetztem Gerät"

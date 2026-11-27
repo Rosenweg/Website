@@ -89,6 +89,7 @@ Wichtig für die geplante Einrichtung per QR ohne Kabel.
 
 | Was | Befehl heute | Offen für QR-Einrichtung |
 |---|---|---|
+| **Zuerst:** Nebenstelle und SIP-Passwort an Rosenweg Gerät geben (ohne sie: Sperrbildschirm „Dieses Telefon ist noch nicht eingerichtet.“, der Katalog installiert nichts). Als Device Owner ist die SIP-Einstellungsseite nicht erreichbar, der Import von `androidsip-<ext>.xml` geht also nur vorher. | `scripts/geteiltes-telefon-einrichten.sh <serie> --nebenstelle 21xx` (ab Gerät v246): holt das Passwort aus `sip_extensions` auf CT 220 und gibt es per Pipe an `read -r pw; am broadcast -a ch.rosenweg4303.telefon.ADB_ZUGANG --es ext 21xx --es pw "$pw" -n ch.rosenweg4303.telefon/org.sipdroid.sipua.rosenweg.AdbFreigabe`. Vorher in pbx-admin die Nebenstelle auf Kontext „geteilt“ stellen, Name „Rosenweg Smartphone N“. | offen: Zugang beim QR-Einrichten mitgeben |
 | SIP-Anrufkonten aktivieren (zwei: Nebenstelle des Geräts und persönliches Konto) | `adb shell telecom set-phone-account-enabled ch.rosenweg4303.telefon/org.sipdroid.sipua.ui.SipConnectionService SipdroidCallProvider 0` und ab Rosenweg Telefon v27 `adb shell telecom set-phone-account-enabled ch.rosenweg4303.phone/org.sipdroid.sipua.ui.SipConnectionService SipdroidCallProvider 0` (das Konto gibt es erst, wenn Rosenweg Telefon einmal lief; das Skript startet es dafür kurz) | bleibt: Android schaltet Anrufkonten fremder Apps nie selbst ein. Die Freigabe überlebt An- und Abmelden (das Konto wird nur offline geschaltet, nie ausgetragen) |
 | Akku-Optimierung für Rosenweg Telefon ausnehmen (persönliches SIP-Konto bleibt im Ruhemodus registriert) | `adb shell dumpsys deviceidle whitelist +ch.rosenweg4303.phone` | dito; geht beim Ausblenden/Daten-Löschen verloren → Rosenweg Telefon im Katalog auf „immer“ |
 | Standard-Telefon-App | `adb shell cmd role add-role-holder android.app.role.DIALER ch.rosenweg4303.phone 0` | Knox oder Rückfrage beim Einrichten prüfen |
@@ -141,6 +142,11 @@ adb shell am broadcast -a ch.rosenweg4303.telefon.ADB_ABGLEICH \
 # Installationsverbot 10 Minuten aufheben, z.B. für adb install -r
 adb shell am broadcast -a ch.rosenweg4303.telefon.ADB_INSTALLATION \
     -n ch.rosenweg4303.telefon/org.sipdroid.sipua.rosenweg.AdbFreigabe
+
+# ab Gerät v246: erstes Einrichten, Nebenstelle + SIP-Passwort (Passwort nur über stdin,
+# am einfachsten mit dem Skript: --nebenstelle 21xx)
+<passwort> | adb shell 'read -r pw; am broadcast -a ch.rosenweg4303.telefon.ADB_ZUGANG \
+    --es ext 21xx --es pw "$pw" -n ch.rosenweg4303.telefon/org.sipdroid.sipua.rosenweg.AdbFreigabe'
 
 # ab Gerät v237: Installationsverbot sofort wieder setzen (nach adb install)
 adb shell am broadcast -a ch.rosenweg4303.telefon.ADB_INSTALLATION_ENDE \
