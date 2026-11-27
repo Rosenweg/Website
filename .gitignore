@@ -64,3 +64,4 @@ authentik-ct/.env
 # Python-Zwischencode — entsteht beim Ausprobieren der Skripte unter scripts/
 __pycache__/
 *.pyc
+api/node_modules
