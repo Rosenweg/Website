@@ -43,7 +43,8 @@
         const d = new Date(String(s).replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? '' : 'Z'));
         return isNaN(d) ? '' : d.toLocaleDateString('de-CH', { day: 'numeric', month: 'numeric', year: 'numeric' });
     }
-    const sichererPfad = (p) => /^\/[A-Za-z0-9/_.-]+$/.test(p || '') ? p : '/logo-rosenweg.png';
+    // Logos werden lange zwischengespeichert (immutable): neue Fassung = neues ?v= im Register
+    const sichererPfad = (p) => /^\/[A-Za-z0-9/_.-]+(\?v=[A-Za-z0-9]{1,20})?$/.test(p || '') ? p : '/logo-rosenweg.png';
     const sichereUrl = (p) => /^\/api\/apps\/[A-Za-z0-9/_.-]+$/.test(p || '') ? BASIS + p : null;
 
     // Gerätefamilie des Besuchers (nur zum Hervorheben, nichts wird versteckt)

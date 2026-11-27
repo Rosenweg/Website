@@ -6,7 +6,7 @@
       "name": "Rosenweg Virtuelle Computer",
       "repo": "Rosenweg/rosenweg-vm",
       "paket": "ch.rosenweg4303.vm",
-      "logo": "/img/apps/rosenweg-vm.png",
+      "logo": "/img/apps/rosenweg-vm.png?v=20261127",
       "reihenfolge": 10,
       "text": "Die eigenen virtuellen Computer der Anlage öffnen – im Haus und unterwegs, mit Ton, USB-Geräten und freigegebenen Ordnern.",
       "fuer": "Für alle, denen die Technik einen virtuellen Computer eingerichtet hat."
@@ -15,7 +15,7 @@
       "name": "Rosenweg Salz",
       "repo": "Rosenweg/rosenweg-salz",
       "paket": "ch.rosenweg4303.salz",
-      "logo": "/img/apps/rosenweg-salz.png",
+      "logo": "/img/apps/rosenweg-salz.png?v=20261127",
       "reihenfolge": 20,
       "text": "Salzvorrat der Enthärtungsanlagen: Anlieferung und eingefüllte Säcke mit dem Barcode buchen, Bestand, Reichweite und „Nächster Sack etwa am …“ je Lager.",
       "fuer": "Buchen dürfen die Bewohner von Rosenweg 2, 4 und 9, die Kooperation (Lager im Rosenweg 10) und die Technik. Alle anderen sehen nur einen Hinweis."
@@ -24,7 +24,7 @@
       "name": "Rosenweg Kiosk",
       "repo": "Rosenweg/rosenweg-tv-kiosk",
       "paket": "ch.rosenweg4303.kiosk",
-      "logo": "/img/apps/rosenweg-kiosk.png",
+      "logo": "/img/apps/rosenweg-kiosk.png?v=20261127",
       "reihenfolge": 40,
       "text": "Startseite für Android-TV-Geräte (z.B. Chromecast mit Google TV): zeigt dauernd die Diashow, das Menü dahinter nur mit PIN.",
       "fuer": "Für die Technik beim Einrichten eines Fernsehers als Anzeige.",
@@ -35,7 +35,7 @@
       "name": "Rosenweg Profil",
       "repo": "Rosenweg/rosenweg-profil",
       "paket": "ch.rosenweg4303.profil",
-      "logo": "/img/apps/rosenweg-profil.png",
+      "logo": "/img/apps/rosenweg-profil.png?v=20261127",
       "reihenfolge": 30,
       "text": "Die eigenen Angaben im Rosenweg-Portal ansehen und ändern.",
       "fuer": ""
@@ -44,7 +44,7 @@
       "name": "Rosenweg Zutritt",
       "repo": "Rosenweg/rosenweg-zutritt",
       "paket": "ch.rosenweg4303.zutritt",
-      "logo": "/img/apps/rosenweg-zutritt.png",
+      "logo": "/img/apps/rosenweg-zutritt.png?v=20261127",
       "reihenfolge": 50,
       "text": "Türen, Access-Benutzer, Besucher-Pässe und Rosenweg-Karten verwalten (Karte nachschlagen, zuordnen, am UniFi-Leser anlernen); Zutritts- und Kartenprotokoll, Karten-Anmeldungen der Apps. Ersetzt Rosenweg Karten.",
       "fuer": "Für die Technik und den Präsidenten.",
@@ -55,85 +55,85 @@
   "katalog": {
     "ch.rosenweg4303.math": {
       "repo": "Rosenweg/calculator-rosenweg",
-      "logo": "/img/apps/rosenweg-rechner.png",
+      "logo": "/img/apps/rosenweg-rechner.png?v=20261127",
       "text": "Ein einfacher Rechner."
     },
     "ch.rosenweg4303.calendar": {
       "repo": "Rosenweg/calendar-rosenweg",
-      "logo": "/img/apps/rosenweg-kalender.png",
+      "logo": "/img/apps/rosenweg-kalender.png?v=20261127",
       "text": "Termine aus der Rosenweg-Nextcloud."
     },
     "ch.rosenweg4303.camera": {
       "repo": "Rosenweg/camera-rosenweg",
-      "logo": "/img/apps/rosenweg-kamera.png",
+      "logo": "/img/apps/rosenweg-kamera.png?v=20261127",
       "text": "Fotos und Videos; auf den geteilten Telefonen landen sie in deiner Nextcloud."
     },
     "ch.rosenweg4303.clock": {
       "repo": "Rosenweg/clock-rosenweg",
-      "logo": "/img/apps/rosenweg-uhr.png",
+      "logo": "/img/apps/rosenweg-uhr.png?v=20261127",
       "text": "Wecker, Timer und Stoppuhr."
     },
     "ch.rosenweg4303.contacts": {
       "repo": "Rosenweg/contacts-rosenweg",
-      "logo": "/img/apps/rosenweg-kontakte.png",
+      "logo": "/img/apps/rosenweg-kontakte.png?v=20261127",
       "text": "Adressbuch aus der Rosenweg-Nextcloud."
     },
     "ch.rosenweg4303.documents": {
       "repo": "Rosenweg/documents-rosenweg",
-      "logo": "/img/apps/rosenweg-dokumente.png",
+      "logo": "/img/apps/rosenweg-dokumente.png?v=20261127",
       "text": "Dokumente ansehen und bearbeiten."
     },
     "ch.rosenweg4303.filemanager": {
       "repo": "Rosenweg/file-manager-rosenweg",
-      "logo": "/img/apps/rosenweg-dateimanager.png",
+      "logo": "/img/apps/rosenweg-dateimanager.png?v=20261127",
       "text": "Dateien auf dem Telefon und in der Nextcloud."
     },
     "ch.rosenweg4303.gallery": {
       "repo": "Rosenweg/gallery-rosenweg",
-      "logo": "/img/apps/rosenweg-galerie.png",
+      "logo": "/img/apps/rosenweg-galerie.png?v=20261127",
       "text": "Fotos und Videos ansehen."
     },
     "ch.rosenweg4303.home": {
       "repo": "Rosenweg/launcher-rosenweg",
-      "logo": "/img/apps/rosenweg-launcher.png",
+      "logo": "/img/apps/rosenweg-launcher.png?v=20261127",
       "name": "Rosenweg Startseite",
       "text": "Startbildschirm; auf den geteilten Telefonen je Person gespeichert."
     },
     "ch.rosenweg4303.messages": {
       "repo": "Rosenweg/messages-rosenweg",
-      "logo": "/img/apps/rosenweg-messenger.png",
+      "logo": "/img/apps/rosenweg-messenger.png?v=20261127",
       "text": "Chats, Ankündigungen, Notfall-Meldungen und SMS."
     },
     "ch.rosenweg4303.notes": {
       "repo": "Rosenweg/notes-rosenweg",
-      "logo": "/img/apps/rosenweg-notizen.png",
+      "logo": "/img/apps/rosenweg-notizen.png?v=20261127",
       "text": "Notizen und Checklisten."
     },
     "ch.rosenweg4303.paint": {
       "repo": "Rosenweg/paint-rosenweg",
-      "logo": "/img/apps/rosenweg-paint.png",
+      "logo": "/img/apps/rosenweg-paint.png?v=20261127",
       "text": "Skizzen und Zeichnungen."
     },
     "ch.rosenweg4303.phone": {
       "repo": "Rosenweg/phone-rosenweg",
-      "logo": "/img/apps/rosenweg-telefon.png",
+      "logo": "/img/apps/rosenweg-telefon.png?v=20261127",
       "name": "Rosenweg Telefon",
       "text": "Telefonieren über die Rosenweg-Telefonanlage, mit deiner Nummer."
     },
     "ch.rosenweg4303.voicerecorder": {
       "repo": "Rosenweg/voice-recorder-rosenweg",
-      "logo": "/img/apps/rosenweg-diktiergeraet.png",
+      "logo": "/img/apps/rosenweg-diktiergeraet.png?v=20261127",
       "name": "Rosenweg Diktiergerät",
       "text": "Sprachaufnahmen."
     },
     "ch.rosenweg4303.keyboard": {
       "repo": "Rosenweg/keyboard-rosenweg",
-      "logo": "/img/apps/rosenweg-tastatur.png",
+      "logo": "/img/apps/rosenweg-tastatur.png?v=20261127",
       "text": "Tastatur ohne Datenweitergabe."
     },
     "ch.rosenweg4303.telefon": {
       "repo": "Rosenweg/android-sip-rosenweg",
-      "logo": "/img/apps/rosenweg-geraet.png",
+      "logo": "/img/apps/rosenweg-geraet.png?v=20261127",
       "name": "Rosenweg Gerät",
       "text": "App der geteilten Rosenweg-Telefone: Sperrbildschirm, Anmeldung mit Karte, Telefonie.",
       "nicht_oeffentlich": true,

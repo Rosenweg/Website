@@ -27,7 +27,7 @@ test('apps-register.json ist gueltig und kennt die bisherigen Apps', () => {
   assert.equal(daten.apps.karten, undefined);
   assert.equal(daten.katalog['ch.rosenweg4303.karten'], undefined);
   assert.equal(daten.aufgegeben['ch.rosenweg4303.karten'].ersetzt_durch, 'ch.rosenweg4303.zutritt');
-  assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.zutritt.logo)));
+  assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.zutritt.logo.split('?')[0])));
   assert.ok(!fs.existsSync(path.join(WURZEL, 'img', 'apps', 'rosenweg-karten.png')));
 });
 
