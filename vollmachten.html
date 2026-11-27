@@ -441,7 +441,8 @@
       const canAdminUpload = v.status === 'entwurf' && !canSign && hatGruppe('technik', 'präsident', 'praesident');
       const canActivatePaper = v.status === 'entwurf' && hatGruppe('technik', 'präsident', 'praesident', 'verwaltung');
       const canEdit = v.status === 'entwurf';
-      const canRevoke = v.status === 'aktiv' && ((v.vollmachtgeber_email || '').toLowerCase() === myEmail || isAdmin);
+      // Der Server entscheidet (darf_widerrufen, gleiche Regel wie beim Widerrufen selbst)
+      const canRevoke = v.darf_widerrufen === true;
       return `<div class="bg-white border rounded-lg p-4 hover:shadow-md transition">
         <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
           <div class="flex-1 min-w-0">

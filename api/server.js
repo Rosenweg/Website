@@ -17,6 +17,7 @@ const { STWEG_GROUPS, parseStweg, getUserStwegs, stwegFolderName, folderStwegNr,
 const { nummernKanal, darfEchteNummernSehen, istTechnikOderPraesident, interneNummerFinden, nummernAusgeben, nummernAusBodyEntfernen, interneNummernLaden, interneNummernCacheLeeren, interneNummernPruefen, nummernSicht } = require('./lib/nummernsicht');
 const { zevAliasAddress, zevGotoTargets } = require('./lib/zev');
 const reklMelder = require('./lib/reklamation-melder');
+const vollmachtRechte = require('./lib/vollmacht-rechte');
 
 const app = express();
 
@@ -27174,6 +27175,8 @@ app.get('/api/vollmachten', authMiddleware, async (req, res) => {
         LIMIT 500`,
       params,
     );
+    // Knopf „Widerrufen“ nur, wo der Server es erlaubt (Ausschuss/Verwaltung sehen „Alle“, widerrufen aber nicht)
+    for (const row of r.rows) row.darf_widerrufen = vollmachtRechte.darfWiderrufen({ groups, email }, row);
     res.json({ vollmachten: r.rows, is_admin: isAdmin });
   } catch (err) { console.error('[vollmachten] list:', err); res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
@@ -27725,9 +27728,9 @@ app.post('/api/vollmachten/:id/revoke', authMiddleware, async (req, res) => {
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = existing.rows[0];
     const groups = req.user.groups || [];
-    const isAdmin = isTechnik(groups) || isPraesident(groups);
     const isGeber = await vmIsUserVollmachtgeber(id, req.user.email, v.vollmachtgeber_email);
-    if (!isAdmin && !isGeber) return res.status(403).json({ error: 'Nur Vollmachtgeber oder Admin' });
+    // Gleiche Regel wie das Feld darf_widerrufen in GET /api/vollmachten (lib/vollmacht-rechte.js)
+    if (!vollmachtRechte.darfWiderrufenRecht(groups, isGeber)) return res.status(403).json({ error: 'Nur Vollmachtgeber oder Technik/Präsident' });
     if (v.status === 'widerrufen') return res.status(400).json({ error: 'Bereits widerrufen' });
     const r = await pool.query(
       `UPDATE vollmachten SET status='widerrufen', widerrufen_am=NOW(),
