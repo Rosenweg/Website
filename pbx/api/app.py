@@ -1934,18 +1934,34 @@ def telefon_karte():
         conn.close()
 
 
+def _token_art(token):
+    """Nur die Art des Ausweises fuers Log, nie das Token selbst."""
+    t = token or ""
+    for p in ("rw_app_", "rw_pat_"):
+        if t.startswith(p):
+            return p + "..."
+    return "JWT" if t.count(".") == 2 else "Token"
+
+
 def _karten_verwalter():
     """Geraet + angemeldete Person mit Technik/Praesident. -> (ext, sitzung, None) oder (.., .., response).
     Ohne Geraet (Rosenweg Karten auf dem eigenen Handy, Stefan 25.11.2026): Bearer-Token der
-    Rosenweg-Anmeldung (Website-Login oder Authentik rosenweg-apps) mit Technik/Praesident."""
-    if not request.authorization and _bearer():
+    Rosenweg-Anmeldung (Website-Login, Authentik rosenweg-apps oder Karten-Sitzung rw_app_) mit
+    Technik/Praesident - Karte wie Schluessel: dieselben Rechte wie das Konto.
+
+    Nur nach dem Schema unterscheiden: Werkzeug (ab 2.3) liest auch "Bearer ..." in
+    request.authorization, ein "not request.authorization" schickte jede App zu _geraet()
+    (401 "Geraet nicht berechtigt", Anmeldeschleife in Rosenweg Karten 1.6.2, 27.11.2026)."""
+    if _bearer():
         person = current_user()
         if not person:
             person = _rosenweg_konto()
         if not person:
+            app.logger.warning("Rosenweg Karten: Anmeldung ungueltig (%s)", _token_art(_bearer()))
             return None, None, (jsonify({"error": "Rosenweg-Anmeldung ungueltig"}), 401)
         gruppen = {str(g).lower() for g in (person.get("groups") or [])}
         if not (gruppen & KARTEN_VERWALTER):
+            app.logger.info("Rosenweg Karten: %s nicht berechtigt", person.get("email") or "?")
             return "App", None, (jsonify({"error": "nicht berechtigt"}), 403)
         return "App", {"name": person.get("name") or "", "email": person.get("email") or ""}, None
     ext, deny = _geraet()

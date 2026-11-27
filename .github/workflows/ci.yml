@@ -51,6 +51,12 @@ jobs:
       - name: Kontakte-Sync (Verzeichnis ohne echte Nummern)
         run: python3 -m unittest discover -s contacts-sync -v
 
+      - name: PBX-API (Kartenverwaltung ohne Geraet)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/pbx"
+          "$RUNNER_TEMP/pbx/bin/pip" install --quiet -r pbx/api/requirements.txt
+          cd pbx/api && "$RUNNER_TEMP/pbx/bin/python" -m unittest test_karten_verwalter -v
+
   kerberos-pruefer:
     # Prueft Kerberos-Tickets der Agent-Anmeldung (api/kerberos-pruefer, Protokoll v2)
     runs-on: ubuntu-latest
