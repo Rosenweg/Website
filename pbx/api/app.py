@@ -118,8 +118,45 @@ def _bearer():
     return h[7:].strip() if h.lower().startswith("bearer ") else None
 
 
+# ─── Im Auftrag der Haupt-API: Rosenweg Mein Telefon auf geteilten Telefonen ─────
+# Auf einem geteilten Telefon hat die App kein Token; Rosenweg Geraet reicht ihre
+# Anfragen nur an die Haupt-API (Anlage-Token), und die reicht die Anfragen von
+# Mein Telefon hierher weiter (api/routes/telefonanlage.js, Entscheid Stefan
+# 27.11.2026): mit X-PBX-Secret und der Person am Telefon im Kopf
+# X-Rosenweg-Im-Auftrag (base64url-JSON {id, email, name, groups}).
+# Angenommen nur mit dem Geheimnis und nur fuer genau diese Pfade; die Person
+# bekommt hier keine Technik-Rechte (is_admin False) - nur die eigene Nummer und
+# die eigenen Geraete.
+IM_AUFTRAG_KOPF = "X-Rosenweg-Im-Auftrag"
+_IM_AUFTRAG_PFADE = re.compile(
+    r"/api/telefon/(ich|ich/erreichbarkeit|meine|ausweis|privat/[0-9]{1,9}|[0-9]{2,8}/(abmelden|suchen))")
+
+
+def _im_auftrag():
+    """Person aus dem Kopf der Haupt-API, sonst None (auch bei falschem Geheimnis oder Pfad)."""
+    roh = request.headers.get(IM_AUFTRAG_KOPF, "")
+    geheim = request.headers.get("X-PBX-Secret", "")
+    if not roh or not PBX_SHARED_SECRET or not hmac.compare_digest(geheim.encode(), PBX_SHARED_SECRET.encode()):
+        return None
+    if not _IM_AUFTRAG_PFADE.fullmatch(request.path) or len(roh) > 4096:
+        return None
+    try:
+        d = json.loads(base64.urlsafe_b64decode(roh + "=" * (-len(roh) % 4)).decode("utf-8"))
+    except (ValueError, binascii.Error, UnicodeDecodeError):
+        return None
+    email = d.get("email") if isinstance(d, dict) else None
+    if not isinstance(email, str) or "@" not in email or len(email) > 254:
+        return None
+    gruppen = d.get("groups") if isinstance(d.get("groups"), list) else []
+    return {"id": d.get("id"), "email": email, "name": str(d.get("name") or "")[:120],
+            "groups": [str(g) for g in gruppen][:100], "im_auftrag": True}
+
+
 def current_user():
-    """Validiert den Bearer-Token gegen die Haupt-API. None wenn ungueltig."""
+    """Validiert den Bearer-Token gegen die Haupt-API. None wenn ungueltig.
+    Mit dem Kopf X-Rosenweg-Im-Auftrag gilt nur er (siehe _im_auftrag)."""
+    if IM_AUFTRAG_KOPF in request.headers:
+        return _im_auftrag()
     token = _bearer()
     if not token:
         return None
@@ -137,6 +174,8 @@ def current_user():
 
 
 def is_admin(user):
+    if (user or {}).get("im_auftrag"):
+        return False  # geteiltes Telefon ueber die Haupt-API: nur fuer sich selbst
     groups = [str(g).lower() for g in (user or {}).get("groups", [])]
     return "technik" in groups or "präsident" in groups or "praesident" in groups
 
@@ -3778,6 +3817,10 @@ PORTAL_PFADE_STANDARD = {
     # Anmeldungen der Apps, offene Bestaetigungen
     "ch.rosenweg4303.zutritt": ["/api/karten/", "/api/access/", "GET /api/apps/sitzungen", "/api/apps/sitzungen/",
                                 "GET /api/me/bestaetigungen"],
+    # Rosenweg Mein Telefon: die eigene Nummer ueber die Haupt-API (api/routes/telefonanlage.js reicht
+    # hierher zurueck, nur fuer die Person am Telefon), eigene Handys abmelden
+    "ch.rosenweg4303.meintelefon": ["/api/telefonanlage/", "GET /api/messenger/zugaenge", "DELETE /api/messenger/zugaenge/",
+                                    "GET /api/apps/sitzungen", "DELETE /api/apps/sitzungen/"],
 }
 _PORTAL_PFAD = re.compile(r"/api/[A-Za-z0-9._~!$&'()*+,;=:@%/-]{1,1000}(\?[A-Za-z0-9._~!$&'()*+,;=:@%/?-]{0,1000})?")
 _PORTAL_KODIERT_VERBOTEN = re.compile(r"%(2e|2f|5c|00)", re.I)
