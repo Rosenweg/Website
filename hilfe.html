@@ -44,13 +44,20 @@
         <div class="max-w-4xl mx-auto px-4 text-center">
             <div class="text-6xl mb-3">&#128218;</div>
             <h1 class="text-3xl sm:text-4xl font-bold mb-3">Hilfe & Anleitungen</h1>
-            <p class="text-lg sm:text-xl opacity-90 max-w-2xl mx-auto">Alle Funktionen der Rosenweg-Website erklaert — was ist es, wofür wird es genutzt, wie macht man's. Klicke eine Kachel an oder scrolle durch.</p>
+            <p class="text-lg sm:text-xl opacity-90 max-w-2xl mx-auto">Alle Funktionen der Rosenweg-Website erklärt — was ist es, wofür wird es genutzt, wie macht man's. Klicke eine Kachel an oder scrolle durch.</p>
             <p class="text-sm opacity-75 mt-3">Letzte Aktualisierung: 17. November 2026 (nach der Sicherheitsprüfung) · 30+ Bereiche dokumentiert</p>
         </div>
     </section>
 
     <!-- Quick Links: gruppiert nach Themen -->
     <div class="max-w-5xl mx-auto px-4 -mt-6 relative z-10">
+
+        <!-- Anleitungen als PDF (Befund H1): Inhalt aus js/hilfe-anleitungen.js -->
+        <div class="bg-white rounded-xl shadow-md p-5 mb-3">
+            <h2 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">&#128196; Anleitungen als PDF</h2>
+            <p class="text-xs text-gray-500 mb-3">Schritt für Schritt mit Bildern, zum Ausdrucken. Öffnen geht nach der Anmeldung.</p>
+            <div id="anleitungen-pdf" class="grid sm:grid-cols-2 gap-3"></div>
+        </div>
 
         <div class="bg-white rounded-xl shadow-md p-5 mb-3">
             <h2 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">&#128100; Mein Konto &amp; Alltag</h2>
@@ -1174,7 +1181,7 @@
                             document.body.removeChild(a);
                             URL.revokeObjectURL(url);
                         } catch (err) {
-                            alert('Download fehlgeschlagen: ' + err.message + '\n\nMoeglicherweise musst du erst einloggen.');
+                            alert('Download fehlgeschlagen: ' + err.message + '\n\nMöglicherweise musst du dich erst anmelden.');
                         }
                     }
                     </script>
@@ -2534,5 +2541,7 @@
             <p>STWEG-Kooperation Rosenweg, 4303 Kaiseraugst</p>
         </div>
     </footer>
+    <script src="/js/hilfe-anleitungen.js"></script>
+    <script>HilfeAnleitungen.init(document);</script>
 </body>
 </html>
