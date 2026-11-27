@@ -20762,10 +20762,23 @@ function genOrtCode() {
 }
 const VALID_KAT = ['aufzug', 'heizung', 'wasser', 'tuer', 'reinigung', 'sonstige'];
 
+// STWEG-Grenze wie Türschilder/Reklamationen (lib/stweg-sicht.js): Technik/
+// Präsident alles; Ausschuss und Verwaltung die Orte ihrer STWEG(s), Orte ohne
+// STWEG wie bei den Reklamationen. Ändern: reklStwegSchreibbar (nur eigene STWEG).
 app.get('/api/reklamation-orte', authMiddleware, requirePermission('reklamationen', 'read'), async (req, res) => {
   try {
-    const r = await pool.query('SELECT id, code, name, stweg, kategorie, aktiv, created_at FROM reklamation_orte ORDER BY aktiv DESC, name ASC');
-    res.json({ orte: r.rows });
+    const g = req.user?.groups || [];
+    const sicht = stwegSichtLib.stwegSicht(g);
+    const params = [];
+    const r = await pool.query(
+      `SELECT id, code, name, stweg, kategorie, aktiv, created_at FROM reklamation_orte
+        WHERE ${stwegSichtLib.sichtSql(sicht, 'stweg', params)} ORDER BY aktiv DESC, name ASC`, params);
+    const alle = isTechnik(g) || isPraesident(g);
+    const schreibStwegs = alle ? 'alle' : [1, 2, 3, 4, 5, 6, 7, 8].filter(n => reklStwegSchreibbar(g, n));
+    res.json({
+      orte: r.rows.map(o => ({ ...o, darf_aendern: reklStwegSchreibbar(g, o.stweg) })),
+      schreib_stwegs: schreibStwegs,
+    });
   } catch (e) { console.error('[rekl-orte-list]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 
