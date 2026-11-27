@@ -41,4 +41,14 @@ function megPlatzAenderung(body) {
   return { felder, werte };
 }
 
-module.exports = { darfMegPlaetzeVerwalten, megPlatzAenderung };
+// M3: Platznummern numerisch sortieren (1, 2, …, 10, 100 statt 1, 10, 100, 2),
+// erst nach Typ, dann Nummer; Nummern mit Zusatz (z. B. „12a“) nach der Zahl.
+function platzNrVergleich(a, b) {
+  return String(a ?? '').localeCompare(String(b ?? ''), 'de', { numeric: true, sensitivity: 'base' });
+}
+function sortierePlaetze(rows) {
+  return [...(rows || [])].sort((a, b) =>
+    String(a.typ || '').localeCompare(String(b.typ || '')) || platzNrVergleich(a.platz_nr, b.platz_nr));
+}
+
+module.exports = { darfMegPlaetzeVerwalten, megPlatzAenderung, platzNrVergleich, sortierePlaetze };

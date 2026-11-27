@@ -56,6 +56,18 @@ test('M2: bewusst leeren geht, Pflichtfelder bleiben, Prüfung von Typ/Status/Wo
   assert.deepEqual(meg.megPlatzAenderung({ unbekannt: 1 }), { felder: [], werte: [] });
 });
 
+test('M3: Platznummern numerisch, nach Typ getrennt', () => {
+  const rows = ['100', '10', '2', '1', '12a', '12'].map(n => ({ typ: 'auto', platz_nr: n }))
+    .concat([{ typ: 'motorrad', platz_nr: '3' }, { typ: 'motorrad', platz_nr: '20' }]);
+  const s = meg.sortierePlaetze(rows);
+  assert.deepEqual(s.filter(p => p.typ === 'auto').map(p => p.platz_nr), ['1', '2', '10', '12', '12a', '100']);
+  assert.deepEqual(s.filter(p => p.typ === 'motorrad').map(p => p.platz_nr), ['3', '20']);
+  assert.equal(s[0].typ, 'auto');
+  assert.ok(meg.platzNrVergleich('9', '10') < 0);
+  assert.match(route, /sortierePlaetze\(r\.rows\)/);
+  assert.ok(!/ORDER BY typ, platz_nr/.test(route), 'keine Textsortierung mehr');
+});
+
 test('M2: Route und Seite führen zusammen', () => {
   assert.match(route, /megPlatzAenderung\(req\.body\)/);
   assert.ok(!/zugeordnet_email=\$6, wohnung_id=\$7/.test(route), 'altes Überschreiben entfernt');

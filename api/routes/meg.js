@@ -5,7 +5,7 @@
 const express = require('express');
 const { pool } = require('../lib/db');
 const { authMiddleware } = require('../middleware/auth');
-const { darfMegPlaetzeVerwalten, megPlatzAenderung } = require('../lib/meg');
+const { darfMegPlaetzeVerwalten, megPlatzAenderung, sortierePlaetze } = require('../lib/meg');
 
 const router = express.Router();
 
@@ -28,8 +28,8 @@ router.get('/einstellplaetze/verfuegbar', async (req, res) => {
   try {
     const r = await pool.query(
       `SELECT id, platz_nr, typ FROM meg_einstellplaetze
-        WHERE status = 'zu_vermieten' ORDER BY typ, platz_nr`);
-    res.json(r.rows);
+        WHERE status = 'zu_vermieten'`);
+    res.json(sortierePlaetze(r.rows)); // M3: numerisch (platz_nr ist Text)
   } catch (err) { res.status(500).json({ error: 'Fehler beim Laden' }); }
 });
 
@@ -38,7 +38,7 @@ router.get('/einstellplaetze/verfuegbar', async (req, res) => {
 // eigenen Platz. Vorher bekam jedes Konto jeder STWEG die ganze Tabelle.
 router.get('/einstellplaetze', authMiddleware, async (req, res) => {
   try {
-    const r = await pool.query('SELECT * FROM meg_einstellplaetze ORDER BY typ, platz_nr');
+    const r = { rows: sortierePlaetze((await pool.query('SELECT * FROM meg_einstellplaetze')).rows) }; // M3
     if (darfMegPlaetzeVerwalten(req.user)) return res.json(r.rows);
     const me = String(req.user?.email || '').toLowerCase();
     res.json(r.rows.map(p => (me && String(p.zugeordnet_email || '').toLowerCase() === me)
