@@ -70,7 +70,8 @@ const BEREICHE = [
   ['access', 'Türen und Zutritt'], ['wasch', 'Waschküche'], ['mqtt', 'MQTT'], ['display', 'Anzeigen'],
   ['mail-approval-config', 'Mail-Freigabe-Regeln'], ['verwaltung-mail-queue', 'Verwaltungs-Mails'],
   ['mail-templates', 'Mail-Vorlagen'], ['verteiler', 'Verteiler'], ['email', 'E-Mail-Versand'],
-  ['kontakte', 'Kontakte'], ['stweg', 'STWEG-Termine'], ['alarmpanel', 'Alarmanlage'],
+  ['kontakte', 'Kontakte'], ['verwaltungen', 'Hausverwaltungen'], ['stweg-modules', 'STWEG-Module'],
+  ['stweg-sections', 'STWEG-Seiten'], ['salz', 'Salz'], ['stweg', 'STWEG-Termine'], ['alarmpanel', 'Alarmanlage'],
   ['energie-admin', 'Energie-Erfassung'], ['internal', 'Abgleich'], ['wohnungen', 'Wohnungen'],
 ];
 const VERBEN = {
@@ -82,12 +83,12 @@ const VERBEN = {
   abgleich: 'abgeglichen', reactivate: 'wieder aktiviert', cancel: 'abgebrochen', provision: 'eingerichtet',
   bootstrap: 'eingerichtet', approve: 'genehmigt', reject: 'abgelehnt', befehle: 'Befehl geschickt',
   'add_user': 'Person aufgenommen', 'remove_user': 'Person entfernt',
-  'passwort-drucken': 'neues Passwort gedruckt',
+  'passwort-drucken': 'neues Passwort gedruckt', 'kiosk-pin': 'gesetzt', anzeigen: 'angezeigt',
 };
 function aktionText(methode, pfad) {
   const p = pfadNormal(pfad);
   const b = BEREICHE.find(([pre]) => p === pre || p.startsWith(pre + '/'));
-  const bereich = b ? b[1] : (p.split('/')[0] || 'Verwaltung');
+  const bereich = /\/kiosk-pin(\/|$)/.test(p) ? 'Kiosk-PIN einer Station' : b ? b[1] : (p.split('/')[0] || 'Verwaltung');
   const letzte = p.split('/').filter(Boolean).pop() || '';
   const m = String(methode || '').toUpperCase();
   const verb = VERBEN[letzte] && m !== 'DELETE'
@@ -180,21 +181,41 @@ function vermerken(req, res) {
   req._kartenAdminVermerk = true;
   const k = kontext(req);
   const text = aktionText(k.methode, k.pfad);
-  const fertig = () => {
-    const status = res?.statusCode || 0;
-    const e = { ...k, text, status, ok: status > 0 && status < 400 };
-    if (deps?.protokollieren) {
-      deps.protokollieren('admin-mit-karte', {
-        displayId: k.karte || null, email: k.email, name: k.name, durch: `${k.art}:${k.sitzung}`, erfolg: e.ok,
-        detail: `${text} · ${k.methode} ${k.pfad} · ${status}${herkunftText(k) ? ' · ' + herkunftText(k) : ''}`,
-      });
-    } else {
-      console.warn(`[karten-admin] ${k.email} ${k.methode} ${k.pfad} ${status} (${k.art})`);
-    }
-    // Wartet die Aktion auf Bestätigung (202), kommt die Bestätigungs-Mail statt der Quittung
-    if (status !== 202) quittung.hinzu(k.email, e);
-  };
+  const fertig = () => eintragenUndQuittieren(k, text, res?.statusCode || 0);
   if (res && typeof res.once === 'function') res.once('finish', fertig); else fertig();
+  return true;
+}
+
+function eintragenUndQuittieren(k, text, status) {
+  const e = { ...k, text, status, ok: status > 0 && status < 400 };
+  if (deps?.protokollieren) {
+    deps.protokollieren('admin-mit-karte', {
+      displayId: k.karte || null, email: k.email, name: k.name, durch: `${k.art}:${k.sitzung}`, erfolg: e.ok,
+      detail: `${text} · ${k.methode} ${k.pfad} · ${status}${herkunftText(k) ? ' · ' + herkunftText(k) : ''}`,
+    });
+  } else {
+    console.warn(`[karten-admin] ${k.email} ${k.methode} ${k.pfad} ${status} (${k.art})`);
+  }
+  // Wartet die Aktion auf Bestätigung (202), kommt die Bestätigungs-Mail statt der Quittung
+  if (status !== 202) quittung.hinzu(k.email, e);
+}
+
+// ─── Admin-Aktionen in anderen Diensten (Befund W26) ────────────────────────
+// Telefonanlage (pbx.rosenweg4303.ch) und WhatsApp-Gateway prüfen die Anmeldung
+// über diese API (/api/auth/me bzw. /api/me) und nehmen damit auch die Karte an.
+// Nach einer schreibenden Admin-Aktion melden sie sie hier (POST
+// /api/karten-admin/vermerk mit dem Bearer der Person); nur mit der Karte
+// entsteht ein Eintrag im Kartenprotokoll und eine Quittung. Gesperrt wird nichts.
+const FREMDE_DIENSTE = { pbx: 'Telefonanlage', whatsapp: 'WhatsApp-Gateway' };
+function fremdVermerken(req, { dienst, methode, pfad, status } = {}) {
+  if (!istKartenSitzung(req)) return false;
+  const name = FREMDE_DIENSTE[String(dienst || '')];
+  const m = String(methode || '').toUpperCase();
+  if (!name || !['POST', 'PUT', 'PATCH', 'DELETE'].includes(m)) return false;
+  const p = String(pfad || '').split('?')[0].replace(/[^\w/.:-]/g, '').slice(0, 200);
+  const k = { ...kontext(req), methode: m, pfad: `${dienst}:${p}` };
+  const verb = m === 'DELETE' ? 'gelöscht' : m === 'POST' ? 'angelegt bzw. ausgelöst' : 'geändert';
+  eintragenUndQuittieren(k, `${name}: ${verb}`, Number(status) || 0);
   return true;
 }
 
@@ -481,7 +502,7 @@ function loopbackAusfuehren(port) {
 }
 
 const modul = {
-  einrichten, vermerken, mitKarteProtokollieren, bestaetigungVerlangen, routen, sqlSpeicher, loopbackAusfuehren,
+  einrichten, vermerken, fremdVermerken, mitKarteProtokollieren, bestaetigungVerlangen, routen, sqlSpeicher, loopbackAusfuehren,
   ausweisEinloesen, ausweisErzeugen, bestaetigen, ablehnen, alleAbmelden, aktionText, pfadNormal, neuerBuendler,
   quittungMail, bestaetigungsMail, AUSWEIS_PRAEFIX, BESTAETIGUNG_MIN,
   _quittung: () => quittung,

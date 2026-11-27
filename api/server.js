@@ -7884,7 +7884,7 @@ app.get('/api/verwaltungen', authMiddleware, requireAusschussOrTechnik, async (r
 });
 
 // Create
-app.post('/api/verwaltungen', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+app.post('/api/verwaltungen', authMiddleware, requireAusschussOrTechnik, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   try {
     const b = req.body || {};
     if (!verwaltungAenderbar(req.user?.groups || [], b.stweg || null)) {
@@ -7923,7 +7923,7 @@ async function maybeResendForVerwaltung(v) {
 }
 
 // Update
-app.put('/api/verwaltungen/:id', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+app.put('/api/verwaltungen/:id', authMiddleware, requireAusschussOrTechnik, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const b = req.body || {};
@@ -7959,7 +7959,7 @@ app.put('/api/verwaltungen/:id', authMiddleware, requireAusschussOrTechnik, asyn
 });
 
 // Delete (hard)
-app.delete('/api/verwaltungen/:id', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+app.delete('/api/verwaltungen/:id', authMiddleware, requireAusschussOrTechnik, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   try {
     const alt = await pool.query('SELECT stweg FROM verwaltungen WHERE id = $1', [parseInt(req.params.id)]);
     if (alt.rows.length && !verwaltungAenderbar(req.user?.groups || [], alt.rows[0].stweg)) {
@@ -7971,7 +7971,7 @@ app.delete('/api/verwaltungen/:id', authMiddleware, requireAusschussOrTechnik, a
 });
 
 // Kontakt-Add
-app.post('/api/verwaltungen/:id/kontakte', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+app.post('/api/verwaltungen/:id/kontakte', authMiddleware, requireAusschussOrTechnik, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   try {
     const verwId = parseInt(req.params.id);
     const b = req.body || {};
@@ -7988,7 +7988,7 @@ app.post('/api/verwaltungen/:id/kontakte', authMiddleware, requireAusschussOrTec
 });
 
 // Kontakt-Update
-app.put('/api/verwaltungen/kontakte/:kid', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+app.put('/api/verwaltungen/kontakte/:kid', authMiddleware, requireAusschussOrTechnik, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   try {
     const b = req.body || {};
     const v = await pool.query('SELECT v.stweg FROM verwaltungs_kontakte k JOIN verwaltungen v ON v.id = k.verwaltung_id WHERE k.id = $1', [parseInt(req.params.kid)]);
@@ -8005,7 +8005,7 @@ app.put('/api/verwaltungen/kontakte/:kid', authMiddleware, requireAusschussOrTec
 });
 
 // Kontakt-Delete
-app.delete('/api/verwaltungen/kontakte/:kid', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+app.delete('/api/verwaltungen/kontakte/:kid', authMiddleware, requireAusschussOrTechnik, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   try {
     const v = await pool.query('SELECT v.stweg FROM verwaltungs_kontakte k JOIN verwaltungen v ON v.id = k.verwaltung_id WHERE k.id = $1', [parseInt(req.params.kid)]);
     if (v.rows.length && !verwaltungAenderbar(req.user?.groups || [], v.rows[0].stweg)) return res.status(403).json({ error: 'Nur für die eigene STWEG' });
@@ -17811,7 +17811,7 @@ app.get('/api/stweg-modules', async (req, res) => {
 
 // POST: Modul fuer eine STWEG an/aus. Admin (technik/Praesident) jede STWEG,
 // Ausschuss nur die eigene(n).
-app.post('/api/stweg-modules', authMiddleware, async (req, res) => {
+app.post('/api/stweg-modules', authMiddleware, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   try {
     const stweg = parseInt(req.body?.stweg, 10);
     const module = String(req.body?.module || '').trim();
@@ -17924,7 +17924,7 @@ app.get('/api/stweg-sections/:stweg', async (req, res) => {
 });
 
 // POST: einen Abschnitt speichern. Admin jede STWEG, Ausschuss eigene — Modul aktiv — HTML sanitisiert.
-app.post('/api/stweg-sections/:stweg/:section', authMiddleware, async (req, res) => {
+app.post('/api/stweg-sections/:stweg/:section', authMiddleware, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   try {
     const stweg = parseInt(req.params.stweg, 10);
     const section = String(req.params.section || '');
@@ -19051,6 +19051,14 @@ kartenAdmin.einrichten({
   ausfuehren: kartenAdmin.loopbackAusfuehren(process.env.PORT || 3000),
 });
 kartenAdmin.routen(app);
+
+// Befund W26: Telefonanlage und WhatsApp-Gateway melden schreibende Admin-
+// Aktionen mit dem Bearer der Person; mit der Karte -> Kartenprotokoll + Quittung.
+// Antwortet immer 204 (verrät nicht, ob es eine Karten-Sitzung war).
+app.post('/api/karten-admin/vermerk', authMiddleware, (req, res) => {
+  try { kartenAdmin.fremdVermerken(req, req.body || {}); } catch (e) { console.warn('[karten-admin] vermerk:', e.message); }
+  res.status(204).end();
+});
 
 // Offene Bestaetigungen der Person (Hinweis-Band im Portal, Apps)
 app.get('/api/me/bestaetigungen', authMiddleware, async (req, res) => {

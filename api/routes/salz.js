@@ -30,6 +30,7 @@ const {
   naechsterSack, inhaltReichtBis, prognoseHinweis, einfuellErinnern, einfuellText, tagText,
 } = require('../lib/salz');
 const webpush = require('../lib/webpush');
+const kartenAdmin = require('../lib/kartenadmin');
 
 const MELDUNG_AN = process.env.SALZ_MELDUNG_AN || 'technik@rosenweg4303.ch';
 const PORTAL_URL = process.env.SALZ_PORTAL_URL || 'https://rosenweg4303.ch/salz.html';
@@ -419,8 +420,13 @@ function salzRouter({ rateLimitGuard }) {
     res.status(403).json({ error: 'In diesem Lager darfst du nicht buchen.' });
     return false;
   };
-  const nurVerwalter = (req, res, next) => istVerwalter(req.user) ? next()
-    : res.status(403).json({ error: 'Nur die Technik kann das ändern.' });
+  // Verwalter-Aktionen mit der Karte: Protokoll + Quittung (Befund W26); Buchungen
+  // der Bewohner sind keine Admin-Aktion und laufen nicht hier durch.
+  const nurVerwalter = (req, res, next) => {
+    if (!istVerwalter(req.user)) return res.status(403).json({ error: 'Nur die Technik kann das ändern.' });
+    kartenAdmin.vermerken(req, res);
+    next();
+  };
   const schema = (req, res, next) => ensureSchema().then(() => next(), e => {
     console.error('[salz] Schema:', e.message);
     res.status(503).json({ error: 'Datenbank nicht bereit' });
