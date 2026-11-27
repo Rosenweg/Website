@@ -33,7 +33,11 @@ app.use('/api/vollmachten/:id/upload-signed', ausweisVorBody('application/pdf', 
 // PBX-Voicemail-Upload: Asterisk-AGI laedt das WAV als Raw-Body hoch
 app.use('/api/pbx/voicemail', ausweisVorBody('audio/wav', (req, res, next) => requirePbxSecret(req, res, next)), express.raw({ type: 'audio/wav', limit: '50mb' }));
 app.use(express.json({ limit: '10mb' }));
-app.use(cors({
+// Bestätigungslinks aus der Karten-Mail (api/lib/kartenadmin.js) sind Formular-POSTs
+// auf derselben Seite, geschützt durch das einmalige Token im Pfad. Wegen
+// Referrer-Policy: no-referrer schickt der Browser dabei "Origin: null" – die
+// CORS-Prüfung unten würde sie mit "Herkunft nicht erlaubt" abweisen.
+const corsPruefung = cors({
   origin: (origin, cb) => {
     // Allow requests with no origin (mobile apps, curl, server-to-server)
     if (!origin) return cb(null, true);
@@ -47,7 +51,8 @@ app.use(cors({
     cb(new Error('CORS not allowed'));
   },
   credentials: true,
-}));
+});
+app.use((req, res, next) => (req.path.startsWith('/api/karten-bestaetigung/') ? next() : corsPruefung(req, res, next)));
 // Fehler der Parser/CORS oben sauber beantworten: ohne eigenen Handler zeigt Express
 // (NODE_ENV nicht 'production') den Stacktrace im Browser.
 app.use((err, req, res, next) => {
