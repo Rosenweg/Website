@@ -300,6 +300,7 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 |---|---|
 | `POST /api/mail-compose` | Recht `mail-compose:write`, 50 / Std.; immer über die Freigabe-Outbox |
 | `/api/verwaltung-mail-queue*` | T/P; `POST …/:id/freigeben` nach Freigabe-Regel (`mail_approval_config`), schon freigegeben → 409 |
+| `GET /api/verwaltung-mail-queue/zur-freigabe?seit=` | angemeldet; nur Mails, die die Person jetzt freigeben kann (Gruppe der Regel, noch nicht selbst freigegeben), mit Vorschau; `seit` (ISO) = neu eingestellt oder bearbeitet seitdem; Antwort `{mails, anzahl, jetzt}` (Rosenweg Mail-Freigabe) |
 | `/api/mail-templates`, `/api/mail-approval-config` | T/P |
 | `/api/mail-empfänger` | Recht `mail-empfänger` |
 | `/api/verteiler*`, `POST /api/verteiler/send`, `POST /api/email/send`, `/api/email/log`, `/api/dmarc/reports`, `/api/email/quota` | T/P |
