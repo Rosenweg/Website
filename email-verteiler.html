@@ -854,13 +854,10 @@
                         <span class="text-gray-500">Anhänge:</span>
                         <span>${entry.has_attachments ? 'Ja' : 'Nein'}</span>
                     </div>
-                    <hr>
-                    <button onclick="checkDeliveryStatus(${entry.id})"
-                        class="w-full bg-blue-50 text-blue-700 border border-blue-200 rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-100 transition"
-                        id="status-btn-${entry.id}">
-                        Zustellstatus bei SMTP2GO prüfen
-                    </button>
-                    <div id="delivery-status-${entry.id}"></div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-500">Versand über:</span>
+                        <span>${escapeHtml(entry.gateway ? (entry.gateway === 'zev' ? 'Mailcow, zev@rosenweg9.ch' : 'Mailcow, Gateway-User ' + entry.gateway) : '-')}</span>
+                    </div>
             `;
 
             if (recipients.length > 0) {
@@ -879,88 +876,6 @@
             html += '</div>';
             content.innerHTML = html;
             modal.classList.remove('hidden');
-        }
-
-        async function checkDeliveryStatus(logId) {
-            const btn = document.getElementById(`status-btn-${logId}`);
-            const statusDiv = document.getElementById(`delivery-status-${logId}`);
-            btn.disabled = true;
-            btn.textContent = 'Wird abgefragt...';
-
-            try {
-                const headers = {};
-                const token = AuthentikAuth.getToken();
-                if (token) headers['Authorization'] = `Bearer ${token}`;
-
-                const res = await fetch(`/api/email/log/${logId}/status`, { headers });
-                const data = await res.json();
-
-                if (data.error) {
-                    statusDiv.innerHTML = `<p class="text-red-600 text-xs mt-2">${escapeHtml(data.error)}</p>`;
-                    btn.textContent = 'Erneut prüfen';
-                    btn.disabled = false;
-                    return;
-                }
-
-                // Update recipient list with delivery status
-                const listEl = document.getElementById(`recipients-list-${logId}`);
-                if (listEl && data.events) {
-                    const eventMap = {};
-                    data.events.forEach(e => { eventMap[e.recipient] = e; });
-
-                    listEl.querySelectorAll('li').forEach(li => {
-                        const addr = li.dataset.recipient;
-                        const ev = eventMap[addr];
-                        if (ev) {
-                            const icon = li.querySelector('span:first-child');
-                            const label = li.querySelector('span:last-child');
-                            if (ev.event === 'delivered') {
-                                icon.textContent = '✓';
-                                icon.className = 'text-green-500';
-                                label.className = 'text-gray-700';
-                            } else if (ev.event.includes('bounced') || ev.event === 'rejected') {
-                                icon.textContent = '✗';
-                                icon.className = 'text-red-500';
-                                label.className = 'text-red-700';
-                                label.textContent += ` (${ev.event})`;
-                            } else if (ev.event === 'sent' || ev.event === 'queued') {
-                                icon.textContent = '↗';
-                                icon.className = 'text-blue-500';
-                            } else if (ev.event === 'opened') {
-                                icon.textContent = '👁';
-                                icon.className = 'text-green-600';
-                                label.textContent += ' (geöffnet)';
-                            } else if (ev.event === 'clicked') {
-                                icon.textContent = '🔗';
-                                icon.className = 'text-green-600';
-                                label.textContent += ' (geklickt)';
-                            } else {
-                                icon.textContent = '?';
-                                icon.className = 'text-yellow-500';
-                                label.textContent += ` (${ev.event})`;
-                            }
-                        }
-                    });
-                }
-
-                const delivered = data.events.filter(e => e.event === 'delivered' || e.event === 'opened' || e.event === 'clicked').length;
-                const bounced = data.events.filter(e => e.event.includes('bounced') || e.event === 'rejected').length;
-                const pending = data.events.filter(e => e.event === 'sent' || e.event === 'queued').length;
-
-                statusDiv.innerHTML = `<div class="flex gap-3 text-xs mt-2">
-                    ${delivered > 0 ? `<span class="text-green-600">${delivered} zugestellt</span>` : ''}
-                    ${bounced > 0 ? `<span class="text-red-600">${bounced} fehlgeschlagen</span>` : ''}
-                    ${pending > 0 ? `<span class="text-blue-600">${pending} ausstehend</span>` : ''}
-                    ${data.events.length === 0 ? '<span class="text-gray-500">Noch kein Status verfügbar</span>' : ''}
-                </div>`;
-
-                btn.textContent = 'Erneut prüfen';
-                btn.disabled = false;
-            } catch (err) {
-                statusDiv.innerHTML = '<p class="text-red-600 text-xs mt-2">Fehler bei der Abfrage</p>';
-                btn.textContent = 'Erneut prüfen';
-                btn.disabled = false;
-            }
         }
 
         function closeModal() {

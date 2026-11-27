@@ -1,6 +1,6 @@
 # Email-System — Rosenweg
 
-Stand: 17.11.2026. Sicherheitsregeln (Mail-Composer, Druck per Mail,
+Stand: 27.11.2026. Sicherheitsregeln (Mail-Composer, Druck per Mail,
 WhatsApp-Gateway) im Überblick: [`sicherheit.md`](sicherheit.md) Abschnitt 4.8.
 
 > **Bis Sommer 2026** lief der Mail-Eingang über Cloudflare Email Routing → Gmail
@@ -17,7 +17,7 @@ WhatsApp-Gateway) im Überblick: [`sicherheit.md`](sicherheit.md) Abschnitt 4.8.
 | Mailcow | CT 240 `mailcow`, `100.64.2.33` | Postfächer, Verteiler-Aliase (Mailcow verteilt selbst an die Mitglieder + `archiv@`), SOGo, IMAP |
 | PMG | CT 230 `pmg`, `100.64.2.31`, pve3 | Filter und Relay. Ausgehend primär über den eigenen VPS (`smtp-relay.rosenweg4303.ch`), Ausweichziel SMTP2GO; interne Ziele (z. B. WhatsApp-Gateway) über den Transport `intern` ohne Ausweichziel. Details: [`../pmg/README.md`](../pmg/README.md) |
 | API (IMAP-Abruf) | CT 128 | holt Mails aus Mailcow-Postfächern (unten) |
-| API (Versand) | CT 128 | `SMTP_HOST`/`SMTP_PORT` aus `backend-lxc/core/compose.yml` (heute `mail-eu.smtp2go.com:2525`), Absender `MAIL_FROM=noreply@rosenweg4303.ch`; ZEV-Mails über Mailcow (Port 587) |
+| API (Versand) | CT 128 | Mailcow-Submission `MAILCOW_SMTP_HOST:587` (STARTTLS, Zertifikat `mail.rosenweg4303.ch` geprüft), je Funktion ein Gateway-User (unten); ZEV-Mails als `zev@rosenweg9.ch` |
 | WhatsApp-Gateway | CT 116, `100.64.2.39:2525` | Mail → WhatsApp für `*@whatsapp.rosenweg4303.ch`, nur über PMG (siehe [`../whatsapp-bot/README.md`](../whatsapp-bot/README.md)) |
 | Druck-API | CT 111 `cups-server`, `100.64.2.32:8080` | druckt PDFs auf `DruckerR9`/`DruckerR13` |
 
@@ -99,16 +99,38 @@ einen Testdruck an `druckerr9+test@…` senden und im Log auf `[Print]` achten.
 Solange der Wert fehlt oder falsch ist, drucken nur Absender aus
 `@rosenweg4303.ch`.
 
-## Ausgang (SMTP2GO)
+## Ausgang der API (Mailcow, Gateway-User)
 
-- **Host**: `mail-eu.smtp2go.com`, **Port** 2525 (STARTTLS)
-- **Benutzer**: `rk-website` (`SMTP_USER`)
-- **Passwort**, **API-Key**: `<im Passwortmanager>` (in `.env` als `SMTP_PASS`
-  bzw. `SMTP2GO_API_KEY`); beide gelten als kompromittiert und sind zu ändern
-  (`sicherheit.md` Abschnitt 7.1, Punkt 3).
-- **Absender**: `noreply@rosenweg4303.ch`
-- Am 17.11.2026 schlug der Versand zeitweise mit SMTP 535 fehl (Anmeldung
-  abgelehnt, Ursache ausserhalb des Codes).
+Seit 27.11.2026 (vorher SMTP2GO, dessen Login ab 16.11.2026 mit 535 scheiterte)
+sendet die API nur noch über Mailcow-Submission: `MAILCOW_SMTP_HOST`
+(`100.64.2.33`), Port 587, STARTTLS, Zertifikat gegen
+`MAILCOW_SMTP_SERVERNAME` (`mail.rosenweg4303.ch`) geprüft. Weiter geht es
+Mailcow → PMG → Relay.
+
+Jede Funktion hat einen eigenen Mailcow-Benutzer (Gateway-User), der Login und
+Absender zugleich ist. Mailcow lässt als Umschlag-Absender nur die eigene
+Adresse zu (`553 … not owned by user`).
+
+| Gateway | Postfach | Wofür (trigger in `email_log`) |
+|---|---|---|
+| `2fa` | `2fa@rosenweg4303.ch` | Karten-Bestätigungslinks und Quittungen, Login-/Reparatur-/Umfrage-Codes, „neues Gerät“/„Neue App-Anmeldung“ |
+| `noreply` | `noreply@rosenweg4303.ch` | alle übrigen Systemmails, bis sie einen eigenen Gateway-User bekommen |
+| `zev` | `zev@rosenweg9.ch` | Absender `@rosenweg9.ch` (echtes Postfach) |
+
+- Zugangsdaten nur in `/opt/rosenweg-core/.env`: `MAIL_<NAME>_USER`,
+  `MAIL_<NAME>_PASS`; die Zuordnung trigger → Gateway steht in
+  `api/lib/mailgateway.js`.
+- Systemabsender (`MAIL_FROM`, `noreply@…`) werden zur Gateway-Adresse
+  (Anzeigename bleibt, sonst „Rosenweg“). Bei fremdem Kopf-Absender (Verteiler:
+  `"Name via Liste" <liste@…>`) bleibt der Kopf, `Sender:` und Umschlag werden
+  der Gateway-User.
+- `email_log.gateway` hält fest, über welchen Gateway-User eine Mail ging.
+- Neuer Gateway-User: Postfach in Mailcow anlegen (Name „Rosenweg System –
+  <Funktion>“, kleines Kontingent), Name in `MAIL_GATEWAYS`, USER/PASS in die
+  `.env`, Trigger in `GATEWAY_REGELN` zuordnen.
+
+SMTP2GO bleibt nur Ausweichziel von PMG und Relay; die API liest dort noch das
+Kontingent (`/api/email/quota`, NOC) und verwaltet Smarthost-Domains (ISP).
 
 Verwendung: Verteiler-Weiterleitung, Authentik-Benachrichtigungen,
 Systemmails. Der Mail-Composer der Website sendet **immer über die
