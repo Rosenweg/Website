@@ -2989,27 +2989,81 @@ app.get('/api/wasch/sperrzeiten', authMiddleware, async (req, res) => {
   }
 });
 
-// Anlegen: Verwaltung mit Schreibrecht, nur Raeume der eigenen STWEG. Bestehende
-// Reservationen bleiben; die Antwort nennt, wie viele in die Sperrzeit fallen.
+// Anlegen: Verwaltung mit Schreibrecht, nur Raeume der eigenen STWEG
+// (Entscheid Stefan 27.11.2026): eine Sperrzeit storniert die Reservationen,
+// die sie schneidet (bei Serien nur diese Termine), und benachrichtigt die
+// Betroffenen per E-Mail und Web-Push.
+//   { vorschau: true }   -> nichts gespeichert, nur { betroffen: [...] }
+//   ohne bestaetigt      -> trifft es Reservationen: 409 { bestaetigung_noetig, betroffen }
+//   { bestaetigt: true } -> speichern, stornieren, benachrichtigen
+const WASCH_BETROFFEN_SQL = `SELECT r.id, r.user_id, r.start_time, r.end_time, r.recurring, u.name AS user_name, u.wohnung, u.email
+   FROM wasch_reservations r JOIN users u ON u.id = r.user_id
+   WHERE r.room_id = $1 AND r.cancelled = false AND r.start_time < $3::timestamp AND r.end_time > $2::timestamp
+   ORDER BY r.start_time`;
+const waschBetroffenJson = (rows) => rows.map(r => ({
+  id: r.id, start_time: r.start_time, end_time: r.end_time, wiederkehrend: !!r.recurring, user_name: r.user_name, wohnung: r.wohnung,
+}));
+
 app.post('/api/wasch/sperrzeiten', authMiddleware, waschAdmin('write'), async (req, res) => {
   const p = waschRegeln.sperrzeitPruefen(req.body);
   if (!p.ok) return res.status(400).json({ error: p.fehler, feld: p.feld });
+  let client;
   try {
-    const raum = (await pool.query('SELECT stweg, active FROM wasch_rooms WHERE id = $1', [p.raum])).rows[0];
+    const raum = (await pool.query('SELECT name, stweg, active FROM wasch_rooms WHERE id = $1', [p.raum])).rows[0];
     if (!raum || raum.active === false) return res.status(404).json({ error: 'Raum nicht gefunden' });
     if (!waschRaumAenderbar(req.user?.groups, raum.stweg)) return res.status(403).json({ error: 'Raum nur für die eigene STWEG' });
-    const r = await pool.query(
+    const zeit = [p.raum, req.body.start_time, req.body.end_time];
+    if (req.body.vorschau === true) {
+      const b = await pool.query(WASCH_BETROFFEN_SQL, zeit);
+      return res.json({ vorschau: true, betroffen: waschBetroffenJson(b.rows) });
+    }
+    client = await pool.connect();
+    await client.query('BEGIN');
+    // gleiche Sperre wie beim Reservieren: keine neue Reservation dazwischen
+    await client.query('SELECT pg_advisory_xact_lock($1)', [p.raum]);
+    const b = await client.query(WASCH_BETROFFEN_SQL, zeit);
+    if (b.rows.length && req.body.bestaetigt !== true) {
+      await client.query('ROLLBACK');
+      client.release();
+      client = null;
+      return res.status(409).json({
+        error: `Die Sperrzeit trifft ${b.rows.length} Reservation${b.rows.length === 1 ? '' : 'en'} – bitte bestätigen`,
+        bestaetigung_noetig: true,
+        betroffen: waschBetroffenJson(b.rows),
+      });
+    }
+    const r = await client.query(
       `INSERT INTO wasch_sperrzeiten (room_id, start_time, end_time, grund, erstellt_von)
        VALUES ($1, $2, $3, $4, $5) RETURNING id, room_id, start_time, end_time, grund`,
       [p.raum, req.body.start_time, req.body.end_time, p.grund, req.user?.email || null]
     );
-    const betroffen = await pool.query(
-      `SELECT COUNT(*)::int AS n FROM wasch_reservations
-       WHERE room_id = $1 AND cancelled = false AND start_time < $3::timestamp AND end_time > $2::timestamp`,
-      [p.raum, req.body.start_time, req.body.end_time]
-    );
-    res.json({ ...r.rows[0], betroffene_reservationen: betroffen.rows[0].n });
+    if (b.rows.length) {
+      await client.query('UPDATE wasch_reservations SET cancelled = true WHERE id = ANY($1::int[])', [b.rows.map(x => x.id)]);
+    }
+    await client.query('COMMIT');
+    client.release();
+    client = null;
+    // Benachrichtigen (nach dem Speichern; Fehler beim Versand stoppen nichts)
+    let benachrichtigt = 0;
+    for (const person of waschRegeln.jePerson(b.rows)) {
+      if (!person.email) continue;
+      const m = waschRegeln.sperrMeldung({
+        name: person.name, raum: raum.name, grund: p.grund, von: r.rows[0].start_time, bis: r.rows[0].end_time,
+        reservationen: person.reservationen, url: `${SITE_URL}/waschkueche.html`,
+      });
+      try {
+        await sendTemplated('wasch-sperrzeit', {
+          user_name: person.name, raum: raum.name, grund: p.grund, anzahl: person.reservationen.length,
+        }, { from: MAIL_FROM, to: person.email, subject: m.betreff, text: m.text });
+        benachrichtigt++;
+      } catch (e) {
+        console.error('[wasch-sperrzeit] Mail an', person.user_id, e.message);
+      }
+      webpushLib.sendToEmails([person.email], { title: 'Waschküche: Reservation storniert', body: m.kurz, url: `${SITE_URL}/waschkueche.html`, tag: `wasch-sperre-${r.rows[0].id}` }).catch(() => {});
+    }
+    res.json({ ...r.rows[0], storniert: b.rows.length, benachrichtigt, betroffen: waschBetroffenJson(b.rows) });
   } catch (err) {
+    if (client) { await client.query('ROLLBACK').catch(() => {}); client.release(); }
     res.status(500).json({ error: fehlerFuerClient(err, 'Fehler beim Speichern der Sperrzeit') });
   }
 });

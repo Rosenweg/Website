@@ -102,7 +102,49 @@ function sperrzeitPruefen(body) {
   return { ok: true, raum, von, bis, grund };
 }
 
+const TAGE = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+const zwei = (n) => String(n).padStart(2, '0');
+/** „Mo 30.11.2026 08:00“ – Ortszeit des Servers (die Tabelle fuehrt Ortszeit). */
+function zeitText(d) {
+  const z = new Date(d);
+  return `${TAGE[z.getDay()]} ${z.getDate()}.${z.getMonth() + 1}.${z.getFullYear()} ${zwei(z.getHours())}:${zwei(z.getMinutes())}`;
+}
+/** „Mo 30.11.2026 08:00–10:00“ bzw. ueber Mitternacht mit beiden Tagen. */
+function zeitraumText(a, b) {
+  const x = new Date(a), y = new Date(b);
+  const gleich = x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate();
+  return gleich ? `${zeitText(x)}–${zwei(y.getHours())}:${zwei(y.getMinutes())}` : `${zeitText(x)} – ${zeitText(y)}`;
+}
+
+/**
+ * Nachricht an eine Person, deren Reservationen eine neue Sperrzeit storniert hat.
+ * reservationen: [{start_time, end_time}] dieser Person. -> { betreff, text, kurz }
+ */
+function sperrMeldung({ name, raum, grund, von, bis, reservationen, url }) {
+  const n = reservationen.length;
+  const liste = reservationen.map(r => `  – ${zeitraumText(r.start_time, r.end_time)}`).join('\n');
+  const betreff = `Waschküche: ${n === 1 ? 'Reservation storniert' : `${n} Reservationen storniert`} (${grund})`;
+  const text = `Hallo ${name || ''}`.trim() + ',\n\n'
+    + `${raum} ist gesperrt: ${grund}\nGesperrt: ${zeitraumText(von, bis)}\n\n`
+    + `Darum ${n === 1 ? 'ist diese Reservation' : 'sind diese Reservationen'} von dir storniert:\n${liste}\n\n`
+    + `Bitte reserviere eine andere Zeit${url ? `: ${url}` : '.'}\n\nDiese E-Mail wurde automatisch versendet.`;
+  const kurz = `${raum}: ${n === 1 ? 'deine Reservation' : `${n} Reservationen`} storniert – ${grund}`;
+  return { betreff, text, kurz };
+}
+
+/** Stornierte Reservationen je Person gruppieren (fuer je eine Nachricht). */
+function jePerson(zeilen) {
+  const m = new Map();
+  for (const z of zeilen || []) {
+    const k = z.user_id;
+    if (!m.has(k)) m.set(k, { user_id: k, email: z.email, name: z.user_name, reservationen: [] });
+    m.get(k).reservationen.push({ id: z.id, start_time: z.start_time, end_time: z.end_time });
+  }
+  return [...m.values()];
+}
+
 module.exports = {
+  zeitText, zeitraumText, sperrMeldung, jePerson,
   STANDARD, FELDER, einstellungen, einstellungenPruefen, abrechnungsMonat,
   autoAbrechnungFaellig, sperrzeitPruefen,
 };

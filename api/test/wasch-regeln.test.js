@@ -79,3 +79,35 @@ test('server.js: Tabelle, Routen, Einstellungen statt fester Grenzen', () => {
   assert.match(src, /ist schon abgerechnet/);
   assert.match(src, /waschRegeln\.autoAbrechnungFaellig\(now, await waschEinstellungen\(\)\)/);
 });
+
+test('Sperrzeit storniert: je Person eine Nachricht mit Grund und Zeitraum', () => {
+  const zeilen = [
+    { id: 5, user_id: 7, email: 'erika.muster@example.org', user_name: 'Erika Muster', start_time: new Date(2026, 11, 1, 9), end_time: new Date(2026, 11, 1, 11) },
+    { id: 6, user_id: 8, email: 'max.beispiel@example.org', user_name: 'Max Beispiel', start_time: new Date(2026, 11, 1, 11), end_time: new Date(2026, 11, 1, 12) },
+    { id: 9, user_id: 7, email: 'erika.muster@example.org', user_name: 'Erika Muster', start_time: new Date(2026, 11, 2, 8), end_time: new Date(2026, 11, 2, 10) },
+  ];
+  const p = r.jePerson(zeilen);
+  assert.equal(p.length, 2);
+  assert.deepEqual(p[0].reservationen.map(x => x.id), [5, 9]);
+  const m = r.sperrMeldung({ name: 'Erika Muster', raum: 'Waschküche 1', grund: 'Reinigung', von: new Date(2026, 11, 1, 8), bis: new Date(2026, 11, 2, 12), reservationen: p[0].reservationen, url: 'https://www.rosenweg4303.ch/waschkueche.html' });
+  assert.equal(m.betreff, 'Waschküche: 2 Reservationen storniert (Reinigung)');
+  assert.match(m.text, /Waschküche 1 ist gesperrt: Reinigung/);
+  assert.match(m.text, /Gesperrt: Di 1\.12\.2026 08:00 – Mi 2\.12\.2026 12:00/);
+  assert.match(m.text, /– Di 1\.12\.2026 09:00–11:00/);
+  assert.match(m.text, /– Mi 2\.12\.2026 08:00–10:00/);
+  assert.match(m.kurz, /2 Reservationen storniert – Reinigung/);
+});
+
+test('server.js: Sperrzeit mit Vorschau, Bestaetigung, Stornieren und Benachrichtigen', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  const route = src.slice(src.indexOf("app.post('/api/wasch/sperrzeiten'"), src.indexOf("app.delete('/api/wasch/sperrzeiten/:id'"));
+  assert.match(route, /req\.body\.vorschau === true/);
+  assert.match(route, /bestaetigung_noetig: true/);
+  assert.match(route, /req\.body\.bestaetigt !== true/);
+  assert.match(route, /pg_advisory_xact_lock/);
+  // nur die betroffenen Termine (auch einzelne einer Serie), nicht die ganze Serie
+  assert.match(route, /UPDATE wasch_reservations SET cancelled = true WHERE id = ANY\(\$1::int\[\]\)/);
+  assert.doesNotMatch(route, /recurring_until/);
+  assert.match(route, /sendTemplated\('wasch-sperrzeit'/);
+  assert.match(route, /webpushLib\.sendToEmails/);
+});

@@ -139,7 +139,7 @@
             <section class="py-8">
                 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <h2 class="text-2xl font-bold text-gray-800 mb-2">Sperrzeiten</h2>
-                    <p class="text-sm text-gray-600 mb-6">In einer Sperrzeit kann niemand reservieren; die Belegung zeigt sie grau mit dem Grund. Bestehende Reservationen bleiben – die Meldung nennt, wie viele betroffen sind.</p>
+                    <p class="text-sm text-gray-600 mb-6">In einer Sperrzeit kann niemand reservieren; die Belegung zeigt sie grau mit dem Grund. Reservationen in dieser Zeit werden storniert (bei Serien nur diese Termine) und die Betroffenen per E-Mail benachrichtigt – vorher zeigt die Seite, wen es trifft.</p>
                     <form id="sperr-form" class="bg-white rounded-lg shadow-md p-6 mb-6 grid md:grid-cols-5 gap-4 items-end">
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1" for="sperr-raum">Raum</label>
@@ -497,10 +497,16 @@
                     end_time: document.getElementById('sperr-bis').value + ':00',
                     grund: document.getElementById('sperr-grund').value.trim(),
                 };
+                const post = (extra) => api('/api/wasch/sperrzeiten', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, ...extra }) });
                 try {
-                    const r = await api('/api/wasch/sperrzeiten', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-                    const n = r.betroffene_reservationen || 0;
-                    toast(n ? `Gesperrt. Achtung: ${n} Reservation${n === 1 ? '' : 'en'} liegen in dieser Zeit.` : 'Gesperrt');
+                    // Erst zeigen, wen es trifft: diese Reservationen werden storniert, die Personen benachrichtigt
+                    const v = await post({ vorschau: true });
+                    if (v.betroffen.length) {
+                        const liste = v.betroffen.map(r => `• ${fmtZeit(r.start_time)}–${new Date(r.end_time).toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' })}  ${r.user_name || '?'}${r.wohnung ? ' (' + r.wohnung + ')' : ''}`).join('\n');
+                        if (!confirm(`Diese Sperrzeit storniert ${v.betroffen.length} Reservation${v.betroffen.length === 1 ? '' : 'en'} und benachrichtigt die Betroffenen per E-Mail (Grund und Zeitraum):\n\n${liste}\n\nSperren und stornieren?`)) return;
+                    }
+                    const r = await post({ bestaetigt: true });
+                    toast(r.storniert ? `Gesperrt. ${r.storniert} Reservation${r.storniert === 1 ? '' : 'en'} storniert, ${r.benachrichtigt} Person${r.benachrichtigt === 1 ? '' : 'en'} benachrichtigt.` : 'Gesperrt');
                     document.getElementById('sperr-grund').value = '';
                     loadSperrzeiten();
                 } catch (err) { toast(err.message, 'error'); }
