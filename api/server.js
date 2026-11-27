@@ -10837,103 +10837,134 @@ app.get('/api/calendar', async (req, res) => {
 
 // GET /api/stweg/:stweg/events — list events (own STWEG + kooperation events from global calendar)
 // requireStwegAccess: Termine (Sitzungen, Wartungen) nur fuer Mitglieder dieser STWEG.
+// Rechte und Formular: lib/termine.js (auch fuer Rosenweg Termine, GET /api/termine).
+const termineLib = require('./lib/termine');
+
+// Alle Termine einer STWEG: eigene (stweg_events), Kooperation (Google-Kalender),
+// Wartungen (Handwerker-Vertraege), festgelegte Terminumfragen. Sortiert.
+async function stwegTermineLaden(stweg) {
+  // STWEG-eigene Termine
+  const result = await pool.query(
+    `SELECT * FROM stweg_events WHERE stweg = $1 AND start_date >= NOW() - INTERVAL '7 days' ORDER BY start_date LIMIT 20`,
+    [stweg]
+  );
+  // Merge with global calendar
+  let globalEvents = [];
+  try {
+    const calResp = await fetch(`http://127.0.0.1:${PORT}/api/calendar`);
+    if (calResp.ok) {
+      const calData = await calResp.json();
+      globalEvents = (calData.events || []).slice(0, 10).map(e => ({ ...e, source: 'kooperation' }));
+    }
+  } catch {}
+  const stwegEvents = result.rows.map(e => ({
+    title: e.title, description: e.description, start: e.start_date, end: e.end_date,
+    location: e.location, category: e.category, all_day: e.all_day,
+    id: e.id, source: 'stweg',
+  }));
+  // Wartungen als virtuelle Events einmischen (aktive Verträge mit naechster_termin
+  // dieser STWEG oder ohne STWEG-Zuordnung, ab heute - 7 Tage bis +365)
+  let wartungEvents = [];
+  try {
+    const wartungen = await pool.query(
+      `SELECT v.id, v.titel, v.beschreibung, v.naechster_termin, v.frequenz_einheit, v.frequenz_intervall,
+              v.handwerker_id, h.firma, h.kategorie
+         FROM handwerker_vertraege v
+         JOIN handwerker h ON h.id = v.handwerker_id
+        WHERE v.status = 'aktiv'
+          AND v.naechster_termin IS NOT NULL
+          AND (v.stweg = $1 OR v.stweg IS NULL)
+          AND v.naechster_termin BETWEEN CURRENT_DATE - INTERVAL '7 days' AND CURRENT_DATE + INTERVAL '365 days'
+          AND h.archiviert = false
+        ORDER BY v.naechster_termin`,
+      [stweg]
+    );
+    wartungEvents = wartungen.rows.map(v => ({
+      id: `wartung-${v.id}`,
+      title: `🔧 ${v.titel}`,
+      description: `${v.beschreibung || ''}${v.beschreibung ? '\n' : ''}${v.firma} (${v.kategorie})`.trim(),
+      start: v.naechster_termin,
+      end: null,
+      location: null,
+      category: 'wartung',
+      all_day: true,
+      source: 'wartung',
+      handwerker_id: v.handwerker_id,
+      vertrag_id: v.id,
+    }));
+  } catch (wErr) {
+    console.error('Wartungs-Events Merge error:', wErr.message);
+  }
+  // Sitzungs-Doodle: finalisierte Terminumfragen dieser STWEG als virtuelle
+  // Termine einmischen (analog Wartungen) -> erscheinen automatisch in
+  // "Naechste Termine", ohne separaten Termin-Datensatz.
+  let doodleEvents = [];
+  try {
+    const dq = await pool.query(
+      `SELECT p.id, p.titel, p.ort, o.starts_at
+         FROM doodle_polls p JOIN doodle_options o ON o.id = p.final_option_id
+        WHERE p.status = 'geschlossen' AND p.stweg = $1 AND o.starts_at IS NOT NULL
+          AND o.starts_at BETWEEN CURRENT_DATE - INTERVAL '7 days' AND CURRENT_DATE + INTERVAL '365 days'
+        ORDER BY o.starts_at`,
+      [stweg]
+    );
+    doodleEvents = dq.rows.map(d => ({
+      id: `doodle-${d.id}`,
+      title: `🗓️ ${d.titel}`,
+      description: 'Sitzungstermin (aus Terminumfrage)',
+      start: d.starts_at, end: null, location: d.ort || null,
+      category: 'sitzung', all_day: false, source: 'doodle', poll_id: d.id,
+    }));
+  } catch (dErr) {
+    console.error('Doodle-Events Merge error:', dErr.message);
+  }
+  // Merge and sort by date
+  return [...stwegEvents, ...globalEvents, ...wartungEvents, ...doodleEvents].sort((a, b) => new Date(a.start) - new Date(b.start));
+}
+
 app.get('/api/stweg/:stweg/events', authMiddleware, requireStwegAccess, async (req, res) => {
   try {
     const stweg = parseInt(req.params.stweg, 10);
     if (!stweg || stweg < 1 || stweg > 8) return res.status(400).json({ error: 'Ungueltige STWEG' });
-    // STWEG-eigene Termine
-    const result = await pool.query(
-      `SELECT * FROM stweg_events WHERE stweg = $1 AND start_date >= NOW() - INTERVAL '7 days' ORDER BY start_date LIMIT 20`,
-      [stweg]
-    );
-    // Merge with global calendar
-    let globalEvents = [];
-    try {
-      const calResp = await fetch(`http://127.0.0.1:${PORT}/api/calendar`);
-      if (calResp.ok) {
-        const calData = await calResp.json();
-        globalEvents = (calData.events || []).slice(0, 10).map(e => ({ ...e, source: 'kooperation' }));
-      }
-    } catch {}
-    const stwegEvents = result.rows.map(e => ({
-      title: e.title, description: e.description, start: e.start_date, end: e.end_date,
-      location: e.location, category: e.category, all_day: e.all_day,
-      id: e.id, source: 'stweg',
-    }));
-    // Wartungen als virtuelle Events einmischen (aktive Verträge mit naechster_termin
-    // dieser STWEG oder ohne STWEG-Zuordnung, ab heute - 7 Tage bis +365)
-    let wartungEvents = [];
-    try {
-      const wartungen = await pool.query(
-        `SELECT v.id, v.titel, v.beschreibung, v.naechster_termin, v.frequenz_einheit, v.frequenz_intervall,
-                v.handwerker_id, h.firma, h.kategorie
-           FROM handwerker_vertraege v
-           JOIN handwerker h ON h.id = v.handwerker_id
-          WHERE v.status = 'aktiv'
-            AND v.naechster_termin IS NOT NULL
-            AND (v.stweg = $1 OR v.stweg IS NULL)
-            AND v.naechster_termin BETWEEN CURRENT_DATE - INTERVAL '7 days' AND CURRENT_DATE + INTERVAL '365 days'
-            AND h.archiviert = false
-          ORDER BY v.naechster_termin`,
-        [stweg]
-      );
-      wartungEvents = wartungen.rows.map(v => ({
-        id: `wartung-${v.id}`,
-        title: `🔧 ${v.titel}`,
-        description: `${v.beschreibung || ''}${v.beschreibung ? '\n' : ''}${v.firma} (${v.kategorie})`.trim(),
-        start: v.naechster_termin,
-        end: null,
-        location: null,
-        category: 'wartung',
-        all_day: true,
-        source: 'wartung',
-        handwerker_id: v.handwerker_id,
-        vertrag_id: v.id,
-      }));
-    } catch (wErr) {
-      console.error('Wartungs-Events Merge error:', wErr.message);
-    }
-    // Sitzungs-Doodle: finalisierte Terminumfragen dieser STWEG als virtuelle
-    // Termine einmischen (analog Wartungen) -> erscheinen automatisch in
-    // "Naechste Termine", ohne separaten Termin-Datensatz.
-    let doodleEvents = [];
-    try {
-      const dq = await pool.query(
-        `SELECT p.id, p.titel, p.ort, o.starts_at
-           FROM doodle_polls p JOIN doodle_options o ON o.id = p.final_option_id
-          WHERE p.status = 'geschlossen' AND p.stweg = $1 AND o.starts_at IS NOT NULL
-            AND o.starts_at BETWEEN CURRENT_DATE - INTERVAL '7 days' AND CURRENT_DATE + INTERVAL '365 days'
-          ORDER BY o.starts_at`,
-        [stweg]
-      );
-      doodleEvents = dq.rows.map(d => ({
-        id: `doodle-${d.id}`,
-        title: `🗓️ ${d.titel}`,
-        description: 'Sitzungstermin (aus Terminumfrage)',
-        start: d.starts_at, end: null, location: d.ort || null,
-        category: 'sitzung', all_day: false, source: 'doodle', poll_id: d.id,
-      }));
-    } catch (dErr) {
-      console.error('Doodle-Events Merge error:', dErr.message);
-    }
-    // Merge and sort by date
-    const all = [...stwegEvents, ...globalEvents, ...wartungEvents, ...doodleEvents].sort((a, b) => new Date(a.start) - new Date(b.start));
-    res.json(all);
+    res.json(await stwegTermineLaden(stweg));
   } catch (err) {
     res.status(500).json({ error: 'Fehler' });
   }
 });
 
-// POST /api/stweg/:stweg/events — create event (admin/ausschuss only)
-app.post('/api/stweg/:stweg/events', authMiddleware, adminOnly, async (req, res) => {
+// Schreiben: Technik/Praesident; sonst Recht 'stweg-termine' write und Ausschuss
+// oder Hausverwaltung DIESER STWEG (lib/termine.js). Admin mit Karte: protokolliert.
+async function termineSeitenRecht(user) {
+  const perms = await getUserPermissions(user?.groups || []);
+  return perms[termineLib.SEITE] || 'none';
+}
+async function requireTermineWrite(req, res, next) {
+  try {
+    const stweg = parseStweg(req.params.stweg);
+    if (!stweg) return res.status(400).json({ error: 'Ungültige STWEG-Nummer' });
+    const g = req.user?.groups || [];
+    if (!termineLib.termineSchreibErlaubt(g, stweg, await termineSeitenRecht(req.user), req.user?.isAdmin === true)) {
+      return res.status(403).json({ error: `Termine der ${termineLib.stwegName(stweg)} bearbeiten nur Ausschuss und Verwaltung dieser STWEG (Recht „STWEG-Termine“)` });
+    }
+    if (isTechnik(g) || isPraesident(g) || req.user?.isAdmin) kartenAdmin.vermerken(req, res);
+    next();
+  } catch (err) {
+    console.error('[termine] Rechte:', err.message);
+    res.status(500).json({ error: 'Rechte konnten nicht geprüft werden' });
+  }
+}
+
+// POST /api/stweg/:stweg/events — Termin anlegen
+app.post('/api/stweg/:stweg/events', authMiddleware, requireStwegAccess, requireTermineWrite, async (req, res) => {
   try {
     const stweg = parseInt(req.params.stweg, 10);
-    const { title, description, start_date, end_date, all_day, location, category } = req.body;
-    if (!title || !start_date) return res.status(400).json({ error: 'Titel und Startdatum erforderlich' });
+    const f = termineLib.terminAusFormular(req.body);
+    if (f.error) return res.status(f.status).json({ error: f.error, feld: f.feld });
+    const w = f.werte;
     const result = await pool.query(
       `INSERT INTO stweg_events (stweg, title, description, start_date, end_date, all_day, location, category, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-      [stweg, title, description || null, start_date, end_date || null, all_day || false, location || null, category || 'sonstiges', req.user.user_id || req.user.id]
+      [stweg, w.title, w.description, w.start_date, w.end_date, w.all_day, w.location, w.category, req.user.user_id || req.user.id || null]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -10941,13 +10972,64 @@ app.post('/api/stweg/:stweg/events', authMiddleware, adminOnly, async (req, res)
   }
 });
 
-// DELETE /api/stweg/:stweg/events/:id
-app.delete('/api/stweg/:stweg/events/:id', authMiddleware, adminOnly, async (req, res) => {
+// PUT /api/stweg/:stweg/events/:id — Termin aendern (nur gesendete Felder)
+app.put('/api/stweg/:stweg/events/:id', authMiddleware, requireStwegAccess, requireTermineWrite, async (req, res) => {
   try {
-    await pool.query('DELETE FROM stweg_events WHERE id = $1 AND stweg = $2', [req.params.id, parseInt(req.params.stweg)]);
+    const stweg = parseInt(req.params.stweg, 10);
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(404).json({ error: 'Termin nicht gefunden' });
+    const alt = await pool.query('SELECT * FROM stweg_events WHERE id = $1 AND stweg = $2', [id, stweg]);
+    if (!alt.rows.length) return res.status(404).json({ error: 'Termin nicht gefunden' });
+    const f = termineLib.terminAusFormular(req.body, { teilweise: true });
+    if (f.error) return res.status(f.status).json({ error: f.error, feld: f.feld });
+    const w = { ...alt.rows[0], ...f.werte };
+    if (w.end_date && new Date(w.end_date) < new Date(w.start_date)) {
+      return res.status(400).json({ error: 'Ende liegt vor dem Beginn', feld: 'end_date' });
+    }
+    const r = await pool.query(
+      `UPDATE stweg_events SET title = $3, description = $4, start_date = $5, end_date = $6, all_day = $7,
+              location = $8, category = $9
+        WHERE id = $1 AND stweg = $2 RETURNING *`,
+      [id, stweg, w.title, w.description, w.start_date, w.end_date, w.all_day, w.location, w.category]
+    );
+    res.json(r.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler beim Speichern' });
+  }
+});
+
+// DELETE /api/stweg/:stweg/events/:id
+app.delete('/api/stweg/:stweg/events/:id', authMiddleware, requireStwegAccess, requireTermineWrite, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(404).json({ error: 'Termin nicht gefunden' });
+    const r = await pool.query('DELETE FROM stweg_events WHERE id = $1 AND stweg = $2', [id, parseInt(req.params.stweg, 10)]);
+    if (!r.rowCount) return res.status(404).json({ error: 'Termin nicht gefunden' });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+// GET /api/termine[?stweg=3|3,5|alle] — Rosenweg Termine: Termine der eigenen
+// STWEG(s) in einer Liste (Kooperation/Wartung ohne STWEG nur einmal), dazu je
+// sichtbare STWEG das Schreibrecht und – falls eingerichtet – der Nextcloud-
+// Kalender, in dem die Termine schon stehen (TERMINE_NEXTCLOUD_KALENDER).
+app.get('/api/termine', authMiddleware, async (req, res) => {
+  try {
+    const sichtbar = termineLib.termineStwegs(req.user?.groups || [], await termineSeitenRecht(req.user), req.user?.isAdmin === true);
+    const wahl = termineLib.termineAuswahl(sichtbar, req.query.stweg);
+    if (wahl.error) return res.status(wahl.status).json({ error: wahl.error });
+    const kalender = termineLib.nextcloudKalender(process.env.TERMINE_NEXTCLOUD_KALENDER);
+    const jeStweg = await Promise.all(wahl.stwegs.map(async nr => ({ nr, termine: await stwegTermineLaden(nr) })));
+    res.json({
+      stwegs: sichtbar.map(s => ({ ...s, gezeigt: wahl.stwegs.includes(s.nr), kalender: kalender[s.nr] || null })),
+      kategorien: termineLib.KATEGORIEN,
+      termine: termineLib.termineZusammenfuehren(jeStweg),
+    });
+  } catch (err) {
+    console.error('[termine]', err.message);
+    res.status(500).json({ error: 'Termine konnten nicht geladen werden' });
   }
 });
 

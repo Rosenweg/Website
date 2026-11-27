@@ -26,6 +26,9 @@ const RECHTE_MIGRATIONEN = [
   // Im Portal an Verteiler senden verlangt schreiben (Entscheid Stefan 27.11.2026, V10);
   // 'Verwaltung' = ÜBERGANG (alte globale Gruppe).
   { name: '2026-11-27-email-verteiler-verwaltung-write', page: 'email-verteiler', access: 'write', gruppen: [...VERWALTUNGEN, 'Verwaltung'] },
+  // STWEG-Termine anlegen/aendern/loeschen: alle Ausschuesse und Verwaltungen, die API
+  // bindet es an die eigene STWEG (lib/termine.js; Entscheid Stefan 28.11.2026)
+  { name: '2026-11-28-stweg-termine-ausschuss-verwaltung-write', page: 'stweg-termine', access: 'write', gruppen: [...AUSSCHUESSE, ...VERWALTUNGEN] },
 ];
 
 const SQL_TABELLE = `

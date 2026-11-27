@@ -149,7 +149,8 @@ hat dort keine Rechte, auch wenn er dort wohnt oder Eigentümer ist.
 | Unterschriftenliste erzeugen / Rückläufe erfassen | — | — | — | ✅ 🅢 | (R) 🅢 | ✅ | ✅ |
 | Echtheitsprüfung Unterschriftenliste (30 / 10 Min.) | 👁 | 👁 | 👁 | 👁 | 👁 | 👁 | 👁 |
 | STWEG-Seiten (Module, Inhalte, Abschnitte) | 👁 | 👁 | 👁 | ✅ 🅢 | — | ✅ | ✅ |
-| STWEG-Termine | — | 👁 🅢 | 👁 🅢 | 👁 🅢 | 👁 🅢 | ✅ | ✅ |
+| STWEG-Termine lesen (`/api/stweg/:nr/events`, `/api/termine`, App Rosenweg Termine) | — | 👁 🅢 | 👁 🅢 | 👁 🅢 | 👁 🅢 | 👁 alle | 👁 alle |
+| STWEG-Termine anlegen, ändern, löschen (Recht `stweg-termine` schreiben, seit 28.11.2026 für alle Ausschüsse und Verwaltungen vorgegeben) | — | — | — | ✅ 🅢 (R) | ✅ 🅢 (R) | ✅ | ✅ |
 | Verwaltungen (Firmen, Plattform-Zugänge) | 👁 öffentlicher Teil | — | — | 👁 eigene STWEG + übergreifende, ✅ nur eigene STWEG | — | ✅ | ✅ |
 | Kontakte der Verwaltungen | — | je nach Sichtbarkeitsstufe 🅢 | je nach Stufe 🅢 | je nach Stufe 🅢 | 👁 eigene Verwaltung 🅢 | 👁 | 👁 |
 | Grundbuch: Status und Anteile | — | 👁 ohne Namen/Adressen | 👁 ohne Namen | 👁 vollständig | 👁 ohne Namen | 👁 | 👁 |
@@ -237,6 +238,7 @@ Seit dem 17.11.2026 gilt in allen schreibenden STWEG-Bereichen:
   Unterschriftenlisten und Rückläufe (`requireStwegWrite`), ausserdem für
   Reklamationen (Liste und alle `:id`-Routen; fremde Meldungen ergeben **404**),
   Auslagen, Personen, Benutzer- und Gruppenverwaltung, Verwaltungen, STWEG-Seiten,
+  STWEG-Termine (`api/lib/termine.js`),
   Waschküche und Telefonbuch.
 - Datensätze **ohne STWEG** (z. B. Reklamationen oder Auslagen ohne Zuordnung) sehen
   und bearbeiten alle Ausschüsse.
