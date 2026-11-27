@@ -16,7 +16,8 @@ from cryptography.fernet import Fernet
 
 _tmp = tempfile.mkdtemp()
 os.environ["PBX_DB_PATH"] = os.path.join(_tmp, "pbx-nc.sqlite")
-os.environ["PBX_PIN_KEY"] = Fernet.generate_key().decode()
+_SCHLUESSEL = Fernet.generate_key().decode()
+os.environ["PBX_PIN_KEY"] = _SCHLUESSEL
 os.environ["NC_TOKEN_URL"] = "http://nc-token.test:8097"
 os.environ["NC_TOKEN_SECRET"] = "s" * 32
 
@@ -55,6 +56,15 @@ class NextcloudZugangTest(unittest.TestCase):
             conn.commit()
         finally:
             conn.close()
+        # Im CI-Lauf ist app schon von anderen Tests geladen (ohne NC_TOKEN_URL)
+        for ziel, wert in ((pbx, {"NC_TOKEN_URL": "http://nc-token.test:8097", "NC_TOKEN_SECRET": "s" * 32}),):
+            for k, v in wert.items():
+                p = mock.patch.object(ziel, k, v)
+                p.start()
+                self.addCleanup(p.stop)
+        p = mock.patch.dict(os.environ, {"PBX_PIN_KEY": _SCHLUESSEL})
+        p.start()
+        self.addCleanup(p.stop)
         self.aufrufe = []
         self.n = 0
         self.sperre = threading.Lock()
