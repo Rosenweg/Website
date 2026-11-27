@@ -92,9 +92,13 @@ const { haeuserAusAuswahl } = require('./lib/haeuser');
 const benutzername = require('./lib/benutzername');
 const zlibModul = require('zlib');
 
-// Mail (transporter, loggedSendMail, isAllowlistedSender, generateOTP, EMAIL_ALLOWLIST,
-// MAIL_FROM, SMTP2GO_*) -> lib/mail.js
-const { transporter, MAIL_FROM, SMTP2GO_API_KEY, SMTP2GO_API_URL, EMAIL_ALLOWLIST, generateOTP, loggedSendMail, isAllowlistedSender } = require('./lib/mail');
+// Mail (mailSenden, loggedSendMail, isAllowlistedSender, generateOTP, EMAIL_ALLOWLIST,
+// MAIL_FROM) -> lib/mail.js; Versand über Mailcow-Gateway-User (lib/mailgateway.js)
+const { MAIL_FROM, EMAIL_ALLOWLIST, generateOTP, mailSenden, loggedSendMail, isAllowlistedSender } = require('./lib/mail');
+// SMTP2GO nur noch als Ausweichziel des PMG/Relays (Kontingent im NOC, Smarthost-Domains
+// im ISP-Bereich). Die API selbst sendet nicht mehr darüber.
+const SMTP2GO_API_KEY = process.env.SMTP2GO_API_KEY || '';
+const SMTP2GO_API_URL = 'https://eu-api.smtp2go.com/v3';
 // WhatsApp-Queue + Technik-Gruppen-Resolver -> lib/whatsapp.js
 const { queueWhatsappMessage, resolveTechnikWhatsappGroupId } = require('./lib/whatsapp');
 const { otpAusstellen, otpPruefen, ausstellenErlaubt, normEmail, OTP_FEHLER, OTP_SCHEMA_SQL } = require('./lib/otp');
@@ -4530,6 +4534,7 @@ app.post('/api/verteiler/send', authMiddleware, adminOnly, async (req, res) => {
   try {
     let sent = 0;
     let failed = [];
+    let gateway = null;
     // EINE Mail, alle Empfänger im BCC — so sehen sie sich gegenseitig NICHT (DSGVO).
     // To = MAIL_FROM (neutral); der Verteiler-Alias darf NICHT ins To (sonst Re-Fanout).
     try {
@@ -4538,7 +4543,7 @@ app.post('/api/verteiler/send', authMiddleware, adminOnly, async (req, res) => {
       const htmlBody = String(body)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         .replace(/\r?\n/g, '<br>');
-      await transporter.sendMail({
+      ({ gateway } = await mailSenden({
         from: MAIL_FROM,
         to: MAIL_FROM,
         bcc: validRecipients,
@@ -4547,9 +4552,10 @@ app.post('/api/verteiler/send', authMiddleware, adminOnly, async (req, res) => {
         subject,
         text: body,
         html: htmlBody,
-      });
+      }, 'verteiler-direct'));
       sent = validRecipients.length;
     } catch (sendErr) {
+      gateway = sendErr.gateway || null;
       console.error('BCC-Versand fehlgeschlagen:', sendErr.message);
       failed = validRecipients.slice();
     }
@@ -4557,11 +4563,11 @@ app.post('/api/verteiler/send', authMiddleware, adminOnly, async (req, res) => {
     // Log to email_log
     const status = failed.length === 0 ? 'sent' : (sent > 0 ? 'partial' : 'failed');
     await pool.query(
-      `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments, recipients_list, failed_recipients, status, trigger, to_addresses)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments, recipients_list, failed_recipients, status, trigger, to_addresses, gateway)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [verteiler_id || null, req.user?.email || MAIL_FROM, req.user?.name || 'Admin', subject, sent, false,
        JSON.stringify(recipients), failed.length > 0 ? JSON.stringify(failed) : null, status,
-       'verteiler-direct', recipients.join(', ')]
+       'verteiler-direct', recipients.join(', '), gateway]
     );
 
     res.json({ success: true, sent, failed: failed.length });
@@ -4798,21 +4804,23 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
   // NICHT toAddress — sonst leitet Cloudflare Email Routing die Mail
   // an die Verteiler-Adresse selbst zurück und unser IMAP-Poll
   // verarbeitet sie erneut (Endlosschleife).
+  // Kopf-From bleibt die Verteiler-Adresse; Umschlag und Sender: = Gateway-User (lib/mailgateway.js).
+  let gateway = null;
   if (bccRecipients.length > 0) {
-    await transporter.sendMail({ ...baseMail, to: 'undisclosed-recipients:;', bcc: bccRecipients });
+    ({ gateway } = await mailSenden({ ...baseMail, to: 'undisclosed-recipients:;', bcc: bccRecipients }, 'verteiler-batch'));
   }
   // Drucker-Tags einzeln (jeder Tag braucht seine eigene To-Zeile fürs Print-Routing)
   for (const drucker of druckerRecipients) {
-    await transporter.sendMail({ ...baseMail, to: drucker });
+    ({ gateway } = await mailSenden({ ...baseMail, to: drucker }, 'verteiler-batch'));
   }
   console.log(`Distributed email to ${recipients.length} recipients for ${toAddress} (${bccRecipients.length} BCC + ${druckerRecipients.length} drucker-individuell)`);
 
   const logResult = await pool.query(
-    `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments, recipients_list, status, message_id, trigger, to_addresses)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+    `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments, recipients_list, status, message_id, trigger, to_addresses, gateway)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
     [list.id, senderEmail, senderName, parsed.subject, recipients.length, attachments.length > 0,
      JSON.stringify(recipients), 'sent', messageId || parsed.messageId || null,
-     'verteiler-batch', recipients.join(', ')]
+     'verteiler-batch', recipients.join(', '), gateway]
   );
 
   // Mirror in WhatsApp-Gruppe wenn für diesen Verteiler eine Group-ID hinterlegt ist.
@@ -4838,118 +4846,7 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
     }
   }
 
-  // Schedule delivery report to sender after 90 seconds (only for internal senders — DSGVO)
-  if (SMTP2GO_API_KEY && senderEmail && senderEmail.endsWith(`@${VERTEILER_DOMAIN}`)) {
-    const logId = logResult.rows[0].id;
-    const parentMsgId = messageId || parsed.messageId || null;
-    setTimeout(() => sendDeliveryReport(logId, senderEmail, list.name, parsed.subject, recipients, parentMsgId).catch(
-      err => console.error('[DeliveryReport] Error:', err.message)
-    ), 90_000);
-  }
-
   return { success: true, action: 'distributed', recipients: recipients.length };
-}
-
-// ─── Delivery Report ────────────────────────────────────────────────
-async function sendDeliveryReport(logId, senderEmail, verteilerName, originalSubject, recipientsList, parentMessageId) {
-  // Loop-Schutz: niemals Zustellbericht an noreply, system-Adressen oder Verteiler selbst senden
-  const senderLower = (senderEmail || '').toLowerCase();
-  if (!senderLower
-      || senderLower.startsWith('noreply@')
-      || senderLower.startsWith('mailer-daemon@')
-      || senderLower.startsWith('postmaster@')
-      || senderLower === `noreply@${VERTEILER_DOMAIN}`) {
-    console.log(`[DeliveryReport] skipped — sender ${senderEmail} ist System-Adresse`);
-    return;
-  }
-  // Niemals an einen Verteiler-Empfänger als Sender zurückschreiben (Self-Loop)
-  const verteilerCheck = await pool.query(
-    'SELECT 1 FROM email_verteiler WHERE LOWER(email_address) = $1 AND active = true LIMIT 1',
-    [senderLower]
-  );
-  if (verteilerCheck.rows.length > 0) {
-    console.log(`[DeliveryReport] skipped — sender ${senderEmail} ist selbst eine Verteiler-Adresse (Loop-Schutz)`);
-    return;
-  }
-  // Niemals Zustellbericht zu Zustellbericht senden (Subject-Check)
-  if (/^zustellbericht:/i.test(originalSubject || '')) {
-    console.log(`[DeliveryReport] skipped — original subject is bereits ein Zustellbericht`);
-    return;
-  }
-  const log = await pool.query('SELECT * FROM email_log WHERE id = $1', [logId]);
-  if (log.rows.length === 0) return;
-  const entry = log.rows[0];
-
-  // Query SMTP2GO for delivery status
-  const startDate = new Date(entry.created_at);
-  startDate.setMinutes(startDate.getMinutes() - 5);
-  const endDate = new Date(entry.created_at);
-  endDate.setHours(endDate.getHours() + 2);
-
-  const apiRes = await fetch(`${SMTP2GO_API_URL}/activity/search`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Smtp2go-Api-Key': SMTP2GO_API_KEY },
-    signal: AbortSignal.timeout(15000),
-    body: JSON.stringify({
-      start_date: startDate.toISOString(),
-      end_date: endDate.toISOString(),
-      search_subject: originalSubject,
-      limit: 200,
-    }),
-  });
-  const apiData = await apiRes.json();
-
-  // Best status per recipient
-  const statusMap = new Map();
-  const priority = { clicked: 5, opened: 4, delivered: 3, soft_bounced: 2, bounced: 2, rejected: 2, sent: 1, queued: 0 };
-  for (const e of (apiData.data?.events || [])) {
-    const cur = statusMap.get(e.recipient);
-    if (!cur || (priority[e.event] || 0) > (priority[cur.event] || 0)) {
-      statusMap.set(e.recipient, { event: e.event, date: e.date });
-    }
-  }
-
-  // Build report
-  const statusIcon = { delivered: '\u2705', opened: '\u2705', clicked: '\u2705', sent: '\u23F3', queued: '\u23F3', soft_bounced: '\u26A0\uFE0F', bounced: '\u274C', rejected: '\u274C' };
-  const statusLabel = { delivered: 'Zugestellt', opened: 'Gelesen', clicked: 'Link geklickt', sent: 'Gesendet', queued: 'In Warteschlange', soft_bounced: 'Temporärer Fehler', bounced: 'Fehlgeschlagen', rejected: 'Abgelehnt' };
-
-  let rows = '';
-  for (const email of recipientsList) {
-    const status = statusMap.get(email);
-    const icon = status ? (statusIcon[status.event] || '\u2753') : '\u2753';
-    const label = status ? (statusLabel[status.event] || status.event) : 'Unbekannt';
-    rows += `<tr><td style="padding:4px 12px;border-bottom:1px solid #eee">${escapeHtml(email)}</td><td style="padding:4px 12px;border-bottom:1px solid #eee">${icon} ${label}</td></tr>`;
-  }
-
-  const delivered = [...statusMap.values()].filter(s => ['delivered', 'opened', 'clicked'].includes(s.event)).length;
-  const failed = [...statusMap.values()].filter(s => ['bounced', 'rejected'].includes(s.event)).length;
-  const pending = recipientsList.length - delivered - failed;
-
-  const html = `
-    <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-      <h2 style="color:#1a56db">Zustellbericht: ${escapeHtml(verteilerName)}</h2>
-      <p><strong>Betreff:</strong> ${escapeHtml(originalSubject || '(kein Betreff)')}</p>
-      <p><strong>Empfänger:</strong> ${recipientsList.length} | <strong>Zugestellt:</strong> ${delivered} | <strong>Ausstehend:</strong> ${pending} | <strong>Fehlgeschlagen:</strong> ${failed}</p>
-      <table style="border-collapse:collapse;width:100%;margin-top:12px">
-        <thead><tr style="background:#f3f4f6"><th style="padding:6px 12px;text-align:left">Empfänger</th><th style="padding:6px 12px;text-align:left">Status</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-      <p style="color:#6b7280;font-size:12px;margin-top:16px">Automatischer Zustellbericht von Rosenweg Verteiler. Status kann sich noch ändern (z.B. "Gesendet" → "Zugestellt").</p>
-    </div>`;
-
-  await loggedSendMail({
-    from: `"Rosenweg Verteiler" <noreply@rosenweg4303.ch>`,
-    to: senderEmail,
-    subject: `Zustellbericht: ${originalSubject || verteilerName}`,
-    html,
-    headers: {
-      'Auto-Submitted': 'auto-replied',
-      'X-Auto-Response-Suppress': 'All',
-      'X-Rosenweg-System': 'verteiler-delivery-report',
-      'Precedence': 'auto_reply',
-    },
-  }, 'verteiler-delivery-report', { parent_message_id: parentMessageId || null, parent_source: `verteiler ${verteilerName} (log #${logId})` });
-  console.log(`[DeliveryReport] Sent to ${senderEmail} for log #${logId}: ${delivered}/${recipientsList.length} delivered`);
 }
 
 // HTTP endpoint (kept for direct API testing)
@@ -7527,65 +7424,6 @@ async function autoArchiveSupersededKontakte() {
 }
 setInterval(autoArchiveSupersededKontakte, 24 * 60 * 60 * 1000);
 setTimeout(autoArchiveSupersededKontakte, 5 * 60 * 1000); // initial run 5min nach Start
-
-// ─── SMTP2GO-Rejection-Sync ────────────────────────────────────────
-// SMTP2GO klassifiziert Mails asynchron als 'rejected' (Suppression-Liste,
-// hard-bounce, etc). Wir pollen alle 10 Min die Activity-API und tragen
-// betroffene Mails im email_log nach (status='failed' + error_message).
-async function syncSmtp2goRejections() {
-  if (!SMTP2GO_API_KEY) return;
-  try {
-    const lookbackHours = 6;
-    const r = await fetch(`${SMTP2GO_API_URL}/activity/search`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Smtp2go-Api-Key': SMTP2GO_API_KEY },
-      signal: AbortSignal.timeout(20_000),
-      body: JSON.stringify({
-        start_date: new Date(Date.now() - lookbackHours * 3600 * 1000).toISOString(),
-        end_date: new Date().toISOString(),
-        event: 'rejected',
-        limit: 500,
-      }),
-    });
-    if (!r.ok) {
-      console.error('[Smtp2goSync] API error:', r.status);
-      return;
-    }
-    const data = await r.json();
-    const events = data.data?.events || [];
-    if (events.length === 0) return;
-
-    let updated = 0;
-    for (const ev of events) {
-      const recipient = (ev.recipient || ev.to || '').toLowerCase().trim();
-      const subject = ev.subject || '';
-      const reason = (ev.smtp_response || '').slice(0, 1000);
-      // Nur ECHTE Bounces (550-er) markieren — SMTP2GO klassifiziert auch
-      // "250 OK"-Antworten als 'rejected' (backscatter), das sind keine Fehler.
-      const isRealBounce = /^5\d\d/.test(reason) || /unknown|not found|unavailable|hard.{0,2}bounce/i.test(reason);
-      if (!isRealBounce) continue;
-      // Match nach Empfänger + Subject in unseren letzten Logs
-      const upd = await pool.query(
-        `UPDATE email_log
-         SET status = 'failed',
-             error_message = $1,
-             failed_recipients = COALESCE(failed_recipients, '') || CASE WHEN failed_recipients IS NULL THEN $2 ELSE ',' || $2 END
-         WHERE status = 'sent'
-           AND created_at > NOW() - INTERVAL '${lookbackHours} hours'
-           AND LOWER(to_addresses) LIKE '%' || $2 || '%'
-           AND ($3 = '' OR subject = $3 OR subject LIKE '%' || $3 || '%')
-         RETURNING id`,
-        [reason, recipient, subject]
-      );
-      updated += upd.rows.length;
-    }
-    if (updated > 0) console.log(`[Smtp2goSync] ${updated} email_log Eintraege auf failed gesetzt (von ${events.length} rejected events)`);
-  } catch (err) {
-    console.error('[Smtp2goSync] Fehler:', err.message);
-  }
-}
-setInterval(syncSmtp2goRejections, 10 * 60 * 1000); // alle 10 Min
-setTimeout(syncSmtp2goRejections, 60 * 1000); // initial run nach 1 min
 
 // ─── Nextcloud-CardDAV-Sync (Telefonbuch für EAS / iOS / DAVx5) ──
 // Schreibt alle Kontakte aus wohnungen_kontakte als vCards ins
@@ -10307,62 +10145,6 @@ app.get('/api/email/log', authMiddleware, adminOnly, async (req, res) => {
     res.json({ log: result.rows });
   } catch (err) {
     res.status(500).json({ error: 'Fehler' });
-  }
-});
-
-// SMTP2GO delivery status for a specific email log entry
-app.get('/api/email/log/:id/status', authMiddleware, adminOnly, async (req, res) => {
-  if (!SMTP2GO_API_KEY) return res.status(400).json({ error: 'SMTP2GO API-Key nicht konfiguriert' });
-  try {
-    const entry = await pool.query('SELECT * FROM email_log WHERE id = $1', [req.params.id]);
-    if (entry.rows.length === 0) return res.status(404).json({ error: 'Log-Eintrag nicht gefunden' });
-    const log = entry.rows[0];
-
-    // Search SMTP2GO activity for this email by subject and time range
-    const startDate = new Date(log.created_at);
-    startDate.setMinutes(startDate.getMinutes() - 5);
-    const endDate = new Date(log.created_at);
-    endDate.setHours(endDate.getHours() + 48);
-
-    const apiRes = await fetch(`${SMTP2GO_API_URL}/activity/search`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Smtp2go-Api-Key': SMTP2GO_API_KEY },
-      signal: AbortSignal.timeout(15000),
-      body: JSON.stringify({
-        start_date: startDate.toISOString(),
-        end_date: endDate.toISOString(),
-        search_subject: log.subject,
-        limit: 200,
-      }),
-    });
-    const apiData = await apiRes.json();
-
-    // Deduplicate: keep the most recent/best event per recipient
-    const eventMap = new Map();
-    const priority = { 'clicked': 5, 'opened': 4, 'delivered': 3, 'soft_bounced': 2, 'bounced': 2, 'rejected': 2, 'sent': 1, 'queued': 0 };
-    for (const e of (apiData.data?.events || [])) {
-      const existing = eventMap.get(e.recipient);
-      if (!existing || (priority[e.event] || 0) > (priority[existing.event] || 0)) {
-        eventMap.set(e.recipient, { recipient: e.recipient, event: e.event, date: e.date, smtp_response: e.smtp_response || null });
-      }
-    }
-    const events = [...eventMap.values()];
-
-    // Update failed_recipients in DB based on SMTP2GO data
-    const bounced = events.filter(e => e.event.includes('bounced') || e.event === 'rejected');
-    if (bounced.length > 0) {
-      await pool.query(
-        'UPDATE email_log SET failed_recipients = $1, status = $2 WHERE id = $3',
-        [JSON.stringify(bounced.map(b => b.recipient)),
-         bounced.length >= (log.recipients_count || 1) ? 'failed' : 'partial',
-         log.id]
-      );
-    }
-
-    res.json({ events, total: apiData.data?.total_events || 0 });
-  } catch (err) {
-    console.error('SMTP2GO status error:', err);
-    res.status(500).json({ error: 'SMTP2GO-Abfrage fehlgeschlagen' });
   }
 });
 
@@ -19762,12 +19544,12 @@ app.post('/api/whatsapp/delete-status', requireWhatsappSecret, async (req, res) 
 // Bot-Heartbeat: in-memory, alarmiert Admins wenn stale (>5min).
 let waBotHeartbeat = null; // { is_ready, ready_at, phone, pid, uptime_seconds, received_at }
 let waBotStaleAlertSent = false; // verhindert Alert-Spam
+let waBotStaleVersuchAt = null;  // letzter Stale-Alarmversuch (auch gescheiterte zählen)
 // Bot lebt, ist aber nicht mit WhatsApp verbunden (Kopplung verloren). So lief es
 // 21.9.–24.10.2026 unbemerkt: Heartbeats kamen, nur is_ready war false.
 let waBotNotReadySince = null;
-let waBotNotReadyAlertAt = null; // letzter Alarm; wiederholt alle WA_NOT_READY_REMIND_MS
-const WA_NOT_READY_ALERT_MS = 15 * 60 * 1000;
-const WA_NOT_READY_REMIND_MS = 24 * 60 * 60 * 1000;
+let waBotNotReadyAlertAt = null; // letzter Alarmversuch; höchstens einer je 6 h (lib/wawacht.js)
+const waWacht = require('./lib/wawacht');
 app.post('/api/whatsapp/heartbeat', requireWhatsappSecret, (req, res) => {
   const wasStale = waBotStaleAlertSent;            // war zuvor ein Stale-Alarm raus?
   const prevHb = waBotHeartbeat?.received_at;       // letzter Heartbeat vor der Lücke
@@ -19776,6 +19558,7 @@ app.post('/api/whatsapp/heartbeat', requireWhatsappSecret, (req, res) => {
     received_at: new Date(),
   };
   waBotStaleAlertSent = false; // Bot lebt → Alert-Sperre aufheben
+  waBotStaleVersuchAt = null;
   res.json({ ok: true });
   // Flanke stale→erreichbar: Entwarnung an dieselben Admins schicken.
   if (wasStale) {
@@ -19784,8 +19567,9 @@ app.post('/api/whatsapp/heartbeat', requireWhatsappSecret, (req, res) => {
   }
   if (req.body?.is_ready) {
     if (waBotNotReadyAlertAt) {
+      // Es ging ein "nicht verbunden"-Alarm raus -> einmal "wieder verbunden" melden.
       const downMin = Math.round((Date.now() - waBotNotReadySince.getTime()) / 60000);
-      sendBotRecovery(downMin).catch(() => {});
+      sendBotRecovery(downMin, 'verbunden').catch(() => {});
     }
     waBotNotReadySince = null; waBotNotReadyAlertAt = null;
   } else if (!waBotNotReadySince) {
@@ -19804,12 +19588,10 @@ async function botAdminEmails() {
 
 // Kopplung verloren: nur per Mail — über WhatsApp kommt die Warnung ja gerade nicht an.
 async function checkBotNotReady() {
-  if (!waBotNotReadySince) return;
+  if (!waWacht.alarmFaellig({ seit: waBotNotReadySince, letzterVersuch: waBotNotReadyAlertAt })) return;
   const age = Date.now() - waBotNotReadySince.getTime();
-  if (age < WA_NOT_READY_ALERT_MS) return;
-  if (waBotNotReadyAlertAt && Date.now() - waBotNotReadyAlertAt.getTime() < WA_NOT_READY_REMIND_MS) return;
   const erneut = !!waBotNotReadyAlertAt;
-  const vorher = waBotNotReadyAlertAt;
+  // Versuch zählt auch, wenn der Versand scheitert — sonst Flut (16.11.2026: jede Minute).
   waBotNotReadyAlertAt = new Date();
   const ageMin = Math.round(age / 60000);
   const dauer = ageMin >= 120 ? `${Math.round(ageMin / 60)} Stunden` : `${ageMin} Minuten`;
@@ -19827,11 +19609,10 @@ async function checkBotNotReady() {
         + `Telefon: ${waBotHeartbeat?.phone || '(unbekannt)'}\n\n`
         + `Neu koppeln: https://whatsapp.rosenweg4303.ch → Kopplung, QR-Code mit dem Bot-Telefon scannen\n`
         + `(WhatsApp → Verknüpfte Geräte → Gerät hinzufügen).\n\n`
-        + `Diese Erinnerung kommt täglich, bis der Bot wieder verbunden ist.`,
+        + `Diese Erinnerung kommt alle 6 Stunden, bis der Bot wieder verbunden ist; dann folgt eine Entwarnung.`,
     }, 'whatsapp-bot-not-ready');
   } catch (err) {
-    waBotNotReadyAlertAt = vorher; // nicht als verschickt werten -> naechste Minute erneut
-    console.warn('[WA-Watchdog] Kopplungs-Alarm konnte nicht gesendet werden:', err.message);
+    console.warn('[WA-Watchdog] Kopplungs-Alarm konnte nicht gesendet werden (nächster Versuch in 6 h):', err.message);
   }
 }
 
@@ -19846,7 +19627,9 @@ async function checkBotHeartbeat() {
   const lastHb = waBotHeartbeat?.received_at || WA_WATCHDOG_START;
   const age = Date.now() - new Date(lastHb).getTime();
   if (age < STALE_MS || waBotStaleAlertSent) return;
+  if (waBotStaleVersuchAt && Date.now() - waBotStaleVersuchAt.getTime() < waWacht.ABSTAND_MS) return;
   waBotStaleAlertSent = true;
+  waBotStaleVersuchAt = new Date();
   const ageMin = Math.round(age / 60000);
   console.warn(`[WA-Watchdog] Bot stale seit ${ageMin}min — Alarm.`);
   try {
@@ -19867,13 +19650,15 @@ async function checkBotHeartbeat() {
         + `Admin-UI: https://whatsapp.rosenweg4303.ch`,
     }, 'whatsapp-bot-stale');
   } catch (err) {
-    waBotStaleAlertSent = false; // Versand gescheitert -> naechste Minute erneut
+    waBotStaleAlertSent = false; // Versand gescheitert -> erneut, aber frühestens in 6 h
     console.warn('[WA-Watchdog] Alarm konnte nicht gesendet werden:', err.message);
   }
 }
-// Entwarnung: Bot sendet wieder Heartbeats nach einem Stale-Alarm.
-async function sendBotRecovery(downMin) {
-  console.log(`[WA-Watchdog] Bot wieder erreichbar${downMin != null ? ` (Ausfall ~${downMin}min)` : ''} — Entwarnung.`);
+// Entwarnung: Bot sendet wieder Heartbeats nach einem Stale-Alarm (art 'erreichbar')
+// bzw. ist nach einem "nicht verbunden"-Alarm wieder mit WhatsApp verbunden (art 'verbunden').
+async function sendBotRecovery(downMin, art = 'erreichbar') {
+  const verbunden = art === 'verbunden';
+  console.log(`[WA-Watchdog] Bot wieder ${art}${downMin != null ? ` (Ausfall ~${downMin}min)` : ''} — Entwarnung.`);
   try {
     const adminEmails = await botAdminEmails();
     if (adminEmails.length === 0) return;
@@ -19881,17 +19666,21 @@ async function sendBotRecovery(downMin) {
     await loggedSendMail({
       from: MAIL_FROM,
       to: adminEmails.join(', '),
-      subject: '✅ WhatsApp-Bot wieder erreichbar',
-      text: `Entwarnung: Der WhatsApp-Bot sendet wieder Heartbeats.\n\n`
+      subject: verbunden ? '✅ WhatsApp-Bot wieder verbunden' : '✅ WhatsApp-Bot wieder erreichbar',
+      text: (verbunden
+        ? `Entwarnung: Der WhatsApp-Bot ist wieder mit WhatsApp verbunden. WhatsApp-Nachrichten gehen wieder raus.\n\n`
+        : `Entwarnung: Der WhatsApp-Bot sendet wieder Heartbeats.\n\n`)
         + (downMin != null ? `Ausfalldauer: ca. ${downMin} Minuten\n` : '')
         + `Status: ${waBotHeartbeat?.is_ready ? 'ready' : 'nicht ready'}\n`
         + `Telefon: ${phone}\n`
         + `Zeit: ${new Date().toLocaleString('de-CH')}\n`,
-    }, 'whatsapp-bot-recovered').catch(() => {});
+    }, verbunden ? 'whatsapp-bot-reconnected' : 'whatsapp-bot-recovered').catch(() => {});
     pushWhatsappBroadcast({
       emails: adminEmails,
       sourceType: 'bot-watchdog',
-      body: `✅ *WhatsApp-Bot wieder online*\nHeartbeat empfangen${downMin != null ? ` (Ausfall ~${downMin}min)` : ''}. Entwarnung.`,
+      body: verbunden
+        ? `✅ *WhatsApp-Bot wieder verbunden*${downMin != null ? ` (Unterbruch ~${downMin}min)` : ''}. Entwarnung.`
+        : `✅ *WhatsApp-Bot wieder online*\nHeartbeat empfangen${downMin != null ? ` (Ausfall ~${downMin}min)` : ''}. Entwarnung.`,
     }).catch(() => {});
   } catch (err) {
     console.warn('[WA-Watchdog] Entwarnung konnte nicht gesendet werden:', err.message);
@@ -28324,6 +28113,8 @@ async function initDB() {
       -- aus inbound-Mail an druckerr+, Delivery-Report aus Verteiler-Batch, etc.)
       ALTER TABLE email_log ADD COLUMN IF NOT EXISTS parent_message_id VARCHAR(500);
       ALTER TABLE email_log ADD COLUMN IF NOT EXISTS parent_source TEXT;
+      -- Mailcow-Gateway-User, über den die Mail ging (lib/mailgateway.js; 'zev' = zev@rosenweg9.ch)
+      ALTER TABLE email_log ADD COLUMN IF NOT EXISTS gateway VARCHAR(64);
       CREATE INDEX IF NOT EXISTS idx_email_log_trigger ON email_log (trigger, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_email_log_created ON email_log (created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_email_log_parent ON email_log (parent_message_id) WHERE parent_message_id IS NOT NULL;

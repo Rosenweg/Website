@@ -74,7 +74,7 @@ Mehr: [docs/website.md](docs/website.md), Anleitungen: [Ausschuss](docs/anleitun
 | Backend | Node.js-API (`api/server.js`, `api/routes/`), Docker-Image `ghcr.io/rosenweg/rosenweg-api` |
 | Anmeldung | Authentik (SSO), dazu persönliche Zugangstoken und Einmal-Codes |
 | Hosting | Proxmox-Cluster, ein LXC je Dienst; Frontends mit nginx, API mit Docker Compose |
-| E-Mail | Mailcow und Proxmox Mail Gateway; Versand der API über SMTP2GO |
+| E-Mail | Mailcow und Proxmox Mail Gateway; Versand der API über Mailcow (ein Gateway-User je Funktion) |
 | Rand | Traefik als Reverse-Proxy, DNS bei Cloudflare |
 
 Container, Adressen und Hostnamen: [docs/infrastruktur.md](docs/infrastruktur.md), [docs/routing.md](docs/routing.md).
