@@ -3577,22 +3577,44 @@ def _nc_name(ext):
     return f"Rosenweg Geraet {ext}"
 
 
-def _nextcloud_widerrufen(conn, ext):
-    """App-Passwort der Person auf diesem Geraet loeschen (beim Abmelden). Im Hintergrund."""
+# Je Nebenstelle nur ein Ausstellen bzw. Widerrufen gleichzeitig (XCover 2101, 27.11.2026): nach
+# der Anmeldung fragen mehrere Apps gleichzeitig ueber Rosenweg Geraet nach dem Zugang. Ohne Sperre
+# stellte jede Anfrage ein eigenes App-Passwort aus, und nc-token loescht dabei die vorherigen
+# gleichen Namens - das Telefon behielt ein schon geloeschtes (401, dann 429 Brute-Force-Sperre).
+_NC_SPERREN = {}
+_NC_SPERREN_LOCK = threading.Lock()
+
+
+def _nc_sperre(ext):
+    with _NC_SPERREN_LOCK:
+        return _NC_SPERREN.setdefault(ext, threading.Lock())
+
+
+def _nextcloud_widerrufen(conn, ext, sofort=False):
+    """App-Passwort der Person auf diesem Geraet loeschen (beim Abmelden). Im Hintergrund, unter
+    der Sperre der Nebenstelle (sonst koennte es ein gerade neu ausgestelltes treffen);
+    sofort=True: gleich hier (der Aufrufer haelt die Sperre schon)."""
     r = conn.execute("SELECT email FROM telefon_nextcloud WHERE ext = ?", (ext,)).fetchone()
     if not r:
         return
     conn.execute("DELETE FROM telefon_nextcloud WHERE ext = ?", (ext,))
     email = r["email"]
 
-    def los():
+    def widerruf():
         try:
             requests.post(f"{NC_TOKEN_URL}/widerrufen", json={"email": email, "name": _nc_name(ext)},
                           headers={"X-NC-Token-Secret": NC_TOKEN_SECRET}, timeout=60)
         except Exception as e:
             app.logger.warning("Nextcloud-Widerruf %s: %s", ext, type(e).__name__)
-    if NC_TOKEN_URL:
-        import threading
+
+    def los():
+        with _nc_sperre(ext):
+            widerruf()
+    if not NC_TOKEN_URL:
+        return
+    if sofort:
+        widerruf()
+    else:
         threading.Thread(target=los, daemon=True).start()
 
 
@@ -3606,6 +3628,11 @@ def telefon_nextcloud():
     f = _pin_fernet()
     if f is None or not NC_TOKEN_URL:
         return jsonify({"error": "Nextcloud-Zugang nicht eingerichtet"}), 503
+    with _nc_sperre(ext):   # parallele Anfragen warten und bekommen dann das gespeicherte
+        return _telefon_nextcloud_holen(ext, f)
+
+
+def _telefon_nextcloud_holen(ext, f):
     conn = db.connect()
     try:
         email, _ = _person_der_nebenstelle(conn, ext)
@@ -3623,8 +3650,8 @@ def telefon_nextcloud():
             conn.commit()
             return jsonify({"server": NEXTCLOUD_SERVER, "benutzer": r["benutzer"],
                             "app_passwort": f.decrypt(r["pw_enc"].encode()).decode()})
-        if r:   # andere Person: altes Passwort weg
-            _nextcloud_widerrufen(conn, ext)
+        if r:   # andere Person: altes Passwort weg, vor dem neuen (gleicher Name)
+            _nextcloud_widerrufen(conn, ext, sofort=True)
         try:
             a = requests.post(f"{NC_TOKEN_URL}/ausstellen", json={"email": email, "name": _nc_name(ext)},
                               headers={"X-NC-Token-Secret": NC_TOKEN_SECRET}, timeout=60)
