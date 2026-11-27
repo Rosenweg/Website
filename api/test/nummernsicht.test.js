@@ -141,3 +141,36 @@ test('Laden: fehlende Tabelle ergibt leere Liste statt Fehler', async () => {
   assert.equal((await interneNummernLaden(gut)).length, 1);
   interneNummernCacheLeeren();
 });
+
+test('Liegenschaftsverwaltung: verwaltete STWEGs im Portal, sonst nur intern', () => {
+  const { verwalteteStwegsLaden } = require('../lib/nummernsicht');
+  const verwaltung = { email: 'sb@verwaltung.example', groups: ['verwaltung'] };
+  assert.equal(darfEchteNummernSehen(verwaltung, fremd5, { kanal: 'portal', verwaltet: [5] }), true);
+  assert.equal(darfEchteNummernSehen(verwaltung, nachbar9, { kanal: 'portal', verwaltet: [5] }), false);
+  assert.equal(darfEchteNummernSehen(verwaltung, fremd5, { kanal: 'verzeichnis', verwaltet: [5] }), false);
+  assert.equal(darfEchteNummernSehen(verwaltung, { email: 'x@example.org' }, { kanal: 'portal', verwaltet: [5] }), false);
+  return verwalteteStwegsLaden({ query: async () => { throw new Error('nie gefragt'); } }, bewohner9)
+    .then(r => assert.deepEqual(r, []));
+});
+
+test('Liegenschaftsverwaltung: Zuordnung per Datenbank, Fehler = keine', async () => {
+  const { verwalteteStwegsLaden } = require('../lib/nummernsicht');
+  const verwaltung = { email: 'SB@verwaltung.example', groups: ['Verwaltung'] };
+  let param;
+  const pool = { query: async (_sql, p) => { param = p; return { rows: [{ stweg: 4 }, { stweg: 5 }] }; } };
+  assert.deepEqual(await verwalteteStwegsLaden(pool, verwaltung), [4, 5]);
+  assert.deepEqual(param, ['sb@verwaltung.example']);
+  assert.deepEqual(await verwalteteStwegsLaden({ query: async () => { throw new Error('x'); } }, verwaltung), []);
+});
+
+test('nummernSichtAus mit verwalteten STWEGs', () => {
+  const sicht = nummernSichtAus({ email: 'sb@verwaltung.example', groups: ['verwaltung'] }, 'portal', [], [5]);
+  assert.equal(sicht({ telefon: '079 000 00 00' }, fremd5).telefon, '079 000 00 00');
+  assert.equal(sicht({ telefon: '079 000 00 00' }, nachbar9).telefon, null);
+});
+
+test('Amtsnummer ist von aussen waehlbar, keine Anlagennummer', () => {
+  const { AMTSNUMMER, DIENST_TECHNIK } = require('../lib/nummernsicht');
+  assert.match(AMTSNUMMER.replace(/\s/g, ''), /^\+41\d{9}$/);
+  assert.equal(istAnlagennummer(DIENST_TECHNIK), true);
+});

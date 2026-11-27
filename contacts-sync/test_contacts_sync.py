@@ -9,7 +9,8 @@ cs = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cs)
 
 PERSONEN = [
-    {"name": "Anna Beispiel", "email": "familie@example.org", "emails": [], "adresse": "Musterweg 1"},
+    {"name": "Anna Beispiel", "email": "familie@example.org", "emails": [], "adresse": "Musterweg 1",
+     "tel": "+41 61 000 00 09", "mobile": "+41 79 000 00 09", "telefone": [{"nummer": "+41 61 000 00 08"}]},
     {"name": "Bruno Beispiel", "email": "familie@example.org", "emails": [], "adresse": None},
     {"name": "Clara Ohnenummer", "email": "clara@example.org", "emails": [], "adresse": None},
     {"name": "Dora Nichts", "email": None, "emails": [], "adresse": None},
@@ -56,6 +57,19 @@ class Verzeichnis(unittest.TestCase):
     def test_verwaltung_behaelt_geschaeftsnummern(self):
         self.assertIn("+41 61 000 00 01", self.karte("Eva Sachbearbeiterin"))
         self.assertIn("+41 61 000 00 00", self.karte("Muster Verwaltungen AG"))
+
+
+class PraesidentVoll(unittest.TestCase):
+    def test_volle_fassung_mit_echten_und_internen(self):
+        d = cs.verzeichnis(PERSONEN, VERW, VKONT, INTERNE, echte=True)
+        k = next(v for v in d.values() if "FN:Anna Beispiel\r\n" in v)
+        self.assertIn("309011", k)
+        self.assertIn("TEL;TYPE=CELL:+41 79 000 00 09", k)
+        self.assertIn("+41 61 000 00 08", k)
+
+    def test_geteilte_fassung_ohne_echte(self):
+        d = cs.verzeichnis(PERSONEN, VERW, VKONT, INTERNE)
+        self.assertFalse(any("000 00 09" in v or "000 00 08" in v for v in d.values()))
 
 
 class GleichePerson(unittest.TestCase):

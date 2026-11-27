@@ -862,7 +862,7 @@ app.post('/api/ki-search', authMiddleware, async (req, res) => {
     const searches = await Promise.allSettled([
       // Personen (nur für wohnungsverwaltung-Berechtigte)
       groups.some(g => g.toLowerCase() === 'technik' || g.toLowerCase() === 'praesident' || g.toLowerCase() === 'präsident' || g.toLowerCase() === 'verwaltung') || isAdmin
-        ? pool.query('SELECT id, name, email, telefon FROM personen WHERE de_norm(name) LIKE de_norm($1) OR de_norm(email) LIKE de_norm($1) LIMIT 5', [like])
+        ? pool.query('SELECT p.id, p.name, p.email, p.telefon, (SELECT array_agg(DISTINCT w.stweg) FROM wohnungen_kontakte k JOIN wohnungen w ON w.id = k.wohnung_id WHERE k.person_id = p.id AND k.archiviert_am IS NULL) AS stwegs FROM personen p WHERE de_norm(p.name) LIKE de_norm($1) OR de_norm(p.email) LIKE de_norm($1) LIMIT 5', [like])
         : { rows: [] },
       // Handwerker (alle eingeloggten User)
       pool.query('SELECT id, firma, kategorie, telefon, mobile, email FROM handwerker WHERE archiviert = false AND (de_norm(firma) LIKE de_norm($1) OR de_norm(kategorie) LIKE de_norm($1) OR de_norm(COALESCE(leistungen::text,\'\')) LIKE de_norm($1)) LIMIT 5', [like]),
@@ -899,9 +899,10 @@ app.post('/api/ki-search', authMiddleware, async (req, res) => {
     const [personen, handwerker, vollmachten, reklamationen, mails, verwaltungen, wohnungen, projekte] = searches.map(s => s.status === 'fulfilled' ? (s.value?.rows || []) : []);
 
     // Treffer normalisieren
-    // Personen aller STWEGs (Verwaltung): echte Nummer nur Technik/Praesident/selbst
+    // Personen aller STWEGs: echte Nummer nur Technik/Praesident/selbst und die
+    // Verwaltung fuer die STWEGs, die sie verwaltet (lib/nummernsicht.js)
     const sicht = await nummernSicht(req, pool);
-    for (const p0 of personen) { const p = sicht(p0); hits.push({ typ: 'Person', titel: p.name, sub: p.email || p.telefon || p.interne_nummer || '', url: '/personen.html', meta: p }); }
+    for (const p0 of personen) { const { stwegs, ...p1 } = p0; const p = sicht(p1, { email: p1.email, name: p1.name, stwegs: stwegs || [] }); hits.push({ typ: 'Person', titel: p.name, sub: p.email || p.telefon || p.interne_nummer || '', url: '/personen.html', meta: p }); }
     for (const h of handwerker) hits.push({ typ: 'Handwerker', titel: h.firma, sub: (h.kategorie || '') + (h.mobile ? ' · ' + h.mobile : ''), url: '/handwerker.html#' + h.id, meta: h });
     for (const v of vollmachten) hits.push({ typ: 'Vollmacht', titel: v.vollmachtgeber_name + ' → ' + v.bevollmaechtigter_name, sub: `${v.art} · ${v.status} · ${v.doc_hash}`, url: '/vollmachten.html', meta: v });
     for (const r of reklamationen) hits.push({ typ: 'Reklamation', titel: (r.beschreibung || '').slice(0, 80), sub: `STWEG ${r.stweg || '—'} · ${r.status}`, url: '/reklamationen.html', meta: r });
@@ -27051,14 +27052,15 @@ app.get('/api/vollmachten/lookup/personen', authMiddleware, async (req, res) => 
     const vollerZugriff = isTechnik(groups) || isPraesident(groups) || groups.some(g => g.toLowerCase() === 'verwaltung');
     if (vollerZugriff) {
       const r = await pool.query(
-        `SELECT id, name, email, telefon, mobile, adresse FROM personen
-          WHERE LOWER(name) LIKE LOWER($1) OR LOWER(email) LIKE LOWER($1)
-          ORDER BY name LIMIT 10`,
+        `SELECT p.id, p.name, p.email, p.telefon, p.mobile, p.adresse, (SELECT array_agg(DISTINCT w.stweg) FROM wohnungen_kontakte k JOIN wohnungen w ON w.id = k.wohnung_id WHERE k.person_id = p.id AND k.archiviert_am IS NULL) AS stwegs FROM personen p
+          WHERE LOWER(p.name) LIKE LOWER($1) OR LOWER(p.email) LIKE LOWER($1)
+          ORDER BY p.name LIMIT 10`,
         ['%' + q + '%'],
       );
       // Verwaltung sucht ueber alle STWEGs: echte Nummern nur Technik/Praesident/selbst
+      // und fuer die STWEGs, die diese Verwaltung verwaltet
       const sicht = await nummernSicht(req, pool);
-      return res.json({ personen: r.rows.map(p => sicht(p, { email: p.email, name: p.name })) });
+      return res.json({ personen: r.rows.map(({ stwegs, ...p }) => sicht(p, { email: p.email, name: p.name, stwegs: stwegs || [] })) });
     }
     // Alle anderen: nur Personen mit Wohnung in den eigenen STWEGs und nur
     // Name/E-Mail (reicht fuer die Bevollmaechtigten-Auswahl). Frueher bekam

@@ -143,8 +143,10 @@ def interne_nummern_fuer(interne, name, mails):
     return out
 
 
-def verzeichnis(personen, verw, vkont, interne):
-    """-> {uid: vcard}. Personen nur mit interner Nummer, nie mit Handy/Festnetz."""
+def verzeichnis(personen, verw, vkont, interne, echte=False):
+    """-> {uid: vcard}. Personen nur mit interner Nummer, nie mit Handy/Festnetz.
+    echte=True: zusaetzlich die echten Nummern — NUR fuer das persoenliche
+    Adressbuch von praesident@ (Entscheid Stefan 27.11.2026), nie fuer geteilte."""
     desired = {}
     for p in personen:
         name = (p.get("name") or "").strip()
@@ -155,11 +157,16 @@ def verzeichnis(personen, verw, vkont, interne):
             m = (m or "").strip()
             if m and m not in mails: mails.append(m)
         intern = interne_nummern_fuer(interne, name, mails)
-        if not intern and not mails: continue
+        tels = []
+        if echte:
+            for t in [p.get("tel"), p.get("mobile")] + arr(p.get("telefone")):
+                t = (t or "").strip()
+                if t and t not in tels and t not in intern: tels.append(t)
+        if not intern and not mails and not tels: continue
         u = str(uuid.uuid5(NS, name))
         # Kategorie "Bewohner": die Anlage liefert fuer solche Karten nur 3HHWWP
         # an die geteilten Telefone, auch falls hier je wieder etwas anderes stuende.
-        desired[u] = vc(u, name, fam, giv, [], mails, adr=(p.get("adresse") or "").replace("\n", ", "),
+        desired[u] = vc(u, name, fam, giv, tels, mails, adr=(p.get("adresse") or "").replace("\n", ", "),
                         intern=intern, cats=("Rosenweg", "Bewohner"))
     desired["rosenweg-pbx"] = vc("rosenweg-pbx", "Rosenweg", "Rosenweg", "", ["+41 61 551 01 52"], [], note="Telefonzentrale / Technik-Hotline")
     for v in verw:
@@ -217,7 +224,7 @@ def main():
     sogo_base = ENV.get("SOGO_BASE", "https://100.64.2.33/SOGo/dav/")
     sogo_host = ENV.get("SOGO_HOST", "mailcow.rosenweg9.ch")
     pgc = finde_pg_container()
-    personen = jq(pgc, "SELECT COALESCE(json_agg(json_build_object('name',name,'email',email,'emails',emails,'adresse',adresse)),'[]'::json) FROM personen WHERE COALESCE(name,'')<>''")
+    personen = jq(pgc, "SELECT COALESCE(json_agg(json_build_object('name',name,'tel',telefon,'mobile',mobile,'telefone',telefone,'email',email,'emails',emails,'adresse',adresse)),'[]'::json) FROM personen WHERE COALESCE(name,'')<>''")
     verw = jq(pgc, "SELECT COALESCE(json_agg(json_build_object('firma',firma_name,'tel',telefon,'email',email,'adresse',adresse,'website',website)),'[]'::json) FROM verwaltungen WHERE aktiv")
     vkont = jq(pgc, "SELECT COALESCE(json_agg(json_build_object('firma',v.firma_name,'name',k.name,'funktion',k.funktion,'email',k.email,'tel',k.telefon)),'[]'::json) FROM verwaltungs_kontakte k JOIN verwaltungen v ON v.id=k.verwaltung_id WHERE v.aktiv")
     try:
@@ -227,12 +234,14 @@ def main():
     if not interne:
         print("  Hinweis: keine internen Nummern (telefon_interne_nummern leer) — Personen ohne Telefonnummer")
     desired = verzeichnis(personen, verw, vkont, interne)
+    voll = verzeichnis(personen, verw, vkont, interne, echte=True)   # nur praesident@
     print("desired:", len(desired), "interne Nummern:", len(interne))
     carddav_sync(ctx, desired, "Nextcloud", nc_base, "kontakte", ENV["NC_KONTAKTE_PW"], True, nc_host)
     # SOGo: persoenliche Buecher nur hinzufuegen/aktualisieren (private Kontakte bleiben).
-    # Gleiche UIDs -> die Personenkarten mit echten Nummern werden dabei ersetzt.
+    # inbox@: nur interne Nummern (gleiche UIDs -> alte Karten mit echten Nummern werden
+    # ersetzt). praesident@: volle Fassung mit echten Nummern (Entscheid Stefan).
     carddav_sync(ctx, desired, "SOGo inbox@", sogo_base + "inbox@rosenweg4303.ch/Contacts/personal/", "inbox@rosenweg4303.ch", ENV["INBOX_PW"], False, sogo_host)
-    carddav_sync(ctx, desired, "SOGo praesident@", sogo_base + "praesident@rosenweg4303.ch/Contacts/personal/", "praesident@rosenweg4303.ch", ENV["PRAESIDENT_PW"], False, sogo_host)
+    carddav_sync(ctx, voll, "SOGo praesident@", sogo_base + "praesident@rosenweg4303.ch/Contacts/personal/", "praesident@rosenweg4303.ch", ENV["PRAESIDENT_PW"], False, sogo_host)
     tmp = "/tmp/zpush-vcards"
     if os.path.isdir(tmp): shutil.rmtree(tmp)
     os.makedirs(tmp)

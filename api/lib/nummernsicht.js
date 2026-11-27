@@ -11,6 +11,9 @@
 //                                        Personen im eigenen Haus (= eigene
 //                                        STWEG, dieselbe Gruppenlogik wie
 //                                        ueberall im Portal: lib/groups.js)
+//   - Liegenschaftsverwaltung            auf den Portalseiten die STWEGs, die
+//     (Gruppe verwaltung)                sie verwaltet (Vertrag in verwaltungen,
+//                                        gleiche Wahl wie findVerwaltungForStweg)
 //
 // Kein Portal sind Zugaenge, bei denen die Daten in einem anderen Verzeichnis
 // landen oder auf einem Geraet stehen, an dem sich mehrere anmelden: MCP und
@@ -71,7 +74,7 @@ function istTechnikOderPraesident(user) {
  * @param {object} person   { email?, emails?, stweg?, stwegs? } — stweg(s) = Haeuser/STWEGs der Person
  * @param {object} [opt]    { kanal: 'portal' | 'verzeichnis' } (Vorgabe: verzeichnis = streng)
  */
-function darfEchteNummernSehen(user, person = {}, { kanal = KANAL_VERZEICHNIS } = {}) {
+function darfEchteNummernSehen(user, person = {}, { kanal = KANAL_VERZEICHNIS, verwaltet = [] } = {}) {
   if (!user) return false;
   if (istTechnikOderPraesident(user)) return true;
   const ich = klein(user.email);
@@ -81,6 +84,7 @@ function darfEchteNummernSehen(user, person = {}, { kanal = KANAL_VERZEICHNIS } 
   }
   if (kanal !== KANAL_PORTAL) return false;
   const meine = getUserStwegs((user.groups || []).map(String));
+  for (const v of verwaltet || []) meine.add(Number(v));
   if (meine.size === 0) return false;
   const seine = [person.stweg, ...(Array.isArray(person.stwegs) ? person.stwegs : [])]
     .map(Number).filter((s) => Number.isFinite(s) && s > 0);
@@ -177,15 +181,55 @@ function interneNummernCacheLeeren() { cache = { zeit: 0, liste: null }; }
  * Angaben, nach denen entschieden wird ({email, name, stweg|stwegs}); fehlt sie,
  * gilt obj selbst. Die Liste der internen Nummern wird einmal je Anfrage geladen.
  */
-function nummernSichtAus(user, kanal, interne) {
+function nummernSichtAus(user, kanal, interne, verwaltet = []) {
   return (obj, person = obj) => nummernAusgeben(obj, {
-    sichtbar: darfEchteNummernSehen(user, person, { kanal }),
+    sichtbar: darfEchteNummernSehen(user, person, { kanal, verwaltet }),
     intern: interneNummerFinden(interne, person),
   });
 }
-async function nummernSicht(req, pool) {
-  return nummernSichtAus(req.user, nummernKanal(req), await interneNummernLaden(pool));
+
+function istVerwaltungsGruppe(user) {
+  return (user?.groups || []).some((g) => String(g).toLowerCase() === 'verwaltung');
 }
+
+// Welche STWEGs verwaltet die Liegenschaftsverwaltung, zu der `user` gehoert?
+// Je STWEG dieselbe Wahl wie findVerwaltungForStweg (server.js): aktiver Vertrag
+// fuer genau diese STWEG vor einem STWEG-uebergreifenden (stweg NULL). Die Person
+// gehoert dazu, wenn ihre E-Mail die der Firma oder eines Firmenkontakts ist.
+const VERWALTET_SQL = `
+  WITH s AS (SELECT generate_series(1, 8) AS stweg),
+  gewaehlt AS (
+    SELECT DISTINCT ON (s.stweg) s.stweg, v.id
+      FROM s JOIN verwaltungen v
+        ON v.aktiv = true AND (v.stweg = s.stweg OR v.stweg IS NULL)
+       AND (v.vertrag_von IS NULL OR v.vertrag_von <= CURRENT_DATE)
+       AND (v.vertrag_bis IS NULL OR v.vertrag_bis >= CURRENT_DATE)
+     ORDER BY s.stweg, (v.stweg IS NULL), v.id)
+  SELECT g.stweg FROM gewaehlt g JOIN verwaltungen v ON v.id = g.id
+   WHERE LOWER(v.email) = LOWER($1)
+      OR EXISTS (SELECT 1 FROM verwaltungs_kontakte k WHERE k.verwaltung_id = v.id AND LOWER(k.email) = LOWER($1))
+   ORDER BY g.stweg`;
+
+async function verwalteteStwegsLaden(pool, user) {
+  if (!istVerwaltungsGruppe(user) || !klein(user?.email)) return [];
+  try {
+    const r = await pool.query(VERWALTET_SQL, [klein(user.email)]);
+    return r.rows.map((x) => Number(x.stweg));
+  } catch {
+    return [];
+  }
+}
+
+async function nummernSicht(req, pool) {
+  const [interne, verwaltet] = await Promise.all([interneNummernLaden(pool), verwalteteStwegsLaden(pool, req.user)]);
+  return nummernSichtAus(req.user, nummernKanal(req), interne, verwaltet);
+}
+
+// Von aussen waehlbar ist nur die Amtsnummer: alle eingehenden Anrufe gehen auf
+// den Dienst Technik (intern 2000, pbx/asterisk-config/extensions.conf [inbound]),
+// eine Durchwahl auf 3HHWWP gibt es nicht.
+const AMTSNUMMER = process.env.PBX_AMTSNUMMER || '+41 61 551 01 52';
+const DIENST_TECHNIK = '2000';
 
 /** Eingang von der Anlage pruefen: nur 3HHWWP mit E-Mail und Name. */
 function interneNummernPruefen(liste) {
@@ -214,5 +258,6 @@ module.exports = {
   darfEchteNummernSehen, gleichePerson, interneNummerFinden,
   nummernAusgeben, nummernAusBodyEntfernen,
   interneNummernLaden, interneNummernCacheLeeren, interneNummernPruefen,
-  nummernSichtAus, nummernSicht,
+  nummernSichtAus, nummernSicht, verwalteteStwegsLaden, istVerwaltungsGruppe,
+  AMTSNUMMER, DIENST_TECHNIK,
 };

@@ -82,8 +82,11 @@ bleiben in der Personenverwaltung des Portals (`api/lib/nummernsicht.js`).
 - Verwaltungen und ihre Mitarbeitenden behalten ihre Geschäftsnummern.
 - Die Anlage gibt Karten der Kategorie `Bewohner` an die geteilten Telefone
   ohnehin nur mit 3HHWWP weiter (`pbx/api/app.py`, `_vcards_lesen`).
-- SOGo (inbox@, praesident@) und Z-Push bekommen dieselben Karten; gleiche UIDs,
-  also werden die alten Personenkarten mit echten Nummern dabei ersetzt.
+- SOGo inbox@ und Z-Push bekommen dieselben Karten; gleiche UIDs, also werden
+  die alten Personenkarten mit echten Nummern dabei ersetzt.
+- **Ausnahme praesident@** (Entscheid Stefan 27.11.2026): das persönliche
+  SOGo-Adressbuch des Präsidenten bekommt die volle Fassung, also interne
+  **und** echte Nummern.
 
 Tests: `python3 -m unittest discover -s contacts-sync` (auch in der CI).
 
