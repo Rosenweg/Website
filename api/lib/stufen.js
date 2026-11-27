@@ -77,4 +77,13 @@ function istKartenSitzung(req) {
   return KARTEN_ARTEN.has(req?.auth?.art);
 }
 
-module.exports = { STUFEN, RANG, FRISCH_MIN, KARTEN_ARTEN, jwtClaims, authTimeAus, anmeldung, stufeReicht, istKartenSitzung };
+/**
+ * Darf diese Anmeldung das Passwort wechseln? Nur frisch und nur mit einer
+ * Anmeldung, die Authentik gerade bestaetigt hat: Website-Sitzung oder
+ * Access-Token der Rosenweg-Apps.
+ */
+function passwortWechselErlaubt(auth) {
+  return auth?.stufe === 'frisch' && (auth.art === 'website' || auth.art === 'app');
+}
+
+module.exports = { STUFEN, RANG, FRISCH_MIN, KARTEN_ARTEN, jwtClaims, authTimeAus, anmeldung, stufeReicht, istKartenSitzung, passwortWechselErlaubt };
