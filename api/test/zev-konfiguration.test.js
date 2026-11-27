@@ -43,3 +43,16 @@ test('Seite: Alias-Felder schreibgeschützt ohne Recht, Fehler mit Servertext st
   const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   assert.match(src, /rechte: zevSeitenRechte\(req\.user, stweg\)/);
 });
+
+// Z6: Fehlermeldung nennt die Beschriftung der Seite, nicht den Feldnamen.
+test('Ungültige Mail: Meldung mit Feldbeschriftung statt internem Namen', () => {
+  const { zevMailFeldFehler, ZEV_MAIL_FELDER } = require('../lib/zev');
+  assert.equal(zevMailFeldFehler({ axova_email: 'info@beispiel.ch', archiv_mailbox: '' }), null);
+  const m = zevMailFeldFehler({ axova_email: 'kein-mail' });
+  assert.match(m, /Axova-Mailadresse/);
+  assert.ok(!/axova_email/.test(m));
+  const html = fs.readFileSync(path.join(__dirname, '..', '..', 'stweg3', 'pages', 'zev-smartme.html'), 'utf8');
+  for (const [, beschriftung] of ZEV_MAIL_FELDER) assert.ok(html.includes(beschriftung), `Seite kennt „${beschriftung}“`);
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.ok(!/Ungültige E-Mail in \$\{f\}/.test(src));
+});

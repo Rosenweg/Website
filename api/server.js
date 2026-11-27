@@ -8316,10 +8316,9 @@ app.put('/api/zev/config/:stweg', authMiddleware, requirePermission('wohnungsver
     if (alias.error) return res.status(alias.status).json({ error: alias.error });
     const aliasDomain = alias.domain, aliasPrefix = alias.prefix;
     // Empfaengeradressen landen als goto in Mailcow bzw. als Mail-Empfaenger.
-    for (const f of ['archiv_mailbox', 'invoice_email', 'axova_email', 'allgemein_email']) {
-      const v = trim(b[f]);
-      if (v && !require('./lib/zev').isValidEmail(v)) return res.status(400).json({ error: `Ungültige E-Mail in ${f}` });
-    }
+    // Meldung nennt die Beschriftung der Seite, nicht den Feldnamen (Z6).
+    const mailFehler = require('./lib/zev').zevMailFeldFehler(b);
+    if (mailFehler) return res.status(400).json({ error: mailFehler });
     await pool.query(
       `INSERT INTO zev_config (stweg, aktiv, alias_domain, alias_prefix, archiv_mailbox, invoice_email, axova_email, notizen, eigentuemer_sieht_mieter, allgemein_email, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())

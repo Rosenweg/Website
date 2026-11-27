@@ -47,6 +47,25 @@ function zevGotoTargets({ bewohnerEmail, archivMailbox, invoiceEmail }) {
   return [...set];
 }
 
+// Mail-Felder der ZEV-Konfiguration mit der Beschriftung der Seite (Z6):
+// Fehlermeldungen nennen die Beschriftung, nicht den internen Feldnamen.
+const ZEV_MAIL_FELDER = [
+  ['archiv_mailbox', 'Archiv-Postfach'],
+  ['invoice_email', 'Rechnungsadresse Verwaltung'],
+  ['axova_email', 'Axova-Mailadresse'],
+  ['allgemein_email', 'Allgemeinzähler-Empfänger'],
+];
+
+// Liefert null oder die Meldung fuer das erste ungueltige Mail-Feld.
+function zevMailFeldFehler(body) {
+  const b = body || {};
+  for (const [feld, beschriftung] of ZEV_MAIL_FELDER) {
+    const v = typeof b[feld] === 'string' ? b[feld].trim() : '';
+    if (v && !isValidEmail(v)) return `Ungültige E-Mail-Adresse im Feld „${beschriftung}“`;
+  }
+  return null;
+}
+
 // ─── Sicht auf die Online-Rechnungen („Meine ZEV-Rechnungen“) ─────────────
 // Bewohnende Partei einer Wohnung: ist ein aktiver Mieter da, sind das Mieter
 // und Bewohner (Eigentuemerin vermietet); sonst Bewohner und Eigentuemer
@@ -152,4 +171,4 @@ function zevWechselMelden(k, kontakteDerWohnung) {
   return !!occ && Number(occ.id) === Number(k.id);
 }
 
-module.exports = { zevSlug, zevAliasAddress, isValidEmail, zevGotoTargets, zevBewohnendePartei, zevDarfRechnungSehen, zevStwegFuerEmpfaenger, zevAliasAusFormular, zevAktuellerBewohner, zevWechselMelden };
+module.exports = { zevSlug, zevAliasAddress, isValidEmail, zevGotoTargets, zevBewohnendePartei, zevDarfRechnungSehen, zevStwegFuerEmpfaenger, zevAliasAusFormular, zevAktuellerBewohner, zevWechselMelden, zevMailFeldFehler, ZEV_MAIL_FELDER };
