@@ -1643,7 +1643,7 @@ def telefon_privat_nextcloud():
     # nc-token (CT 104) erlaubt im Namen nur [A-Za-z0-9 ._äöüÄÖÜ-]{3,64} - keine Klammern
     # (sonst 400 -> "Nextcloud-Zugang fehlgeschlagen" bei jeder App auf dem eigenen Handy).
     roh = re.sub(r"[^A-Za-z0-9 ._äöüÄÖÜ-]", " ", f"{app_name} auf {geraet}")
-    name = re.sub(r"\s+", " ", roh).strip()[:56] + " - " + pysecrets.token_hex(3)
+    name = re.sub(r"\s+", " ", roh).strip()[:55] + " - " + pysecrets.token_hex(3)
     try:
         a = requests.post(f"{NC_TOKEN_URL}/ausstellen", json={"email": konto["email"], "name": name},
                           headers={"X-NC-Token-Secret": NC_TOKEN_SECRET}, timeout=60)
