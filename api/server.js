@@ -17,7 +17,7 @@ const druckApi = require('./lib/druckapi'); // Druck-API CT 111 und Gotenberg (D
 const { STWEG_GROUPS, parseStweg, getUserStwegs, stwegFolderName, folderStwegNr, isTechnik, isPraesident, getAusschussStwegs, isAusschussForAny, canSeeVerwaltungKontakte,
   VERWALTUNG_GROUPS, istVerwaltungUebergang, verwaltungStwegs, isVerwaltungFor, isVerwaltungForAny, verwaltetAlleStwegs, istVerwaltungsGruppenName, getStwegsMitVerwaltung } = require('./lib/groups');
 const { nummernKanal, darfEchteNummernSehen, istTechnikOderPraesident, interneNummerFinden, nummernAusgeben, nummernAusBodyEntfernen, interneNummernLaden, interneNummernCacheLeeren, interneNummernPruefen, nummernSicht } = require('./lib/nummernsicht');
-const { zevAliasAddress, zevGotoTargets, zevDarfRechnungSehen, zevStwegFuerEmpfaenger } = require('./lib/zev');
+const { zevAliasAddress, zevGotoTargets, zevDarfRechnungSehen, zevStwegFuerEmpfaenger, zevAliasAusFormular } = require('./lib/zev');
 const reklMelder = require('./lib/reklamation-melder');
 const vollmachtRechte = require('./lib/vollmacht-rechte');
 const projekteRechte = require('./lib/projekte-rechte');
@@ -8164,29 +8164,23 @@ function requireStwegWrite(req, res, next) {
   next();
 }
 
+// Was die ZEV-Seite dem User anbietet (Z2): Schreiben (Ausschuss/Verwaltung
+// dieser STWEG, T/P) und Alias-Felder (nur T/P). Der Server prueft trotzdem selbst.
+function zevSeitenRechte(user, stweg) {
+  const g = user?.groups || [];
+  return { schreiben: stwegSchreibErlaubt(g, stweg), alias: isTechnik(g) || isPraesident(g) };
+}
+
 app.put('/api/zev/config/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, async (req, res) => {
   try {
     const stweg = parseInt(req.params.stweg); const b = req.body || {};
     const trim = v => (typeof v === 'string' && v.trim()) ? v.trim() : null;
     const prev = await loadZevConfig(stweg);
-    // Alias-Domain/-Prefix bestimmen, welche Mailcow-Aliase Sync und Orphan-
-    // Cleanup anfassen (prefix.*@domain wird ueberschrieben bzw. deaktiviert).
-    // Nur Technik/Praesident duerfen sie aendern; sonst bleiben die bisherigen
-    // Werte (Formular schickt sie immer mit).
+    // Alias-Domain/-Prefix nur Technik/Praesident (Z2, lib/zev.js).
     const cg = req.user?.groups || [];
-    const darfAlias = isTechnik(cg) || isPraesident(cg);
-    let aliasDomain = (trim(prev.alias_domain) || 'rosenweg9.ch').toLowerCase();
-    let aliasPrefix = (trim(prev.alias_prefix) || 'zev').toLowerCase();
-    if (darfAlias) {
-      aliasDomain = (trim(b.alias_domain) || 'rosenweg9.ch').toLowerCase();
-      aliasPrefix = (trim(b.alias_prefix) || 'zev').toLowerCase();
-      if (!/^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/.test(aliasDomain)) {
-        return res.status(400).json({ error: 'Ungültige Alias-Domain' });
-      }
-      if (!/^[a-z0-9][a-z0-9-]{0,30}$/.test(aliasPrefix)) {
-        return res.status(400).json({ error: 'Ungültiger Alias-Prefix' });
-      }
-    }
+    const alias = zevAliasAusFormular({ darfAlias: isTechnik(cg) || isPraesident(cg), prev, body: b });
+    if (alias.error) return res.status(alias.status).json({ error: alias.error });
+    const aliasDomain = alias.domain, aliasPrefix = alias.prefix;
     // Empfaengeradressen landen als goto in Mailcow bzw. als Mail-Empfaenger.
     for (const f of ['archiv_mailbox', 'invoice_email', 'axova_email', 'allgemein_email']) {
       const v = trim(b[f]);
@@ -8212,7 +8206,7 @@ app.get('/api/zev/wohnungen/:stweg', authMiddleware, requirePermission('wohnungs
   try {
     const stweg = parseInt(req.params.stweg);
     const cfg = await loadZevConfig(stweg);
-    res.json({ config: cfg, wohnungen: await resolveZevForStweg(stweg, cfg) });
+    res.json({ config: cfg, wohnungen: await resolveZevForStweg(stweg, cfg), rechte: zevSeitenRechte(req.user, stweg) });
   } catch (e) { console.error('[zev-wohnungen]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 

@@ -106,4 +106,26 @@ function zevStwegFuerEmpfaenger(recips, cfgs) {
   return eindeutig(aktiv);
 }
 
-module.exports = { zevSlug, zevAliasAddress, isValidEmail, zevGotoTargets, zevBewohnendePartei, zevDarfRechnungSehen, zevStwegFuerEmpfaenger };
+// ─── Alias-Domain/-Prefix aus dem Formular (Z2) ──────────────────────────
+// Bestimmen, welche Mailcow-Aliase Sync und Orphan-Cleanup anfassen; aendern
+// duerfen sie nur Technik/Praesident. Andere: bisherige Werte bleiben; schicken
+// sie abweichende Werte, gibt es eine verstaendliche Meldung statt stillem
+// Verwerfen. Rueckgabe { domain, prefix } oder { status, error }.
+function zevAliasAusFormular({ darfAlias, prev, body }) {
+  const t = v => (typeof v === 'string' && v.trim()) ? v.trim().toLowerCase() : null;
+  const alt = { domain: t(prev && prev.alias_domain) || 'rosenweg9.ch', prefix: t(prev && prev.alias_prefix) || 'zev' };
+  const b = body || {};
+  if (!darfAlias) {
+    const geaendert = (t(b.alias_domain) && t(b.alias_domain) !== alt.domain)
+      || (t(b.alias_prefix) && t(b.alias_prefix) !== alt.prefix);
+    if (geaendert) return { status: 403, error: 'Alias-Domain und Alias-Prefix ändern nur Technik oder Präsident. Die übrigen Felder bitte ohne diese Änderung speichern.' };
+    return alt;
+  }
+  const domain = t(b.alias_domain) || 'rosenweg9.ch';
+  const prefix = t(b.alias_prefix) || 'zev';
+  if (!ZEV_DOMAIN_RE.test(domain)) return { status: 400, error: 'Ungültige Alias-Domain (Beispiel: rosenweg9.ch)' };
+  if (!ZEV_PREFIX_RE.test(prefix)) return { status: 400, error: 'Ungültiger Alias-Prefix (Kleinbuchstaben, Ziffern, Bindestrich; Beispiel: zev)' };
+  return { domain, prefix };
+}
+
+module.exports = { zevSlug, zevAliasAddress, isValidEmail, zevGotoTargets, zevBewohnendePartei, zevDarfRechnungSehen, zevStwegFuerEmpfaenger, zevAliasAusFormular };

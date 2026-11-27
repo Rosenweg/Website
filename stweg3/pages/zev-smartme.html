@@ -59,6 +59,7 @@
                         <label class="block text-xs font-medium text-gray-600 mb-1">Alias-Prefix</label>
                         <input type="text" id="c-prefix" placeholder="zev" class="w-full border border-gray-300 rounded px-3 py-1.5">
                     </div>
+                    <p id="alias-hint" class="hidden md:col-span-2 -mt-2 text-xs text-gray-500">Alias-Domain und Alias-Prefix ändern nur Technik oder Präsident.</p>
                     <div>
                         <label class="block text-xs font-medium text-gray-600 mb-1">Archiv-Postfach (smart-me Kopie)</label>
                         <input type="email" id="c-archiv" placeholder="smartme@rosenweg9.ch" class="w-full border border-gray-300 rounded px-3 py-1.5">
@@ -86,7 +87,8 @@
                         <br><span class="text-xs text-gray-500">Aus = datensparsam: nur wer in der Wohnung wohnt, sieht die Rechnungen (bei Vermietung Mieter und Bewohner, sonst die Eigentümer selbst). An = zusätzlich die Eigentümer vermieteter Wohnungen. Vor dem Aktivieren Datenschutz/Verwaltung prüfen.</span></span>
                 </label>
                 <p class="text-xs text-gray-500 mt-3">Bewohner-Ansicht: <a href="zev-meine-rechnungen.html" class="text-amber-700 underline">Meine ZEV-Rechnungen</a> (jeder sieht nur seine eigenen).</p>
-                <div class="flex items-center gap-3 mt-4">
+                <p id="nur-lesen-hint" class="hidden text-sm text-gray-600 mt-4">Nur Ansicht: Ändern dürfen der Ausschuss und die Verwaltung dieser STWEG sowie Technik/Präsident.</p>
+                <div id="save-row" class="flex items-center gap-3 mt-4">
                     <button id="btn-save" class="bg-amber-600 text-white px-5 py-2 rounded-lg font-semibold hover:bg-amber-700 transition">Speichern</button>
                     <span id="save-msg" class="text-sm text-gray-500"></span>
                 </div>
@@ -142,6 +144,31 @@
     const STWEG = parseInt(new URLSearchParams(location.search).get('stweg'), 10) || 3; // N3: pro STWEG wiederverwendbar
     const $ = id => document.getElementById(id);
     let WOHNUNGEN = [];
+    let RECHTE = { schreiben: false, alias: false };
+    // Klartext aus der Server-Antwort statt nur „HTTP 4xx“ (Z2).
+    async function fehlerText(r) {
+        const d = await r.json().catch(() => ({}));
+        if (d && (d.error || d.reason)) return d.error || d.reason;
+        if (r.status === 401) return 'Bitte neu anmelden.';
+        if (r.status === 403) return 'Keine Berechtigung für diese Änderung.';
+        return 'Server antwortet mit Fehler ' + r.status + '. Bitte später erneut versuchen oder Technik fragen.';
+    }
+    function applyRechte(rechte) {
+        RECHTE = { schreiben: !!(rechte && rechte.schreiben), alias: !!(rechte && rechte.alias) };
+        for (const id of ['c-domain', 'c-prefix']) {
+            $(id).readOnly = !RECHTE.alias;
+            $(id).classList.toggle('bg-gray-100', !RECHTE.alias);
+            $(id).classList.toggle('text-gray-500', !RECHTE.alias);
+        }
+        $('alias-hint').classList.toggle('hidden', RECHTE.alias || !RECHTE.schreiben);
+        document.querySelectorAll('#content input').forEach(el => {
+            if (el.closest('#unz-section')) return;
+            if (!RECHTE.schreiben) el.disabled = true;
+        });
+        $('save-row').classList.toggle('hidden', !RECHTE.schreiben);
+        $('btn-sync').classList.toggle('hidden', !RECHTE.schreiben);
+        $('nur-lesen-hint').classList.toggle('hidden', RECHTE.schreiben);
+    }
     const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 
     function showGate(msg) {
@@ -195,9 +222,10 @@
             const r = await AuthentikAuth.apiFetch(`/api/zev/wohnungen/${STWEG}`, { cache: 'no-store' });
             if (r.status === 401) { showGate(); return; }
             if (r.status === 403) { showGate('Dein Konto ist nicht für die Wohnungsverwaltung freigeschaltet.'); return; }
-            if (!r.ok) throw new Error('HTTP ' + r.status);
+            if (!r.ok) throw new Error(await fehlerText(r));
             const data = await r.json();
             fillConfig(data.config || {});
+            applyRechte(data.rechte);
             WOHNUNGEN = data.wohnungen || [];
             renderWohnungen(data.wohnungen);
             loadUnzugeordnet();
@@ -212,8 +240,6 @@
         $('save-msg').textContent = 'Speichere …';
         const body = {
             aktiv: $('c-aktiv').checked,
-            alias_domain: $('c-domain').value.trim() || 'rosenweg9.ch',
-            alias_prefix: $('c-prefix').value.trim() || 'zev',
             archiv_mailbox: $('c-archiv').value.trim() || null,
             invoice_email: $('c-invoice').value.trim() || null,
             allgemein_email: $('c-allgemein').value.trim() || null,
@@ -221,11 +247,16 @@
             notizen: $('c-notizen').value.trim() || null,
             eigentuemer_sieht_mieter: $('c-eig-sieht-mieter').checked,
         };
+        // Alias-Felder nur mitschicken, wenn sie wirken (Technik/Präsident).
+        if (RECHTE.alias) {
+            body.alias_domain = $('c-domain').value.trim() || 'rosenweg9.ch';
+            body.alias_prefix = $('c-prefix').value.trim() || 'zev';
+        }
         try {
             const r = await AuthentikAuth.apiFetch(`/api/zev/config/${STWEG}`, {
                 method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
             });
-            if (!r.ok) throw new Error('HTTP ' + r.status);
+            if (!r.ok) { $('save-msg').textContent = 'Nicht gespeichert: ' + await fehlerText(r); return; }
             $('save-msg').textContent = '✓ Gespeichert';
             setTimeout(() => $('save-msg').textContent = '', 2500);
             load();
