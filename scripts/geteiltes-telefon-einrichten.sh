@@ -195,6 +195,16 @@ schritt "Zugriff auf alle Dateien (Aufräumen beim Abmelden)" a shell appops set
 schritt "Fernwartung: Band über allen Apps (Rosenweg Gerät)" a shell appops set $GERAET SYSTEM_ALERT_WINDOW allow
 schritt "\"Nicht stören\" kurz ausschalten (Telefon suchen)" a shell cmd notification allow_dnd $GERAET
 
+# Google-Einrichtung: "Einrichtung von <Telefon> abschließen" (com.google.android.setupwizard,
+# Kanal suw_consolidate_notification, XCover 27.11.2026) ist eine laufende Meldung, die der
+# Benachrichtigungs-Wächter nicht entfernen darf. Personalisierung als abgeschlossen markieren
+# (10 = USER_SETUP_PERSONALIZATION_COMPLETE) und die Meldung einmal wegräumen.
+schritt "Google-Einrichtung als abgeschlossen markiert" a shell settings put secure user_setup_personalization_state 10
+if a shell dumpsys notification 2>/dev/null | grep -q "pkg=com.google.android.setupwizard"; then
+  schritt "Meldung \"Einrichtung abschließen\" (Google) weggeräumt" a shell am force-stop com.google.android.setupwizard
+fi
+
+# Startseite
 # Startseite
 schritt "Launcher darf Widgets einbinden (Uhr auf der Startseite)" a shell appwidget grantbind --package ch.rosenweg4303.home --user 0
 
@@ -215,6 +225,7 @@ echo "  SIP-Konten:       $(a shell dumpsys telecom 2>/dev/null | grep -c "$SIPK
 echo "  Browser:          $(rolle android.app.role.BROWSER)"
 echo "  Seitentaste:      $(a shell settings get global function_key_config_longpress_type | tr -d '\r')/$(a shell settings get global power_button_long_press | tr -d '\r') (soll 0/1)"
 echo "  Netz+Sicherheit:  $(a shell settings get secure lock_function_val | tr -d '\r') (soll 0)"
+echo "  Google-Einrichtung: $(a shell settings get secure user_setup_personalization_state | tr -d '\r') (soll 10), Meldung: $(a shell dumpsys notification 2>/dev/null | grep -c "pkg=com.google.android.setupwizard" | tr -d '\r') (soll 0)"
 echo "  adb über TCP:     Port $(a shell getprop service.adb.tcp.port | tr -d '\r') (soll 5555)"
 # Nur bekannte Schlüssel: ohne ro.adb.secure=1 nähme adbd jeden Rechner an (Userbuild: 1)
 SICHER=$(a shell getprop ro.adb.secure | tr -d '\r')
