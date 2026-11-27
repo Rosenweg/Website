@@ -22,6 +22,7 @@
 const express = require('express');
 const { pool } = require('../lib/db');
 const { authMiddleware, requireUserLogin } = require('../middleware/auth');
+const kartenAdmin = require('../lib/kartenadmin'); // Admin-Aktionen mit der Karte
 const { isTechnik, isPraesident } = require('../lib/groups');
 const { schluesselPruefen, alsZeile, githubSchluessel, GITHUB_BENUTZER } = require('../lib/sshkeys');
 const { queueWhatsappMessage, resolveTechnikWhatsappGroupId } = require('../lib/whatsapp');
@@ -85,8 +86,9 @@ function requireHostToken(req, res, next) {
 
 function requireTechnik(req, res, next) {
   const groups = req.user?.groups || [];
-  if (isTechnik(groups) || isPraesident(groups)) return next();
-  return res.status(403).json({ error: 'Nur für Technik oder Präsident' });
+  if (!isTechnik(groups) && !isPraesident(groups)) return res.status(403).json({ error: 'Nur für Technik oder Präsident' });
+  kartenAdmin.vermerken(req, res); // mit der Karte: Protokoll + Quittung (lib/kartenadmin.js)
+  next();
 }
 
 // 'Präsident' und 'praesident' sind dieselbe Gruppe — in der Matrix
@@ -278,7 +280,7 @@ router.get('/me', authMiddleware, requireUserLogin, async (req, res) => {
 });
 
 // POST /api/ssh/me/schluessel — einen Schluessel von Hand hinterlegen
-router.post('/me/schluessel', authMiddleware, requireUserLogin, async (req, res) => {
+router.post('/me/schluessel', authMiddleware, kartenAdmin.bestaetigungVerlangen, requireUserLogin, async (req, res) => {
   try {
     const { pubkey, label } = req.body || {};
     let k;
@@ -312,7 +314,7 @@ router.delete('/me/schluessel/:id', authMiddleware, requireUserLogin, async (req
 });
 
 // PUT /api/ssh/me/github  { benutzer: 'name' | null }
-router.put('/me/github', authMiddleware, requireUserLogin, async (req, res) => {
+router.put('/me/github', authMiddleware, kartenAdmin.bestaetigungVerlangen, requireUserLogin, async (req, res) => {
   try {
     const roh = req.body?.benutzer;
     const benutzer = roh === null || roh === '' ? null : String(roh).trim();
@@ -329,7 +331,7 @@ router.put('/me/github', authMiddleware, requireUserLogin, async (req, res) => {
 });
 
 // POST /api/ssh/me/github/abgleich — von Hand nachziehen
-router.post('/me/github/abgleich', authMiddleware, requireUserLogin, async (req, res) => {
+router.post('/me/github/abgleich', authMiddleware, kartenAdmin.bestaetigungVerlangen, requireUserLogin, async (req, res) => {
   try {
     const u = await pool.query(`SELECT github_benutzer FROM users WHERE id = $1`, [req.user.id]);
     const benutzer = u.rows[0]?.github_benutzer;
@@ -734,7 +736,7 @@ router.get('/matrix', authMiddleware, requireTechnik, async (req, res) => {
 });
 
 // POST /api/ssh/matrix — Regel anlegen oder aendern
-router.post('/matrix', authMiddleware, requireTechnik, async (req, res) => {
+router.post('/matrix', authMiddleware, requireTechnik, kartenAdmin.bestaetigungVerlangen, async (req, res) => {
   try {
     const { host_id, subjekt_typ, subjekt, ssh, sudo, notiz } = req.body || {};
     if (!['gruppe', 'benutzer'].includes(subjekt_typ)) {
@@ -770,7 +772,7 @@ router.post('/matrix', authMiddleware, requireTechnik, async (req, res) => {
 });
 
 // DELETE /api/ssh/matrix/:id
-router.delete('/matrix/:id', authMiddleware, requireTechnik, async (req, res) => {
+router.delete('/matrix/:id', authMiddleware, requireTechnik, kartenAdmin.bestaetigungVerlangen, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'Ungültige ID' });

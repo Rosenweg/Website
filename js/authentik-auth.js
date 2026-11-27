@@ -302,6 +302,7 @@ const AuthentikAuth = {
         localStorage.setItem(this.USER_KEY, JSON.stringify(data.user));
         if (!localStorage.getItem(this.SESSION_KEY)) localStorage.setItem(this.SESSION_KEY, token);
         this._setSharedToken(token); // Cookie-Ablauf mitschieben (Sliding-Session)
+        this._offeneBestaetigungen(token);
         return true;
       }
       // Nur ein klares 401 beendet die Sitzung; ein Serverfehler darf nicht
@@ -347,7 +348,66 @@ const AuthentikAuth = {
       this.logout();
       return resp;
     }
+    // 202 { bestaetigung: 'email' } (api/lib/kartenadmin.js): eine heikle Aktion mit
+    // der Rosenweg-Karte wartet auf die Bestaetigung per E-Mail-Link. Gut sichtbar
+    // sagen, dass noch nichts geschehen ist.
+    if (resp.status === 202) this._bestaetigungPruefen(resp);
     return resp;
+  },
+
+  async _bestaetigungPruefen(resp) {
+    let data = null;
+    try { data = await resp.clone().json(); } catch (_) { return; }
+    if (!data || data.bestaetigung !== 'email') return;
+    this._bestaetigungZeigen(this.bestaetigungsText(data), true);
+  },
+
+  /** Gleicher Text wie in den Apps (rosenweg_basis): was noch fehlt und bis wann. */
+  bestaetigungsText(data) {
+    let bis = '';
+    try { bis = new Date(data.ablauf).toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Zurich' }); } catch (_) {}
+    return 'Diese Aktion muss noch bestätigt werden – wir haben dir eine E-Mail mit einem Bestätigungslink geschickt'
+      + (bis ? ' (gültig bis ' + bis + ')' : '') + '. Erst danach wird sie ausgeführt.';
+  },
+
+  _bestaetigungZeigen(text, dringend) {
+    try {
+      if (typeof document === 'undefined' || !document.createElement) return;
+      const zeigen = () => {
+        let box = document.getElementById('rw-bestaetigung');
+        if (!box) {
+          box = document.createElement('div');
+          box.id = 'rw-bestaetigung';
+          box.setAttribute('role', 'alert');
+          box.style.cssText = 'position:fixed;left:50%;top:1rem;transform:translateX(-50%);z-index:99999;max-width:38rem;background:#dbeafe;color:#1e3a8a;border:2px solid #2563eb;border-radius:.5rem;padding:.8rem 1rem;font:15px/1.45 system-ui,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.2)';
+          document.body.appendChild(box);
+        }
+        box.textContent = (dringend ? '✉️ ' : '') + text + ' ';
+        const x = document.createElement('button');
+        x.textContent = 'OK';
+        x.style.cssText = 'margin-left:.5rem;background:#2563eb;color:#fff;border:none;border-radius:.35rem;padding:.25rem .8rem;cursor:pointer;font-weight:600';
+        x.onclick = () => box.remove();
+        box.appendChild(x);
+      };
+      if (document.body) zeigen(); else document.addEventListener('DOMContentLoaded', zeigen);
+    } catch (_) {}
+  },
+
+  // Hinweis-Band: offene Bestaetigungen der Person (GET /api/me/bestaetigungen), hoechstens einmal je Minute
+  async _offeneBestaetigungen(token) {
+    try {
+      const jetzt = Date.now();
+      const zuletzt = Number(sessionStorage.getItem('rw_best_geprueft') || 0);
+      if (jetzt - zuletzt < 60 * 1000) return;
+      sessionStorage.setItem('rw_best_geprueft', String(jetzt));
+      const r = await fetch('/api/me/bestaetigungen', { headers: { Authorization: `Bearer ${token}` } });
+      if (!r.ok) return;
+      const offen = (await r.json()).offen || [];
+      if (!offen.length) return;
+      const n = offen.length;
+      this._bestaetigungZeigen(`${n} ${n === 1 ? 'Aktion wartet' : 'Aktionen warten'} auf deine Bestätigung per E-Mail`
+        + ` (zuletzt: ${offen[0].text}). Ausgelöst mit deiner Rosenweg-Karte – warst du das nicht, im Link „Ablehnen – Karte sperren“ wählen.`, false);
+    } catch (_) {}
   },
 
   /**

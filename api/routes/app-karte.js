@@ -718,7 +718,7 @@ async function karteZugangPruefen(pool, token, ip) {
   let r;
   try {
     r = await pool.query(
-      `SELECT s.id, s.app, s.art, s.groups_json, u.id AS user_id, u.email, u.name, u.wohnung, u.stweg
+      `SELECT s.id, s.app, s.art, s.groups_json, s.app_name, s.geraet_name, s.karte_anzeige, u.id AS user_id, u.email, u.name, u.wohnung, u.stweg
          FROM app_karten_sitzungen s JOIN users u ON u.id = s.user_id
         WHERE s.zugang_hash = $1 AND s.revoked_at IS NULL AND s.zugang_bis > NOW() AND s.expires_at > NOW()
           AND COALESCE(u.active, true)`, [ak.hash(token)]);
@@ -737,7 +737,7 @@ async function karteZugangPruefen(pool, token, ip) {
       id: z.user_id, user_id: z.user_id, email: z.email, name: z.name, wohnung: z.wohnung, stweg: z.stweg,
       role, isAdmin: role === 'admin', groups, auth_source: z.art === 'qr' ? 'app-qr' : z.art === 'handy' ? 'app-handy' : 'karte', auth_client: 'rosenweg-apps',
     },
-    sitzung: { id: z.id, app: z.app, art: z.art || 'karte' },
+    sitzung: { id: z.id, app: z.app, art: z.art || 'karte', app_name: z.app_name || '', geraet: z.geraet_name || '', karte: z.karte_anzeige || '' },
   };
 }
 

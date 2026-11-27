@@ -10,6 +10,8 @@ const { istAnlageToken, anlageTokenPruefen } = require('../lib/anlagetoken');
 const { isTechnik, isPraesident } = require('../lib/groups');
 const { karteZugangPruefen } = require('../routes/app-karte');
 const appKennungLib = require('../lib/appkennung');
+const { anmeldung, jwtClaims, authTimeAus } = require('../lib/stufen');
+const kartenAdmin = require('../lib/kartenadmin');
 
 // Pfade, die einen Ausweis erzeugen oder ändern — für Zugangstoken tabu.
 // Relativ zu /api/, Präfix-Vergleich auf Segmentgrenze.
@@ -103,6 +105,7 @@ async function authMiddleware(req, res, next) {
       };
       req.user.isAdmin = req.user.role === 'admin' || req.user.groups.some(g => g.toLowerCase() === 'technik');
       req.pat = { id: row.id, name: row.name, scopes: row.scopes };
+      req.auth = anmeldung('pat');
       // Innerhalb eines Routers (/api/ssh, /api/stations …) ist req.path nur der
       // Rest hinter dem Mount — der Scope-Check würde dort das falsche Segment
       // lesen. baseUrl + path ergibt in beiden Fällen den vollen Pfad.
@@ -172,6 +175,8 @@ async function authMiddleware(req, res, next) {
       req.user.isAdmin = zeile.role === 'admin' || isTechnik(groups) || isPraesident(groups);
       // requireUserLogin sperrt Token-Verwaltung & Co. auch fuer diesen Weg
       req.anlage = { ext: String(p.ext || ''), paket: String(p.paket || ''), token };
+      req.auth = anmeldung('anlage');
+      req.absenderIp = absenderIp(req);
       return weiter(zeile.email || 'anlage:' + req.anlage.ext, 'anlage');
     }
 
@@ -193,6 +198,9 @@ async function authMiddleware(req, res, next) {
       }
       req.user = k.user;
       req.appKarte = k.sitzung;
+      // Karte = Schluessel (volle Rechte); Admin-Aktionen protokolliert lib/kartenadmin.js
+      req.auth = anmeldung(k.sitzung.art || 'karte');
+      req.absenderIp = absenderIp(req);
       // Eine Sitzung gehoert genau einer App: meldet sich eine andere, auffallen lassen
       if (req.rosenwegApp && k.sitzung.app && req.rosenwegApp.paket !== String(k.sitzung.app).toLowerCase()) {
         console.warn(`[app-kennung] Sitzung ${k.sitzung.id} gehoert ${k.sitzung.app}, Anfrage meldet ${req.rosenwegApp.text}`);
@@ -200,9 +208,35 @@ async function authMiddleware(req, res, next) {
       return weiter(req.user.email || 'karte:' + k.sitzung.id, k.sitzung.art || 'karte');
     }
 
+    // 0d. Per E-Mail bestaetigte Karten-Aktion (lib/kartenadmin.js): Einmal-Ausweis,
+    //     60 s, genau Methode + Pfad der gespeicherten Aktion; Gruppen frisch aus
+    //     Authentik (beim Bestaetigen geholt). Die Route prueft alles wie sonst.
+    if (token.startsWith(kartenAdmin.AUSWEIS_PRAEFIX)) {
+      if (req.kartenBestaetigung && req.kartenBestaetigung.token === token) return next(); // zweiter authMiddleware
+      const vollerPfad = ((req.baseUrl || '') + req.path).toLowerCase()
+        .replace(/\/{2,}/g, '/').replace(/^\/api\//, '').replace(/^\/+|\/+$/g, '');
+      const b = kartenAdmin.ausweisEinloesen(token, req.method, vollerPfad);
+      if (!b) return res.status(401).json({ error: 'Bestaetigung abgelaufen' });
+      const u = await pool.query(
+        `SELECT id, email, name, wohnung, stweg, role, active FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1`, [b.email]);
+      const zeile = u.rows[0];
+      if (!zeile || zeile.active === false) return res.status(401).json({ error: 'Konto unbekannt oder gesperrt' });
+      const groups = (b.groups || []).map(String);
+      req.user = {
+        id: zeile.id, user_id: zeile.id, email: zeile.email, name: zeile.name,
+        wohnung: zeile.wohnung, stweg: zeile.stweg, groups,
+        role: isTechnik(groups) || isPraesident(groups) ? 'admin' : 'bewohner', auth_source: 'karten-bestaetigung',
+      };
+      req.user.isAdmin = req.user.role === 'admin';
+      req.auth = anmeldung('bestaetigt');
+      req.kartenBestaetigung = { id: b.id, token };
+      return weiter(zeile.email || 'bestaetigung:' + b.id, 'bestaetigt');
+    }
+
     // 1. Try local session token first
     const result = await pool.query(
-      `SELECT s.user_id, s.expires_at, u.name, u.email, u.role, u.wohnung, u.stweg, u.groups_json
+      `SELECT s.user_id, s.expires_at, s.id_token AS _id_token, EXTRACT(EPOCH FROM (NOW() - s.created_at))::int AS _sitzung_alter_s,
+              u.name, u.email, u.role, u.wohnung, u.stweg, u.groups_json
        FROM sessions s JOIN users u ON u.id = s.user_id
        WHERE s.token = $1 AND s.expires_at > NOW() AND u.active IS NOT FALSE`,
       [token]
@@ -210,6 +244,19 @@ async function authMiddleware(req, res, next) {
     if (result.rows.length > 0) {
       req.user = result.rows[0];
       req.user.id = req.user.user_id; // Ensure both .id and .user_id are set consistently
+      // Anmelde-Stufe (lib/stufen.js, nur Auskunft): Browser-Login ueber Authentik
+      // (id_token) = konto, frisch nach auth_time des id_token (Ersatz: Alter der
+      // Sitzung, in SQL gerechnet). OTP-Sitzung (ohne id_token) = konto, nie frisch.
+      {
+        const idToken = req.user._id_token;
+        const alter = Number(req.user._sitzung_alter_s);
+        const authTime = idToken
+          ? (authTimeAus(jwtClaims(idToken)) || (Number.isFinite(alter) ? Math.floor(Date.now() / 1000 - alter) : null))
+          : null;
+        req.auth = anmeldung(idToken ? 'website' : 'otp', authTime);
+        delete req.user._id_token;
+        delete req.user._sitzung_alter_s;
+      }
       req.user.isAdmin = req.user.role === 'admin';
       req.user.groups = (() => { try { return JSON.parse(req.user.groups_json || '[]'); } catch { return []; } })();
       // Sliding-Expiry: aktive Sessions automatisch verlaengern (kein staendiges
@@ -233,6 +280,8 @@ async function authMiddleware(req, res, next) {
       if (user?.gebremst) return res.status(429).json({ error: 'Zu viele Anmeldeversuche — bitte kurz warten.' });
       if (user) {
         req.user = user;
+        // userinfo hat genau dieses Token bestaetigt -> auth_time aus seinen Claims
+        req.auth = anmeldung('app', authTimeAus(jwtClaims(token)));
         return weiter(user.email || user.name || 'unknown', 'app');
       }
       return res.status(401).json({ error: 'Anmeldung abgelaufen' });
@@ -243,6 +292,7 @@ async function authMiddleware(req, res, next) {
       const user = await validateAuthentikToken(token);
       if (user) {
         req.user = user;
+        req.auth = anmeldung('authentik', authTimeAus(jwtClaims(token)));
         return weiter(user.email || user.name || 'unknown', 'authentik');
       }
     }
@@ -254,13 +304,21 @@ async function authMiddleware(req, res, next) {
   }
 }
 
+// Admin-Waechter vermerken Admin-Aktionen mit der Karte (Protokoll + Quittung,
+// lib/kartenadmin.js). Die Karte hat volle Rechte; gesperrt wird nichts.
 function adminOnly(req, res, next) {
   if (!req.user?.isAdmin) return res.status(403).json({ error: 'Admin-Rechte erforderlich' });
+  kartenAdmin.vermerken(req, res);
   next();
 }
 
+// Seiten der Rechteverwaltung, deren requirePermission als Admin-Bereich gilt
+const ADMIN_SEITEN = new Set(['rechteverwaltung', 'bewohner-verwaltung', 'proxmox-verwaltung', 'mail-approval-config']);
+
 function requirePermission(page, level = 'read') {
-  return async (req, res, next) => {
+  const vermerk = ADMIN_SEITEN.has(page);
+  return async (req, res, weiter) => {
+    const next = () => { if (vermerk) kartenAdmin.vermerken(req, res); weiter(); };
     const groups = req.user.groups || (() => { try { return JSON.parse(req.user.groups_json || '[]'); } catch { return []; } })();
     // Technik and Präsident always have full access
     if (groups.some(g => { const gl = g.toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident'; })) return next();
@@ -290,4 +348,4 @@ function requireUserLogin(req, res, next) {
   next();
 }
 
-module.exports = { authMiddleware, adminOnly, requirePermission, requireUserLogin, scopeErlaubt, absenderIp };
+module.exports = { authMiddleware, adminOnly, requirePermission, requireUserLogin, scopeErlaubt, absenderIp, ADMIN_SEITEN };

@@ -31,6 +31,7 @@ const express = require('express');
 const crypto = require('crypto');
 const { pool } = require('../lib/db');
 const { authMiddleware } = require('../middleware/auth');
+const kartenAdmin = require('../lib/kartenadmin'); // Admin-Aktionen mit der Karte
 const { isTechnik } = require('../lib/groups');
 const P = require('../lib/stationprotokoll');
 const kerberos = require('../lib/kerberos');
@@ -279,8 +280,9 @@ module.exports = function stationenV2(intern) {
   // auch Präsident und Admin zulässt: ein Neustart oder Abmelden trifft
   // jemanden, der gerade davorsitzt (Stefan, 27.11.2026: „nur Technik").
   function nurTechnikGruppe(req, res, next) {
-    if (isTechnik(req.user?.groups || [])) return next();
-    return res.status(403).json({ error: 'Befehle an Geräte nur für die Gruppe technik' });
+    if (!isTechnik(req.user?.groups || [])) return res.status(403).json({ error: 'Befehle an Geräte nur für die Gruppe technik' });
+    kartenAdmin.vermerken(req, res); // mit der Karte: Protokoll + Quittung
+    next();
   }
   const wer = (req) => req.user?.email || req.user?.name || 'unbekannt';
   const OFFEN_MAX = 10;

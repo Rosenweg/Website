@@ -63,6 +63,7 @@ const { pool } = require('../lib/db');
 const { authenticateAD } = require('../lib/adauth');
 const { windowsRechnerLesen, adLesbar, STANDORT_REGELN } = require('../lib/adrechner');
 const { authMiddleware } = require('../middleware/auth');
+const kartenAdmin = require('../lib/kartenadmin'); // Admin-Aktionen mit der Karte
 const { isTechnik, isPraesident } = require('../lib/groups');
 const {
   STATION_TYPES, VERWALTUNGS_TYPEN, DRUCKER, buildConfig, missingSecrets, hausWlan,
@@ -468,8 +469,9 @@ function darfOsVeroeffentlichen(req, res, next) {
 
 function nurTechnik(req, res, next) {
   const groups = req.user?.groups || [];
-  if (req.user?.isAdmin || isTechnik(groups) || isPraesident(groups)) return next();
-  return res.status(403).json({ error: 'Nur Technik darf Stationen verwalten' });
+  if (!(req.user?.isAdmin || isTechnik(groups) || isPraesident(groups))) return res.status(403).json({ error: 'Nur Technik darf Stationen verwalten' });
+  kartenAdmin.vermerken(req, res); // mit der Karte: Protokoll + Quittung (lib/kartenadmin.js)
+  next();
 }
 
 // ─── Anmeldung (Installer) ──────────────────────────────────────────
@@ -2081,7 +2083,7 @@ const uhrzeit = (d) => new Date(d).toLocaleTimeString('de-CH',
 // POST /api/stations/admin/:id/ssh-wartung — freigeben oder verlaengern.
 // Ein zweiter Druck auf den Knopf verlaengert auf zwei Stunden ab jetzt, statt
 // eine zweite Freigabe danebenzustellen.
-router.post('/admin/:id/ssh-wartung', authMiddleware, nurTechnik, nichtFuerWindows, a(async (req, res) => {
+router.post('/admin/:id/ssh-wartung', authMiddleware, nurTechnik, kartenAdmin.bestaetigungVerlangen, nichtFuerWindows, a(async (req, res) => {
   await ensureSchema();
   const wer = req.user?.email || req.user?.name || 'unbekannt';
   const st = await pool.query(
@@ -2134,7 +2136,7 @@ router.get('/admin/wartungsschluessel', authMiddleware, nurTechnik, a(async (req
   res.json({ schluessel: r.rows });
 }));
 
-router.post('/admin/wartungsschluessel', authMiddleware, nurTechnik, a(async (req, res) => {
+router.post('/admin/wartungsschluessel', authMiddleware, nurTechnik, kartenAdmin.bestaetigungVerlangen, a(async (req, res) => {
   await ensureSchema();
   const wer = req.user?.email || req.user?.name || 'unbekannt';
   let k;
