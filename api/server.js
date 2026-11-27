@@ -14834,12 +14834,24 @@ app.get('/api/auslagen-stundensatz', authMiddleware, requirePermission('auslagen
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
+// Stundensatz aendern (Befund W4): Technik/Praesident jede STWEG und den Satz
+// ohne STWEG (gilt fuer alle); der Ausschuss nur die eigene(n) STWEG(s).
+function darfStundensatz(groups, stweg) {
+  const g = groups || [];
+  if (isTechnik(g) || isPraesident(g)) return true;
+  if (stweg === null || stweg === undefined) return false;
+  return getAusschussStwegs(g).has(Number(stweg));
+}
+
 app.put('/api/auslagen-stundensatz', authMiddleware, requirePermission('auslagen-stundensatz', 'write'), async (req, res) => {
   try {
     const b = req.body || {};
-    const stwegInt = b.stweg === null || b.stweg === '' ? null : parseInt(b.stweg, 10);
-    if (b.stweg !== null && b.stweg !== '' && (!Number.isFinite(stwegInt) || stwegInt < 1 || stwegInt > 8)) {
-      return res.status(400).json({ error: 'Ungueltiger STWEG' });
+    const stwegInt = b.stweg === null || b.stweg === '' || b.stweg === undefined ? null : parseInt(b.stweg, 10);
+    if (b.stweg !== null && b.stweg !== '' && b.stweg !== undefined && (!Number.isFinite(stwegInt) || stwegInt < 1 || stwegInt > 8)) {
+      return res.status(400).json({ error: 'Ungültige STWEG' });
+    }
+    if (!darfStundensatz(req.user?.groups, stwegInt)) {
+      return res.status(403).json({ error: stwegInt === null ? 'Den Satz für alle STWEG ändern nur Technik/Präsident' : 'Nur den Stundensatz der eigenen STWEG' });
     }
     const satz = Number(b.satz_chf);
     if (!Number.isFinite(satz) || satz <= 0 || satz > 500) return res.status(400).json({ error: 'Stundensatz muss 0 < satz <= 500' });
@@ -14858,7 +14870,11 @@ app.put('/api/auslagen-stundensatz', authMiddleware, requirePermission('auslagen
 
 app.delete('/api/auslagen-stundensatz/:id', authMiddleware, requirePermission('auslagen-stundensatz', 'write'), async (req, res) => {
   try {
-    await pool.query('DELETE FROM auslagen_stundensatz WHERE id = $1', [parseInt(req.params.id, 10)]);
+    const id = parseInt(req.params.id, 10);
+    const alt = await pool.query('SELECT stweg FROM auslagen_stundensatz WHERE id = $1', [id]);
+    if (!alt.rows.length) return res.status(404).json({ error: 'Nicht gefunden' });
+    if (!darfStundensatz(req.user?.groups, alt.rows[0].stweg)) return res.status(403).json({ error: 'Nur den Stundensatz der eigenen STWEG' });
+    await pool.query('DELETE FROM auslagen_stundensatz WHERE id = $1', [id]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });

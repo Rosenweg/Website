@@ -74,10 +74,25 @@
   <script>
   const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   let LIST = [];
+  // Wer welchen Satz aendern darf (gleiche Regel wie die API, Befund W4):
+  // Technik/Praesident alles, der Ausschuss nur die eigene(n) STWEG(s).
+  let ALLE = false, EIGENE = new Set();
+  function rechteSetzen(groups) {
+    const g = (groups || []).map(x => String(x).toLowerCase());
+    ALLE = g.some(x => x === 'technik' || x === 'präsident' || x === 'praesident');
+    EIGENE = new Set();
+    g.forEach(x => { const m = x.match(/^stweg([1-7])-ausschuss$/); if (m) EIGENE.add(m[1]); if (x === 'meg-ausschuss') EIGENE.add('8'); });
+    if (!ALLE) {
+      const sel = document.getElementById('f-stweg');
+      [...sel.options].forEach(o => { if (!EIGENE.has(o.value)) o.remove(); });
+    }
+  }
+  const darf = (stweg) => ALLE || (stweg != null && EIGENE.has(String(stweg)));
 
   document.addEventListener('DOMContentLoaded', async () => {
     const u = await AuthentikAuth.init({ requireAuth: true });
     if (!u) return;
+    rechteSetzen(u.groups);
     document.getElementById('auth-gate').classList.add('hidden');
     document.getElementById('content').classList.remove('hidden');
     document.getElementById('form').addEventListener('submit', save);
@@ -107,7 +122,7 @@
       <td class="px-3 py-2 text-gray-700">${s.gueltig_ab ? esc(String(s.gueltig_ab).slice(0,10)) : '—'}</td>
       <td class="px-3 py-2 text-gray-600 text-xs">${esc(s.beschreibung || '')}</td>
       <td class="px-3 py-2 text-right">
-        <button onclick="del(${s.id})" class="text-red-600 text-xs hover:underline">löschen</button>
+        ${darf(s.stweg) ? `<button onclick="del(${s.id})" class="text-red-600 text-xs hover:underline">löschen</button>` : ''}
       </td>
     </tr>`).join('');
   }
@@ -136,7 +151,8 @@
 
   async function del(id) {
     if (!confirm('Wirklich löschen?')) return;
-    await AuthentikAuth.apiFetch('/api/auslagen-stundensatz/' + id, { method: 'DELETE' });
+    const r = await AuthentikAuth.apiFetch('/api/auslagen-stundensatz/' + id, { method: 'DELETE' });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || 'Fehler ' + r.status); }
     await loadList();
   }
   </script>
