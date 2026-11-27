@@ -50,3 +50,16 @@ test('server.js reicht der Statusmeldung nie die Notiz weiter', () => {
   assert.ok(aufrufe.length >= 2, 'Definition und mindestens ein Aufruf erwartet');
   for (const a of aufrufe) assert.ok(!/notiz/.test(a), a);
 });
+
+test('F2-7: Verlauf für die meldende Person nur Erfassung, Status und Nachricht an sie', () => {
+  for (const e of ['Erstellt (Web-Formular) · 📍 Keller', 'Status: offen → weitergeleitet',
+    '💬 Nachricht an meldende Person: "Lampe bestellt"']) assert.equal(rm.melderSiehtEreignis(e), true, e);
+  for (const e of ['Zugewiesen an: Technik A', 'Zuweisung entfernt', 'Handwerker zugewiesen: Firma X',
+    'Handwerker-Zuweisung entfernt', 'Auto-zugewiesen an Handwerker: Firma X', '📦 Archiviert',
+    '↩ Aus Archiv zurückgeholt', 'Notiz geändert: "intern"', '🔧 Sicherung getauscht',
+    '🤖 Aus Technik-Chat erkannt (conf 0.9): "…"', 'Muster benachrichtigt', 'Kategorie korrigiert: x',
+    '💰 Entschädigungs-Entwurf für A angelegt', '', null]) assert.equal(rm.melderSiehtEreignis(e), false, String(e));
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  // beide Wege, auf denen die meldende Person den Verlauf sieht
+  assert.equal((src.match(/reklMelder\.melderSiehtEreignis\(e\.event\)/g) || []).length, 2);
+});

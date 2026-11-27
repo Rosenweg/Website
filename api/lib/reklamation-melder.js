@@ -45,4 +45,15 @@ function nachricht({ rekl, name, status, bemerkung, siteUrl }) {
   };
 }
 
-module.exports = { melderBemerkung, statusLabel, mailBeiStatus, nachricht, MAX_BEMERKUNG };
+// Verlauf fuer die meldende Person (GET /api/reklamationen/meine/:id/verlauf,
+// Befund F2-7): nur die Erfassung, Statuswechsel und die Nachricht an sie.
+// Alles andere ist intern – Zuweisung, Handwerker, Notiz, Archiv,
+// Arbeitsschritte, Bot-Vermerke, Benachrichtigungen. Positivliste, damit ein
+// neuer interner Eintrag nicht von selbst beim Melder auftaucht.
+const MELDER_EREIGNISSE = [/^Erstellt\b/, /^Status: /, /^💬 Nachricht an meldende Person: /];
+function melderSiehtEreignis(event) {
+  const e = String(event || '');
+  return MELDER_EREIGNISSE.some(re => re.test(e));
+}
+
+module.exports = { melderBemerkung, statusLabel, mailBeiStatus, nachricht, melderSiehtEreignis, MAX_BEMERKUNG };

@@ -20332,8 +20332,9 @@ app.get('/api/reklamationen/:id/history', authMiddleware, requirePermission('rek
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
     if (!(await darfReklamation(req.user, id))) return res.status(404).json({ error: 'Nicht gefunden' });
     const r = await pool.query('SELECT created_at, who, event FROM reklamation_events WHERE reklamation_id = $1 ORDER BY created_at ASC, id ASC', [id]);
-    // Melder (weder Admin noch Ausschuss) sieht keine Eintraege zur internen Notiz.
-    const events = reklNurMelder(req.user) ? r.rows.filter(e => !/^Notiz geändert/i.test(e.event || '')) : r.rows;
+    // Melder (weder Admin noch Ausschuss/Verwaltung) sieht nur Statuswechsel und
+    // Nachrichten an sie, wie /meine/:id/verlauf (lib/reklamation-melder.js, F2-7).
+    const events = reklNurMelder(req.user) ? r.rows.filter(e => reklMelder.melderSiehtEreignis(e.event)) : r.rows;
     res.json({ events });
   } catch (e) { console.error('[reklamation-history]', e); res.status(500).json({ error: 'Fehler' }); }
 });
@@ -20620,7 +20621,7 @@ app.get('/api/reklamationen/meine/:id/foto', authMiddleware, async (req, res) =>
     return sendeReklamationsFoto(res, p);
   } catch (e) { console.error('[reklamation-meine-foto]', e); if (!res.headersSent) res.status(500).end(); }
 });
-// Owner-Zugriff: Verlauf/Arbeitsschritte der EIGENEN Meldung (interne Notizen/Benachrichtigungen gefiltert).
+// Owner-Zugriff: Verlauf der EIGENEN Meldung – nur Statuswechsel und Nachrichten an die meldende Person.
 app.get('/api/reklamationen/meine/:id/verlauf', authMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
@@ -20633,11 +20634,9 @@ app.get('/api/reklamationen/meine/:id/verlauf', authMiddleware, async (req, res)
     const r = await pool.query(
       `SELECT created_at, who, event FROM reklamation_events
         WHERE reklamation_id = $1
-          AND event NOT ILIKE 'Notiz geändert%'
-          AND event NOT ILIKE '%benachrichtigt%'
-          AND event NOT ILIKE 'Kategorie korrigiert%'
         ORDER BY created_at ASC, id ASC`, [id]);
-    res.json({ events: r.rows });
+    // Nur Erfassung, Statuswechsel und Nachricht an sie (lib/reklamation-melder.js, F2-7)
+    res.json({ events: r.rows.filter(e => reklMelder.melderSiehtEreignis(e.event)) });
   } catch (e) { console.error('[reklamation-meine-verlauf]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 // Melder-Benachrichtigung bei Status-Wechsel (E-Mail + WhatsApp + Web-Push) — gemeinsam
