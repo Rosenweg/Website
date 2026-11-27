@@ -208,35 +208,69 @@ sind (`status = assigned`), deren Konto für geteilte Telefone freigeschaltet is
 
 **Sicherheitshinweis:** Die UID ist nicht geheim und lässt sich mit jedem NFC-Telefon
 auslesen und auf eine beschreibbare Karte kopieren. Wer eine Karte verliert, meldet das
-sofort — die Karte wird in **Rosenweg Karten** (oder in UniFi Access) entzogen und gilt
+sofort — die Karte wird in **Rosenweg Zutritt** (oder in UniFi Access) entzogen und gilt
 dann weder an den Türen noch an den Telefonen.
 
-### Kartenverwaltung: App „Rosenweg Karten“
+### Kartenverwaltung: App „Rosenweg Zutritt“ (Haupt-API)
 
-Eigene App `ch.rosenweg4303.karten` (Repo `~/Documents/rosenweg-karten`), nur für
-Technik/Präsident. Karte antippen zeigt Inhaber, Inventarnummer und Status; dazu
-„Einer Person zuordnen“ (durchsuchbare Liste) und „Entziehen“ (mit Rückfrage).
+Entscheid Stefan 27.11.2026: **Karten gehören nicht in die Telefonanlage.** Die
+Kartenverwaltung liegt in der Haupt-API unter `/api/karten/*` (`api/routes/karten.js`,
+Logik `api/lib/kartenverwaltung.js`); die App dazu ist **Rosenweg Zutritt**
+(`ch.rosenweg4303.zutritt`, Repo `Rosenweg/rosenweg-zutritt`, alle Plattformen). Rosenweg
+Karten (`ch.rosenweg4303.karten`, Java 1.6.3) ist aufgegeben (`apps-register.json`,
+Abschnitt `aufgegeben`).
 
-- **Ohne INTERNET-Berechtigung und ohne Zugangsdaten**: alles läuft über den
-  `AnlageProvider` von Rosenweg Gerät (`ContentResolver.call`, Permission
-  `ch.rosenweg4303.permission.ANLAGE`, darum mit demselben Schlüssel signiert):
-  `karten_info(uid)`, `karten_zuordnen(uid, {email})`, `karten_entziehen(uid)`,
-  `karten_personen("personen")` → Bundle `json` (Antwort der Anlage) oder `fehler`
-  (+ `status`); `nicht_berechtigt = true`, wenn die angemeldete Person nicht Technik/
-  Präsident ist. Rosenweg Gerät prüft das live über `/api/telefon/status`, die Anlage
-  prüft nochmals an der Sitzung der Nebenstelle.
-- Katalog: als Android-App mit Gruppen `technik,präsident,praesident`.
+| Methode | Pfad (Haupt-API) | Körper | Antwort |
+|---|---|---|---|
+| GET | `/api/karten/personen` | – | `{personen:[{name,email}]}` (Personen mit interner Nummer, sonst aktive Konten), nach Name |
+| POST | `/api/karten/info` | `{uid}` | `{found, assigned, status, display_id, access_name, person:{name,email}, uid}` |
+| POST | `/api/karten/zuordnen` | `{uid, email}` | `{ok, importiert?, schon?, display_id, name}`; 404 ohne Access-Benutzer, 409 `{error, besitzer:{name}}` |
+| POST | `/api/karten/entziehen` | `{uid}` | `{ok, schon?, display_id, name}`; 404 Karte unbekannt |
+| POST | `/api/karten/loeschen` | `{uid}` | `{ok, display_id}`; nur entzogene Karten (sonst 409) |
+| GET | `/api/karten/protokoll` | `?tage=&aktion=&email=` | `{tage, eintraege:[…]}` (alter Pfad `/api/karten-protokoll` bleibt) |
+
+- **Rechte:** Technik oder Präsident (`requireTechnikOrPraesident`); eine Seite „karten“ in
+  der Rechteverwaltung gibt es nicht.
+- **Anmeldung:** Website-Login, `rosenweg-apps`-Token, Karten-/QR-/Handy-Sitzung (`rw_app_`)
+  und auf geteilten Telefonen das Anlage-Token (Rosenweg Gerät → `POST /api/telefon/portal`,
+  `portal_pfade` für `ch.rosenweg4303.zutritt`: `/api/karten/`, `/api/access/`,
+  `/api/apps/sitzungen…`, `GET /api/me/bestaetigungen`). Karte = Schlüssel: volle Rechte;
+  jede schreibende Aktion mit der Karte steht als `admin-mit-karte` im Kartenprotokoll und
+  wird per Mail quittiert (`api/lib/kartenadmin.js`). Keine Kartenaktion braucht die
+  E-Mail-Bestätigung (202); die App zeigt sie trotzdem an, falls eine Route sie verlangt.
 - Zuordnen: Kennt Access die Karte noch nicht, legt die Haupt-API sie als Fremdkarte an
   (`POST /credentials/nfc_cards/import`, CSV im Feld `file`) und ordnet sie dann dem
-  Access-Benutzer mit dieser E-Mail zu. Hat die Person keinen Access-Benutzer, kommt eine
-  Fehlermeldung (Benutzer zuerst in UniFi Access anlegen). Gehört die Karte schon jemand
-  anderem: Fehler mit Namen, zuerst entziehen. Fremdkarten müssen in Access erlaubt sein
-  (Einstellungen › Card Inventory › Third-Party NFC Cards).
-- Entziehen löst nur die Zuordnung; die Karte bleibt in der Access-Inventur.
-- Türleser übernehmen Änderungen nach etwa 30 s.
-- Jede Änderung steht in der Haupt-DB (`access_karten_protokoll`: Aktion, Karte, Ziel,
-  durch „Telefon <Nebenstelle> (Name <E-Mail>)“) und in `telefon_log`
-  (`karte-info`, `karte-zu`, `karte-weg`).
+  Access-Benutzer mit dieser E-Mail zu. Ohne Access-Benutzer: Fehlermeldung. Gehört die
+  Karte schon jemand anderem: Fehler mit Namen, zuerst entziehen. Fremdkarten müssen in
+  Access erlaubt sein (Einstellungen › Card Inventory › Third-Party NFC Cards).
+- Entziehen löst nur die Zuordnung; die Karte bleibt in der Access-Inventur. Türleser
+  übernehmen Änderungen nach etwa 30 s.
+- **Kartenprotokoll:** nur noch in der Haupt-DB (`access_karten_protokoll`: Aktion `info`,
+  `zuordnen`, `entziehen`, `loeschen`, `admin-mit-karte`, …; durch „Telefon <Nebenstelle>
+  (Name <E-Mail>)“, „<App>/<Version> (…)“ oder „Portal (…)“). Die alten Einträge der Anlage
+  (`telefon_log`: `karte-info`, `karte-zu`, `karte-weg`, `karte-geloescht`) übernimmt die
+  Anlage einmal beim Start (`karten_protokoll_uebernehmen()`, Aktion `telefon-…`, Quelle
+  `pbx:<id>`, doppelt nicht möglich; Marke `config.karten_protokoll_bis`). Sie bleiben
+  zusätzlich in `telefon_log`. An- und Abmeldungen per Karte am Telefon (`an`,
+  `karte-abgelehnt`) bleiben nur in der Anlage.
+
+#### Übergang (bis Rosenweg Karten von den zwei Telefonen ist)
+
+Rosenweg Karten 1.6.3 (`ANLAGE_WEB=https://pbx.rosenweg4303.ch`) und Rosenweg Gerät
+(`AnlageProvider` `karten_*`) rufen noch `/api/telefon/karten/*` der Anlage. Diese Pfade
+reichen nur noch weiter (`_karten_weiterreichen` in `pbx/api/app.py`), Antworten wie bisher
+plus `Deprecation: true` und `Link` auf den neuen Pfad:
+
+- mit `Authorization: Bearer …` (App auf dem eigenen Handy): Kopf unverändert an die
+  Haupt-API;
+- mit HTTP-Basic (geteiltes Telefon): Anlage-Token der angemeldeten Person für genau diese
+  Anfrage (`PORTAL_ANLAGE_SECRET` muss auf CT 220 gesetzt sein, wie für `/api/telefon/portal`).
+
+Die Haupt-API behält `/api/pbx/karte/zuordnen|entziehen|loeschen` (PBX-Geheimnis) für ältere
+Stände der Anlage; `GET /api/pbx/karte/:nfcId` bleibt für die Anmeldung am Telefon.
+Entfernen, sobald Stefan Rosenweg Karten auf den zwei Telefonen deinstalliert hat: die fünf
+Routen `/api/telefon/karten/*` in der Anlage, die drei schreibenden `/api/pbx/karte/*` in der
+Haupt-API und die `karten_*`-Methoden in Rosenweg Gerät.
 
 ### Endpunkte
 
@@ -245,21 +279,15 @@ Anlage (pbx-api, HTTP-Basic Nebenstelle:SIP-Passwort, nur Nebenstellen „geteil
 | Methode | Pfad | Körper | Antwort |
 |---|---|---|---|
 | POST | `/api/telefon/karte` | `{uid}` | wie `/api/telefon/einloesen`: `{ok, ext, angemeldet, name, email, seit, apps}`; Fehler `{error, grund}` mit 400 `unlesbar`, 404 `unbekannt`, 403 `gesperrt`/`nicht_freigeschaltet`, 429 `gebremst`, 502 `verbindung` |
-| POST | `/api/telefon/karten/info` | `{uid}` | `{found, assigned, status, display_id, access_name, person:{name,email}, uid}` |
-| POST | `/api/telefon/karten/zuordnen` | `{uid, email}` | `{ok, importiert?, schon?, display_id, name}`; 404 ohne Access-Benutzer, 409 `{error, besitzer:{name}}` |
-| POST | `/api/telefon/karten/entziehen` | `{uid}` | `{ok, schon?, display_id, name}`; 404 Karte unbekannt |
-| POST | `/api/telefon/karten/loeschen` | `{uid}` | `{ok, display_id}`; nur entzogene Karten (sonst 409), löscht aus dem Access-Bestand |
-| GET | `/api/telefon/karten/personen` | – | `{personen:[{name,email}]}` aus `personen_nummern` (Personen-Abgleich), nach Name |
-
-`/api/telefon/karten/*` nur, wenn die Sitzung der Nebenstelle die Gruppe technik,
-präsident oder praesident hat (sonst 403 `{error: "nicht berechtigt"}`).
+| * | `/api/telefon/karten/*` | wie `/api/karten/*` | Übergang, reicht an die Haupt-API weiter (siehe oben) |
 
 Haupt-API (`X-PBX-Secret`, nur von der Anlage):
 
 | Methode | Pfad | Körper | Antwort |
 |---|---|---|---|
 | GET | `/api/pbx/karte/:nfcId` | – | `{found:false}` oder `{found, assigned, status, display_id, access_name, person:{user_id, email, name, groups}}` |
-| POST | `/api/pbx/karte/zuordnen` | `{nfc_id, email, durch}` | siehe oben |
+| POST | `/api/pbx/karte/zuordnen` | `{nfc_id, email, durch}` | Übergang, wie `/api/karten/zuordnen` |
+| POST | `/api/pbx/karten-protokoll/uebernahme` | `{zeilen:[telefon_log]}` (≤ 1000) | `{ok, gelesen, uebernommen, uebersprungen, schon_da}`; einmalige Übernahme |
 | POST | `/api/pbx/karte/entziehen` | `{nfc_id, durch}` | siehe oben; Access: `PUT /users/{id}/nfc_cards/delete {token}` |
 | POST | `/api/pbx/karte/loeschen` | `{nfc_id, durch}` | Access: `DELETE /credentials/nfc_cards/tokens/{token}`; nur ohne Inhaber |
 

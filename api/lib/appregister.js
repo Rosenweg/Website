@@ -17,6 +17,11 @@
 //   katalog: Android-Apps aus dem Katalog der geteilten Telefone, Schlüssel =
 //            Paketname. Felder: repo, logo?, name?, text?, fuer?, technik?,
 //            nicht_oeffentlich? (kein Download auf /apps)
+//   aufgegeben (freiwillig): Apps, die es nicht mehr gibt, Schlüssel = Paketname.
+//            Felder: name?, ersetzt_durch? (Paketname). /apps zeigt sie nicht mehr,
+//            auch wenn sie noch im Katalog der geteilten Telefone steht; ein Paket
+//            darf nicht zugleich unter apps oder katalog stehen. Beispiel: Rosenweg
+//            Karten, in Rosenweg Zutritt aufgegangen (Stefan 27.11.2026).
 //   Felder mit "_" am Anfang sind Notizen und werden nicht ausgewertet.
 const fs = require('fs');
 const path = require('path');
@@ -69,6 +74,17 @@ function pruefen(d) {
       if (e[f] !== undefined && typeof e[f] !== 'boolean') fehler.push(`${wo}: ${f} ist kein Ja/Nein`);
     }
   }
+  const aufgegeben = d.aufgegeben === undefined ? {} : d.aufgegeben;
+  if (!aufgegeben || typeof aufgegeben !== 'object' || Array.isArray(aufgegeben)) fehler.push('aufgegeben ist kein Objekt');
+  else {
+    for (const [p, e] of Object.entries(aufgegeben)) {
+      const wo = `aufgegeben.${p}`;
+      if (!PAKET_RE.test(p)) fehler.push(`${wo}: Paketname ungültig`); else merken('paket', p, wo);
+      if (!e || typeof e !== 'object') { fehler.push(`${wo}: kein Objekt`); continue; }
+      if (!text(e.name)) fehler.push(`${wo}: name ist kein Text`);
+      if (e.ersetzt_durch !== undefined && !PAKET_RE.test(String(e.ersetzt_durch))) fehler.push(`${wo}: ersetzt_durch ungültig`);
+    }
+  }
   return fehler;
 }
 
@@ -115,7 +131,7 @@ function nachPaket(paket, d = register()) {
 function oeffentlich(d = register()) {
   const ohneNotiz = (o) => Object.fromEntries(Object.entries(o).filter(([k]) => !k.startsWith('_')));
   const je = (obj) => Object.fromEntries(Object.entries(obj || {}).map(([k, e]) => [k, ohneNotiz(e)]));
-  return { version: d.version, apps: je(d.apps), katalog: je(d.katalog) };
+  return { version: d.version, apps: je(d.apps), katalog: je(d.katalog), aufgegeben: je(d.aufgegeben) };
 }
 
 module.exports = { register, pruefen, nachPaket, oeffentlich, PAKET_RE };

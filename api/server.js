@@ -19006,8 +19006,9 @@ app.put('/api/pbx/personen/nummern', requirePbxSecret, async (req, res) => {
 // verwaltet Karten fuer Technik/Praesident (Kartenverwaltung auf dem Telefon).
 // UniFi Access ist die einzige Quelle: zugewiesen = darf, entzogen/unbekannt = darf nicht.
 // Karten-UID = Tag.getId() des Telefons als Hex = nfc_id in Access (z.B. 04D4C227C22A81).
-const normNfcId = (s) => String(s || '').replace(/[^0-9a-fA-F]/g, '').toUpperCase();
-const nfcIdGueltig = (s) => /^[0-9A-F]{8,20}$/.test(s) && s.length % 2 === 0;
+// Verwalten (Nachschlagen, Zuordnen, Entziehen, Loeschen): lib/kartenverwaltung.js, Routen
+// /api/karten/* in routes/karten.js (aus der Telefonanlage umgezogen, Entscheid Stefan 27.11.2026).
+const { normNfcId, nfcIdGueltig } = require('./lib/kartenverwaltung');
 
 // Kartenliste kurz zwischenspeichern (nur um das Token zur UID zu finden; Status und
 // Besitzer werden bei jeder Anfrage live ueber /tokens/{token} gelesen).
@@ -19177,24 +19178,7 @@ app.get('/api/me/bestaetigungen', authMiddleware, async (req, res) => {
   }
 });
 
-// Kartenprotokoll fuer die Technik. ?aktion=admin-mit-karte (Admin-Aktionen mit der Karte),
-// bestaetigung-angefragt | bestaetigt | abgelehnt | app-anmeldung …; ?email=; ?tage= (Standard 30)
-app.get('/api/karten-protokoll', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
-  try {
-    const tage = Math.min(365, Math.max(1, parseInt(req.query.tage, 10) || 30));
-    const bed = ['created_at > NOW() - make_interval(days => $1)'];
-    const p = [tage];
-    if (req.query.aktion) { p.push(String(req.query.aktion)); bed.push(`aktion = $${p.length}`); }
-    if (req.query.email) { p.push(String(req.query.email).toLowerCase()); bed.push(`LOWER(ziel_email) = $${p.length}`); }
-    const r = await pool.query(`SELECT id, aktion, nfc_id, display_id, ziel_email, ziel_name, durch, erfolg, detail, created_at
-        FROM access_karten_protokoll WHERE ${bed.join(' AND ')} ORDER BY created_at DESC LIMIT 500`, p);
-    res.json({ tage, eintraege: r.rows });
-  } catch (e) {
-    if (/does not exist/.test(e.message)) return res.json({ tage: 30, eintraege: [] });
-    console.error('[karten-protokoll]', e.message);
-    res.status(500).json({ error: 'Abfrage fehlgeschlagen' });
-  }
-});
+// Kartenprotokoll fuer die Technik: GET /api/karten/protokoll (alter Pfad /api/karten-protokoll) in routes/karten.js
 
 // Fremdkarte in die Access-Karteninventur importieren.
 // Dokumentiert (Access-API, "Import Third-Party NFC Cards"): POST multipart/form-data, Feld "file"
@@ -19247,85 +19231,26 @@ app.get('/api/pbx/karte/:nfcId', requirePbxSecret, async (req, res) => {
   } catch (e) { kartenFehler(res, e); }
 });
 
-// Karte einer Person zuordnen (Import, falls Access sie noch nicht kennt). {nfc_id, email, durch}
+// Verwalten mit dem PBX-Geheimnis (alter Weg ueber /api/telefon/karten/* der PBX). Die PBX reicht
+// inzwischen an /api/karten/* weiter (Anmeldung der Person statt Geheimnis); diese drei bleiben fuer
+// den Uebergang und laufen ueber dieselbe Logik (lib/kartenverwaltung.js). {nfc_id, email?, durch}
+let pbxKartenVerwaltung = null;
+const pbxKarten = () => (pbxKartenVerwaltung ??= require('./lib/kartenverwaltung').kartenVerwaltung({
+  accessKarteZurUid, accessKarteImportieren, karteNachschlagen, unifiUserByEmail, unifiAccessRaw, accessOk,
+  accessKartenBesitzerId, accessKartenBesitzerName, accessKartenCacheLeeren, kartenProtokollieren,
+}));
+const pbxDurch = (req) => String(req.body?.durch || 'pbx').slice(0, 200);
 app.post('/api/pbx/karte/zuordnen', requirePbxSecret, async (req, res) => {
-  const nfcId = normNfcId(req.body?.nfc_id);
-  const email = String(req.body?.email || '').toLowerCase().trim();
-  const durch = String(req.body?.durch || 'pbx').slice(0, 200);
-  if (!nfcIdGueltig(nfcId)) return res.status(400).json({ error: 'Ungueltige Karten-UID' });
-  if (!/^[^\s@]+@[^\s@]+$/.test(email)) return res.status(400).json({ error: 'E-Mail fehlt' });
-  const log = { nfcId, email, durch };
-  try {
-    const au = await unifiUserByEmail(email);
-    if (!au) {
-      await kartenProtokollieren('zuordnen', { ...log, erfolg: false, detail: 'kein Access-Benutzer' });
-      return res.status(404).json({ error: 'Diese Person hat keinen Benutzer in UniFi Access — bitte zuerst dort anlegen.' });
-    }
-    const auName = au.full_name || `${au.first_name || ''} ${au.last_name || ''}`.trim() || email;
-    let k = await accessKarteZurUid(nfcId, true);
-    let importiert = false;
-    if (!k) { k = await accessKarteImportieren(nfcId, `Rosenweg ${email}`); importiert = true; }
-    const besitzer = accessKartenBesitzerId(k);
-    if (besitzer && String(besitzer) !== String(au.id)) {
-      const wer = accessKartenBesitzerName(k) || 'jemand anderem';
-      await kartenProtokollieren('zuordnen', { ...log, displayId: k.display_id, name: auName, erfolg: false, detail: `gehoert ${wer}` });
-      return res.status(409).json({ error: `Die Karte gehört bereits ${wer}. Zuerst entziehen.`, besitzer: { name: wer } });
-    }
-    if (besitzer && String(besitzer) === String(au.id)) {
-      return res.json({ ok: true, schon: true, display_id: k.display_id || null, name: auName });
-    }
-    const r = await unifiAccessRaw('PUT', `/users/${encodeURIComponent(au.id)}/nfc_cards`, { token: k.token });
-    accessKartenCacheLeeren();
-    if (r.status === 0) throw Object.assign(new Error('UniFi Access nicht erreichbar'), { http: 502 });
-    const ok = accessOk(r) && (!r.body?.code || r.body.code === 'SUCCESS');
-    await kartenProtokollieren('zuordnen', { ...log, displayId: k.display_id, name: auName, erfolg: ok,
-      detail: (importiert ? 'importiert; ' : '') + (ok ? '' : `${r.status} ${r.body?.msg || ''}`) });
-    if (!ok) return res.status(502).json({ error: r.body?.msg || 'Zuordnen in UniFi Access fehlgeschlagen' });
-    res.json({ ok: true, importiert, display_id: k.display_id || null, name: auName });
-  } catch (e) { kartenFehler(res, e); }
+  const { status, body } = await pbxKarten().zuordnen(normNfcId(req.body?.nfc_id), req.body?.email, pbxDurch(req));
+  res.status(status).json(body);
 });
-
-// Karte entziehen (Zuordnung loesen; die Karte bleibt in der Access-Inventur). {nfc_id, durch}
 app.post('/api/pbx/karte/entziehen', requirePbxSecret, async (req, res) => {
-  const nfcId = normNfcId(req.body?.nfc_id);
-  const durch = String(req.body?.durch || 'pbx').slice(0, 200);
-  if (!nfcIdGueltig(nfcId)) return res.status(400).json({ error: 'Ungueltige Karten-UID' });
-  try {
-    const k = await accessKarteZurUid(nfcId, true);
-    if (!k) return res.status(404).json({ error: 'Karte nicht bekannt' });
-    const besitzer = accessKartenBesitzerId(k);
-    if (!besitzer) return res.json({ ok: true, schon: true, display_id: k.display_id || null });
-    const wer = accessKartenBesitzerName(k);
-    const r = await unifiAccessRaw('PUT', `/users/${encodeURIComponent(besitzer)}/nfc_cards/delete`, { token: k.token });
-    accessKartenCacheLeeren();
-    if (r.status === 0) throw Object.assign(new Error('UniFi Access nicht erreichbar'), { http: 502 });
-    const ok = accessOk(r) && (!r.body?.code || r.body.code === 'SUCCESS');
-    await kartenProtokollieren('entziehen', { nfcId, displayId: k.display_id, name: wer, durch, erfolg: ok,
-      detail: ok ? '' : `${r.status} ${r.body?.msg || ''}` });
-    if (!ok) return res.status(502).json({ error: r.body?.msg || 'Entziehen in UniFi Access fehlgeschlagen' });
-    res.json({ ok: true, display_id: k.display_id || null, name: wer });
-  } catch (e) { kartenFehler(res, e); }
+  const { status, body } = await pbxKarten().entziehen(normNfcId(req.body?.nfc_id), pbxDurch(req));
+  res.status(status).json(body);
 });
-
-// Karte aus dem Bestand von UniFi Access loeschen (defekt/verloren). Nur entzogene Karten
-// (ohne Inhaber); zugeordnete zuerst entziehen. {nfc_id, durch}
 app.post('/api/pbx/karte/loeschen', requirePbxSecret, async (req, res) => {
-  const nfcId = normNfcId(req.body?.nfc_id);
-  const durch = String(req.body?.durch || 'pbx').slice(0, 200);
-  if (!nfcIdGueltig(nfcId)) return res.status(400).json({ error: 'Ungueltige Karten-UID' });
-  try {
-    const k = await accessKarteZurUid(nfcId, true);
-    if (!k) return res.status(404).json({ error: 'Karte nicht bekannt' });
-    if (accessKartenBesitzerId(k)) return res.status(409).json({ error: 'Karte ist noch zugeordnet - zuerst entziehen' });
-    const r = await unifiAccessRaw('DELETE', `/credentials/nfc_cards/tokens/${encodeURIComponent(k.token)}`);
-    accessKartenCacheLeeren();
-    if (r.status === 0) throw Object.assign(new Error('UniFi Access nicht erreichbar'), { http: 502 });
-    const ok = accessOk(r) && (!r.body?.code || r.body.code === 'SUCCESS');
-    await kartenProtokollieren('loeschen', { nfcId, displayId: k.display_id, name: '', durch, erfolg: ok,
-      detail: ok ? '' : `${r.status} ${r.body?.msg || ''}` });
-    if (!ok) return res.status(502).json({ error: r.body?.msg || 'Loeschen in UniFi Access fehlgeschlagen' });
-    res.json({ ok: true, display_id: k.display_id || null });
-  } catch (e) { kartenFehler(res, e); }
+  const { status, body } = await pbxKarten().loeschen(normNfcId(req.body?.nfc_id), pbxDurch(req));
+  res.status(status).json(body);
 });
 
 app.get('/api/pbx/cnam/:number', requirePbxSecret, async (req, res) => {
@@ -23654,6 +23579,14 @@ require('./routes/app-karte').appKarteRoutes(app, {
   pool, authMiddleware, requireUserLogin, absenderIp: require('./middleware/auth').absenderIp,
   loggedSendMail, MAIL_FROM, karteNachschlagen, accessKarteLive, accessKartenBesitzerId, kartenPerson,
   kartenProtokollieren, authentikUserByEmail,
+});
+
+// Kartenverwaltung (Rosenweg Zutritt, Website): /api/karten/* -> routes/karten.js. Aus der Telefonanlage
+// umgezogen (Entscheid Stefan 27.11.2026); die PBX reicht /api/telefon/karten/* fuer den Uebergang weiter.
+require('./routes/karten').kartenRoutes(app, {
+  pool, authMiddleware, requireTechnikOrPraesident, requirePbxSecret, kartenProtokollieren,
+  accessKarteZurUid, accessKarteImportieren, karteNachschlagen, unifiUserByEmail, unifiAccessRaw, accessOk,
+  accessKartenBesitzerId, accessKartenBesitzerName, accessKartenCacheLeeren,
 });
 
 app.post('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {

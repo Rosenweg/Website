@@ -1875,7 +1875,6 @@ def telefon_einloesen():
 KARTE_FEHL_MAX = 10          # Fehlversuche pro Nebenstelle ...
 KARTE_FEHL_FENSTER_S = 60    # ... pro Minute
 _KARTE_FEHL = {}             # ext -> [Zeitpunkte der Fehlversuche]
-KARTEN_VERWALTER = {"technik", "präsident", "praesident"}
 
 
 def _karten_uid(roh):
@@ -1963,151 +1962,170 @@ def telefon_karte():
         conn.close()
 
 
-def _token_art(token):
-    """Nur die Art des Ausweises fuers Log, nie das Token selbst."""
-    t = token or ""
-    for p in ("rw_app_", "rw_pat_"):
-        if t.startswith(p):
-            return p + "..."
-    return "JWT" if t.count(".") == 2 else "Token"
+# ─── Kartenverwaltung: umgezogen in die Haupt-API (Entscheid Stefan 27.11.2026) ──
+# "Karten gehoeren nicht in die Telefonanlage." Nachschlagen, Zuordnen, Entziehen,
+# Loeschen, die Personenliste und das Kartenprotokoll liegen jetzt in der Haupt-API
+# unter /api/karten/* (api/routes/karten.js, Logik api/lib/kartenverwaltung.js) und
+# werden dort mit der normalen Anmeldung geprueft (Technik/Praesident, Karte = Schluessel,
+# Admin-Aktionen mit der Karte protokolliert und quittiert).
+#
+# UEBERGANG: Die alte App Rosenweg Karten (Java 1.6.3, ANLAGE_WEB=https://pbx.rosenweg4303.ch)
+# und Rosenweg Geraet (AnlageProvider karten_*, HTTP-Basic des Telefons) rufen noch
+# /api/telefon/karten/*. Diese Pfade reichen hier nur noch weiter:
+#   - mit "Authorization: Bearer ..." (App auf dem eigenen Handy): Kopf unveraendert an
+#     die Haupt-API, die den Ausweis selbst prueft;
+#   - mit HTTP-Basic (geteiltes Telefon): die am Telefon angemeldete Person bekommt ein
+#     Anlage-Token fuer genau diese eine Anfrage (wie /api/telefon/portal, HS256,
+#     PORTAL_ANLAGE_SECRET, 60 s, einmal). Die Haupt-API sieht "anlage" = Karte.
+# Antworten haben dieselbe Form wie vorher; dazu "Deprecation: true" und ein Link auf den
+# neuen Pfad. Entfernen, sobald Rosenweg Karten von den Telefonen ist (Rosenweg Zutritt
+# ersetzt sie, ch.rosenweg4303.zutritt) - siehe pbx/GETEILTE-TELEFONE.md.
+KARTEN_UMZUG = {
+    "personen": ("GET", "/api/karten/personen"),
+    "info": ("POST", "/api/karten/info"),
+    "zuordnen": ("POST", "/api/karten/zuordnen"),
+    "entziehen": ("POST", "/api/karten/entziehen"),
+    "loeschen": ("POST", "/api/karten/loeschen"),
+}
+# Paket im Anlage-Token: die alte App (fuer Protokoll und App-Kennung der Haupt-API)
+KARTEN_ALT_PAKET = "ch.rosenweg4303.karten"
 
 
-def _karten_verwalter():
-    """Geraet + angemeldete Person mit Technik/Praesident. -> (ext, sitzung, None) oder (.., .., response).
-    Ohne Geraet (Rosenweg Karten auf dem eigenen Handy, Stefan 25.11.2026): Bearer-Token der
-    Rosenweg-Anmeldung (Website-Login, Authentik rosenweg-apps oder Karten-Sitzung rw_app_) mit
-    Technik/Praesident - Karte wie Schluessel: dieselben Rechte wie das Konto.
-
-    Nur nach dem Schema unterscheiden: Werkzeug (ab 2.3) liest auch "Bearer ..." in
-    request.authorization, ein "not request.authorization" schickte jede App zu _geraet()
-    (401 "Geraet nicht berechtigt", Anmeldeschleife in Rosenweg Karten 1.6.2, 27.11.2026)."""
+def _karten_weiterreichen(was):
+    methode, ziel = KARTEN_UMZUG[was]
+    kopf = {"Accept": "application/json"}
     if _bearer():
-        person = current_user()
-        if not person:
-            person = _rosenweg_konto()
-        if not person:
-            app.logger.warning("Rosenweg Karten: Anmeldung ungueltig (%s)", _token_art(_bearer()))
-            return None, None, (jsonify({"error": "Rosenweg-Anmeldung ungueltig"}), 401)
-        gruppen = {str(g).lower() for g in (person.get("groups") or [])}
-        if not (gruppen & KARTEN_VERWALTER):
-            app.logger.info("Rosenweg Karten: %s nicht berechtigt", person.get("email") or "?")
-            return "App", None, (jsonify({"error": "nicht berechtigt"}), 403)
-        return "App", {"name": person.get("name") or "", "email": person.get("email") or ""}, None
-    ext, deny = _geraet()
-    if deny:
-        return None, None, deny
-    conn = db.connect()
+        kopf["Authorization"] = request.headers.get("Authorization", "")
+        wer = "App"
+    else:
+        ext, deny = _geraet()
+        if deny:
+            return deny
+        conn = db.connect()
+        try:
+            s = conn.execute("SELECT user_id, email, name, seit FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+        finally:
+            conn.close()
+        if not s or not s["email"]:
+            return jsonify({"error": "nicht berechtigt"}), 403
+        if not PORTAL_ANLAGE_SECRET:
+            return jsonify({"error": "Portal-Zugang der Telefone nicht eingerichtet"}), 503
+        kopf["Authorization"] = f"Bearer {_portal_token(s, ext, KARTEN_ALT_PAKET, methode, ziel)}"
+        kopf["X-Rosenweg-Telefon"] = ext
+        wer = ext
+    daten = None
+    if methode == "POST":
+        d = request.get_json(silent=True) or {}
+        daten = {k: d[k] for k in ("uid", "email") if k in d}
+    app.logger.info("Kartenverwaltung ueber den alten Pfad (%s): %s %s -> %s", wer, methode, request.path, ziel)
     try:
-        s = conn.execute("SELECT name, email, gruppen FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
-    finally:
-        conn.close()
-    try:
-        gruppen = {str(g).lower() for g in json.loads((s["gruppen"] if s else None) or "[]")}
-    except ValueError:
-        gruppen = set()
-    if not s or not (gruppen & KARTEN_VERWALTER):
-        return ext, None, (jsonify({"error": "nicht berechtigt"}), 403)
-    return ext, s, None
-
-
-def _karten_durch(ext, s):
-    if ext == "App":
-        return f"Rosenweg Karten ({s['name']} <{s['email']}>)"
-    return f"Telefon {ext} ({s['name']} <{s['email']}>)"
-
-
-def _karten_weiter(ext, s, ereignis, methode, pfad, daten, ziel_email=None):
-    try:
-        status, body = _haupt_karte(methode, pfad, daten)
+        r = requests.request(methode, f"{MAIN_API_BASE}{ziel}", headers=kopf, json=daten, timeout=25,
+                             allow_redirects=False)
     except requests.RequestException as e:
-        app.logger.warning("Karten %s: Website nicht erreichbar (%s)", ext, type(e).__name__)
+        app.logger.warning("Karten %s: Haupt-API nicht erreichbar (%s)", wer, type(e).__name__)
         return jsonify({"error": "Keine Verbindung zur Anlage"}), 502
-    conn = db.connect()
     try:
-        ziel = ziel_email or (body.get("person") or {}).get("email") or ""
-        karte = body.get("display_id") or (daten or {}).get("nfc_id") or pfad.rsplit("/", 1)[-1]
-        _karten_log(conn, ext, ereignis, s["email"], s["name"],
-                    f"karte:{karte}" + (f"->{ziel}" if ziel else "") + ("" if status == 200 else f":{status}"))
-        conn.commit()
-    finally:
-        conn.close()
-    return jsonify(body), status
+        body = r.json()
+    except ValueError:
+        body = {"error": "Antwort der Haupt-API unlesbar"}
+    antwort = jsonify(body)
+    antwort.status_code = r.status_code
+    antwort.headers["Deprecation"] = "true"
+    antwort.headers["Link"] = f'<https://www.rosenweg4303.ch{ziel}>; rel="successor-version"'
+    return antwort
 
 
 @app.post("/api/telefon/karten/info")
 def telefon_karten_info():
-    ext, s, deny = _karten_verwalter()
-    if deny:
-        return deny
-    uid = _karten_uid((request.get_json(silent=True) or {}).get("uid"))
-    if not uid:
-        return jsonify({"error": "Karte nicht lesbar"}), 400
-    resp, status = _karten_weiter(ext, s, "karte-info", "GET", f"/api/pbx/karte/{uid}", None)
-    if status == 200:
-        # Gruppen und Website-ID braucht das Telefon nicht
-        d = resp.get_json() or {}
-        p = d.get("person")
-        if p:
-            d["person"] = {"name": p.get("name"), "email": p.get("email")}
-        d["uid"] = uid
-        return jsonify(d)
-    return resp, status
+    return _karten_weiterreichen("info")
 
 
 @app.post("/api/telefon/karten/zuordnen")
 def telefon_karten_zuordnen():
-    ext, s, deny = _karten_verwalter()
-    if deny:
-        return deny
-    d = request.get_json(silent=True) or {}
-    uid = _karten_uid(d.get("uid"))
-    email = str(d.get("email") or "").strip().lower()
-    if not uid or not re.fullmatch(r"[^\s@]+@[^\s@]+", email):
-        return jsonify({"error": "Karte oder E-Mail fehlt"}), 400
-    return _karten_weiter(ext, s, "karte-zu", "POST", "/api/pbx/karte/zuordnen",
-                          {"nfc_id": uid, "email": email, "durch": _karten_durch(ext, s)}, ziel_email=email)
+    return _karten_weiterreichen("zuordnen")
 
 
 @app.post("/api/telefon/karten/entziehen")
 def telefon_karten_entziehen():
-    ext, s, deny = _karten_verwalter()
-    if deny:
-        return deny
-    uid = _karten_uid((request.get_json(silent=True) or {}).get("uid"))
-    if not uid:
-        return jsonify({"error": "Karte nicht lesbar"}), 400
-    return _karten_weiter(ext, s, "karte-weg", "POST", "/api/pbx/karte/entziehen",
-                          {"nfc_id": uid, "durch": _karten_durch(ext, s)})
+    return _karten_weiterreichen("entziehen")
 
 
 @app.post("/api/telefon/karten/loeschen")
 def telefon_karten_loeschen():
-    """Entzogene Karte aus dem Bestand von UniFi Access loeschen (defekt/verloren)."""
-    ext, s, deny = _karten_verwalter()
-    if deny:
-        return deny
-    uid = _karten_uid((request.get_json(silent=True) or {}).get("uid"))
-    if not uid:
-        return jsonify({"error": "Karte nicht lesbar"}), 400
-    return _karten_weiter(ext, s, "karte-geloescht", "POST", "/api/pbx/karte/loeschen",
-                          {"nfc_id": uid, "durch": _karten_durch(ext, s)})
+    return _karten_weiterreichen("loeschen")
 
 
 @app.get("/api/telefon/karten/personen")
 def telefon_karten_personen():
-    """Auswahlliste fuer "Einer Person zuordnen": Personen aus dem Personen-Abgleich."""
-    _, _, deny = _karten_verwalter()
-    if deny:
-        return deny
+    return _karten_weiterreichen("personen")
+
+
+# ─── Kartenprotokoll der Anlage in die Haupt-API uebernehmen (einmalig) ──────
+# Die Anlage schrieb Kartenaktionen (karte-info, karte-zu, karte-weg, karte-geloescht)
+# in telefon_log. Sie gehen einmal an die Haupt-API (access_karten_protokoll, aktion
+# telefon-info|telefon-zuordnen|telefon-entziehen|telefon-loeschen, quelle "pbx:<id>").
+# Idempotent: die Haupt-API legt keine Zeile doppelt an; danach merkt sich die Anlage die
+# hoechste uebernommene id (config karten_protokoll_bis). Die Zeilen bleiben in telefon_log
+# (PBX-Admin zeigt sie weiter). An-/Abmeldungen am Telefon bleiben nur hier.
+#   python3 -c "import app; print(app.karten_protokoll_uebernehmen())"   (auf CT 220)
+# und automatisch beim Start (Thread, wenn KARTEN_PROTOKOLL_UEBERNAHME nicht "aus" ist).
+KARTEN_PROTOKOLL_EREIGNISSE = ("karte-info", "karte-zu", "karte-weg", "karte-geloescht")
+
+
+def karten_protokoll_uebernehmen(post=None, stapel=500):
+    """-> {"uebernommen": n, "gelesen": m, "bis": id}. Wirft bei Fehlern der Haupt-API."""
+    post = post or requests.post
     conn = db.connect()
     try:
-        rows = conn.execute("SELECT lower(email) AS email, MIN(name) AS name FROM personen_nummern "
-                            "WHERE aktiv = 1 AND email <> '' GROUP BY lower(email)").fetchall()
+        bis = int(_cfg(conn).get("karten_protokoll_bis", "0") or 0)
     finally:
         conn.close()
-    personen = sorted(({"name": r["name"], "email": r["email"]} for r in rows),
-                      key=lambda p: (p["name"] or "").lower())
-    return jsonify({"personen": personen})
+    gesamt = {"uebernommen": 0, "gelesen": 0, "bis": bis}
+    while True:
+        conn = db.connect()
+        try:
+            zeilen = [dict(z) for z in conn.execute(
+                "SELECT id, ext, ereignis, email, name, durch, zeit FROM telefon_log WHERE id > ? AND ereignis IN "
+                f"({','.join('?' * len(KARTEN_PROTOKOLL_EREIGNISSE))}) ORDER BY id LIMIT ?",
+                (bis, *KARTEN_PROTOKOLL_EREIGNISSE, stapel)).fetchall()]
+        finally:
+            conn.close()
+        if not zeilen:
+            return gesamt
+        r = post(f"{MAIN_API_BASE}/api/pbx/karten-protokoll/uebernahme", json={"zeilen": zeilen},
+                 headers={"X-PBX-Secret": PBX_SHARED_SECRET}, timeout=60)
+        if r.status_code != 200:
+            raise RuntimeError(f"Haupt-API: HTTP {r.status_code}")
+        d = r.json()
+        bis = zeilen[-1]["id"]
+        gesamt["uebernommen"] += int(d.get("uebernommen") or 0)
+        gesamt["gelesen"] += len(zeilen)
+        gesamt["bis"] = bis
+        conn = db.connect()
+        try:
+            conn.execute("INSERT INTO config (key, value) VALUES ('karten_protokoll_bis', ?) "
+                         "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (str(bis),))
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def _karten_protokoll_im_hintergrund():
+    if os.environ.get("KARTEN_PROTOKOLL_UEBERNAHME", "").lower() in ("aus", "0", "nein", "false"):
+        return
+    import threading
+
+    def lauf():
+        for versuch in range(6):
+            try:
+                g = karten_protokoll_uebernehmen()
+                if g["gelesen"]:
+                    app.logger.info("Kartenprotokoll an die Haupt-API: %s", g)
+                return
+            except Exception as e:  # noqa: BLE001 - naechster Versuch, nie den Start stoeren
+                app.logger.warning("Kartenprotokoll-Uebernahme (Versuch %d): %s", versuch + 1, e)
+                time.sleep(60 * (versuch + 1))
+    threading.Thread(target=lauf, name="karten-protokoll", daemon=True).start()
 
 
 # ─── App-Katalog der geteilten Telefone ─────────────────────────────────────
@@ -2272,6 +2290,7 @@ APPS_REGISTER = {}
 APPS_KATALOG_REPOS = {}
 APPS_KATALOG_INFO = {}
 APPS_OEFFENTLICH_OHNE = set()
+APPS_AUFGEGEBEN = set()        # aus apps-register.json "aufgegeben": nicht mehr auf /apps
 _APPS_REGISTER_STAND = {"zeit": 0.0, "quelle": "", "fehler": ""}
 _APP_SCHLUESSEL = re.compile(r"[a-z][a-z0-9-]{0,30}")
 _APP_PAKET = re.compile(r"[a-z][a-z0-9_]*(\.[a-z0-9_]+){1,6}")
@@ -2280,7 +2299,7 @@ _APP_REPO = re.compile(r"Rosenweg/[A-Za-z0-9._-]{1,100}")
 
 def _apps_register_uebernehmen(d, quelle):
     """Register pruefen und die vier Namen neu binden (atomar je Name). True = uebernommen."""
-    global APPS_REGISTER, APPS_KATALOG_REPOS, APPS_KATALOG_INFO, APPS_OEFFENTLICH_OHNE
+    global APPS_REGISTER, APPS_KATALOG_REPOS, APPS_KATALOG_INFO, APPS_OEFFENTLICH_OHNE, APPS_AUFGEGEBEN
     try:
         if d.get("version") != 1:
             raise ValueError("version")
@@ -2303,11 +2322,18 @@ def _apps_register_uebernehmen(d, quelle):
                 info[paket] = i
             if e.get("nicht_oeffentlich"):
                 ohne.add(paket)
+        # Aufgegebene Apps (z.B. Rosenweg Karten, 27.11.2026): nicht mehr auf /apps, keine Releases
+        aus = set()
+        for paket in (d.get("aufgegeben") or {}):
+            if not _APP_PAKET.fullmatch(paket):
+                raise ValueError(f"aufgegeben.{paket}")
+            aus.add(paket)
     except (AttributeError, KeyError, TypeError, ValueError) as e:
         _APPS_REGISTER_STAND["fehler"] = f"{quelle}: ungueltig ({e})"
         app.logger.warning("Apps-Register aus %s ungueltig: %s", quelle, e)
         return False
     APPS_REGISTER, APPS_KATALOG_REPOS, APPS_KATALOG_INFO, APPS_OEFFENTLICH_OHNE = register, repos, info, ohne
+    APPS_AUFGEGEBEN = aus
     _APPS_REGISTER_STAND.update(quelle=quelle, fehler="")
     return True
 
@@ -2468,6 +2494,9 @@ def apps_index():
     neu = {(v["schluessel"], v["plattform"]): v for v in aktuell}
     apps = []
     nur_anzeige = []
+    # Aufgegebene Apps zeigt /apps nicht mehr (auch nicht dem Updater); im Katalog der geteilten
+    # Telefone (telefon_apps) bleiben sie, bis die Technik sie dort abschaltet.
+    rows = [r for r in rows if r["paket"] not in APPS_AUFGEGEBEN]
     for r in rows:
         if r["paket"] in APPS_OEFFENTLICH_OHNE:
             nur_anzeige.append(r)   # auf /apps zeigen, aber ohne Datei (Stefan 27.11.2026)
@@ -3718,6 +3747,10 @@ PORTAL_PFADE_STANDARD = {
     # Rosenweg Uhr: Wecker, Weltuhren, Timer-Vorlagen der Person (Haupt-API routes/app-daten.js;
     # die Haupt-API laesst je Anlage-Token ohnehin nur die App selbst an ihre Daten)
     "ch.rosenweg4303.clock": ["GET,PUT /api/me/app-daten/ch.rosenweg4303.clock"],
+    # Rosenweg Zutritt (Technik/Praesident; die Haupt-API prueft die Rechte): Karten, UniFi Access,
+    # Anmeldungen der Apps, offene Bestaetigungen
+    "ch.rosenweg4303.zutritt": ["/api/karten/", "/api/access/", "GET /api/apps/sitzungen", "/api/apps/sitzungen/",
+                                "GET /api/me/bestaetigungen"],
 }
 _PORTAL_PFAD = re.compile(r"/api/[A-Za-z0-9._~!$&'()*+,;=:@%/-]{1,1000}(\?[A-Za-z0-9._~!$&'()*+,;=:@%/?-]{0,1000})?")
 _PORTAL_KODIERT_VERBOTEN = re.compile(r"%(2e|2f|5c|00)", re.I)
@@ -4825,5 +4858,6 @@ if __name__ == "__main__":
     if PBX_SHARED_SECRET:
         import threading
         threading.Thread(target=_personen_abgleich_schleife, daemon=True, name="personen-abgleich").start()
+        _karten_protokoll_im_hintergrund()
     from waitress import serve
     serve(app, host="0.0.0.0", port=PORT)
