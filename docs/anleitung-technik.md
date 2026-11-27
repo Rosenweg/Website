@@ -350,7 +350,11 @@ Die Regeln (welche Gruppen, wie viele Freigaben, ab welchem Betrag) stehen in
 ## 8. NOC-Wandbild mit Token
 
 Das Wandbild `noc-fullscreen.html` (auf `www.…` und `noc.rosenweg4303.ch`) zeigt Mail-
-und Netzwerkzustand. Es hat drei Betriebsarten:
+und Netzwerkzustand. Darunter steht der Abschnitt **Stationen**: je Gerät eine Karte,
+rot und gelb zuerst. Rot = Anschluss-Abweichung, doppelt, Anzeige aus, Arbeitsplatz über drei
+Tage still; gelb = gesperrt, Arbeitsplatz aus, Wartung steht still; blau = Update/SSH-Wartung
+läuft; grau = darf aus sein (Laptop, Kiosk-TV, Chromecast) oder Windows ohne Agent. Online heisst:
+Lebenszeichen jünger als 15 min (Kiosk, Chromecast: 5 min). Wer angemeldet ist, zeigt das NOC nicht. Es hat drei Betriebsarten:
 
 | Aufruf | Sicht |
 |---|---|

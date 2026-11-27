@@ -38,6 +38,8 @@
     .led-green { background: #34d399; box-shadow: 0 0 8px #34d399; animation: noc-pulse 2s infinite; }
     .led-amber { background: #fbbf24; box-shadow: 0 0 8px #fbbf24; }
     .led-red   { background: #f87171; box-shadow: 0 0 8px #f87171; animation: noc-pulse 1s infinite; }
+    .led-blau  { background: #38bdf8; box-shadow: 0 0 8px #38bdf8; }
+    .led-grau  { background: #475569; box-shadow: none; }
     @keyframes noc-pulse { 0%,100% { opacity: 1 } 50% { opacity: .5 } }
     .noc-pill { display: inline-flex; align-items: center; gap: .4rem; background: rgba(15,23,42,.6); border: 1px solid #334155; border-radius: .35rem; padding: .15rem .5rem; }
     .noc-pill span:last-child { font-family: ui-monospace, monospace; font-size: .62rem; text-transform: uppercase; color: #cbd5e1; }
@@ -57,6 +59,28 @@
     .noc-wandbild .noc-mid { font-size: 1.5rem; }
     .noc-wandbild .noc-label { font-size: .72rem; }
     .noc-wandbild .noc-inner { padding: 1.5rem; }
+    /* Stationen: eine Karte je Geraet, die schlimmsten zuerst. */
+    .noc-stationen { display: grid; gap: .5rem; grid-template-columns: repeat(auto-fill, minmax(12.5rem, 1fr)); }
+    .noc-st { background: rgba(15,23,42,0.6); border: 1px solid #334155; border-left-width: 4px; border-radius: .5rem; padding: .5rem .65rem; min-width: 0; }
+    .noc-st.st-rot  { border-left-color: #f87171; background: rgba(127,29,29,.25); }
+    .noc-st.st-gelb { border-left-color: #fbbf24; }
+    .noc-st.st-gruen{ border-left-color: #34d399; }
+    .noc-st.st-blau { border-left-color: #38bdf8; }
+    .noc-st.st-grau { border-left-color: #475569; opacity: .7; }
+    .noc-st-kopf { display: flex; align-items: center; gap: .45rem; min-width: 0; }
+    .noc-st-name { font-family: ui-monospace, monospace; font-weight: 600; color: #f1f5f9; font-size: .82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .noc-st-zeit { margin-left: auto; font-family: ui-monospace, monospace; font-size: .68rem; color: #94a3b8; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .noc-st-was  { font-size: .66rem; color: #94a3b8; font-family: ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: .1rem; }
+    .noc-st-tags { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .3rem; }
+    .noc-tag { font-family: ui-monospace, monospace; font-size: .6rem; text-transform: uppercase; letter-spacing: .03em; border-radius: .25rem; padding: .05rem .35rem; border: 1px solid #334155; color: #cbd5e1; }
+    .tag-rot  { background: rgba(248,113,113,.18); border-color: #f87171; color: #fecaca; }
+    .tag-gelb { background: rgba(251,191,36,.15); border-color: #fbbf24; color: #fde68a; }
+    .tag-info { background: rgba(56,189,248,.15); border-color: #38bdf8; color: #bae6fd; }
+    .noc-wandbild .noc-stationen { grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: .6rem; }
+    .noc-wandbild .noc-st-name { font-size: 1.05rem; }
+    .noc-wandbild .noc-st-zeit { font-size: .85rem; }
+    .noc-wandbild .noc-st-was  { font-size: .78rem; }
+    .noc-wandbild .noc-tag     { font-size: .72rem; }
   `;
 
   const KOPF = (modus) => `
@@ -190,6 +214,70 @@
       </div>
     </div>`;
 
+  // Stationen (Rosenweg/os-stationen, Agent v2, Kiosk, Chromecast): Zaehler
+  // oben, darunter eine Karte je Geraet — rot und gelb zuerst. Woher die
+  // Ampel kommt, steht in api/lib/nocstationen.js.
+  const STATIONEN = `
+    <div class="flex items-center justify-between mt-5 mb-2">
+      <div class="flex items-center gap-2">
+        <span class="noc-led led-amber" data-el="led-stationen"></span>
+        <span class="text-[11px] font-mono uppercase tracking-wider text-slate-300">Stationen</span>
+      </div>
+      <span class="text-[10px] text-slate-500 font-mono" data-el="st-fehler"></span>
+    </div>
+    <div class="noc-gitter mb-3">
+      <div class="noc-tile">
+        <div class="noc-label">Online</div>
+        <div class="flex items-baseline gap-2"><span class="noc-big text-emerald-300" data-el="st-online">—</span><span class="text-xs text-slate-400">/ <span data-el="st-gesamt">0</span></span></div>
+        <div class="noc-leise" data-el="st-online-leise">&nbsp;</div>
+      </div>
+      <div class="noc-tile">
+        <div class="noc-label">Offline</div>
+        <div class="noc-big" data-el="st-offline">—</div>
+        <div class="noc-leise" data-el="st-offline-leise">&nbsp;</div>
+      </div>
+      <div class="noc-tile">
+        <div class="noc-label">Warnungen</div>
+        <div class="noc-big" data-el="st-warn">—</div>
+        <div class="noc-leise" data-el="st-warn-leise">&nbsp;</div>
+      </div>
+      <div class="noc-tile">
+        <div class="noc-label">Update · Wartung</div>
+        <div class="noc-big" data-el="st-arbeit">—</div>
+        <div class="noc-leise">laufend oder angefordert</div>
+      </div>
+    </div>
+    <div data-el="st-liste" class="noc-stationen"><div class="text-xs text-slate-500 font-mono">lade…</div></div>`;
+
+  // Alter eines Lebenszeichens, kurz: 3 min, 2 h, 4 T.
+  const fmtAlter = (min) => {
+    if (min === null || min === undefined) return 'nie';
+    if (min < 2) return 'jetzt';
+    if (min < 60) return min + ' min';
+    if (min < 48 * 60) return Math.round(min / 60) + ' h';
+    return Math.round(min / 1440) + ' T';
+  };
+  const ZUSTAND_TEXT = { online: '', aus: 'aus', still: 'still', nie: 'nie gemeldet', 'ohne-agent': 'ohne Agent' };
+  const LED = { rot: 'led-red', gelb: 'led-amber', gruen: 'led-green', blau: 'led-blau', grau: 'led-grau' };
+
+  function stationKarte(s) {
+    const ort = [s.rolle_text, s.haus ? 'R' + s.haus : null, s.standort].filter(Boolean).join(' · ');
+    const was = [s.os, s.agent].filter(Boolean).join(' · ');
+    const zeit = s.zustand === 'ohne-agent' ? '—'
+      : s.zustand === 'online' ? fmtAlter(s.alter_min)
+      : (ZUSTAND_TEXT[s.zustand] || s.zustand) + (s.alter_min !== null && s.alter_min !== undefined ? ' ' + fmtAlter(s.alter_min) : '');
+    // „aus"/„still" stehen schon rechts in der Zeit — nicht noch einmal als Etikett.
+    const tags = (s.hinweise || []).filter((x) => !/^(aus|Anzeige aus|seit Tagen still|nie gemeldet)$/.test(x.text));
+    const titel = [ort, was, ...(s.hinweise || []).map((x) => x.text)].filter(Boolean).join('\n');
+    return `<div class="noc-st st-${esc(s.ampel)}" title="${esc(titel)}">
+      <div class="noc-st-kopf"><span class="noc-led ${LED[s.ampel] || 'led-grau'}"></span>
+        <span class="noc-st-name">${esc(s.id)}</span><span class="noc-st-zeit">${esc(zeit)}</span></div>
+      <div class="noc-st-was">${esc(ort)}</div>
+      ${was ? `<div class="noc-st-was">${esc(was)}</div>` : ''}
+      ${tags.length ? `<div class="noc-st-tags">${tags.map((x) => `<span class="noc-tag tag-${esc(x.stufe)}">${esc(x.text)}</span>`).join('')}</div>` : ''}
+    </div>`;
+  }
+
   function cssEinmal() {
     if (document.getElementById('noc-cockpit-css')) return;
     const st = document.createElement('style');
@@ -251,7 +339,7 @@
     }
 
     ziel.className = 'noc-cockpit' + (modus === 'wandbild' ? ' noc-wandbild' : '') + ' sm:rounded-2xl ' + (ziel.className || '');
-    ziel.innerHTML = `<div class="noc-inner">${KOPF(modus)}${MAIL}${UNIFI}</div>`;
+    ziel.innerHTML = `<div class="noc-inner">${KOPF(modus)}${MAIL}${UNIFI}${STATIONEN}</div>`;
     const el = (n) => ziel.querySelector(`[data-el="${n}"]`);
     const setz = (n, wert, klasse) => { const e = el(n); if (!e) return; e.textContent = wert; if (klasse) e.className = klasse; };
     // Eine Kachel in der Dienste-Leiste: Lampe, Wert, Erklaerung beim Draufzeigen.
@@ -447,6 +535,46 @@
       }, 'subsystems');
     }
 
+    function malStationen(d) {
+      sicher(() => {
+        const z = d.zusammenfassung || {};
+        el('led-stationen').className = 'noc-led ' + (LED[z.ampel] || 'led-grau');
+        setz('st-fehler', '');
+        setz('st-online', z.online ?? 0);
+        setz('st-gesamt', z.gesamt ?? 0);
+        setz('st-online-leise', z.ohne_agent ? z.ohne_agent + ' ohne Agent' : '\u00a0');
+        const echtAus = (z.offline || 0) - (z.aus_erlaubt || 0);
+        setz('st-offline', z.offline ?? 0, 'noc-big ' + (z.stoerungen && echtAus > 0 ? 'text-rose-400' : ''));
+        setz('st-offline-leise', z.aus_erlaubt ? z.aus_erlaubt + ' davon dürfen aus sein' : '\u00a0');
+        const w = (z.warnungen || 0) + (z.stoerungen || 0);
+        setz('st-warn', w, 'noc-big ' + (z.stoerungen ? 'text-rose-400' : z.warnungen ? 'text-amber-300' : 'text-emerald-300'));
+        setz('st-warn-leise', w ? (z.stoerungen || 0) + ' rot · ' + (z.warnungen || 0) + ' gelb' : 'keine');
+        setz('st-arbeit', z.arbeiten ?? 0, 'noc-big ' + (z.arbeiten ? 'text-sky-300' : ''));
+        const liste = d.stationen || [];
+        el('st-liste').innerHTML = liste.length
+          ? liste.map(stationKarte).join('')
+          : '<div class="text-xs text-slate-500 font-mono">keine Stationen eingetragen</div>';
+      }, 'stationen');
+    }
+
+    // Eigener Abruf: fehlt der Endpunkt (alte API) oder klemmt die Datenbank,
+    // bleibt der Rest des Lagebilds stehen.
+    async function stationen() {
+      if (document.hidden) return;
+      try {
+        const r = await holen('/api/isp/noc/public/stationen');
+        if (!r.ok) {
+          el('led-stationen').className = 'noc-led led-red';
+          setz('st-fehler', 'Stationen: HTTP ' + r.status);
+          return;
+        }
+        malStationen(await r.json());
+      } catch (e) {
+        el('led-stationen').className = 'noc-led led-red';
+        setz('st-fehler', 'Stationen: ' + e.message);
+      }
+    }
+
     async function ampeln() {
       let s = { mail: true, web: true, internet: true };
       try {
@@ -493,14 +621,16 @@
       if (el('utc')) setz('utc', now.toISOString().slice(11, 19));
     }
 
-    el('jetzt').addEventListener('click', () => { laden(); ampeln(); });
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) laden(); });
+    el('jetzt').addEventListener('click', () => { laden(); ampeln(); stationen(); });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { laden(); stationen(); } });
 
-    uhr(); laden(); ampeln();
+    uhr(); laden(); ampeln(); stationen();
     const t1 = setInterval(uhr, 1000);
     const t2 = setInterval(laden, intervallMs);
     const t3 = setInterval(ampeln, Math.max(intervallMs, 60000));
-    return { laden, ampeln, beenden: () => { clearInterval(t1); clearInterval(t2); clearInterval(t3); } };
+    // Lebenszeichen kommen hoechstens jede Minute — die API cached 15 s.
+    const t4 = setInterval(stationen, Math.max(intervallMs, 15000));
+    return { laden, ampeln, stationen, beenden: () => { [t1, t2, t3, t4].forEach(clearInterval); } };
   }
 
   global.NocCockpit = { starten };
