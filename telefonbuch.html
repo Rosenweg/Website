@@ -13,7 +13,7 @@
     <link rel="icon" href="/logo-rosenweg.png">
     <link rel="apple-touch-icon" href="/logo-rosenweg.png">
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="/js/authentik-auth.js?v=5"></script>
+    <script src="/js/authentik-auth.js?v=6"></script>
     <script src="/js/nav.js?v=3"></script>
     <script src="/js/excel-export.js?v=1"></script>
     <style>
@@ -92,7 +92,7 @@
 
         function matches(c, q) {
             if (!q) return true;
-            const hay = (c.name + ' ' + (c.email || '') + ' ' + (c.telefon || '') + ' ' +
+            const hay = (c.name + ' ' + (c.email || '') + ' ' + (c.telefon || '') + ' ' + (c.interne_nummer || '') + ' ' +
                 c.wohnungen.map(w => `STWEG ${w.stweg} ${w.bezeichnung}`).join(' ')).toLowerCase();
             return q.toLowerCase().split(/\s+/).every(t => hay.includes(t));
         }
@@ -124,6 +124,13 @@
                             <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"/></svg>
                             ${escapeHtml(c.telefon)}
                         </a>` : (c.telefon ? `<span class="text-gray-400 text-sm">${escapeHtml(c.telefon)}</span>` : '');
+                    // Interne Nummer 3HHWWP: erreicht die Person auf ihren Geraeten (inkl.
+                    // Weiterleitung). Echte Nummern gibt die API nur fuers eigene Haus heraus.
+                    const intern = c.interne_nummer && !c.deceased ? `
+                        <a href="tel:${escapeHtml(c.interne_nummer)}" class="flex items-center gap-1.5 text-emerald-700 hover:text-emerald-800 text-sm" title="Interne Nummer: klingelt auf ihren Rosenweg-Geraeten, inkl. Weiterleitung">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"/></svg>
+                            ${escapeHtml(c.interne_nummer)} <span class="text-xs text-gray-500">Rosenweg intern</span>
+                        </a>` : '';
                     const mailLink = c.email && !c.deceased ? `
                         <a href="mailto:${escapeHtml(c.email)}" class="flex items-center gap-1.5 text-blue-700 hover:text-blue-800 text-sm break-all">
                             <svg class="w-4 h-4 flex-none" fill="currentColor" viewBox="0 0 20 20"><path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"/><path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"/></svg>
@@ -139,7 +146,7 @@
                                 <h3 class="name font-semibold text-gray-900 text-base leading-tight">${escapeHtml(c.name)}${c.deceased ? ' <span class="text-xs font-normal text-gray-500">(verstorben)</span>' : ''}</h3>
                             </div>
                             <div class="mt-1 flex flex-wrap items-center gap-x-1 gap-y-0.5">${wohnungenHtml}</div>
-                            ${(phoneLink || mailLink) ? `<div class="mt-2 flex flex-col gap-1">${phoneLink}${mailLink}</div>` : ''}
+                            ${(intern || phoneLink || mailLink) ? `<div class="mt-2 flex flex-col gap-1">${intern}${phoneLink}${mailLink}</div>` : ''}
                         </div>`;
                 }).join('');
                 return `
@@ -160,10 +167,11 @@
             const filtered = allContacts.filter(c => matches(c, q));
             const flat = filtered.flatMap(c => {
                 if (c.wohnungen.length === 0) {
-                    return [{ Name: c.name, Telefon: c.telefon || '', Email: c.email || '', STWEG: '', Wohnung: '', Rolle: '', Verstorben: c.deceased ? 'ja' : '' }];
+                    return [{ Name: c.name, Intern: c.interne_nummer || '', Telefon: c.telefon || '', Email: c.email || '', STWEG: '', Wohnung: '', Rolle: '', Verstorben: c.deceased ? 'ja' : '' }];
                 }
                 return c.wohnungen.map(w => ({
                     Name: c.name,
+                    Intern: c.interne_nummer || '',
                     Telefon: c.telefon || '',
                     Email: c.email || '',
                     STWEG: w.stweg,

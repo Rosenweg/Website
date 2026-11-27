@@ -11,6 +11,7 @@
 // 15 Minuten; wer nur die Karten-UID hat, bekommt eine eigene, sichtbare und
 // gemeldete Sitzung — nie die des Opfers.
 const crypto = require('crypto');
+const appregister = require('./appregister');
 
 const TOKEN_PRAEFIX = 'rw_app_';
 const SITZUNG_RE = /^ks_[0-9a-f]{32}$/;
@@ -67,14 +68,8 @@ function anzeigeText(s, max = 60) {
   return String(s || '').replace(/[\x00-\x1f\x7f<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
-/**
- * Anfrage zur Karten-Anmeldung prüfen. -> { ok:true, werte } | { ok:false, fehler }
- * body: { uid, app, app_name?, geraet:{kennung, name?, plattform?}, schluessel }
- */
-function anmeldungPruefen(body) {
-  const b = body && typeof body === 'object' ? body : {};
-  const uid = kartenUid(b.uid);
-  if (!uid) return { ok: false, fehler: 'Karte nicht lesbar' };
+/** App, Gerät und Geräteschlüssel (gleich für Karte und QR). -> { ok:true, werte } | { ok:false, fehler } */
+function appGeraetPruefen(b) {
   const app = String(b.app || '');
   if (!APP_RE.test(app) || app.length > 100) return { ok: false, fehler: 'App fehlt' };
   const g = b.geraet && typeof b.geraet === 'object' ? b.geraet : {};
@@ -84,12 +79,96 @@ function anmeldungPruefen(body) {
   return {
     ok: true,
     werte: {
-      uid, app, kennung, schluessel: b.schluessel,
-      appName: anzeigeText(b.app_name || app, 60),
+      app, kennung, schluessel: b.schluessel,
+      // Name aus dem App-Register (apps-register.json), wo es die App kennt: die
+      // Anfrage kann sich so nicht als andere App ausgeben (Liste, Mail "neues Gerät")
+      appName: anzeigeText(appregister.nachPaket(app.toLowerCase())?.name || b.app_name || app, 60),
       geraetName: anzeigeText(g.name || 'Unbekanntes Gerät', 60),
       plattform: anzeigeText(g.plattform || '', 40),
     },
   };
+}
+
+/**
+ * Anfrage zur Karten-Anmeldung prüfen. -> { ok:true, werte } | { ok:false, fehler }
+ * body: { uid, app, app_name?, geraet:{kennung, name?, plattform?}, schluessel }
+ */
+function anmeldungPruefen(body) {
+  const b = body && typeof body === 'object' ? body : {};
+  const uid = kartenUid(b.uid);
+  if (!uid) return { ok: false, fehler: 'Karte nicht lesbar' };
+  const p = appGeraetPruefen(b);
+  return p.ok ? { ok: true, werte: { uid, ...p.werte } } : p;
+}
+
+// ─── Anmeldung per QR-Code (Stefan 27.11.2026) ──────────────────────────────
+// Wie beim Sperrbildschirm der geteilten Telefone, aber für die App auf dem
+// EIGENEN Handy: Die Person ist im Portal angemeldet (z. B. am Computer,
+// /smartphones → "App auf eigenem Handy"), dort steht ein QR; die App scannt
+// ihn mit der Kamera und bekommt ihre eigene Sitzung. Inhalt "RWAPP1:<token>"
+// (anderer Präfix als "RWTEL1:" der geteilten Telefone: die beiden Codes sind
+// nicht austauschbar) und bewusst keine URL. Einmalig, kurzlebig, je Person
+// gilt nur der neueste.
+const QR_PRAEFIX = 'RWAPP1:';
+const QR_PRAEFIX_TELEFON = 'RWTEL1:';
+const QR_TOKEN_RE = /^[A-Za-z0-9_-]{20,64}$/;
+
+function neuesQrToken() {
+  return zufall(24);
+}
+
+/** Gescannten Inhalt -> Token oder null (auch der blosse Token ohne Präfix gilt). */
+function qrToken(roh) {
+  let t = String(roh || '').trim();
+  if (t.startsWith(QR_PRAEFIX)) t = t.slice(QR_PRAEFIX.length);
+  return QR_TOKEN_RE.test(t) ? t : null;
+}
+
+/**
+ * Anfrage zur QR-Anmeldung prüfen. -> { ok:true, werte } | { ok:false, fehler }
+ * body: { token, app, app_name?, geraet:{kennung, name?, plattform?}, schluessel }
+ */
+function qrAnmeldungPruefen(body) {
+  const b = body && typeof body === 'object' ? body : {};
+  if (String(b.token || '').trim().startsWith(QR_PRAEFIX_TELEFON)) {
+    return { ok: false, fehler: 'Das ist der QR für geteilte Telefone. Wähle auf rosenweg4303.ch/smartphones „App auf eigenem Handy“.' };
+  }
+  const token = qrToken(b.token);
+  if (!token) return { ok: false, fehler: 'Das ist kein Rosenweg-Anmeldecode' };
+  const p = appGeraetPruefen(b);
+  return p.ok ? { ok: true, werte: { token, ...p.werte } } : p;
+}
+
+// ─── "Mit dem Handy anmelden" (Stefan 27.11.2026) ────────────────────────────
+// Umgekehrter QR für Computer ohne Kamera und ohne Kartenleser: die App am
+// Computer zeigt einen QR mit der Portal-Adresse /app-anmelden#<code>; die
+// Person scannt ihn mit der Kamera ihres Handys (jede Kamera-App genügt), ist im
+// Portal angemeldet und bestätigt. Prinzip Geräte-Code (RFC 8628). Der kurze
+// Benutzer-Code steht auch lesbar unter dem QR (zum Abtippen).
+const HANDY_ZEICHEN = 'BCDFGHJKLMNPQRSTVWXZ23456789';   // ohne 0/O, 1/I, Vokale (keine Wörter)
+
+function neuerBenutzerCode() {
+  const b = crypto.randomBytes(8);
+  let c = '';
+  for (let i = 0; i < 8; i++) c += HANDY_ZEICHEN[b[i] % HANDY_ZEICHEN.length];
+  return c.slice(0, 4) + '-' + c.slice(4);
+}
+
+/** Eingabe/URL-Teil -> "ABCD-EFGH" oder null (Gross/klein, Leer- und Bindestriche egal). */
+function benutzerCode(roh) {
+  const c = String(roh || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (c.length !== 8 || [...c].some(z => !HANDY_ZEICHEN.includes(z))) return null;
+  return c.slice(0, 4) + '-' + c.slice(4);
+}
+
+/** Anfrage "Code holen" prüfen: App, Gerät, Schlüssel wie bei Karte und QR. */
+function handyCodePruefen(body) {
+  return appGeraetPruefen(body && typeof body === 'object' ? body : {});
+}
+
+/** Ohne Karte angemeldet (QR oder Handy): beim Erneuern Konto statt Karte prüfen. */
+function ohneKarte(art) {
+  return art === 'qr' || art === 'handy';
 }
 
 /**
@@ -133,8 +212,9 @@ function istTechnikOderPraesident(groups) {
 }
 
 module.exports = {
-  TOKEN_PRAEFIX, SITZUNG_RE, GRENZEN,
-  neueSitzungsId, neuesZugangsToken, zufall, hash, kartenUid,
+  TOKEN_PRAEFIX, SITZUNG_RE, GRENZEN, QR_PRAEFIX, QR_PRAEFIX_TELEFON,
+  neueSitzungsId, neuesZugangsToken, neuesQrToken, zufall, hash, kartenUid, qrToken,
   oeffentlicherSchluessel, erneuernText, unterschriftGueltig, anzeigeText,
-  anmeldungPruefen, gebremst, abzuloesen, istTechnikOderPraesident,
+  anmeldungPruefen, qrAnmeldungPruefen, gebremst, abzuloesen, istTechnikOderPraesident,
+  neuerBenutzerCode, benutzerCode, handyCodePruefen, ohneKarte,
 };

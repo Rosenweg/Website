@@ -4,28 +4,27 @@
 // wird nichts doppelt gepflegt. Wer was sieht, richtet sich nach den Gruppen
 // der angemeldeten Person, nach denselben Regeln wie auf der Website:
 //
-//   Verwaltung, Handwerker, Nebenstellen   jede angemeldete Person
-//   Ansprechpartner je STWEG               nur die eigenen STWEG
-//   Bewohner und Eigentümer                nur die eigenen STWEG, und nur
-//                                          für Ausschuss, Verwaltung,
-//                                          Technik und Präsidium
+//   Verwaltung, Handwerker                jede angemeldete Person
+//   Nebenstellen                          jede angemeldete Person, nur Nummern
+//                                         der Anlage (2–4 Stellen, 3HHWWP)
+//   Ansprechpartner je STWEG              nur die eigenen STWEG
+//   Bewohner und Eigentuemer              jede angemeldete Person, aber nur mit
+//                                         der internen Nummer 3HHWWP
 //
-// Die letzte Zeile ist eine Abwägung und keine technische Notwendigkeit:
-// eine Station steht im Treppenhaus, und private Nummern gehören nicht auf
-// ein Gerät, an dem sich der Reihe nach mehrere Leute anmelden. Wer sie im
-// Alltag braucht — Ausschuss und Verwaltung — bekommt sie.
+// Echte Nummern von Personen (Handy, Festnetz) gehoeren nicht auf ein Geraet im
+// Treppenhaus, an dem sich der Reihe nach mehrere Leute anmelden — und seit es
+// die internen Nummern gibt, braucht sie dort niemand: wer 3HHWWP waehlt,
+// erreicht die Person auf ihren Geraeten, inklusive Weiterleitung (Stefan
+// 27.11.2026, lib/nummernsicht.js). Nur Technik und Praesident sehen die echten
+// Nummern weiterhin, wie ueberall.
 const { pool } = require('./db');
-const { isTechnik, isPraesident, isAusschussForAny, getUserStwegs, getAusschussStwegs } = require('./groups');
+const { isTechnik, isPraesident, getUserStwegs } = require('./groups');
+const { istAnlagennummer, interneNummernLaden } = require('./nummernsicht');
 
 function eintrag(kategorie, name, nummer, zusatz) {
   const sauber = String(nummer || '').replace(/[^\d+]/g, '');
   if (sauber.length < 3) return null;
   return { kategorie, name: String(name || '').trim() || sauber, nummer: sauber, zusatz: zusatz || '' };
-}
-
-function darfBewohnerSehen(groups) {
-  return isTechnik(groups) || isPraesident(groups) || isAusschussForAny(groups)
-    || groups.some((g) => ['verwaltung', 'wohnungsverwaltung', 'bewohner-verwaltung'].includes(g.toLowerCase()));
 }
 
 /**
@@ -66,37 +65,47 @@ async function telefonbuch(groups) {
   }
 
   // --- Nebenstellen --------------------------------------------------------
+  // In pbx_ring_members stehen auch echte Handynummern (Technik-Bereitschaft):
+  // die nur fuer Technik/Praesident, sonst nur Nummern der Anlage.
   const ring = await pool.query(
     'SELECT name, phone, notiz FROM pbx_ring_members WHERE enabled IS NOT FALSE');
-  for (const r of ring.rows) dazu('Intern', r.name, r.phone, r.notiz);
+  for (const r of ring.rows) {
+    if (alleStwegs || istAnlagennummer(r.phone)) dazu('Intern', r.name, r.phone, r.notiz);
+  }
 
   // --- Ansprechpartner je STWEG -------------------------------------------
+  // Mit Wohnung = Bewohner: dann die interne Nummer statt der echten. Ohne
+  // Wohnung (Hauswart, Firma) bleibt die Nummer.
+  const interne = await interneNummernLaden(pool);
+  const internVon = (email) => {
+    const e = String(email || '').trim().toLowerCase();
+    return e ? interne.filter((n) => String(n.email).toLowerCase() === e) : [];
+  };
   if (alleStwegs || stwegs.length) {
     const k = await pool.query(
-      alleStwegs ? 'SELECT name, telefon, funktion, wohnung, stweg FROM kontakte'
-                 : 'SELECT name, telefon, funktion, wohnung, stweg FROM kontakte WHERE stweg = ANY($1)',
+      alleStwegs ? 'SELECT name, email, telefon, funktion, wohnung, stweg FROM kontakte'
+                 : 'SELECT name, email, telefon, funktion, wohnung, stweg FROM kontakte WHERE stweg = ANY($1)',
       alleStwegs ? [] : [stwegs]);
     for (const r of k.rows) {
-      dazu('Ansprechpartner', r.name, r.telefon,
-        [r.funktion, r.wohnung && `Wohnung ${r.wohnung}`, `STWEG ${r.stweg}`].filter(Boolean).join(' · '));
+      const zusatz = [r.funktion, r.wohnung && `Wohnung ${r.wohnung}`, `STWEG ${r.stweg}`].filter(Boolean).join(' · ');
+      if (alleStwegs || !String(r.wohnung || '').trim()) dazu('Ansprechpartner', r.name, r.telefon, zusatz);
+      if (String(r.wohnung || '').trim()) {
+        for (const n of internVon(r.email)) dazu('Ansprechpartner', r.name, n.nummer, `${zusatz} · intern`);
+      }
     }
   }
 
-  // --- Bewohner und Eigentümer --------------------------------------------
-  // Nur die STWEG, in denen die Person Ausschuss ist (Verwaltung: ihre
-  // STWEG-Gruppen). Vorher genuegte Ausschuss irgendwo, und man sah die
-  // Privatnummern jeder STWEG, in der man bloss wohnt.
-  const verwaltungsGruppe = (groups || []).some((g) => ['verwaltung', 'wohnungsverwaltung', 'bewohner-verwaltung'].includes(String(g).toLowerCase()));
-  const bewohnerStwegs = [...new Set([...getAusschussStwegs(groups || []), ...(verwaltungsGruppe ? stwegs : [])])];
-  if (darfBewohnerSehen(groups || []) && (alleStwegs || bewohnerStwegs.length)) {
+  // --- Bewohner und Eigentuemer: interne Nummern -------------------------
+  // Quelle: Abbild der Anlage (telefon_interne_nummern, von der pbx-api).
+  for (const n of interne) {
+    dazu('Bewohner', n.name, n.nummer, [n.wohnung, 'intern'].filter(Boolean).join(' · '));
+  }
+
+  // --- Echte Nummern: nur Technik und Praesident ---------------------------
+  if (alleStwegs) {
     const w = await pool.query(
-      alleStwegs
-        ? `SELECT bezeichnung, stweg, eigentuemer_name, eigentuemer_telefon,
-                  mieter_name, mieter_telefon FROM wohnungen WHERE deleted_at IS NULL`
-        : `SELECT bezeichnung, stweg, eigentuemer_name, eigentuemer_telefon,
-                  mieter_name, mieter_telefon FROM wohnungen
-            WHERE deleted_at IS NULL AND stweg = ANY($1)`,
-      alleStwegs ? [] : [bewohnerStwegs]);
+      `SELECT bezeichnung, stweg, eigentuemer_name, eigentuemer_telefon,
+              mieter_name, mieter_telefon FROM wohnungen WHERE deleted_at IS NULL`);
     for (const r of w.rows) {
       const ort = [r.bezeichnung, `STWEG ${r.stweg}`].filter(Boolean).join(' · ');
       dazu('Eigentümer', r.eigentuemer_name, r.eigentuemer_telefon, ort);
@@ -104,14 +113,9 @@ async function telefonbuch(groups) {
     }
 
     const wk = await pool.query(
-      alleStwegs
-        ? `SELECT k.name, k.telefon, k.mobile, k.rolle, w.bezeichnung, w.stweg
-             FROM wohnungen_kontakte k JOIN wohnungen w ON w.id = k.wohnung_id
-            WHERE k.deleted_at IS NULL AND k.archiviert_am IS NULL`
-        : `SELECT k.name, k.telefon, k.mobile, k.rolle, w.bezeichnung, w.stweg
-             FROM wohnungen_kontakte k JOIN wohnungen w ON w.id = k.wohnung_id
-            WHERE k.deleted_at IS NULL AND k.archiviert_am IS NULL AND w.stweg = ANY($1)`,
-      alleStwegs ? [] : [bewohnerStwegs]);
+      `SELECT k.name, k.telefon, k.mobile, k.rolle, w.bezeichnung, w.stweg
+         FROM wohnungen_kontakte k JOIN wohnungen w ON w.id = k.wohnung_id
+        WHERE k.deleted_at IS NULL AND k.archiviert_am IS NULL`);
     for (const r of wk.rows) {
       const ort = [r.rolle, r.bezeichnung, `STWEG ${r.stweg}`].filter(Boolean).join(' · ');
       dazu('Bewohner', r.name, r.telefon, ort);

@@ -50,7 +50,9 @@ async function apiAufruf(auth, method, pfad, { body, query } = {}) {
   }
   const r = await fetch(url, {
     method,
-    headers: { Authorization: auth, 'Content-Type': 'application/json', Accept: 'application/json' },
+    // X-Rosenweg-Kanal: Antworten landen bei einem Agenten, nicht im Portal —
+    // echte Telefonnummern nur fuer Technik/Praesident/selbst (lib/nummernsicht.js).
+    headers: { Authorization: auth, 'Content-Type': 'application/json', Accept: 'application/json', 'X-Rosenweg-Kanal': 'mcp' },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   const text = await r.text();

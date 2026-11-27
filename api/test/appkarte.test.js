@@ -77,3 +77,42 @@ test('Token und Sitzungs-Id haben ihr Format', () => {
   assert.match(ak.neueSitzungsId(), ak.SITZUNG_RE);
   assert.notEqual(ak.neuesZugangsToken(), ak.neuesZugangsToken());
 });
+
+test('QR-Anmeldung: Praefix RWAPP1, Token-Form, Telefon-QR mit Hinweis', () => {
+  const t = ak.neuesQrToken();
+  assert.equal(ak.qrToken(ak.QR_PRAEFIX + t), t);
+  assert.equal(ak.qrToken(t), t);
+  assert.equal(ak.qrToken('RWAPP1:kurz'), null);
+  assert.equal(ak.qrToken('https://example.org/' + t), null);
+  const { uid, ...ohneKarte } = gueltig();
+  const p = ak.qrAnmeldungPruefen({ ...ohneKarte, token: ak.QR_PRAEFIX + t });
+  assert.equal(p.ok, true);
+  assert.equal(p.werte.token, t);
+  assert.equal(p.werte.app, 'ch.rosenweg4303.telefon');
+  assert.equal(p.werte.uid, undefined);
+  const tel = ak.qrAnmeldungPruefen({ ...ohneKarte, token: 'RWTEL1:' + t });
+  assert.equal(tel.ok, false);
+  assert.match(tel.fehler, /geteilte Telefone/);
+  assert.equal(ak.qrAnmeldungPruefen({ ...ohneKarte, token: 'irgendwas' }).ok, false);
+  assert.equal(ak.qrAnmeldungPruefen({ ...ohneKarte, token: t, schluessel: 'x' }).ok, false);
+  assert.equal(ak.qrAnmeldungPruefen({ token: t }).ok, false);
+});
+
+test('Mit dem Handy anmelden: Benutzer-Code lesbar, Eingabe tolerant, nur ohne Karte', () => {
+  for (let i = 0; i < 50; i++) {
+    const c = ak.neuerBenutzerCode();
+    assert.match(c, /^[B-DF-HJ-NP-TV-XZ2-9]{4}-[B-DF-HJ-NP-TV-XZ2-9]{4}$/);
+    assert.equal(ak.benutzerCode(c), c);
+    assert.equal(ak.benutzerCode(c.toLowerCase().replace('-', ' ')), c);
+  }
+  assert.equal(ak.benutzerCode('ABCD-EFGH'), null);   // Vokale kommen nie vor
+  assert.equal(ak.benutzerCode('BCDF-GHJ'), null);
+  assert.equal(ak.benutzerCode('<script>'), null);
+  const { uid, ...ohneKarte } = gueltig();
+  assert.equal(ak.handyCodePruefen(ohneKarte).ok, true);
+  assert.equal(ak.handyCodePruefen({ ...ohneKarte, schluessel: 'x' }).ok, false);
+  assert.equal(ak.handyCodePruefen(null).ok, false);
+  assert.equal(ak.ohneKarte('qr'), true);
+  assert.equal(ak.ohneKarte('handy'), true);
+  assert.equal(ak.ohneKarte('karte'), false);
+});

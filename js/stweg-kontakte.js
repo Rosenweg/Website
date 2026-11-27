@@ -141,6 +141,7 @@ const STWEGKontakte = (function() {
                     html += '<p class="font-semibold text-gray-800">' + esc(person.name) + '</p>';
                     if (person.email) html += '<p class="text-sm text-gray-600">&#x1F4E7; <a href="mailto:' + esc(person.email) + '" class="text-blue-600 hover:underline">' + esc(person.email) + '</a></p>';
                     if (person.telefon) html += '<p class="text-sm text-gray-600">&#x1F4F1; <a href="tel:' + esc(person.telefon.replace(/\s/g,'')) + '" class="text-blue-600 hover:underline">' + esc(person.telefon) + '</a></p>';
+                    else if (person.interne_nummer) html += '<p class="text-sm text-gray-600">&#x260E; <a href="tel:' + esc(person.interne_nummer) + '" class="text-blue-600 hover:underline">' + esc(person.interne_nummer) + '</a> <span class="text-xs text-gray-500">Rosenweg intern</span></p>';
                     html += '<p class="text-xs text-gray-500 mt-1">' + displayRolle + '</p>';
                     html += '</div>';
                     if (person.rolle === 'eigentuemer' && w.bewohner.length > 1) {

@@ -126,6 +126,36 @@ test('Adressen: IPv4 oder Hostname, MAC normiert; erlaubte Anzeige-Hosts', () =>
   assert.equal(w.adresseErlaubt('http://display.rosenweg4303.ch/', ['display.rosenweg4303.ch']), false);
 });
 
+test('Chromecast bekommt display-lite.html auf demselben Host, Haus bleibt; voll und fremde Pfade bleiben', () => {
+  // display.* ist nur intern auflösbar — der Chromecast bekommt www.*
+  assert.equal(w.castAdresse(URL9), 'https://www.rosenweg4303.ch/display-lite.html?haus=9');
+  assert.equal(w.castAdresse('https://display.rosenweg4303.ch/?haus=9'), 'https://www.rosenweg4303.ch/display-lite.html?haus=9');
+  assert.equal(w.castAdresse('https://www.rosenweg4303.ch/display.html?haus=13&gesperrt=1'),
+    'https://www.rosenweg4303.ch/display-lite.html?haus=13&gesperrt=1');
+  assert.equal(w.castAdresse('https://display.rosenweg4303.ch'), 'https://www.rosenweg4303.ch/display-lite.html');
+  // overrides roles.display.cast_seite = 'voll': display.html bleibt
+  assert.equal(w.castAdresse(URL9, 'voll'), URL9);
+  // Von Hand überschriebene andere Seite: nicht anfassen
+  assert.equal(w.castAdresse('https://display.rosenweg4303.ch/test.html?haus=9'), 'https://display.rosenweg4303.ch/test.html?haus=9');
+  assert.equal(w.castAdresse('kaputt'), 'kaputt');
+  assert.equal(w.castAdresse(undefined), undefined);
+  // Erlaubt mit den Cast-Hosts dazu (so prüft castZiel)
+  assert.equal(w.adresseErlaubt(w.castAdresse(URL9), ['display.rosenweg4303.ch', ...w.CAST_ERLAUBT]), true);
+  assert.equal(w.adresseErlaubt(w.castAdresse(URL9), ['display.rosenweg4303.ch']), false);
+});
+
+test('Chromecast mit Haus 9: aus buildConfig wird die Lite-Adresse, overrides wirken', () => {
+  const { buildConfig } = require('../lib/stationconfig');
+  const ziel = (st) => {
+    const d = buildConfig({ id: 'cc', hostname: 'cc', ...st, role: 'display' }).roles.display;
+    return w.castAdresse(d.url, d.cast_seite);
+  };
+  assert.equal(ziel({ haus: 9 }), 'https://www.rosenweg4303.ch/display-lite.html?haus=9');
+  assert.equal(ziel({ haus: 9, overrides: { roles: { display: { cast_seite: 'voll' } } } }), URL9);
+  assert.equal(ziel({ haus: 9, overrides: { roles: { display: { url: 'https://display.rosenweg4303.ch/display.html' } } } }),
+    'https://www.rosenweg4303.ch/display-lite.html?haus=9');
+});
+
 // ─── Gegen die Attrappe ───────────────────────────────────────────────
 
 const mitOpenssl = { skip: opensslDa() ? false : 'openssl fehlt' };

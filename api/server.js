@@ -14,6 +14,7 @@ const { escapeHtml, createSemaphore, normalizePhone, safeId, geheimnisGleich, fe
 
 // STWEG-Gruppen-Mapping + pure Klassifizierer -> lib/groups.js
 const { STWEG_GROUPS, parseStweg, getUserStwegs, stwegFolderName, folderStwegNr, isTechnik, isPraesident, getAusschussStwegs, isAusschussForAny, canSeeVerwaltungKontakte } = require('./lib/groups');
+const { nummernKanal, darfEchteNummernSehen, istTechnikOderPraesident, interneNummerFinden, nummernAusgeben, nummernAusBodyEntfernen, interneNummernLaden, interneNummernCacheLeeren, interneNummernPruefen, nummernSicht } = require('./lib/nummernsicht');
 const { zevAliasAddress, zevGotoTargets } = require('./lib/zev');
 
 const app = express();
@@ -32,7 +33,11 @@ app.use('/api/vollmachten/:id/upload-signed', ausweisVorBody('application/pdf', 
 // PBX-Voicemail-Upload: Asterisk-AGI laedt das WAV als Raw-Body hoch
 app.use('/api/pbx/voicemail', ausweisVorBody('audio/wav', (req, res, next) => requirePbxSecret(req, res, next)), express.raw({ type: 'audio/wav', limit: '50mb' }));
 app.use(express.json({ limit: '10mb' }));
-app.use(cors({
+// Bestätigungslinks aus der Karten-Mail (api/lib/kartenadmin.js) sind Formular-POSTs
+// auf derselben Seite, geschützt durch das einmalige Token im Pfad. Wegen
+// Referrer-Policy: no-referrer schickt der Browser dabei "Origin: null" – die
+// CORS-Prüfung unten würde sie mit "Herkunft nicht erlaubt" abweisen.
+const corsPruefung = cors({
   origin: (origin, cb) => {
     // Allow requests with no origin (mobile apps, curl, server-to-server)
     if (!origin) return cb(null, true);
@@ -46,7 +51,8 @@ app.use(cors({
     cb(new Error('CORS not allowed'));
   },
   credentials: true,
-}));
+});
+app.use((req, res, next) => (req.path.startsWith('/api/karten-bestaetigung/') ? next() : corsPruefung(req, res, next)));
 // Fehler der Parser/CORS oben sauber beantworten: ohne eigenen Handler zeigt Express
 // (NODE_ENV nicht 'production') den Stacktrace im Browser.
 app.use((err, req, res, next) => {
@@ -91,9 +97,13 @@ const { haeuserAusAuswahl } = require('./lib/haeuser');
 const benutzername = require('./lib/benutzername');
 const zlibModul = require('zlib');
 
-// Mail (transporter, loggedSendMail, isAllowlistedSender, generateOTP, EMAIL_ALLOWLIST,
-// MAIL_FROM, SMTP2GO_*) -> lib/mail.js
-const { transporter, MAIL_FROM, SMTP2GO_API_KEY, SMTP2GO_API_URL, EMAIL_ALLOWLIST, generateOTP, loggedSendMail, isAllowlistedSender } = require('./lib/mail');
+// Mail (mailSenden, loggedSendMail, isAllowlistedSender, generateOTP, EMAIL_ALLOWLIST,
+// MAIL_FROM) -> lib/mail.js; Versand über Mailcow-Gateway-User (lib/mailgateway.js)
+const { MAIL_FROM, EMAIL_ALLOWLIST, generateOTP, mailSenden, loggedSendMail, isAllowlistedSender } = require('./lib/mail');
+// SMTP2GO nur noch als Ausweichziel des PMG/Relays (Kontingent im NOC, Smarthost-Domains
+// im ISP-Bereich). Die API selbst sendet nicht mehr darüber.
+const SMTP2GO_API_KEY = process.env.SMTP2GO_API_KEY || '';
+const SMTP2GO_API_URL = 'https://eu-api.smtp2go.com/v3';
 // WhatsApp-Queue + Technik-Gruppen-Resolver -> lib/whatsapp.js
 const { queueWhatsappMessage, resolveTechnikWhatsappGroupId } = require('./lib/whatsapp');
 const { otpAusstellen, otpPruefen, ausstellenErlaubt, normEmail, OTP_FEHLER, OTP_SCHEMA_SQL } = require('./lib/otp');
@@ -262,6 +272,9 @@ const { AUTHENTIK_URL, AUTHENTIK_EXTERNAL_URL, AUTHENTIK_CLIENT_ID, AUTHENTIK_CL
 const { authentikAPI, tokenCache, validateAuthentikToken, authentikPasswordLogin, appTokensVergessen, MANAGED_PAGES, ACCESS_LEVELS, resolveAncestorGroups, getUserPermissions } = require('./lib/auth');
 // Auth-Middleware -> middleware/auth.js (authMiddleware/adminOnly/requirePermission/requireUserLogin)
 const { authMiddleware, adminOnly, requirePermission, requireUserLogin } = require('./middleware/auth');
+// Admin-Aktionen mit der Karte: Protokoll, Quittung, Bestaetigung per E-Mail (lib/kartenadmin.js)
+const kartenAdmin = require('./lib/kartenadmin');
+const { FRISCH_MIN: STUFE_FRISCH_MIN, passwortWechselErlaubt } = require('./lib/stufen');
 // Web-Push (VAPID) -> lib/webpush.js (Opt-in-Benachrichtigungen fuer PWAs)
 const webpushLib = require('./lib/webpush');
 
@@ -861,7 +874,7 @@ app.post('/api/ki-search', authMiddleware, async (req, res) => {
     const searches = await Promise.allSettled([
       // Personen (nur für wohnungsverwaltung-Berechtigte)
       groups.some(g => g.toLowerCase() === 'technik' || g.toLowerCase() === 'praesident' || g.toLowerCase() === 'präsident' || g.toLowerCase() === 'verwaltung') || isAdmin
-        ? pool.query('SELECT id, name, email, telefon FROM personen WHERE de_norm(name) LIKE de_norm($1) OR de_norm(email) LIKE de_norm($1) LIMIT 5', [like])
+        ? pool.query('SELECT p.id, p.name, p.email, p.telefon, (SELECT array_agg(DISTINCT w.stweg) FROM wohnungen_kontakte k JOIN wohnungen w ON w.id = k.wohnung_id WHERE k.person_id = p.id AND k.archiviert_am IS NULL) AS stwegs FROM personen p WHERE de_norm(p.name) LIKE de_norm($1) OR de_norm(p.email) LIKE de_norm($1) LIMIT 5', [like])
         : { rows: [] },
       // Handwerker (alle eingeloggten User)
       pool.query('SELECT id, firma, kategorie, telefon, mobile, email FROM handwerker WHERE archiviert = false AND (de_norm(firma) LIKE de_norm($1) OR de_norm(kategorie) LIKE de_norm($1) OR de_norm(COALESCE(leistungen::text,\'\')) LIKE de_norm($1)) LIMIT 5', [like]),
@@ -898,7 +911,10 @@ app.post('/api/ki-search', authMiddleware, async (req, res) => {
     const [personen, handwerker, vollmachten, reklamationen, mails, verwaltungen, wohnungen, projekte] = searches.map(s => s.status === 'fulfilled' ? (s.value?.rows || []) : []);
 
     // Treffer normalisieren
-    for (const p of personen) hits.push({ typ: 'Person', titel: p.name, sub: p.email || p.telefon || '', url: '/personen.html', meta: p });
+    // Personen aller STWEGs: echte Nummer nur Technik/Praesident/selbst und die
+    // Verwaltung fuer die STWEGs, die sie verwaltet (lib/nummernsicht.js)
+    const sicht = await nummernSicht(req, pool);
+    for (const p0 of personen) { const { stwegs, ...p1 } = p0; const p = sicht(p1, { email: p1.email, name: p1.name, stwegs: stwegs || [] }); hits.push({ typ: 'Person', titel: p.name, sub: p.email || p.telefon || p.interne_nummer || '', url: '/personen.html', meta: p }); }
     for (const h of handwerker) hits.push({ typ: 'Handwerker', titel: h.firma, sub: (h.kategorie || '') + (h.mobile ? ' · ' + h.mobile : ''), url: '/handwerker.html#' + h.id, meta: h });
     for (const v of vollmachten) hits.push({ typ: 'Vollmacht', titel: v.vollmachtgeber_name + ' → ' + v.bevollmaechtigter_name, sub: `${v.art} · ${v.status} · ${v.doc_hash}`, url: '/vollmachten.html', meta: v });
     for (const r of reklamationen) hits.push({ typ: 'Reklamation', titel: (r.beschreibung || '').slice(0, 80), sub: `STWEG ${r.stweg || '—'} · ${r.status}`, url: '/reklamationen.html', meta: r });
@@ -968,7 +984,7 @@ app.get('/api/permissions', authMiddleware, requirePermission('rechteverwaltung'
   }
 });
 
-app.put('/api/permissions', authMiddleware, requirePermission('rechteverwaltung', 'write'), async (req, res) => {
+app.put('/api/permissions', authMiddleware, requirePermission('rechteverwaltung', 'write'), kartenAdmin.bestaetigungVerlangen, async (req, res) => {
   const { permissions } = req.body; // [{ group_name, page, access }]
   if (!Array.isArray(permissions)) return res.status(400).json({ error: 'permissions Array erforderlich' });
 
@@ -1067,6 +1083,9 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
       permissions: permissions,
       whatsapp_opt_in: whatsappOptIn,
     },
+    // Wie ist diese Anfrage angemeldet (lib/stufen.js)? Nur Auskunft, sperrt nichts.
+    // stufe: karte | konto | frisch; art: website | otp | app | authentik | pat | karte | qr | handy | anlage | bestaetigt
+    anmeldung: { ...(req.auth || { stufe: 'karte', art: 'unbekannt', auth_time: null }), frisch_min: STUFE_FRISCH_MIN },
   });
   } catch (err) {
     console.error('[auth/me] Error:', err.message);
@@ -1480,11 +1499,17 @@ const AD_PASSWORD_API_URL = process.env.AD_PASSWORD_API_URL || 'http://100.64.2.
 const AD_PASSWORD_API_SECRET = process.env.AD_PASSWORD_API_SECRET || '';
 if (!AD_PASSWORD_API_SECRET) console.warn('[ad-password] AD_PASSWORD_API_SECRET fehlt — Passwoerter werden nicht ins AD uebernommen');
 
-// Passwortwechsel nur aus einer frischen Browser-Anmeldung ueber Authentik: ein
+// Passwortwechsel nur aus einer frischen Anmeldung mit dem Rosenweg-Konto: ein
 // gestohlenes Sitzungstoken (oder eine OTP-Sitzung) allein reicht nicht, um das
 // Konto zu uebernehmen. Das alte Passwort laesst sich nicht verlangen — viele Konten
 // melden sich per Passkey/Einladung an und kennen keins.
-const PASSWORT_FRISCH_MS = 15 * 60 * 1000;
+//
+// Frisch (lib/stufen.js, passwortWechselErlaubt): Website-Sitzung mit id_token oder
+// Access-Token der Rosenweg-Apps, deren auth_time hoechstens STUFE_FRISCH_MIN (15)
+// Minuten alt ist. Die Apps holen das mit prompt=login/max_age=0 (rosenweg_basis:
+// 403 reauth -> bestaetigen()), die Website mit reauth=1. Bisher ging es nur mit der
+// Website-Sitzung; App-Tokens bekamen immer 403. Karte, QR, Anlage und PAT sperrt
+// PAT_GESPERRT schon in authMiddleware (unveraendert).
 app.post('/api/change-password', authMiddleware, async (req, res) => {
   const new_password = req.body?.new_password;
   if (!new_password || typeof new_password !== 'string') {
@@ -1498,18 +1523,11 @@ app.post('/api/change-password', authMiddleware, async (req, res) => {
   }
   const userId = req.user.user_id || req.user.id;
   const sitzungsToken = (req.headers.authorization || '').replace(/^Bearer /, '');
-  let sitzung;
-  try {
-    // Frische in SQL pruefen (Uhr der DB, die created_at gesetzt hat — keine Abweichung
-    // zwischen API- und DB-Uhr, keine Zeitzonen-Deutung von created_at in node).
-    sitzung = (await pool.query(
-      `SELECT id_token, created_at > NOW() - make_interval(secs => $3) AS frisch
-         FROM sessions WHERE token = $1 AND user_id = $2`, [sitzungsToken, userId, PASSWORT_FRISCH_MS / 1000])).rows[0];
-  } catch (err) {
-    return res.status(500).json({ error: fehlerFuerClient(err, 'Fehler') });
-  }
-  if (!sitzung || !sitzung.id_token || !sitzung.frisch) {
-    return res.status(403).json({ error: 'Bitte zur Bestätigung neu anmelden und das Passwort danach innert 15 Minuten ändern.', reauth: true });
+  if (!passwortWechselErlaubt(req.auth)) {
+    return res.status(403).json({
+      error: `Bitte zur Bestätigung neu anmelden und das Passwort danach innert ${STUFE_FRISCH_MIN} Minuten ändern.`,
+      reauth: true, fehler: 'frisch',
+    });
   }
   // Limit erst nach der Frische-Pruefung: sonst verbrauchten die 403-Runden (Seite
   // fragt, wird zur Neuanmeldung geschickt) die Versuche und sperrten den Wechsel (R2-S1f).
@@ -4189,7 +4207,8 @@ app.get('/api/kontakte/:stweg', authMiddleware, async (req, res) => {
       `SELECT * FROM kontakte WHERE stweg = $1 ORDER BY sort_order, name`,
       [stweg]
     );
-    res.json({ kontakte: result.rows });
+    const sicht = await nummernSicht(req, pool);
+    res.json({ kontakte: result.rows.map(k => sicht(k, { email: k.email, name: k.name, stweg })) });
   } catch (err) {
     res.status(500).json({ error: 'Fehler' });
   }
@@ -4202,10 +4221,13 @@ app.put('/api/kontakte', authMiddleware, adminOnly, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // Wer die echten Nummern nicht sieht (GET liefert sie leer), loescht sie
+    // beim Speichern nicht: leeres telefon heisst dann "unveraendert".
+    const telefonSql = istTechnikOderPraesident(req.user) ? '$3' : "COALESCE(NULLIF($3, ''), telefon)";
     for (const k of kontakte) {
       if (k.id) {
         await client.query(
-          `UPDATE kontakte SET name=$1, email=$2, telefon=$3, funktion=$4, wohnung=$5, sort_order=$6, updated_at=NOW()
+          `UPDATE kontakte SET name=$1, email=$2, telefon=${telefonSql}, funktion=$4, wohnung=$5, sort_order=$6, updated_at=NOW()
            WHERE id=$7`,
           [k.name, k.email, k.telefon, k.funktion, k.wohnung, k.sort_order || 0, k.id]
         );
@@ -4517,6 +4539,7 @@ app.post('/api/verteiler/send', authMiddleware, adminOnly, async (req, res) => {
   try {
     let sent = 0;
     let failed = [];
+    let gateway = null;
     // EINE Mail, alle Empfänger im BCC — so sehen sie sich gegenseitig NICHT (DSGVO).
     // To = MAIL_FROM (neutral); der Verteiler-Alias darf NICHT ins To (sonst Re-Fanout).
     try {
@@ -4525,7 +4548,7 @@ app.post('/api/verteiler/send', authMiddleware, adminOnly, async (req, res) => {
       const htmlBody = String(body)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         .replace(/\r?\n/g, '<br>');
-      await transporter.sendMail({
+      ({ gateway } = await mailSenden({
         from: MAIL_FROM,
         to: MAIL_FROM,
         bcc: validRecipients,
@@ -4534,9 +4557,10 @@ app.post('/api/verteiler/send', authMiddleware, adminOnly, async (req, res) => {
         subject,
         text: body,
         html: htmlBody,
-      });
+      }, 'verteiler-direct'));
       sent = validRecipients.length;
     } catch (sendErr) {
+      gateway = sendErr.gateway || null;
       console.error('BCC-Versand fehlgeschlagen:', sendErr.message);
       failed = validRecipients.slice();
     }
@@ -4544,11 +4568,11 @@ app.post('/api/verteiler/send', authMiddleware, adminOnly, async (req, res) => {
     // Log to email_log
     const status = failed.length === 0 ? 'sent' : (sent > 0 ? 'partial' : 'failed');
     await pool.query(
-      `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments, recipients_list, failed_recipients, status, trigger, to_addresses)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments, recipients_list, failed_recipients, status, trigger, to_addresses, gateway)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [verteiler_id || null, req.user?.email || MAIL_FROM, req.user?.name || 'Admin', subject, sent, false,
        JSON.stringify(recipients), failed.length > 0 ? JSON.stringify(failed) : null, status,
-       'verteiler-direct', recipients.join(', ')]
+       'verteiler-direct', recipients.join(', '), gateway]
     );
 
     res.json({ success: true, sent, failed: failed.length });
@@ -4785,21 +4809,23 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
   // NICHT toAddress — sonst leitet Cloudflare Email Routing die Mail
   // an die Verteiler-Adresse selbst zurück und unser IMAP-Poll
   // verarbeitet sie erneut (Endlosschleife).
+  // Kopf-From bleibt die Verteiler-Adresse; Umschlag und Sender: = Gateway-User (lib/mailgateway.js).
+  let gateway = null;
   if (bccRecipients.length > 0) {
-    await transporter.sendMail({ ...baseMail, to: 'undisclosed-recipients:;', bcc: bccRecipients });
+    ({ gateway } = await mailSenden({ ...baseMail, to: 'undisclosed-recipients:;', bcc: bccRecipients }, 'verteiler-batch'));
   }
   // Drucker-Tags einzeln (jeder Tag braucht seine eigene To-Zeile fürs Print-Routing)
   for (const drucker of druckerRecipients) {
-    await transporter.sendMail({ ...baseMail, to: drucker });
+    ({ gateway } = await mailSenden({ ...baseMail, to: drucker }, 'verteiler-batch'));
   }
   console.log(`Distributed email to ${recipients.length} recipients for ${toAddress} (${bccRecipients.length} BCC + ${druckerRecipients.length} drucker-individuell)`);
 
   const logResult = await pool.query(
-    `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments, recipients_list, status, message_id, trigger, to_addresses)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+    `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments, recipients_list, status, message_id, trigger, to_addresses, gateway)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
     [list.id, senderEmail, senderName, parsed.subject, recipients.length, attachments.length > 0,
      JSON.stringify(recipients), 'sent', messageId || parsed.messageId || null,
-     'verteiler-batch', recipients.join(', ')]
+     'verteiler-batch', recipients.join(', '), gateway]
   );
 
   // Mirror in WhatsApp-Gruppe wenn für diesen Verteiler eine Group-ID hinterlegt ist.
@@ -4825,118 +4851,7 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
     }
   }
 
-  // Schedule delivery report to sender after 90 seconds (only for internal senders — DSGVO)
-  if (SMTP2GO_API_KEY && senderEmail && senderEmail.endsWith(`@${VERTEILER_DOMAIN}`)) {
-    const logId = logResult.rows[0].id;
-    const parentMsgId = messageId || parsed.messageId || null;
-    setTimeout(() => sendDeliveryReport(logId, senderEmail, list.name, parsed.subject, recipients, parentMsgId).catch(
-      err => console.error('[DeliveryReport] Error:', err.message)
-    ), 90_000);
-  }
-
   return { success: true, action: 'distributed', recipients: recipients.length };
-}
-
-// ─── Delivery Report ────────────────────────────────────────────────
-async function sendDeliveryReport(logId, senderEmail, verteilerName, originalSubject, recipientsList, parentMessageId) {
-  // Loop-Schutz: niemals Zustellbericht an noreply, system-Adressen oder Verteiler selbst senden
-  const senderLower = (senderEmail || '').toLowerCase();
-  if (!senderLower
-      || senderLower.startsWith('noreply@')
-      || senderLower.startsWith('mailer-daemon@')
-      || senderLower.startsWith('postmaster@')
-      || senderLower === `noreply@${VERTEILER_DOMAIN}`) {
-    console.log(`[DeliveryReport] skipped — sender ${senderEmail} ist System-Adresse`);
-    return;
-  }
-  // Niemals an einen Verteiler-Empfänger als Sender zurückschreiben (Self-Loop)
-  const verteilerCheck = await pool.query(
-    'SELECT 1 FROM email_verteiler WHERE LOWER(email_address) = $1 AND active = true LIMIT 1',
-    [senderLower]
-  );
-  if (verteilerCheck.rows.length > 0) {
-    console.log(`[DeliveryReport] skipped — sender ${senderEmail} ist selbst eine Verteiler-Adresse (Loop-Schutz)`);
-    return;
-  }
-  // Niemals Zustellbericht zu Zustellbericht senden (Subject-Check)
-  if (/^zustellbericht:/i.test(originalSubject || '')) {
-    console.log(`[DeliveryReport] skipped — original subject is bereits ein Zustellbericht`);
-    return;
-  }
-  const log = await pool.query('SELECT * FROM email_log WHERE id = $1', [logId]);
-  if (log.rows.length === 0) return;
-  const entry = log.rows[0];
-
-  // Query SMTP2GO for delivery status
-  const startDate = new Date(entry.created_at);
-  startDate.setMinutes(startDate.getMinutes() - 5);
-  const endDate = new Date(entry.created_at);
-  endDate.setHours(endDate.getHours() + 2);
-
-  const apiRes = await fetch(`${SMTP2GO_API_URL}/activity/search`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Smtp2go-Api-Key': SMTP2GO_API_KEY },
-    signal: AbortSignal.timeout(15000),
-    body: JSON.stringify({
-      start_date: startDate.toISOString(),
-      end_date: endDate.toISOString(),
-      search_subject: originalSubject,
-      limit: 200,
-    }),
-  });
-  const apiData = await apiRes.json();
-
-  // Best status per recipient
-  const statusMap = new Map();
-  const priority = { clicked: 5, opened: 4, delivered: 3, soft_bounced: 2, bounced: 2, rejected: 2, sent: 1, queued: 0 };
-  for (const e of (apiData.data?.events || [])) {
-    const cur = statusMap.get(e.recipient);
-    if (!cur || (priority[e.event] || 0) > (priority[cur.event] || 0)) {
-      statusMap.set(e.recipient, { event: e.event, date: e.date });
-    }
-  }
-
-  // Build report
-  const statusIcon = { delivered: '\u2705', opened: '\u2705', clicked: '\u2705', sent: '\u23F3', queued: '\u23F3', soft_bounced: '\u26A0\uFE0F', bounced: '\u274C', rejected: '\u274C' };
-  const statusLabel = { delivered: 'Zugestellt', opened: 'Gelesen', clicked: 'Link geklickt', sent: 'Gesendet', queued: 'In Warteschlange', soft_bounced: 'Temporärer Fehler', bounced: 'Fehlgeschlagen', rejected: 'Abgelehnt' };
-
-  let rows = '';
-  for (const email of recipientsList) {
-    const status = statusMap.get(email);
-    const icon = status ? (statusIcon[status.event] || '\u2753') : '\u2753';
-    const label = status ? (statusLabel[status.event] || status.event) : 'Unbekannt';
-    rows += `<tr><td style="padding:4px 12px;border-bottom:1px solid #eee">${escapeHtml(email)}</td><td style="padding:4px 12px;border-bottom:1px solid #eee">${icon} ${label}</td></tr>`;
-  }
-
-  const delivered = [...statusMap.values()].filter(s => ['delivered', 'opened', 'clicked'].includes(s.event)).length;
-  const failed = [...statusMap.values()].filter(s => ['bounced', 'rejected'].includes(s.event)).length;
-  const pending = recipientsList.length - delivered - failed;
-
-  const html = `
-    <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-      <h2 style="color:#1a56db">Zustellbericht: ${escapeHtml(verteilerName)}</h2>
-      <p><strong>Betreff:</strong> ${escapeHtml(originalSubject || '(kein Betreff)')}</p>
-      <p><strong>Empfänger:</strong> ${recipientsList.length} | <strong>Zugestellt:</strong> ${delivered} | <strong>Ausstehend:</strong> ${pending} | <strong>Fehlgeschlagen:</strong> ${failed}</p>
-      <table style="border-collapse:collapse;width:100%;margin-top:12px">
-        <thead><tr style="background:#f3f4f6"><th style="padding:6px 12px;text-align:left">Empfänger</th><th style="padding:6px 12px;text-align:left">Status</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-      <p style="color:#6b7280;font-size:12px;margin-top:16px">Automatischer Zustellbericht von Rosenweg Verteiler. Status kann sich noch ändern (z.B. "Gesendet" → "Zugestellt").</p>
-    </div>`;
-
-  await loggedSendMail({
-    from: `"Rosenweg Verteiler" <noreply@rosenweg4303.ch>`,
-    to: senderEmail,
-    subject: `Zustellbericht: ${originalSubject || verteilerName}`,
-    html,
-    headers: {
-      'Auto-Submitted': 'auto-replied',
-      'X-Auto-Response-Suppress': 'All',
-      'X-Rosenweg-System': 'verteiler-delivery-report',
-      'Precedence': 'auto_reply',
-    },
-  }, 'verteiler-delivery-report', { parent_message_id: parentMessageId || null, parent_source: `verteiler ${verteilerName} (log #${logId})` });
-  console.log(`[DeliveryReport] Sent to ${senderEmail} for log #${logId}: ${delivered}/${recipientsList.length} delivered`);
 }
 
 // HTTP endpoint (kept for direct API testing)
@@ -6332,6 +6247,13 @@ app.get('/api/stweg/:nr/kontakte', authMiddleware, async (req, res) => {
       } catch {}
     }
 
+    // Zugang ist auf die eigene STWEG beschraenkt; ueber MCP/Apps trotzdem nur
+    // interne Nummern (lib/nummernsicht.js).
+    const sicht = await nummernSicht(req, pool);
+    const mitSicht = (k) => sicht(k, { email: k.email, name: k.name, stweg: nr });
+    for (const w of wohnungen) w.bewohner = w.bewohner.map(mitSicht);
+    ausschuss = ausschuss.map(mitSicht);
+
     res.json({ stweg: nr, wohnungen, ausschuss });
   } catch (err) {
     console.error('Kontakte error:', err);
@@ -6422,6 +6344,22 @@ async function findOrCreatePerson(client, name, email, telefon, adresse) {
     [nameNorm, emailNorm],
   );
   return again.rows[0]?.id || null;
+}
+
+// Ueber MCP/geteilte Telefone liefert GET die echten Nummern leer
+// (lib/nummernsicht.js). Kommt der Kontakt so zurueck, bleiben die bisherigen
+// Nummern stehen, statt geloescht zu werden.
+async function verborgeneNummernBehalten(client, req, wohnungId, kontakte) {
+  if (!Array.isArray(kontakte) || nummernKanal(req) === 'portal' || istTechnikOderPraesident(req.user)) return;
+  const alt = await client.query(
+    'SELECT id, telefon, mobile FROM wohnungen_kontakte WHERE wohnung_id = $1 AND archiviert_am IS NULL', [wohnungId]);
+  const nachId = new Map(alt.rows.map(r => [r.id, r]));
+  for (const k of kontakte) {
+    const o = k && k.id ? nachId.get(Number(k.id)) : null;
+    if (!o) continue;
+    if (!k.telefon) k.telefon = o.telefon;
+    if (!k.mobile) k.mobile = o.mobile;
+  }
 }
 
 async function saveKontakte(client, wohnungId, kontakte, stweg) {
@@ -7492,65 +7430,6 @@ async function autoArchiveSupersededKontakte() {
 setInterval(autoArchiveSupersededKontakte, 24 * 60 * 60 * 1000);
 setTimeout(autoArchiveSupersededKontakte, 5 * 60 * 1000); // initial run 5min nach Start
 
-// ─── SMTP2GO-Rejection-Sync ────────────────────────────────────────
-// SMTP2GO klassifiziert Mails asynchron als 'rejected' (Suppression-Liste,
-// hard-bounce, etc). Wir pollen alle 10 Min die Activity-API und tragen
-// betroffene Mails im email_log nach (status='failed' + error_message).
-async function syncSmtp2goRejections() {
-  if (!SMTP2GO_API_KEY) return;
-  try {
-    const lookbackHours = 6;
-    const r = await fetch(`${SMTP2GO_API_URL}/activity/search`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Smtp2go-Api-Key': SMTP2GO_API_KEY },
-      signal: AbortSignal.timeout(20_000),
-      body: JSON.stringify({
-        start_date: new Date(Date.now() - lookbackHours * 3600 * 1000).toISOString(),
-        end_date: new Date().toISOString(),
-        event: 'rejected',
-        limit: 500,
-      }),
-    });
-    if (!r.ok) {
-      console.error('[Smtp2goSync] API error:', r.status);
-      return;
-    }
-    const data = await r.json();
-    const events = data.data?.events || [];
-    if (events.length === 0) return;
-
-    let updated = 0;
-    for (const ev of events) {
-      const recipient = (ev.recipient || ev.to || '').toLowerCase().trim();
-      const subject = ev.subject || '';
-      const reason = (ev.smtp_response || '').slice(0, 1000);
-      // Nur ECHTE Bounces (550-er) markieren — SMTP2GO klassifiziert auch
-      // "250 OK"-Antworten als 'rejected' (backscatter), das sind keine Fehler.
-      const isRealBounce = /^5\d\d/.test(reason) || /unknown|not found|unavailable|hard.{0,2}bounce/i.test(reason);
-      if (!isRealBounce) continue;
-      // Match nach Empfänger + Subject in unseren letzten Logs
-      const upd = await pool.query(
-        `UPDATE email_log
-         SET status = 'failed',
-             error_message = $1,
-             failed_recipients = COALESCE(failed_recipients, '') || CASE WHEN failed_recipients IS NULL THEN $2 ELSE ',' || $2 END
-         WHERE status = 'sent'
-           AND created_at > NOW() - INTERVAL '${lookbackHours} hours'
-           AND LOWER(to_addresses) LIKE '%' || $2 || '%'
-           AND ($3 = '' OR subject = $3 OR subject LIKE '%' || $3 || '%')
-         RETURNING id`,
-        [reason, recipient, subject]
-      );
-      updated += upd.rows.length;
-    }
-    if (updated > 0) console.log(`[Smtp2goSync] ${updated} email_log Eintraege auf failed gesetzt (von ${events.length} rejected events)`);
-  } catch (err) {
-    console.error('[Smtp2goSync] Fehler:', err.message);
-  }
-}
-setInterval(syncSmtp2goRejections, 10 * 60 * 1000); // alle 10 Min
-setTimeout(syncSmtp2goRejections, 60 * 1000); // initial run nach 1 min
-
 // ─── Nextcloud-CardDAV-Sync (Telefonbuch für EAS / iOS / DAVx5) ──
 // Schreibt alle Kontakte aus wohnungen_kontakte als vCards ins
 // Nextcloud-Adressbuch "rosenweg-tel". Read-only freigegeben an alle
@@ -8552,7 +8431,9 @@ app.get('/api/wohnungen/eigentuemer-uebersicht', authMiddleware, requirePermissi
     for (const e of byName.values()) e.rollen = [...e.rollen];
     // Sortierung nach Nachname (letztes Wort), bei Gleichheit nach Vorname
     const lastName = n => (n || '').trim().split(/\s+/).pop() || '';
-    res.json({ eigentuemer: [...byName.values()].sort((a,b) => {
+    const sicht = await nummernSicht(req, pool);
+    const liste = [...byName.values()].map(e => sicht(e, { email: e.email, name: e.name, stwegs: e.objects.map(o => o.stweg) }));
+    res.json({ eigentuemer: liste.sort((a,b) => {
       const c = lastName(a.name).localeCompare(lastName(b.name), 'de');
       return c !== 0 ? c : a.name.localeCompare(b.name, 'de');
     }) });
@@ -9512,7 +9393,8 @@ app.get('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverw
       return { ...w, kontakte };
     });
     wohnungen.sort((a, b) => wohnungSort(a.bezeichnung, b.bezeichnung));
-    res.json({ stweg, wohnungen });
+    const sicht = await nummernSicht(req, pool);
+    res.json({ stweg, wohnungen: wohnungen.map(w => wohnungFuerSicht(sicht, w)) });
   } catch (err) {
     console.error('Wohnungen list error:', err);
     res.status(500).json({ error: 'Fehler beim Laden der Wohnungen' });
@@ -9550,6 +9432,15 @@ app.get('/api/stweg/:stweg/overview', async (req, res) => {
   }
 });
 
+// Wohnung samt Kontakten fuer die Ausgabe: echte Nummern nach lib/nummernsicht.js
+// (Portal: eigene STWEG; MCP/geteilte Telefone: nur interne Nummern).
+function wohnungFuerSicht(sicht, w) {
+  const aus = sicht(w, { emails: [w.eigentuemer_email, w.mieter_email].filter(Boolean), stweg: w.stweg });
+  delete aus.interne_nummer;
+  if (Array.isArray(w.kontakte)) aus.kontakte = w.kontakte.map(k => sicht(k, { email: k.email, name: k.name, stweg: w.stweg }));
+  return aus;
+}
+
 // GET /api/wohnungen/:stweg/stats - Occupancy statistics
 app.get('/api/wohnungen/:stweg/stats', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
   try {
@@ -9575,7 +9466,7 @@ app.get('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
     if (!Number.isFinite(wId) || wId < 1) return res.status(400).json({ error: 'Ungültige Wohnungs-ID' });
     const w = await loadWohnungMitKontakte(wId);
     if (!w || w.stweg !== parseStweg(req.params.stweg)) return res.status(404).json({ error: 'Wohnung nicht gefunden' });
-    res.json(w);
+    res.json(wohnungFuerSicht(await nummernSicht(req, pool), w));
   } catch (err) {
     console.error('Wohnung get error:', err);
     res.status(500).json({ error: 'Fehler beim Laden der Wohnung' });
@@ -9603,7 +9494,8 @@ app.get('/api/wohnungen/:stweg/:id/historie', authMiddleware, requireStwegAccess
         ORDER BY archiviert_am DESC, rolle, id`,
       [wId]
     );
-    res.json({ wohnung: wRes.rows[0], historie: kRes.rows });
+    const sicht = await nummernSicht(req, pool);
+    res.json({ wohnung: wRes.rows[0], historie: kRes.rows.map(k => sicht(k, { email: k.email, name: k.name, stweg })) });
   } catch (err) {
     console.error('Historie error:', err);
     res.status(500).json({ error: 'Fehler beim Laden der Historie' });
@@ -9782,6 +9674,7 @@ app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Wohnung nicht gefunden' });
     }
+    await verborgeneNummernBehalten(client, req, result.rows[0].id, b.kontakte);
     const personenBisher = await adminKontaktePersonenVorbereiten(client, req, result.rows[0].id, b.kontakte); // S2-3-1
     await saveKontakte(client, result.rows[0].id, b.kontakte, stweg);
     await adminKontaktePersonenAbgleichen(client, result.rows[0].id, personenBisher, stweg);
@@ -10257,62 +10150,6 @@ app.get('/api/email/log', authMiddleware, adminOnly, async (req, res) => {
     res.json({ log: result.rows });
   } catch (err) {
     res.status(500).json({ error: 'Fehler' });
-  }
-});
-
-// SMTP2GO delivery status for a specific email log entry
-app.get('/api/email/log/:id/status', authMiddleware, adminOnly, async (req, res) => {
-  if (!SMTP2GO_API_KEY) return res.status(400).json({ error: 'SMTP2GO API-Key nicht konfiguriert' });
-  try {
-    const entry = await pool.query('SELECT * FROM email_log WHERE id = $1', [req.params.id]);
-    if (entry.rows.length === 0) return res.status(404).json({ error: 'Log-Eintrag nicht gefunden' });
-    const log = entry.rows[0];
-
-    // Search SMTP2GO activity for this email by subject and time range
-    const startDate = new Date(log.created_at);
-    startDate.setMinutes(startDate.getMinutes() - 5);
-    const endDate = new Date(log.created_at);
-    endDate.setHours(endDate.getHours() + 48);
-
-    const apiRes = await fetch(`${SMTP2GO_API_URL}/activity/search`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Smtp2go-Api-Key': SMTP2GO_API_KEY },
-      signal: AbortSignal.timeout(15000),
-      body: JSON.stringify({
-        start_date: startDate.toISOString(),
-        end_date: endDate.toISOString(),
-        search_subject: log.subject,
-        limit: 200,
-      }),
-    });
-    const apiData = await apiRes.json();
-
-    // Deduplicate: keep the most recent/best event per recipient
-    const eventMap = new Map();
-    const priority = { 'clicked': 5, 'opened': 4, 'delivered': 3, 'soft_bounced': 2, 'bounced': 2, 'rejected': 2, 'sent': 1, 'queued': 0 };
-    for (const e of (apiData.data?.events || [])) {
-      const existing = eventMap.get(e.recipient);
-      if (!existing || (priority[e.event] || 0) > (priority[existing.event] || 0)) {
-        eventMap.set(e.recipient, { recipient: e.recipient, event: e.event, date: e.date, smtp_response: e.smtp_response || null });
-      }
-    }
-    const events = [...eventMap.values()];
-
-    // Update failed_recipients in DB based on SMTP2GO data
-    const bounced = events.filter(e => e.event.includes('bounced') || e.event === 'rejected');
-    if (bounced.length > 0) {
-      await pool.query(
-        'UPDATE email_log SET failed_recipients = $1, status = $2 WHERE id = $3',
-        [JSON.stringify(bounced.map(b => b.recipient)),
-         bounced.length >= (log.recipients_count || 1) ? 'failed' : 'partial',
-         log.id]
-      );
-    }
-
-    res.json({ events, total: apiData.data?.total_events || 0 });
-  } catch (err) {
-    console.error('SMTP2GO status error:', err);
-    res.status(500).json({ error: 'SMTP2GO-Abfrage fehlgeschlagen' });
   }
 });
 
@@ -11060,7 +10897,7 @@ function resolveGroupHierarchy(desiredGroupPks, allGroups) {
 }
 
 // PUT /api/admin/users/:pk - Update user
-app.put('/api/admin/users/:pk', authMiddleware, async (req, res) => {
+app.put('/api/admin/users/:pk', authMiddleware, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   const callerGroups = req.user?.groups || [];
   const isAdmin = isTechnik(callerGroups) || isPraesident(callerGroups);
   const ausschussStwegs = getAusschussStwegs(callerGroups);
@@ -11142,7 +10979,7 @@ app.put('/api/admin/users/:pk', authMiddleware, async (req, res) => {
 });
 
 // DELETE /api/admin/users/:pk - Delete/deactivate user
-app.delete('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-verwaltung', 'write'), async (req, res) => {
+app.delete('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-verwaltung', 'write'), kartenAdmin.bestaetigungVerlangen, async (req, res) => {
   // Konten loeschen nur Technik/Praesident (bewohner-verwaltung:write haben auch
   // Verwaltung und Ausschuss – die koennten sonst beliebige Konten loeschen).
   const callerGroups = req.user?.groups || [];
@@ -11289,6 +11126,9 @@ app.use('/api/messenger', messengerZugang.messengerZugangRouter({ rateLimitGuard
 // Browser und ohne Identität und meldet sich mit Benutzer + Passwort gegen
 // das AD an. Siehe os-stationen/docs/installer.md.
 const stationsRouter = require('./routes/stations');
+// Protokoll v2 (Rosenweg-Agent) VOR dem alten Router: dort fräße '/:id' sonst
+// das 'v2'. Die Helfer kommen aus stations.js (router.intern).
+app.use('/api/stations/v2', require('./routes/stationen-v2')(stationsRouter.intern));
 app.use('/api/stations', stationsRouter);
 // Das Schema gleich beim Start anlegen, nicht erst beim ersten Aufruf einer
 // Stationen-Route. Der Notfall-Zweig weiter unten fragt anzeigegeraete ab und
@@ -12064,7 +11904,7 @@ app.get('/api/proxmox/roles', authMiddleware, adminOnly, async (req, res) => {
 });
 
 // Set ACL (grant access)
-app.put('/api/proxmox/acl', authMiddleware, adminOnly, async (req, res) => {
+app.put('/api/proxmox/acl', authMiddleware, adminOnly, kartenAdmin.bestaetigungVerlangen, async (req, res) => {
   try {
     const { path, userid, roleid } = req.body;
     if (!path || !userid || !roleid) return res.status(400).json({ error: 'path, userid und roleid erforderlich' });
@@ -12079,7 +11919,7 @@ app.put('/api/proxmox/acl', authMiddleware, adminOnly, async (req, res) => {
 });
 
 // Delete ACL (revoke access)
-app.delete('/api/proxmox/acl', authMiddleware, adminOnly, async (req, res) => {
+app.delete('/api/proxmox/acl', authMiddleware, adminOnly, kartenAdmin.bestaetigungVerlangen, async (req, res) => {
   try {
     const { path, userid, roleid } = req.body;
     if (!path || !userid || !roleid) return res.status(400).json({ error: 'path, userid und roleid erforderlich' });
@@ -12152,6 +11992,9 @@ app.get('/api/telefonbuch', authMiddleware, async (req, res) => {
         AND ($1::boolean OR (k.archiviert_am IS NULL AND w.stweg = ANY($2::int[])))
       ORDER BY k.name
     `, [alle, eigene]);
+    // Echte Nummern nur fuers eigene Haus (Portal) bzw. Technik/Praesident/selbst;
+    // sonst die interne Nummer 3HHWWP (lib/nummernsicht.js). Gilt auch fuer MCP.
+    const sicht = await nummernSicht(req, pool);
     // Drucker-Tags filtern, pro Name aggregieren
     const byName = new Map();
     for (const r of rows) {
@@ -12165,6 +12008,8 @@ app.get('/api/telefonbuch', authMiddleware, async (req, res) => {
           deceased: isDeceased,
           email: null,
           telefon: null,
+          interne_nummer: null,
+          nummern_verborgen: false,
           rollen: new Set(),
           wohnungen: [],
         });
@@ -12172,7 +12017,10 @@ app.get('/api/telefonbuch', authMiddleware, async (req, res) => {
       const e = byName.get(cleanName);
       // Bevorzuge Nicht-Drucker-Email
       if (!isDruckerTag && r.email && !e.email) e.email = r.email.trim();
-      if (r.telefon && !e.telefon) e.telefon = r.telefon.trim();
+      const s = sicht({ telefon: r.telefon }, { email: r.email, name: cleanName, stweg: r.stweg });
+      if (s.telefon && !e.telefon) e.telefon = String(s.telefon).trim();
+      if (s.nummern_verborgen) e.nummern_verborgen = true;
+      if (s.interne_nummer && !e.interne_nummer) e.interne_nummer = s.interne_nummer;
       if (r.rolle) e.rollen.add(r.rolle);
       e.wohnungen.push({
         wohnung_id: r.wohnung_id,
@@ -12183,8 +12031,8 @@ app.get('/api/telefonbuch', authMiddleware, async (req, res) => {
       });
       if (isDeceased) e.deceased = true;
     }
-    // Set → Array für JSON
-    for (const e of byName.values()) e.rollen = [...e.rollen];
+    // Set → Array für JSON; verborgen nur melden, wenn wirklich nichts Echtes da ist
+    for (const e of byName.values()) { e.rollen = [...e.rollen]; if (e.telefon) e.nummern_verborgen = false; }
     // Sortierung nach Nachname (letztes Wort), dann Vorname
     const lastName = n => (n || '').trim().split(/\s+/).pop() || '';
     const list = [...byName.values()].sort((a, b) => {
@@ -15141,6 +14989,24 @@ const PERSONEN_SCOPE_SQL = (n) => `(NOT EXISTS (SELECT 1 FROM wohnungen_kontakte
    OR EXISTS (SELECT 1 FROM wohnungen_kontakte k0 JOIN wohnungen w0 ON w0.id = k0.wohnung_id
                WHERE k0.person_id = p.id AND w0.stweg = ANY($${n}::int[])))`;
 
+// Angaben, nach denen lib/nummernsicht.js entscheidet: E-Mail, Name und die
+// STWEGs der (aktiven) Wohnungen der Person.
+function personFuerSicht(p) {
+  const stwegs = (Array.isArray(p?.wohnungen) ? p.wohnungen : [])
+    .filter(w => w && !w.archiviert_am).map(w => w.stweg);
+  return { email: p?.email, name: p?.name, stwegs };
+}
+async function darfNummernDerPerson(req, personId) {
+  const r = await pool.query(
+    `SELECT p.email, p.name, COALESCE(array_agg(DISTINCT w.stweg) FILTER (WHERE w.stweg IS NOT NULL), '{}') AS stwegs
+       FROM personen p
+       LEFT JOIN wohnungen_kontakte k ON k.person_id = p.id AND k.archiviert_am IS NULL
+       LEFT JOIN wohnungen w ON w.id = k.wohnung_id
+      WHERE p.id = $1 GROUP BY p.id`, [personId]);
+  if (!r.rows[0]) return false;
+  return darfEchteNummernSehen(req.user, r.rows[0], { kanal: nummernKanal(req) });
+}
+
 // GET /api/personen — Liste aller Personen mit ihren Wohnungen
 app.get('/api/personen', authMiddleware, requireWohnungsverwaltungRead, async (req, res) => {
   try {
@@ -15174,7 +15040,8 @@ app.get('/api/personen', authMiddleware, requireWohnungsverwaltungRead, async (r
         ORDER BY p.name LIMIT 1000`,
       params,
     );
-    res.json({ personen: r.rows });
+    const sicht = await nummernSicht(req, pool);
+    res.json({ personen: r.rows.map(p => sicht(p, personFuerSicht(p))) });
   } catch (err) {
     console.error('Personen list error:', err);
     res.status(500).json({ error: 'Fehler beim Laden' });
@@ -15206,7 +15073,8 @@ app.get('/api/personen/:id', authMiddleware, requireWohnungsverwaltungRead, asyn
       params,
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
-    res.json(r.rows[0]);
+    const sicht = await nummernSicht(req, pool);
+    res.json(sicht(r.rows[0], personFuerSicht(r.rows[0])));
   } catch (err) {
     res.status(500).json({ error: fehlerFuerClient(err, 'Fehler beim Laden') });
   }
@@ -15220,7 +15088,9 @@ app.put('/api/personen/:id', authMiddleware, requireWohnungsverwaltungWrite, asy
     // H4: STWEG-Scope-Check: Ausschuss darf nur Personen aus eigenem STWEG editieren
     const allowed = await userCanEditPerson(req.user, id);
     if (!allowed) return res.status(403).json({ error: 'Diese Person gehört nicht zu einem STWEG für den du Ausschuss-Berechtigung hast' });
-    const b = req.body || {};
+    let b = req.body || {};
+    // Verborgene Nummern (GET liefert sie leer) beim Speichern nicht ueberschreiben
+    if (!(await darfNummernDerPerson(req, id))) b = nummernAusBodyEntfernen(b);
     const IDENT_FELDER = ['name', 'vorname', 'nachname', 'email', 'telefon', 'mobile', 'telefone', 'adresse'];
     if (IDENT_FELDER.some(f => b[f] !== undefined) && await personGeschuetztFuer(req.user, id)) {
       return res.status(409).json({ error: 'Diese Person hat ein eigenes Konto oder Wohnungen in einer anderen STWEG. Name und Kontaktdaten aendert sie selbst im Profil oder die Technik.' });
@@ -15355,7 +15225,13 @@ app.get('/api/personen-dedup/kandidaten', authMiddleware, requireWohnungsverwalt
        ORDER BY sort, n DESC, schlüssel
        LIMIT 200
     `, scope ? [scope] : []);
-    res.json({ kandidaten: r.rows });
+    // Kandidaten liegen im STWEG-Scope der Person (Portal: eigenes Haus); ueber
+    // MCP/Apps nur interne Nummern.
+    const sicht = await nummernSicht(req, pool);
+    const kandidaten = r.rows.map(k => ({
+      ...k, personen: (k.personen || []).map(p => sicht(p, { email: p.email, name: p.name, stwegs: scope || [] })),
+    }));
+    res.json({ kandidaten });
   } catch (err) {
     res.status(500).json({ error: fehlerFuerClient(err) });
   }
@@ -15364,7 +15240,7 @@ app.get('/api/personen-dedup/kandidaten', authMiddleware, requireWohnungsverwalt
 // POST /api/personen/merge — zwei Personen zusammenfuehren
 // body: { keep_id, merge_id } — alle Kontakte von merge_id werden auf keep_id umgehaengt,
 // merge_id wird geloescht. Daten aus merge_id ueberschreiben die in keep_id nur wenn keep_id-Feld leer ist.
-app.post('/api/personen/merge', authMiddleware, requireWohnungsverwaltungWrite, async (req, res) => {
+app.post('/api/personen/merge', authMiddleware, requireWohnungsverwaltungWrite, kartenAdmin.bestaetigungVerlangen, async (req, res) => {
   const client = await pool.connect();
   try {
     const keepId = parseInt(req.body?.keep_id, 10);
@@ -16089,8 +15965,9 @@ app.delete('/api/mail-approval-config/:id', authMiddleware, requireTechnikOrPrae
 // Nur Technik + Präsident dürfen die Queue sehen/bearbeiten/freigeben.
 function requireTechnikOrPraesident(req, res, next) {
   const groups = req.user?.groups || [];
-  if (isTechnik(groups) || isPraesident(groups)) return next();
-  return res.status(403).json({ error: 'Nur für Technik oder Präsident' });
+  if (!isTechnik(groups) && !isPraesident(groups)) return res.status(403).json({ error: 'Nur für Technik oder Präsident' });
+  kartenAdmin.vermerken(req, res); // mit der Karte: Protokoll + Quittung (lib/kartenadmin.js)
+  next();
 }
 
 // ─── Zähler-Technik (Rosenweg 9) ────────────────────────────────────
@@ -16124,7 +16001,7 @@ function energyAdminHeaders(extra = {}) {
 }
 // Lesen (GET) braucht energie-config/read, alles andere /write.
 const energyAdminRecht = (req, res, next) => requirePermission('energie-config', req.method === 'GET' ? 'read' : 'write')(req, res, next);
-app.use('/api/energie-admin', authMiddleware, energyAdminRecht, async (req, res) => {
+app.use('/api/energie-admin', authMiddleware, energyAdminRecht, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   const path = req.path;
   if (!ENERGY_ADMIN_ROUTES.some(([m, re]) => m === req.method && re.test(path))) {
     return res.status(404).json({ error: 'Unbekannter Energie-Admin-Endpunkt' });
@@ -16321,6 +16198,7 @@ app.post('/api/mqtt/token', authMiddleware, async (req, res) => {
     // nur Gruppen zaehlen, nicht role=admin — sonst zeigt das Token Superuser an,
     // die der Broker dann verweigert.
     const isTech = isTechnik(groups) || isPraesident(groups);
+    if (isTech) kartenAdmin.vermerken(req, res); // Technik-Token mit der Karte: protokollieren
     const email = String(req.user.email).toLowerCase();
     // Eindeutiger Username je Token: die ACL-Pruefung kennt nur den Usernamen. Der
     // aus der E-Mail abgeleitete Name kollidierte (a+b@ und a_b@ -> a_b@) bzw. konnte
@@ -16567,8 +16445,9 @@ app.post('/api/mqtt/aclcheck', mqttBrokerGuard, async (req, res) => {
 // ─── MQTT-Verwaltung + Publish (Technik) fuer die Web-UI ────────────
 function requireMqttTechnik(req, res, next) {
   const groups = req.user?.groups || [];
-  if (req.user?.isAdmin || groups.some(g => String(g).toLowerCase() === 'technik')) return next();
-  return res.status(403).json({ error: 'Nur fuer Technik' });
+  if (!req.user?.isAdmin && !groups.some(g => String(g).toLowerCase() === 'technik')) return res.status(403).json({ error: 'Nur fuer Technik' });
+  kartenAdmin.vermerken(req, res); // mit der Karte: Protokoll + Quittung (lib/kartenadmin.js)
+  next();
 }
 
 // Lazy MQTT-Write-Client (Broker-User 'collector', darf energy/#,display/# schreiben).
@@ -16576,7 +16455,7 @@ function requireMqttTechnik(req, res, next) {
 // (/api/display/rss). Deckt auch die per Chat gesetzten Notfälle ab (message-store
 // published display/emergency direkt, nicht über /api/display/announce).
 let _apiMqttClient = null;
-const displayCache = { announcement: null, emergency: null };
+const displayCache = { announcement: null, emergency: null, announcements: null };
 function apiMqttPublishClient() {
   if (_apiMqttClient) return _apiMqttClient;
   const url = process.env.MQTT_URL;
@@ -16604,6 +16483,12 @@ function apiMqttPublishClient() {
     }, 2000);
   });
   _apiMqttClient.on('message', (topic, payload) => {
+    // Die Liste mitführen, damit /api/display/stand sie ohne MQTT herausgeben
+    // kann (display-lite.html, Chromecasts).
+    if (topic === 'display/announcements') {
+      try { const l = JSON.parse(payload.toString('utf8')); displayCache.announcements = Array.isArray(l) ? l : []; } catch { displayCache.announcements = []; }
+      return;
+    }
     const ch = topic === 'display/announcement' ? 'announcement' : topic === 'display/emergency' ? 'emergency' : null;
     if (!ch) return;
     try { displayCache[ch] = JSON.parse(payload.toString('utf8')); } catch { displayCache[ch] = null; }
@@ -16996,7 +16881,13 @@ app.get('/api/display/pdf/:name', async (req, res) => {
   } catch { res.status(404).end(); }
 });
 
-// GET /api/display/pdfbild/:name — die erste Seite als PNG. ÖFFENTLICH.
+// GET /api/display/pdfbild/:name[?dpi=100|150|200] — die erste Seite als PNG. ÖFFENTLICH.
+//
+// Ohne dpi 600 (siehe unten). Kleinere Geräte bitten um weniger: ein
+// Chromecast 1 stürzt an 4961×7016 Punkten ab (display-lite.html holt 150 dpi,
+// 1240×1754). Nur feste Stufen, damit niemand den Zwischenspeicher mit
+// beliebig vielen Fassungen füllt.
+const ANZEIGE_BILD_DPI = [100, 150, 200];
 //
 // Warum ein Bild und nicht das PDF selbst: die Anzeigetafeln laufen unter
 // Android, und deren WebView hat keinen eingebauten PDF-Betrachter. Ein
@@ -17029,7 +16920,9 @@ app.get('/api/display/pdfbild/:name', async (req, res) => {
     // Der Zeitstempel steckt im Namen: wird dieselbe Datei ersetzt, entsteht
     // ein neues Bild statt eines alten aus dem Zwischenspeicher.
     const marke = `${stat.size}-${Math.floor(stat.mtimeMs)}`;
-    const ziel = pathModule.join(ANZEIGE_BILD_CACHE, `${marke}-${name}.png`);
+    const dpiWunsch = Number(req.query.dpi);
+    const dpi = ANZEIGE_BILD_DPI.includes(dpiWunsch) ? dpiWunsch : 600;
+    const ziel = pathModule.join(ANZEIGE_BILD_CACHE, dpi === 600 ? `${marke}-${name}.png` : `${marke}-${dpi}dpi-${name}.png`);
 
     let bild = null;
     try { bild = await fs.readFile(ziel); } catch { /* noch nicht gerechnet */ }
@@ -17059,7 +16952,7 @@ app.get('/api/display/pdfbild/:name', async (req, res) => {
         // Megapunkte sind im Browser rund 140 MB Arbeitsspeicher. Auf den
         // Android-Tafeln ist das viel; wird das Bild dort leer, ist das der
         // Grund und 400 dpi (15,5 MP) waeren der Rueckzug.
-        execFile('pdftoppm', ['-png', '-r', '600', '-f', '1', '-l', '1', '-singlefile', quelle, rumpf],
+        execFile('pdftoppm', ['-png', '-r', String(dpi), '-f', '1', '-l', '1', '-singlefile', quelle, rumpf],
           { timeout: 20000 }, (err) => (err ? schiefgegangen(err) : fertig()));
       });
       await fs.rename(rumpf + '.png', ziel);
@@ -17387,6 +17280,39 @@ app.post('/api/display/announce', authMiddleware, requireMqttTechnik, async (req
       res.json({ ok: true, topic, active });
     });
   } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
+});
+
+// GET /api/display/stand?haus=N — der Stand beider Kanäle für Anzeigen ohne MQTT.
+//
+// ÖFFENTLICH wie /api/display/rss und das MQTT-Thema display/# selbst (der
+// Nur-Lese-Benutzer display-public steht im Quelltext von display.html): was
+// hier steht, hängt ohnehin im Treppenhaus. display-lite.html (Chromecasts)
+// fragt hier alle paar Sekunden nach, statt mqtt.js über WSS zu laden.
+//
+// Mit ?haus=N nur, was für dieses Haus bestimmt ist — wie meineAnkuendigungen()
+// in display.html. Kein 'by': wer etwas angelegt hat, braucht die Tafel nicht.
+// ok:false heisst, die API kennt den Stand (noch) nicht — etwa direkt nach dem
+// Start, bevor die retained Nachrichten da sind. Die Seite behält dann, was sie hat.
+app.get('/api/display/stand', (req, res) => {
+  const hausRoh = parseInt(String(req.query.haus || ''), 10);
+  const haus = Number.isInteger(hausRoh) && hausRoh > 0 ? hausRoh : null;
+  const inhalt = (d) => !!(d && d.active && (String(d.text || '').trim() || String(d.pdf || '').trim()));
+  const schlank = (d) => ({ text: String(d.text || ''), pdf: String(d.pdf || ''), ts: Number(d.ts) || 0 });
+  const em = displayCache.emergency, an = displayCache.announcement;
+  const liste = Array.isArray(displayCache.announcements) ? displayCache.announcements : null;
+  const meine = (liste || [])
+    .filter((a) => a && (String(a.text || '').trim() || String(a.pdf || '').trim()))
+    .filter((a) => !haus || !Array.isArray(a.haeuser) || !a.haeuser.length || a.haeuser.map(Number).includes(haus))
+    .map((a) => ({ id: Number(a.id) || 0, ...schlank(a) }));
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    ok: liste !== null || em !== null || an !== null,
+    jetzt: Date.now(),
+    emergency: inhalt(em) ? schlank(em) : null,
+    announcements: meine,
+    // Rückfall wie in display.html: der alte Einzelkanal, solange die Liste fehlt.
+    announcement: liste === null && inhalt(an) ? schlank(an) : null,
+  });
 });
 
 // RSS-Ticker-Feed für Digital-Signage (SlideShow-App Ticker-Zone). PUBLIC (kein
@@ -17931,7 +17857,7 @@ app.put('/api/verwaltung-mail-queue/:id', authMiddleware, requireTechnikOrPraesi
 // >= min_approvers verschiedene User aus required_groups. Erst dann Versand.
 // H3-Fix: Race-Safe durch SELECT ... FOR UPDATE auf queue-Row im selben
 // Transaktionsblock. Status-Wechsel auf 'freigegeben' atomar mit COUNT.
-app.post('/api/verwaltung-mail-queue/:id/freigeben', authMiddleware, async (req, res) => {
+app.post('/api/verwaltung-mail-queue/:id/freigeben', authMiddleware, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
@@ -18508,6 +18434,39 @@ app.get('/api/pbx/personen', requirePbxSecret, async (_req, res) => {
   }
 });
 
+// Rueckweg: die pbx-api schickt nach jedem Abgleich die vergebenen Nummern
+// (nummer, email, name, wohnung, haus, aktiv) — die ganze Liste, sie ersetzt
+// das Abbild. Damit zeigen Telefonbuch und Nextcloud-Sync die interne Nummer
+// statt der echten (lib/nummernsicht.js). Keine Weiterleitungsziele.
+app.put('/api/pbx/personen/nummern', requirePbxSecret, async (req, res) => {
+  const geprueft = interneNummernPruefen(req.body?.nummern);
+  if (!geprueft.ok) return res.status(400).json({ error: geprueft.fehler });
+  // Leere Liste waere ein Abriss aller Nummern — nur mit ausdruecklichem leer=true.
+  if (geprueft.nummern.length === 0 && req.body?.leer !== true) {
+    return res.status(400).json({ error: 'Leere Liste (leer=true, wenn wirklich gewollt)' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM telefon_interne_nummern');
+    for (const n of geprueft.nummern) {
+      await client.query(
+        `INSERT INTO telefon_interne_nummern (nummer, email, name, wohnung, haus, aktiv, aktualisiert)
+         VALUES ($1,$2,$3,$4,$5,$6,NOW())`,
+        [n.nummer, n.email, n.name, n.wohnung, n.haus, n.aktiv]);
+    }
+    await client.query('COMMIT');
+    interneNummernCacheLeeren();
+    res.json({ ok: true, anzahl: geprueft.nummern.length });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[pbx-personen-nummern]', e.message);
+    res.status(500).json({ error: 'Speichern fehlgeschlagen' });
+  } finally {
+    client.release();
+  }
+});
+
 // ═══ NFC-Karten fuer die geteilten Telefone (Anmeldung per UniFi-Access-Karte) ═══
 // Die pbx-api fragt hier, wem eine Karte gehoert (Anmeldung am geteilten Telefon) und
 // verwaltet Karten fuer Technik/Praesident (Kartenverwaltung auf dem Telefon).
@@ -18633,6 +18592,67 @@ async function kartenProtokollieren(aktion, { nfcId, displayId, email, name, dur
   }
   console.log(`[pbx-karte] ${aktion} ${erfolg ? 'ok' : 'fehlgeschlagen'}: Karte ${displayId || nfcId} ${email ? '-> ' + email + ' ' : ''}durch ${durch || '?'}${detail ? ' (' + detail + ')' : ''}`);
 }
+
+// ─── Admin-Aktionen mit der Karte (lib/kartenadmin.js) ──────────────────────
+// Karte = Schluessel (Entscheid Stefan 27.11.2026): volle Rechte, aber jede
+// Admin-Aktion mit der Karte steht im Kartenprotokoll und wird quittiert; die
+// zwoelf heiklen muessen per E-Mail-Link bestaetigt werden.
+kartenAdmin.einrichten({
+  speicher: kartenAdmin.sqlSpeicher(pool),
+  senden: (opts, trigger) => loggedSendMail(opts, trigger), // Systemmail, nicht ueber die Mail-Freigabe
+  MAIL_FROM, PORTAL_URL: SITE_URL,
+  protokollieren: (aktion, felder) => kartenProtokollieren(aktion, felder),
+  technikMelden: async (text) => {
+    const gid = await resolveTechnikWhatsappGroupId();
+    if (gid) await queueWhatsappMessage({ chatId: gid, body: text.slice(0, 3500), sourceType: 'karten-bestaetigung' });
+  },
+  // Rechte zum Ausfuehrungszeitpunkt: Konto aktiv und Gruppen frisch aus Authentik
+  personLaden: async (email) => {
+    const r = await authentikAPI('GET', `/core/users/?search=${encodeURIComponent(email)}`);
+    const u = (r.results || []).find(x => String(x.email || '').toLowerCase() === String(email).toLowerCase());
+    return u ? { aktiv: u.is_active !== false, groups: (u.groups_obj || []).map(g => g.name) } : null;
+  },
+  sitzungenWiderrufen: async (wo, grund) => {
+    const bedingung = wo.id ? 'id = $1' : 'LOWER(email) = LOWER($1)';
+    await pool.query(`UPDATE app_karten_sitzungen SET revoked_at = NOW(), revoked_by = 'bestaetigungslink', revoked_reason = $2,
+        zugang_hash = NULL, herausforderung_hash = NULL WHERE revoked_at IS NULL AND ${bedingung}`, [wo.id || wo.email, grund]);
+  },
+  ausfuehren: kartenAdmin.loopbackAusfuehren(process.env.PORT || 3000),
+});
+kartenAdmin.routen(app);
+
+// Offene Bestaetigungen der Person (Hinweis-Band im Portal, Apps)
+app.get('/api/me/bestaetigungen', authMiddleware, async (req, res) => {
+  try {
+    const r = await pool.query(`SELECT id, text, methode, pfad, art, app, geraet, created_at, ablauf
+        FROM karten_bestaetigungen WHERE LOWER(email) = LOWER($1) AND status = 'wartet' AND ablauf > NOW()
+        ORDER BY created_at DESC LIMIT 20`, [req.user.email || '']);
+    res.json({ offen: r.rows });
+  } catch (e) {
+    if (/does not exist/.test(e.message)) return res.json({ offen: [] });
+    console.error('[karten-bestaetigung] offen:', e.message);
+    res.status(500).json({ error: 'Abfrage fehlgeschlagen' });
+  }
+});
+
+// Kartenprotokoll fuer die Technik. ?aktion=admin-mit-karte (Admin-Aktionen mit der Karte),
+// bestaetigung-angefragt | bestaetigt | abgelehnt | app-anmeldung …; ?email=; ?tage= (Standard 30)
+app.get('/api/karten-protokoll', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const tage = Math.min(365, Math.max(1, parseInt(req.query.tage, 10) || 30));
+    const bed = ['created_at > NOW() - make_interval(days => $1)'];
+    const p = [tage];
+    if (req.query.aktion) { p.push(String(req.query.aktion)); bed.push(`aktion = $${p.length}`); }
+    if (req.query.email) { p.push(String(req.query.email).toLowerCase()); bed.push(`LOWER(ziel_email) = $${p.length}`); }
+    const r = await pool.query(`SELECT id, aktion, nfc_id, display_id, ziel_email, ziel_name, durch, erfolg, detail, created_at
+        FROM access_karten_protokoll WHERE ${bed.join(' AND ')} ORDER BY created_at DESC LIMIT 500`, p);
+    res.json({ tage, eintraege: r.rows });
+  } catch (e) {
+    if (/does not exist/.test(e.message)) return res.json({ tage: 30, eintraege: [] });
+    console.error('[karten-protokoll]', e.message);
+    res.status(500).json({ error: 'Abfrage fehlgeschlagen' });
+  }
+});
 
 // Fremdkarte in die Access-Karteninventur importieren.
 // Dokumentiert (Access-API, "Import Third-Party NFC Cards"): POST multipart/form-data, Feld "file"
@@ -19529,12 +19549,12 @@ app.post('/api/whatsapp/delete-status', requireWhatsappSecret, async (req, res) 
 // Bot-Heartbeat: in-memory, alarmiert Admins wenn stale (>5min).
 let waBotHeartbeat = null; // { is_ready, ready_at, phone, pid, uptime_seconds, received_at }
 let waBotStaleAlertSent = false; // verhindert Alert-Spam
+let waBotStaleVersuchAt = null;  // letzter Stale-Alarmversuch (auch gescheiterte zählen)
 // Bot lebt, ist aber nicht mit WhatsApp verbunden (Kopplung verloren). So lief es
 // 21.9.–24.10.2026 unbemerkt: Heartbeats kamen, nur is_ready war false.
 let waBotNotReadySince = null;
-let waBotNotReadyAlertAt = null; // letzter Alarm; wiederholt alle WA_NOT_READY_REMIND_MS
-const WA_NOT_READY_ALERT_MS = 15 * 60 * 1000;
-const WA_NOT_READY_REMIND_MS = 24 * 60 * 60 * 1000;
+let waBotNotReadyAlertAt = null; // letzter Alarmversuch; höchstens einer je 6 h (lib/wawacht.js)
+const waWacht = require('./lib/wawacht');
 app.post('/api/whatsapp/heartbeat', requireWhatsappSecret, (req, res) => {
   const wasStale = waBotStaleAlertSent;            // war zuvor ein Stale-Alarm raus?
   const prevHb = waBotHeartbeat?.received_at;       // letzter Heartbeat vor der Lücke
@@ -19543,6 +19563,7 @@ app.post('/api/whatsapp/heartbeat', requireWhatsappSecret, (req, res) => {
     received_at: new Date(),
   };
   waBotStaleAlertSent = false; // Bot lebt → Alert-Sperre aufheben
+  waBotStaleVersuchAt = null;
   res.json({ ok: true });
   // Flanke stale→erreichbar: Entwarnung an dieselben Admins schicken.
   if (wasStale) {
@@ -19551,8 +19572,9 @@ app.post('/api/whatsapp/heartbeat', requireWhatsappSecret, (req, res) => {
   }
   if (req.body?.is_ready) {
     if (waBotNotReadyAlertAt) {
+      // Es ging ein "nicht verbunden"-Alarm raus -> einmal "wieder verbunden" melden.
       const downMin = Math.round((Date.now() - waBotNotReadySince.getTime()) / 60000);
-      sendBotRecovery(downMin).catch(() => {});
+      sendBotRecovery(downMin, 'verbunden').catch(() => {});
     }
     waBotNotReadySince = null; waBotNotReadyAlertAt = null;
   } else if (!waBotNotReadySince) {
@@ -19571,12 +19593,10 @@ async function botAdminEmails() {
 
 // Kopplung verloren: nur per Mail — über WhatsApp kommt die Warnung ja gerade nicht an.
 async function checkBotNotReady() {
-  if (!waBotNotReadySince) return;
+  if (!waWacht.alarmFaellig({ seit: waBotNotReadySince, letzterVersuch: waBotNotReadyAlertAt })) return;
   const age = Date.now() - waBotNotReadySince.getTime();
-  if (age < WA_NOT_READY_ALERT_MS) return;
-  if (waBotNotReadyAlertAt && Date.now() - waBotNotReadyAlertAt.getTime() < WA_NOT_READY_REMIND_MS) return;
   const erneut = !!waBotNotReadyAlertAt;
-  const vorher = waBotNotReadyAlertAt;
+  // Versuch zählt auch, wenn der Versand scheitert — sonst Flut (16.11.2026: jede Minute).
   waBotNotReadyAlertAt = new Date();
   const ageMin = Math.round(age / 60000);
   const dauer = ageMin >= 120 ? `${Math.round(ageMin / 60)} Stunden` : `${ageMin} Minuten`;
@@ -19594,11 +19614,10 @@ async function checkBotNotReady() {
         + `Telefon: ${waBotHeartbeat?.phone || '(unbekannt)'}\n\n`
         + `Neu koppeln: https://whatsapp.rosenweg4303.ch → Kopplung, QR-Code mit dem Bot-Telefon scannen\n`
         + `(WhatsApp → Verknüpfte Geräte → Gerät hinzufügen).\n\n`
-        + `Diese Erinnerung kommt täglich, bis der Bot wieder verbunden ist.`,
+        + `Diese Erinnerung kommt alle 6 Stunden, bis der Bot wieder verbunden ist; dann folgt eine Entwarnung.`,
     }, 'whatsapp-bot-not-ready');
   } catch (err) {
-    waBotNotReadyAlertAt = vorher; // nicht als verschickt werten -> naechste Minute erneut
-    console.warn('[WA-Watchdog] Kopplungs-Alarm konnte nicht gesendet werden:', err.message);
+    console.warn('[WA-Watchdog] Kopplungs-Alarm konnte nicht gesendet werden (nächster Versuch in 6 h):', err.message);
   }
 }
 
@@ -19613,7 +19632,9 @@ async function checkBotHeartbeat() {
   const lastHb = waBotHeartbeat?.received_at || WA_WATCHDOG_START;
   const age = Date.now() - new Date(lastHb).getTime();
   if (age < STALE_MS || waBotStaleAlertSent) return;
+  if (waBotStaleVersuchAt && Date.now() - waBotStaleVersuchAt.getTime() < waWacht.ABSTAND_MS) return;
   waBotStaleAlertSent = true;
+  waBotStaleVersuchAt = new Date();
   const ageMin = Math.round(age / 60000);
   console.warn(`[WA-Watchdog] Bot stale seit ${ageMin}min — Alarm.`);
   try {
@@ -19634,13 +19655,15 @@ async function checkBotHeartbeat() {
         + `Admin-UI: https://whatsapp.rosenweg4303.ch`,
     }, 'whatsapp-bot-stale');
   } catch (err) {
-    waBotStaleAlertSent = false; // Versand gescheitert -> naechste Minute erneut
+    waBotStaleAlertSent = false; // Versand gescheitert -> erneut, aber frühestens in 6 h
     console.warn('[WA-Watchdog] Alarm konnte nicht gesendet werden:', err.message);
   }
 }
-// Entwarnung: Bot sendet wieder Heartbeats nach einem Stale-Alarm.
-async function sendBotRecovery(downMin) {
-  console.log(`[WA-Watchdog] Bot wieder erreichbar${downMin != null ? ` (Ausfall ~${downMin}min)` : ''} — Entwarnung.`);
+// Entwarnung: Bot sendet wieder Heartbeats nach einem Stale-Alarm (art 'erreichbar')
+// bzw. ist nach einem "nicht verbunden"-Alarm wieder mit WhatsApp verbunden (art 'verbunden').
+async function sendBotRecovery(downMin, art = 'erreichbar') {
+  const verbunden = art === 'verbunden';
+  console.log(`[WA-Watchdog] Bot wieder ${art}${downMin != null ? ` (Ausfall ~${downMin}min)` : ''} — Entwarnung.`);
   try {
     const adminEmails = await botAdminEmails();
     if (adminEmails.length === 0) return;
@@ -19648,17 +19671,21 @@ async function sendBotRecovery(downMin) {
     await loggedSendMail({
       from: MAIL_FROM,
       to: adminEmails.join(', '),
-      subject: '✅ WhatsApp-Bot wieder erreichbar',
-      text: `Entwarnung: Der WhatsApp-Bot sendet wieder Heartbeats.\n\n`
+      subject: verbunden ? '✅ WhatsApp-Bot wieder verbunden' : '✅ WhatsApp-Bot wieder erreichbar',
+      text: (verbunden
+        ? `Entwarnung: Der WhatsApp-Bot ist wieder mit WhatsApp verbunden. WhatsApp-Nachrichten gehen wieder raus.\n\n`
+        : `Entwarnung: Der WhatsApp-Bot sendet wieder Heartbeats.\n\n`)
         + (downMin != null ? `Ausfalldauer: ca. ${downMin} Minuten\n` : '')
         + `Status: ${waBotHeartbeat?.is_ready ? 'ready' : 'nicht ready'}\n`
         + `Telefon: ${phone}\n`
         + `Zeit: ${new Date().toLocaleString('de-CH')}\n`,
-    }, 'whatsapp-bot-recovered').catch(() => {});
+    }, verbunden ? 'whatsapp-bot-reconnected' : 'whatsapp-bot-recovered').catch(() => {});
     pushWhatsappBroadcast({
       emails: adminEmails,
       sourceType: 'bot-watchdog',
-      body: `✅ *WhatsApp-Bot wieder online*\nHeartbeat empfangen${downMin != null ? ` (Ausfall ~${downMin}min)` : ''}. Entwarnung.`,
+      body: verbunden
+        ? `✅ *WhatsApp-Bot wieder verbunden*${downMin != null ? ` (Unterbruch ~${downMin}min)` : ''}. Entwarnung.`
+        : `✅ *WhatsApp-Bot wieder online*\nHeartbeat empfangen${downMin != null ? ` (Ausfall ~${downMin}min)` : ''}. Entwarnung.`,
     }).catch(() => {});
   } catch (err) {
     console.warn('[WA-Watchdog] Entwarnung konnte nicht gesendet werden:', err.message);
@@ -20792,7 +20819,9 @@ app.post('/api/push/test', authMiddleware, async (req, res) => {
 // Berechtigungs-Helper: nur technik/praesident sind voll-admin auf ISP.
 function ispIsAdmin(req) {
   const g = req.user?.groups || [];
-  return isTechnik(g) || isPraesident(g) || req.user?.isAdmin;
+  const admin = isTechnik(g) || isPraesident(g) || req.user?.isAdmin;
+  if (admin) kartenAdmin.vermerken(req, req.res); // mit der Karte: Protokoll + Quittung (schreibend)
+  return admin;
 }
 
 // Hilfsfunktion: hat user die Wohnung X als Eigentümer/Mieter/Bewohner?
@@ -22932,12 +22961,16 @@ app.delete('/api/stations/:id/tunnel', stationsRouter.stationAuth, async (req, r
 // rosenweg-apps). Begruendung und Grenzen in routes/app-tunnel.js.
 require('./routes/app-tunnel').appTunnelRoutes(app, { pool, rateLimitGuard });
 
+// Persoenliche App-Daten (z.B. Wecker der Rosenweg Uhr) auf allen Geraeten einer Person gleich:
+// GET/PUT /api/me/app-daten/:app -> routes/app-daten.js (Modell und Konfliktregel: lib/app-daten.js)
+require('./routes/app-daten').appDatenRoutes(app, { pool, authMiddleware });
+
 // Karten-Anmeldung der Rosenweg-Apps auf privaten Geraeten (Entscheid Stefan 26.11.2026):
 // Rosenweg-Karte ans Handy -> eigene, widerrufbare Sitzung je App. Begruendung in routes/app-karte.js.
 require('./routes/app-karte').appKarteRoutes(app, {
   pool, authMiddleware, requireUserLogin, absenderIp: require('./middleware/auth').absenderIp,
   loggedSendMail, MAIL_FROM, karteNachschlagen, accessKarteLive, accessKartenBesitzerId, kartenPerson,
-  kartenProtokollieren,
+  kartenProtokollieren, authentikUserByEmail,
 });
 
 app.post('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
@@ -26888,12 +26921,15 @@ app.get('/api/vollmachten/lookup/personen', authMiddleware, async (req, res) => 
     const vollerZugriff = isTechnik(groups) || isPraesident(groups) || groups.some(g => g.toLowerCase() === 'verwaltung');
     if (vollerZugriff) {
       const r = await pool.query(
-        `SELECT id, name, email, telefon, mobile, adresse FROM personen
-          WHERE LOWER(name) LIKE LOWER($1) OR LOWER(email) LIKE LOWER($1)
-          ORDER BY name LIMIT 10`,
+        `SELECT p.id, p.name, p.email, p.telefon, p.mobile, p.adresse, (SELECT array_agg(DISTINCT w.stweg) FROM wohnungen_kontakte k JOIN wohnungen w ON w.id = k.wohnung_id WHERE k.person_id = p.id AND k.archiviert_am IS NULL) AS stwegs FROM personen p
+          WHERE LOWER(p.name) LIKE LOWER($1) OR LOWER(p.email) LIKE LOWER($1)
+          ORDER BY p.name LIMIT 10`,
         ['%' + q + '%'],
       );
-      return res.json({ personen: r.rows });
+      // Verwaltung sucht ueber alle STWEGs: echte Nummern nur Technik/Praesident/selbst
+      // und fuer die STWEGs, die diese Verwaltung verwaltet
+      const sicht = await nummernSicht(req, pool);
+      return res.json({ personen: r.rows.map(({ stwegs, ...p }) => sicht(p, { email: p.email, name: p.name, stwegs: stwegs || [] })) });
     }
     // Alle anderen: nur Personen mit Wohnung in den eigenen STWEGs und nur
     // Name/E-Mail (reicht fuer die Bevollmaechtigten-Auswahl). Frueher bekam
@@ -26965,7 +27001,9 @@ app.get('/api/vollmachten/lookup/my-kontakte', authMiddleware, async (req, res) 
         ORDER BY LOWER(k.email), k.rolle`,
       params,
     );
-    res.json({ kontakte: r.rows });
+    // Eigene Wohnungen = eigenes Haus; ueber MCP nur interne Nummern (ausser die eigene)
+    const sicht = await nummernSicht(req, pool);
+    res.json({ kontakte: r.rows.map(k => sicht(k, { email: k.email, name: k.name, stweg: k.stweg })) });
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
@@ -28080,6 +28118,8 @@ async function initDB() {
       -- aus inbound-Mail an druckerr+, Delivery-Report aus Verteiler-Batch, etc.)
       ALTER TABLE email_log ADD COLUMN IF NOT EXISTS parent_message_id VARCHAR(500);
       ALTER TABLE email_log ADD COLUMN IF NOT EXISTS parent_source TEXT;
+      -- Mailcow-Gateway-User, über den die Mail ging (lib/mailgateway.js; 'zev' = zev@rosenweg9.ch)
+      ALTER TABLE email_log ADD COLUMN IF NOT EXISTS gateway VARCHAR(64);
       CREATE INDEX IF NOT EXISTS idx_email_log_trigger ON email_log (trigger, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_email_log_created ON email_log (created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_email_log_parent ON email_log (parent_message_id) WHERE parent_message_id IS NOT NULL;
@@ -28821,6 +28861,21 @@ async function initDB() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_pbx_ring_enabled ON pbx_ring_members(enabled) WHERE enabled = true;
+
+      -- Abbild der persoenlichen Nummern 3HHWWP der Anlage (pbx-api schickt die
+      -- ganze Liste nach jedem Abgleich, PUT /api/pbx/personen/nummern). Quelle
+      -- bleibt die Anlage; hier nur, damit Verzeichnisse (Telefonbuch, Nextcloud-
+      -- Sync) statt der echten Nummern die interne zeigen (lib/nummernsicht.js).
+      CREATE TABLE IF NOT EXISTS telefon_interne_nummern (
+        nummer VARCHAR(6) PRIMARY KEY,
+        email VARCHAR(255) NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        wohnung VARCHAR(255),
+        haus INTEGER,
+        aktiv BOOLEAN NOT NULL DEFAULT true,
+        aktualisiert TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_telefon_interne_email ON telefon_interne_nummern(LOWER(email));
 
       CREATE TABLE IF NOT EXISTS pbx_config (
         key VARCHAR(60) PRIMARY KEY,

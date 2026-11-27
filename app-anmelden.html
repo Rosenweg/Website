@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>App anmelden - Rosenweg</title>
+    <link rel="icon" href="/logo-rosenweg.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=6"></script>
+    <style>
+        body { background:#1e3a8a; }
+        .knopf { display:block; width:100%; padding:.8rem 1rem; border-radius:14px; border:1.2px solid #fff; color:#fff; font-size:1.05rem; }
+        .code { font-family:ui-monospace,monospace; letter-spacing:.2em; }
+    </style>
+</head>
+<body class="text-white min-h-screen">
+<!--
+  "Mit dem Handy anmelden" (Stefan 27.11.2026): Eine Rosenweg-App am Computer zeigt
+  einen QR mit dieser Adresse (/app-anmelden#ABCD-EFGH). Die Person scannt ihn mit dem
+  Handy, ist hier mit dem Rosenweg-Konto angemeldet und gibt die App frei.
+  API: api/routes/app-karte.js (/api/apps/handy-code/...).
+-->
+<main class="max-w-md mx-auto px-5 py-8 text-center space-y-5">
+    <div class="text-blue-200 text-sm">Rosenweg · App anmelden</div>
+    <img src="/logo-rosenweg.png" alt="Rosenweg" class="w-24 h-24 mx-auto">
+
+    <div id="gate" class="hidden space-y-4">
+        <p>Melde dich zuerst mit deinem Rosenweg-Konto an. Danach kannst du die App freigeben.</p>
+        <button class="knopf" style="background:#2563eb" onclick="anmelden()">Mit Rosenweg-Konto anmelden</button>
+    </div>
+
+    <div id="eingabe" class="hidden space-y-3">
+        <p>Gib den Code ein, der am Computer unter dem QR-Code steht.</p>
+        <input id="feld" class="code w-full text-center text-2xl rounded-xl px-3 py-3 text-slate-900" maxlength="9" placeholder="XXXX-XXXX" autocomplete="off" autocapitalize="characters">
+        <button class="knopf" style="background:#2563eb" onclick="weiter()">Weiter</button>
+    </div>
+
+    <div id="frage" class="hidden space-y-4">
+        <h1 class="text-2xl font-bold" id="titel"></h1>
+        <div class="rounded-2xl p-4 text-left text-sm space-y-1" style="background:rgba(30,64,175,.5);border:2px solid #2563eb">
+            <div><span class="text-blue-200">App:</span> <b id="app"></b></div>
+            <div><span class="text-blue-200">Gerät:</span> <span id="geraet"></span></div>
+            <div><span class="text-blue-200">Adresse:</span> <span id="ip"></span></div>
+            <div><span class="text-blue-200">Code:</span> <span class="code" id="codeAnzeige"></span></div>
+        </div>
+        <p class="text-sm text-blue-200">Gib die App nur frei, wenn du <b class="text-white">jetzt selbst</b> vor diesem Gerät sitzt und derselbe Code dort steht.
+            Hat dir jemand diesen Link oder Code geschickt: <b class="text-white">Ablehnen</b>.</p>
+        <button class="knopf" style="background:#16a34a" onclick="entscheiden('bestaetigen')">Anmelden</button>
+        <button class="knopf" style="background:#1e40af" onclick="entscheiden('ablehnen')">Ablehnen</button>
+    </div>
+
+    <div id="ergebnis" class="hidden rounded-2xl p-4 text-lg"></div>
+    <div id="meldung" class="hidden rounded-xl px-4 py-3 text-sm bg-red-100 text-red-800"></div>
+    <p class="text-xs text-blue-200">Alle angemeldeten Apps siehst und beendest du unter <a class="underline" href="/profil.html#app-sitzungen">Profil → App-Anmeldungen</a>.</p>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const MERKER = 'rw-app-anmelden-code';
+let code = null;
+
+function zeige(id) { ['gate', 'eingabe', 'frage', 'ergebnis'].forEach(x => $(x).classList.toggle('hidden', x !== id)); }
+function melde(t) { $('meldung').textContent = t || ''; $('meldung').classList.toggle('hidden', !t); }
+function normal(roh) {
+    const c = String(roh || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    return c.length === 8 ? c.slice(0, 4) + '-' + c.slice(4) : null;
+}
+function anmelden() {
+    // Die Anmeldung kommt ohne das #-Teil zurueck: Code solange merken
+    try { if (code) sessionStorage.setItem(MERKER, code); } catch (e) {}
+    AuthentikAuth.login(location.pathname);
+}
+async function api(pfad, opts) {
+    const r = await AuthentikAuth.apiFetch(pfad, opts);
+    if (r.status === 401) { zeige('gate'); throw new Error('auth'); }
+    return { status: r.status, d: await r.json().catch(() => ({})) };
+}
+function weiter() {
+    const c = normal($('feld').value);
+    if (!c) { melde('Der Code hat 8 Zeichen, z. B. KBQM-3XRP.'); return; }
+    code = c;
+    history.replaceState(null, '', location.pathname + '#' + c);
+    laden();
+}
+async function laden() {
+    melde('');
+    try {
+        const { status, d } = await api('/api/apps/handy-code/' + encodeURIComponent(code));
+        if (status !== 200) { zeige('eingabe'); melde(d.error || 'Unbekannter Code.'); return; }
+        if (d.abgelaufen) { zeige('eingabe'); melde('Der Code ist abgelaufen. Am Computer „Neuen Code holen“.'); return; }
+        if (d.status !== 'wartet') { ergebnis(d.status === 'bestaetigt' || d.status === 'abgeholt' ? 'Diese App ist schon freigegeben.' : 'Dieser Code ist schon benutzt.', d.status !== 'abgelehnt'); return; }
+        $('titel').textContent = (d.app_name || 'App') + ' anmelden?';
+        $('app').textContent = d.app_name || '–';
+        $('geraet').textContent = (d.geraet_name || '–') + (d.plattform ? ' (' + d.plattform + ')' : '');
+        $('ip').textContent = d.ip || '–';
+        $('codeAnzeige').textContent = d.code;
+        zeige('frage');
+    } catch (e) { if (e.message !== 'auth') melde('Keine Verbindung zum Portal.'); }
+}
+async function entscheiden(wahl) {
+    try {
+        const { status, d } = await api('/api/apps/handy-code/' + encodeURIComponent(code) + '/' + wahl, { method: 'POST' });
+        if (status !== 200) { melde(d.error || 'Das hat nicht geklappt.'); return; }
+        ergebnis(wahl === 'bestaetigen'
+            ? '✓ ' + (d.app_name || 'Die App') + ' auf ' + (d.geraet_name || 'dem Computer') + ' wird angemeldet. Du kannst diese Seite schliessen.'
+            : 'Abgelehnt. Die App am Computer bleibt abgemeldet.', wahl === 'bestaetigen');
+    } catch (e) { if (e.message !== 'auth') melde('Keine Verbindung zum Portal.'); }
+}
+function ergebnis(text, gut) {
+    $('ergebnis').textContent = text;
+    $('ergebnis').style.background = gut ? '#bbf7d0' : '#fde68a';
+    $('ergebnis').style.color = '#14532d';
+    zeige('ergebnis');
+}
+
+(async () => {
+    const ausAdresse = location.hash.startsWith('#auth=') ? null : normal(location.hash.slice(1));
+    let gemerkt = null;
+    try { gemerkt = sessionStorage.getItem(MERKER); sessionStorage.removeItem(MERKER); } catch (e) {}
+    AuthentikAuth.handleCallback();
+    if (AuthentikAuth.ready) await AuthentikAuth.ready;
+    code = ausAdresse || normal(gemerkt);
+    if (!AuthentikAuth.isLoggedIn()) { zeige('gate'); return; }
+    if (code && !ausAdresse) history.replaceState(null, '', location.pathname + '#' + code);
+    if (!code) { zeige('eingabe'); return; }
+    laden();
+})();
+</script>
+</body>
+</html>

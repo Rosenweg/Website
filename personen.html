@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Personen — Rosenweg</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="/js/authentik-auth.js?v=5"></script>
+  <script src="/js/authentik-auth.js?v=6"></script>
   <script src="/js/nav.js?v=3"></script>
   <script src="/js/modal-helpers.js?v=1"></script>
   <script src="/js/phone-helpers.js?v=1"></script>
@@ -151,6 +151,7 @@
   const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   let LIST = [];
   let TELEFONE = []; // weitere Nummern (zusätzlich zu Festnetz+Mobile)
+  let NUMMERN_GESPERRT = false; // echte Nummern verborgen (lib/nummernsicht.js)
 
   const TELEFON_TYPEN = [
     { key: 'mobile2', label: 'Mobile (zweite)' },
@@ -215,7 +216,7 @@
       return `<tr class="hover:bg-gray-50 cursor-pointer" onclick="openEdit(${p.id})">
         <td class="px-3 py-2 font-medium text-gray-900">${esc(p.name)}</td>
         <td class="px-3 py-2 text-gray-700">${esc(p.email || '—')}</td>
-        <td class="px-3 py-2 text-gray-700">${esc(p.telefon || p.mobile || '—')}${(p.telefone && p.telefone.length) ? `<span class="text-xs text-blue-600 ml-1" title="${esc(p.telefone.length)} weitere Nummer(n)">+${p.telefone.length}</span>` : ''}</td>
+        <td class="px-3 py-2 text-gray-700">${esc(p.telefon || p.mobile || (p.interne_nummer ? p.interne_nummer + ' (intern)' : '—'))}${(p.telefone && p.telefone.length) ? `<span class="text-xs text-blue-600 ml-1" title="${esc(p.telefone.length)} weitere Nummer(n)">+${p.telefone.length}</span>` : ''}</td>
         <td class="px-3 py-2 text-xs text-gray-600">${wList || '<em class="text-gray-400">keine</em>'}</td>
         <td class="px-3 py-2 text-right"><span class="text-blue-600 text-xs">bearbeiten →</span></td>
       </tr>`;
@@ -227,6 +228,8 @@
     document.getElementById('form').reset();
     document.getElementById('m-id').value = '';
     TELEFONE = []; renderTelefone();
+    NUMMERN_GESPERRT = false;
+    for (const fid of ['m-telefon', 'm-mobile']) document.getElementById(fid).disabled = false;
     document.getElementById('m-wohnungen').innerHTML = '<em>Wohnungen können erst nach dem Anlegen in der Objektverwaltung verknüpft werden.</em>';
     document.getElementById('m-err').classList.add('hidden');
     document.getElementById('modal').classList.remove('hidden');
@@ -249,6 +252,14 @@
     document.getElementById('m-notiz').value = p.notiz || '';
     TELEFONE = Array.isArray(p.telefone) ? p.telefone.slice() : [];
     renderTelefone();
+    // Echte Nummern hausfremder Personen gibt die API nicht heraus (nur interne
+    // 3HHWWP); die Felder bleiben dann gesperrt, gespeichert wird ohne sie.
+    NUMMERN_GESPERRT = !!p.nummern_verborgen;
+    for (const fid of ['m-telefon', 'm-mobile']) {
+      const el = document.getElementById(fid);
+      el.disabled = NUMMERN_GESPERRT;
+      el.placeholder = NUMMERN_GESPERRT ? 'verborgen' + (p.interne_nummer ? ' – intern ' + p.interne_nummer : '') : (fid === 'm-telefon' ? '+41 61 …' : '+41 79 …');
+    }
     const wList = (p.wohnungen || []).map(w => `<div>STWEG ${w.stweg} · ${esc(w.bezeichnung)} (${esc(w.rolle)})</div>`).join('');
     document.getElementById('m-wohnungen').innerHTML = wList
       ? `<div class="font-semibold mb-1">⚙ Änderungen werden auf folgende ${p.wohnungen.length} Wohnung(en) übernommen:</div>${wList}`
@@ -275,6 +286,7 @@
       adresse: document.getElementById('m-adresse').value.trim() || null,
       notiz: document.getElementById('m-notiz').value.trim() || null,
     };
+    if (id && NUMMERN_GESPERRT) { delete payload.telefon; delete payload.mobile; delete payload.telefone; }
     try {
       const url = id ? `/api/personen/${id}` : '/api/personen';
       const r = await AuthentikAuth.apiFetch(url, {

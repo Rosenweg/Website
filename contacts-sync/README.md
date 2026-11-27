@@ -9,22 +9,16 @@ Nextcloud-Adressbuch `kontakte/rosenweg`, die persönlichen SOGo-Adressbücher v
 
 ## Wo es läuft
 
-> **Offener Punkt:** Diese Beschreibung nannte bisher **CT 201** (`docker-pve1`,
-> `100.64.2.24`) mit `docker exec rosenweg_postgres`. CT 201 und der Swarm
-> existieren nicht mehr; die Datenbank läuft heute auf **CT 128**
-> (`/opt/rosenweg-core`, Compose-Projekt `rosenweg-core`). Das Skript sucht den
-> Datenbank-Container jetzt per Compose-Label (`com.docker.compose.project=rosenweg-core`,
-> `com.docker.compose.service=postgres`), danach per Name (`rosenweg-core-postgres`,
-> alt `rosenweg_postgres`); `PG_CONTAINER` in der env-Datei überschreibt das.
-> Docker muss auf dem Host laufen, auf dem das Skript läuft (also CT 128). Wo
-> und ob der Sync heute läuft, ist vor dem Ausrollen auf den Knoten zu prüfen:
->
-> ```bash
-> for n in 100.64.2.20 100.64.2.21 100.64.2.22; do
->   ssh root@$n 'for c in $(pct list | awk "NR>1 && \$2==\"running\"{print \$1}"); do
->     pct exec $c -- test -f /usr/local/bin/contacts-sync.py 2>/dev/null && echo "$(hostname): CT $c"; done'
-> done
-> ```
+Seit 27.11.2026 auf **CT 201 `sync`** (pve1, `100.64.2.24`, Debian 13), einem
+eigenen kleinen Container für Abgleich-Aufgaben – nicht auf CT 128
+(`core-backend`). Die Datenbank liest das Skript **über das Netz** mit einem
+eigenen Nur-Lese-Benutzer `contacts_sync` (nur `SELECT` auf `personen`,
+`verwaltungen`, `verwaltungs_kontakte`, `telefon_interne_nummern`). Postgres
+auf CT 128 ist dafür auf `100.64.2.52:5432` erreichbar, aber per Firewall
+(`DOCKER-USER`) nur von `100.64.2.24`.
+
+Ohne `PG_HOST` arbeitet das Skript wie früher per `docker exec` auf dem Host
+der Datenbank.
 
 ## Dateien
 
@@ -41,6 +35,7 @@ Variablen in `/root/.contacts-sync.env`:
 | `NC_KONTAKTE_PW` | ja | App-Passwort des Nextcloud-Kontos `kontakte` |
 | `INBOX_PW`, `PRAESIDENT_PW` | ja | Postfach-Passwörter für SOGo |
 | `ARCHIV_PW` | – | wird vom Skript derzeit nicht gelesen |
+| `PG_HOST`, `PG_PORT`, `PG_DB`, `PG_USER`, `PG_PASSWORD` | auf CT 201 ja | Netzzugang zur Datenbank (`100.64.2.52`, `5432`, `rosenweg`, `contacts_sync`) |
 | `PG_CONTAINER` | nein | Name/ID des Postgres-Containers, falls die Suche per Label/Name nicht passt |
 | `TLS_VERIFY` | nein | `1` = Zertifikate prüfen (seit 17.11.2026). Dann `NC_BASE` und `SOGO_BASE` auf Hostnamen-URLs setzen, weil die Standard-URLs die Server per IP ansprechen |
 | `NC_BASE` | nein | Standard `http://100.64.2.36/remote.php/dav/addressbooks/users/kontakte/rosenweg/` |
@@ -63,6 +58,32 @@ Timer: täglich **04:30 UTC** + `RandomizedDelaySec=600` + `Persistent=true`.
 - **Z-Push** (CT 115, `100.64.2.38`): `rsync -a --delete` per SSH als root nach
   `/var/lib/zpush-contacts/`, danach `chown www-data`. Der SSH-Schlüssel des
   ausführenden Hosts muss in `/root/.ssh/authorized_keys` von CT 115 stehen.
+
+## Nur interne Nummern bei Personen (seit 27.11.2026)
+
+Personen der Siedlung stehen im Verzeichnis **nur mit ihrer internen Nummer
+3HHWWP** (vCard `item1.TEL` + `X-ABLabel:Rosenweg intern`, Kategorie
+`Rosenweg,Bewohner`), nicht mehr mit Handy/Festnetz — das Verzeichnis ist mit
+allen geteilt, sonst könnte jeder jede Nummer suchen (Stefan). Wer 3HHWWP wählt,
+erreicht die Person auf ihren Geräten, inkl. Weiterleitung. Die echten Nummern
+bleiben in der Personenverwaltung des Portals (`api/lib/nummernsicht.js`).
+
+- Quelle der internen Nummern: Tabelle `telefon_interne_nummern` in der
+  Rosenweg-Datenbank, ein Abbild der Anlage. Die pbx-api schickt die Liste nach
+  jedem stündlichen Abgleich (`PUT /api/pbx/personen/nummern`).
+- Zuordnung Person ↔ Nummer: E-Mail **und** Name (Paare teilen sich oft eine
+  E-Mail), gleiche Regel wie die Anlage.
+- Personen ohne interne Nummer: nur noch E-Mail; ohne E-Mail keine Karte.
+- Verwaltungen und ihre Mitarbeitenden behalten ihre Geschäftsnummern.
+- Die Anlage gibt Karten der Kategorie `Bewohner` an die geteilten Telefone
+  ohnehin nur mit 3HHWWP weiter (`pbx/api/app.py`, `_vcards_lesen`).
+- SOGo inbox@ und Z-Push bekommen dieselben Karten; gleiche UIDs, also werden
+  die alten Personenkarten mit echten Nummern dabei ersetzt.
+- **Ausnahme praesident@** (Entscheid Stefan 27.11.2026): das persönliche
+  SOGo-Adressbuch des Präsidenten bekommt die volle Fassung, also interne
+  **und** echte Nummern.
+
+Tests: `python3 -m unittest discover -s contacts-sync` (auch in der CI).
 
 ## Logik
 

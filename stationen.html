@@ -6,7 +6,7 @@
     <title>Stationen - Rosenweg</title>
     <link rel="icon" href="/logo-rosenweg.png">
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="/js/authentik-auth.js?v=5"></script>
+    <script src="/js/authentik-auth.js?v=6"></script>
     <script src="/js/nav.js?v=3"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -340,6 +340,20 @@
         </div>
     </div>
 
+    <!-- Befehle an ein Gerät mit Rosenweg-Agent -->
+    <div id="befehl-dialog" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[85vh] flex flex-col">
+            <div class="p-6 border-b flex items-center gap-3">
+                <div class="mr-auto">
+                    <h3 class="text-lg font-semibold text-gray-800" id="befehl-titel">Befehle</h3>
+                    <p class="text-sm text-gray-500">Abgeholt beim nächsten Lebenszeichen (alle zwei Minuten), jeder höchstens einmal. Zurückziehen geht, solange er wartet.</p>
+                </div>
+                <button onclick="befehleSchliessen()" class="px-4 py-2 text-sm border rounded-lg hover:bg-gray-50">Schliessen</button>
+            </div>
+            <div class="p-6 overflow-y-auto" id="befehl-liste"></div>
+        </div>
+    </div>
+
     <!-- Windows-Rechner eintragen -->
     <div id="win-dialog" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-lg shadow-xl max-w-lg w-full">
@@ -584,8 +598,8 @@
         <div class="bg-white rounded-lg shadow-xl max-w-lg w-full p-6">
             <h3 class="text-lg font-semibold text-gray-800 mb-2" id="dialog-titel">Station sperren</h3>
             <p class="text-sm text-gray-600 mb-4" id="dialog-text"></p>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Grund <span class="text-gray-400 font-normal">optional</span></label>
-            <input id="dialog-grund" type="text" class="w-full px-3 py-2 border rounded-lg text-sm"
+            <label id="dialog-grund-label" class="block text-sm font-medium text-gray-700 mb-1">Grund <span class="text-gray-400 font-normal">optional</span></label>
+            <input id="dialog-grund" type="text" maxlength="500" class="w-full px-3 py-2 border rounded-lg text-sm"
                    placeholder="z. B. Gerät ausgemustert">
             <div class="flex justify-end gap-3 mt-6">
                 <button onclick="dialogSchliessen()" class="px-4 py-2 text-sm border rounded-lg hover:bg-gray-50">Abbrechen</button>
@@ -707,11 +721,62 @@
             return teile.length ? teile.join(' ') : '—';
         }
 
-        // Ein Windows-Rechner hat keinen Agenten und meldet sich nie. Er darf
+        // Ein Windows-Rechner ohne Rosenweg-Agent meldet sich nie. Er darf
         // deshalb weder als „neu" noch als „länger still" auffallen — sonst
         // gewöhnt man sich an eine Warnung, die nie weggeht, und übersieht
-        // die echte.
-        const ohneAgent = (s) => s.role === 'windows';
+        // die echte. Mit Agent (Protokoll v2, GPO „Rosenweg-Agent") ist er
+        // eine Station wie die anderen: Lebenszeichen, Sperre, Anschluss,
+        // dazu Befehle (Nachricht, Abmelden, Neustart, Netzstart).
+        const istWin = (s) => s.role === 'windows';
+        const hatAgent = (s) => Number(s.agent_protokoll) === 2 && s.agent_modus !== 'parallel';
+        const ohneAgent = (s) => istWin(s) && !hatAgent(s);
+
+        const gb = (b) => `${Math.round((Number(b) || 0) / 1e9)} GB`;
+        const datum = (iso) => new Date(iso).toLocaleDateString('de-CH');
+
+        // Was der Agent meldet, klein unter dem Gerät: Version und System,
+        // wer angemeldet ist, Platte, BitLocker, Updates.
+        function agentZeilen(s) {
+            if (Number(s.agent_protokoll) !== 2) return '';
+            const inv = s.agent_inventar || {};
+            if (s.agent_modus === 'parallel') {
+                return `<div class="text-xs text-gray-400" title="Läuft zur Probe neben station-agent.sh — führt nichts aus">🧪 Rosenweg-Agent ${escape(s.agent_version || '?')} zur Probe${s.agent_gesehen_am ? ', ' + escape(vorZeit(s.agent_gesehen_am).text) : ''}</div>`;
+            }
+            const z = [];
+            const bs = inv.betriebssystem || {};
+            z.push(`🖥 ${escape([bs.name, bs.version, bs.build ? `(${bs.build})` : ''].filter(Boolean).join(' ') || '?')} · Agent ${escape(s.agent_version || '?')}`);
+            const p = (inv.personen || []);
+            z.push(p.length ? `👤 ${p.map(x => escape(x.name) + (x.zustand === 'getrennt' ? ' (getrennt)' : '')).join(', ')}` : '👤 niemand angemeldet');
+            const platte = (inv.platten || []).find(x => /^(c:|\/)$/i.test(x.laufwerk)) || (inv.platten || [])[0];
+            const teile = [];
+            if (platte) teile.push(`💽 ${escape(platte.laufwerk)} ${gb(platte.frei_bytes)} frei von ${gb(platte.gesamt_bytes)}`);
+            const bl = (inv.verschluesselung || []).find(x => /^c:$/i.test(x.laufwerk)) || (inv.verschluesselung || [])[0];
+            if (bl) teile.push(bl.schutz === 'an' ? '🔒 BitLocker an' : bl.schutz === 'aus' ? '🔓 BitLocker aus' : 'BitLocker ?');
+            if (inv.zusatz?.secure_boot === true) teile.push('Secure Boot an');
+            if (teile.length) z.push(teile.join(' · '));
+            const u = inv.updates || {};
+            if (u.zuletzt || u.neustart_ausstehend || u.fehler) {
+                z.push(`⟳ Updates${u.zuletzt ? ' zuletzt ' + escape(datum(u.zuletzt)) : ''}${u.neustart_ausstehend ? ' · <span class="text-yellow-700">Neustart ausstehend</span>' : ''}${u.fehler && !u.zuletzt ? ' · nicht lesbar' : ''}`);
+            }
+            return z.map(t => `<div class="text-xs text-gray-400">${t}</div>`).join('');
+        }
+
+        // Der letzte Befehl an das Gerät, solange er frisch ist (eine Stunde).
+        const BEFEHL_TITEL = {
+            nachricht: 'Nachricht', abmelden: 'Abmelden', neustart: 'Neustart',
+            netzstart_einmal: 'Netzstart (Sicherung)', inventar: 'Inventar lesen',
+        };
+        function befehlZeile(s) {
+            const b = s.befehl_letzter;
+            if (!b || Date.now() - new Date(b.angelegt_am).getTime() > 3600 * 1000) return '';
+            const was = escape(BEFEHL_TITEL[b.art] || b.art);
+            let wie = 'wartet aufs nächste Lebenszeichen', farbe = 'text-blue-700';
+            if (b.ergebnis === 'ok') { wie = b.ergebnis_text || 'erledigt'; farbe = 'text-green-700'; }
+            else if (b.ergebnis === 'fehler' || b.ergebnis === 'abgelehnt') { wie = `${b.ergebnis}: ${b.ergebnis_text || ''}`; farbe = 'text-red-700'; }
+            else if (b.ergebnis === 'verfallen' || b.ergebnis === 'zurueckgezogen') { wie = b.ergebnis; farbe = 'text-gray-500'; }
+            else if (b.abgeholt_am) wie = 'abgeholt, Quittung fehlt';
+            return `<div class="mt-1 text-xs ${farbe}" title="von ${escape(b.angelegt_von || '?')}">⚙ ${was}: ${escape(wie)}</div>`;
+        }
 
         // Ein Chromecast meldet sich auch nicht selbst — aber der Cast-Wächter
         // fragt ihn ab und trägt „zuletzt gesehen" ein. Er zählt deshalb wie
@@ -785,12 +850,14 @@
             if (st.status === 'gescheitert') {
                 return '<span class="px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">Einrichtung gescheitert</span>';
             }
-            if (ohneAgent(s)) {
+            if (istWin(s)) {
                 // Was das AD über den Rechner sagt. Gelöscht oder deaktiviert
                 // wird nur markiert — entfernen entscheidet ein Mensch.
                 if (s.ad_zustand === 'fehlt') return '<span title="Das Computerkonto gibt es im AD nicht mehr. Wird der Rechner nicht mehr gebraucht: Aktionen → Entfernen." class="px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">im AD nicht mehr vorhanden</span>';
                 if (s.ad_zustand === 'deaktiviert') return '<span title="Das Computerkonto ist im AD deaktiviert — an diesem Rechner meldet sich niemand an." class="px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">im AD deaktiviert</span>';
-                if (s.aus_ad) return `<span title="${escape(s.ad_dn || '')}" class="px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700">aus dem AD</span>`;
+            }
+            if (ohneAgent(s)) {
+                if (s.aus_ad) return `<span title="${escape(s.ad_dn || '')} — ohne Rosenweg-Agent (GPO „Rosenweg-Agent“ noch nicht angekommen)" class="px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700">aus dem AD, ohne Agent</span>`;
                 return '<span title="Von Hand eingetragen, ohne Agent, nicht im AD gefunden" class="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">eingetragen</span>';
             }
             if (istCast(s) && s.last_state?.cast) {
@@ -826,7 +893,7 @@
         // sich der Drucker richtet — fehlt es, steht das deutlich da.
         function standortZelle(s) {
             const teile = [s.haus ? `Rosenweg ${s.haus}` : '', s.standort || ''].filter(Boolean);
-            if (ohneAgent(s) && !s.haus) {
+            if (istWin(s) && !s.haus) {
                 const titel = 'Weder OU noch Name verraten das Haus. Unter Aktionen → Einstellen … Haus und Drucker wählen'
                     + (standardDrucker(s) ? '.' : '; bis dahin lässt Windows seinen bisherigen Standarddrucker stehen und fällt nur, wenn es den nicht gibt, auf DruckerR9 zurück.');
                 return `${teile.length ? escape(teile.join(' · ')) + '<br>' : ''}<span title="${escape(titel)}" class="px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800">Standort fehlt</span>`;
@@ -867,7 +934,7 @@
             return `${a.geraet_name || a.geraet_mac} Port ${a.port}${a.port_name ? ` (${a.port_name})` : ''}`;
         }
         const anschlussListe = (l) => (l || []).map(anschlussText).join(' / ');
-        const ohneAnschluss = (s) => (anschlussStand?.ohne || ['windows', 'laptop']).includes(s.role);
+        const ohneAnschluss = (s) => (anschlussStand?.ohne || ['laptop', 'chromecast']).includes(s.role);
         const quelleText = (q) => [q.lokal_ip, q.quelle_ip && q.quelle_ip !== q.lokal_ip ? `über ${q.quelle_ip}` : null].filter(Boolean).join(' ') || 'unbekannte Adresse';
         const vomWaechter = (s) => s.status === 'gesperrt' && s.gesperrt_von === 'Anschluss-Wächter';
 
@@ -997,9 +1064,9 @@
                 // es den nicht (mehr) gibt — das soll man hier sehen, nicht
                 // erst am PC.
                 const druckerZeile = std ? `<div class="text-xs text-gray-400">🖨 ${escape(std)}</div>`
-                    : (ohneAgent(s) ? '<div class="text-xs text-gray-400" title="drucker.ps1 lässt den bisherigen Standard stehen; gibt es den nicht, nimmt es DruckerR9">🖨 keiner gewählt (sonst DruckerR9)</div>' : '');
+                    : (istWin(s) ? '<div class="text-xs text-gray-400" title="drucker.ps1 lässt den bisherigen Standard stehen; gibt es den nicht, nimmt es DruckerR9">🖨 keiner gewählt (sonst DruckerR9)</div>' : '');
                 const st = s.last_state || {};
-                const progZ = ohneAgent(s) ? progZeile(s) : '';
+                const progZ = istWin(s) ? progZeile(s) : '';
                 // Der gelernte Anschluss, klein unter dem Gerät — beim Umzug
                 // sieht man so, wo die Station bisher stand.
                 const anschlussZ = !ohneAgent(s) && !ohneAnschluss(s)
@@ -1014,10 +1081,10 @@
                     <td class="py-3 px-6 font-mono font-medium">${escape(s.id)}${version}</td>
                     <td class="py-3 px-3">${escape(typLabel(s.role))}${druckerZeile}${progZ}</td>
                     <td class="py-3 px-3">${standortZelle(s)}</td>
-                    <td class="py-3 px-3 text-gray-600">${istKiosk(s) ? escape(geraet(s)) + kioskZeile(s) + anschlussZ : istCast(s) ? `Chromecast <span class="font-mono">${escape(s.hardware?.adresse || '?')}</span>${castZeile(s)}` : ohneAgent(s) ? `AD-Name <span class="font-mono">${escape(s.hostname || s.id)}</span>${s.ad_betriebssystem ? `<div class="text-xs text-gray-400">${escape(s.ad_betriebssystem)}</div>` : ''}` : escape(geraet(s)) + anschlussZ}</td>
+                    <td class="py-3 px-3 text-gray-600">${istKiosk(s) ? escape(geraet(s)) + kioskZeile(s) + anschlussZ : istCast(s) ? `Chromecast <span class="font-mono">${escape(s.hardware?.adresse || '?')}</span>${castZeile(s)}` : istWin(s) ? `AD-Name <span class="font-mono">${escape(s.hostname || s.id)}</span>${!hatAgent(s) && s.ad_betriebssystem ? `<div class="text-xs text-gray-400">${escape(s.ad_betriebssystem)}</div>` : ''}${agentZeilen(s)}${anschlussZ}` : escape(geraet(s)) + agentZeilen(s) + anschlussZ}</td>
                     <td class="py-3 px-3 text-gray-600">${escape(s.registered_by || '—')}</td>
                     <td class="py-3 px-3 ${gesehen.alt ? 'text-yellow-700' : 'text-gray-600'}">${escape(gesehen.text)}</td>
-                    <td class="py-3 px-3">${zustandBadge(s)}${wartungZeile(s)}${waechterZeilen(s)}</td>
+                    <td class="py-3 px-3">${zustandBadge(s)}${wartungZeile(s)}${befehlZeile(s)}${waechterZeilen(s)}</td>
                     <td class="py-3 px-6 whitespace-nowrap">${aktionen}</td>
                 </tr>`;
             }).join('');
@@ -2343,8 +2410,16 @@
         // ─── Dialog ────────────────────────────────────────────────────
 
         let dialogAktion = null;
+        let dialogPflicht = false;
 
-        function dialogOeffnen(titel, text, knopf, klasse, aktion, mitGrund) {
+        // feld: andere Beschriftung für das Eingabefeld (Befehle an Windows-PCs:
+        // „Text", Pflicht bei der Nachricht) — sonst „Grund, optional".
+        function dialogOeffnen(titel, text, knopf, klasse, aktion, mitGrund, feld = null) {
+            const lbl = document.getElementById('dialog-grund-label');
+            lbl.innerHTML = feld ? `${escape(feld.label)}${feld.pflicht ? '' : ' <span class="text-gray-400 font-normal">optional</span>'}`
+                : 'Grund <span class="text-gray-400 font-normal">optional</span>';
+            document.getElementById('dialog-grund').placeholder = feld?.placeholder || 'z. B. Gerät ausgemustert';
+            dialogPflicht = !!feld?.pflicht;
             document.getElementById('dialog-titel').textContent = titel;
             document.getElementById('dialog-text').textContent = text;
             document.getElementById('dialog-text').className = 'text-sm text-gray-600 mb-4';
@@ -2365,6 +2440,7 @@
 
         document.getElementById('dialog-ok').addEventListener('click', async () => {
             const grund = document.getElementById('dialog-grund').value.trim();
+            if (dialogPflicht && !grund) { document.getElementById('dialog-grund').focus(); return; }
             const aktion = dialogAktion;
             dialogSchliessen();
             if (aktion) await aktion(grund);
@@ -2389,6 +2465,8 @@
                 `Station „${id}" sperren`,
                 istKiosk(s)
                     ? 'Der Fernseher zeigt ab dem nächsten Lebenszeichen (bis zu einer Minute) nur noch einen Sperrhinweis — keine Diashow, kein PIN-Menü. Auch ohne Netz bleibt er gesperrt. Rückgängig machbar.'
+                    : istWin(s)
+                    ? 'Personen der Domäne können sich nicht mehr anmelden; wer angemeldet ist, bekommt eine Meldung und nach einer Minute den Sperrbildschirm (offene Programme bleiben). Der Grund steht vor der Anmeldung. Der örtliche Administrator kommt weiter herein. Wirkt beim nächsten Lebenszeichen (bis zwei Minuten), rückgängig machbar.'
                     : 'Die Station bekommt keine Konfiguration mehr und lässt sich nicht weiter einrichten. Rückgängig machbar.',
                 'Sperren', 'bg-red-600 hover:bg-red-700',
                 async (grund) => tuUnd(`/api/stations/admin/${encodeURIComponent(id)}/block`,
@@ -2407,6 +2485,98 @@
                 async () => tuUnd(`/api/stations/admin/${encodeURIComponent(id)}/unblock`,
                     { method: 'POST' }, `„${id}" entsperrt.`),
                 false);
+        }
+
+        // ─── Befehle an Geräte mit Rosenweg-Agent (Protokoll v2) ────────
+        // Der Agent holt sie beim nächsten Lebenszeichen ab (alle zwei
+        // Minuten) und quittiert. Jeder Befehl gilt nur kurz; ein PC, der
+        // aus ist, bekommt ihn nicht Tage später. Nur Gruppe technik.
+        function befehlSenden(id, art, parameter, meldung) {
+            return tuUnd(`/api/stations/v2/admin/${encodeURIComponent(id)}/befehle`,
+                { method: 'POST', body: { art, parameter } }, meldung);
+        }
+
+        function befehlNachricht(id) {
+            dialogOeffnen(`Nachricht an „${id}"`,
+                'Erscheint als Fenster bei allen, die gerade angemeldet sind, mit „Technik Rosenweg“ als Absender. Kommt innerhalb von zwei Minuten an.',
+                'Senden', 'bg-blue-600 hover:bg-blue-700',
+                async (text) => befehlSenden(id, 'nachricht', { text }, `Nachricht an „${id}" wartet aufs nächste Lebenszeichen.`),
+                true, { label: 'Text', pflicht: true, placeholder: 'z. B. Bitte heute bis 18 Uhr abmelden — Wartung.' });
+        }
+
+        function befehlAbmelden(id) {
+            dialogOeffnen(`„${id}": alle abmelden`,
+                'Wer angemeldet ist, bekommt eine Meldung und wird eine Minute später abgemeldet. Was bis dahin nicht gespeichert ist, ist weg.',
+                'Abmelden', 'bg-orange-600 hover:bg-orange-700',
+                async (text) => befehlSenden(id, 'abmelden', { text: text || null }, `„${id}" meldet beim nächsten Lebenszeichen ab.`),
+                true, { label: 'Hinweis an die Person', placeholder: 'z. B. Wartung um 18 Uhr' });
+        }
+
+        function befehlNeustart(id) {
+            dialogOeffnen(`„${id}" neu starten`,
+                'Windows zeigt eine Warnung und startet fünf Minuten später neu. Vor Ort lässt sich das mit „shutdown /a“ abbrechen.',
+                'Neu starten', 'bg-orange-600 hover:bg-orange-700',
+                async (text) => befehlSenden(id, 'neustart', { verzoegerung_sekunden: 300, text: text || null }, `„${id}" startet nach dem nächsten Lebenszeichen in fünf Minuten neu.`),
+                true, { label: 'Hinweis an die Person', placeholder: 'z. B. Updates' });
+        }
+
+        // Wie „Zurücksetzen": den Namen abtippen. Der PC startet danach ins
+        // Sicherungs-System und ist eine Weile nicht benutzbar.
+        function befehlNetzstart(id) {
+            const s = (stationen || []).find(x => x.id === id) || {};
+            const inv = s.agent_inventar || {};
+            if (inv.zusatz?.secure_boot === true) {
+                alert(`Auf „${id}" ist Secure Boot an — unser Netzstart ist nicht signiert und würde abgewiesen. Erst im BIOS abschalten (os-stationen/sicherung/README.md).`);
+                return;
+            }
+            const bl = (inv.verschluesselung || []).some(v => v.schutz === 'an');
+            const eingabe = prompt(
+                `„${id}" einmal vom Netz starten (Sicherung)?\n\n`
+                + 'Der PC setzt den Netzstart (PXE) als einmaliges Startziel und startet zwei Minuten danach neu ins Sicherungs-System. '
+                + 'Wer angemeldet ist, wird gewarnt.'
+                + (bl ? '\n\nBitLocker ist an: das Abbild ist verschlüsselt — Wiederherstellungsschlüssel vorher sichern.' : '')
+                + `\n\nZum Bestätigen den Namen eintippen: ${id}`);
+            if (eingabe === null) return;
+            if (eingabe.trim() !== id) { alert('Der Name stimmt nicht überein — nichts geändert.'); return; }
+            befehlSenden(id, 'netzstart_einmal', { verzoegerung_sekunden: 120 }, `„${id}" setzt beim nächsten Lebenszeichen den Netzstart und startet neu.`);
+        }
+
+        let befehlStation = null;
+        async function befehleOeffnen(id) {
+            befehlStation = id;
+            document.getElementById('befehl-titel').textContent = `Befehle an „${id}"`;
+            document.getElementById('befehl-liste').innerHTML = '<p class="text-sm text-gray-500">Lade …</p>';
+            document.getElementById('befehl-dialog').classList.remove('hidden');
+            try {
+                const d = await api(`/api/stations/v2/admin/${encodeURIComponent(id)}/befehle`);
+                const l = d.befehle || [];
+                const wie = (b) => b.ergebnis ? `${b.ergebnis}${b.ergebnis_text ? ': ' + b.ergebnis_text : ''}`
+                    : b.abgeholt_am ? 'abgeholt, Quittung fehlt' : 'wartet';
+                document.getElementById('befehl-liste').innerHTML = l.length ? `<table class="w-full text-sm">
+                    <thead><tr class="text-left text-xs text-gray-500"><th class="py-1 pr-3">Wann</th><th class="pr-3">Was</th><th class="pr-3">Von</th><th class="pr-3">Ergebnis</th><th></th></tr></thead>
+                    <tbody>${l.map(b => `<tr class="border-t align-top">
+                        <td class="py-1 pr-3 whitespace-nowrap">${escape(new Date(b.angelegt_am).toLocaleString('de-CH'))}</td>
+                        <td class="pr-3">${escape(BEFEHL_TITEL[b.art] || b.art)}${b.parameter?.text ? `<div class="text-xs text-gray-500">${escape(b.parameter.text)}</div>` : ''}</td>
+                        <td class="pr-3 text-xs">${escape(b.angelegt_von || '')}</td>
+                        <td class="pr-3 text-xs">${escape(wie(b))}</td>
+                        <td>${!b.abgeholt_am && !b.erledigt_am ? `<button onclick="befehlZurueck(${Number(b.id)})" class="text-xs text-red-600 hover:text-red-800">zurückziehen</button>` : ''}</td>
+                    </tr>`).join('')}</tbody></table>` : '<p class="text-sm text-gray-500">Noch keine Befehle.</p>';
+            } catch (err) {
+                document.getElementById('befehl-liste').innerHTML = `<p class="text-sm text-red-600">${escape(err.message)}</p>`;
+            }
+        }
+
+        async function befehlZurueck(bid) {
+            try {
+                await api(`/api/stations/v2/admin/${encodeURIComponent(befehlStation)}/befehle/${bid}`, { method: 'DELETE' });
+                befehleOeffnen(befehlStation);
+                ladeDaten();
+            } catch (err) { zeigeStatus(err.message, false); }
+        }
+
+        function befehleSchliessen() {
+            document.getElementById('befehl-dialog').classList.add('hidden');
+            befehlStation = null;
         }
 
         // Zurücksetzen löscht die Identität eines Arbeitsplatzes. Deshalb keine
@@ -2508,9 +2678,9 @@
             const s = (stationen || []).find(x => x.id === id) || {};
             dialogOeffnen(
                 `Station „${id}" entfernen`,
-                ohneAgent(s) && s.aus_ad
+                istWin(s) && s.aus_ad
                     ? 'Der Rechner verschwindet aus der Liste und kommt auch beim AD-Abgleich nicht wieder, solange sein Konto im AD dasselbe bleibt. Bei der nächsten Anmeldung gilt er als unbekannt, und Windows behält den Standarddrucker, den es gerade hat. Zurück holt ihn „Windows-Rechner eintragen“.'
-                    : ohneAgent(s)
+                    : istWin(s)
                     ? 'Der Rechner verschwindet aus der Liste. Bei der nächsten Anmeldung gilt er als unbekannt, und Windows behält den Standarddrucker, den es gerade hat.'
                     : istKiosk(s)
                     ? 'Der Fernseher verschwindet aus der Liste, sein Token wird wertlos. Er merkt das beim nächsten Lebenszeichen, vergisst die Kopplung und läuft als Kiosk mit seiner PIN weiter (auch eine Sperre fällt weg). Neu koppeln geht jederzeit.'
@@ -2552,11 +2722,25 @@
             const e = (t, fn, klasse = 'text-gray-800') =>
                 `<button onclick="aktionsMenueZu(); ${fn}('${escape(id)}')" class="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100 ${klasse}">${t}</button>`;
             const linie = '<div class="border-t my-1"></div>';
-            // Ein Windows-Rechner hat keinen Agenten: Aktualisieren, SSH-Wartung,
-            // Sperren und Zurücksetzen gingen ins Leere. Es bleibt, was hier
-            // tatsächlich etwas bewirkt.
-            if (ohneAgent(s)) {
-                m.innerHTML = e('Einstellen …', 'cfgOeffnen') + linie + e('Entfernen …', 'entfernen', 'text-gray-500');
+            // Ein Windows-Rechner: Aktualisieren, SSH-Wartung und Zurücksetzen
+            // gibt es dort nicht (das ist os-stationen). Ohne Agent ginge auch
+            // Sperren ins Leere; mit Agent kommen die Befehle dazu.
+            if (istWin(s)) {
+                let h = e('Einstellen …', 'cfgOeffnen');
+                if (hatAgent(s)) {
+                    h += e('Nachricht anzeigen …', 'befehlNachricht', 'text-blue-700')
+                        + e('Befehle und Verlauf', 'befehleOeffnen') + linie;
+                    if (!ohneAnschluss(s) && s.anschluss?.length && !s.anschluss_abweichung) h += e('Anschluss neu lernen (Umzug) …', 'anschlussVergessen', 'text-blue-700');
+                    if (s.anschluss_abweichung) h += e(s.status !== 'gesperrt' || vomWaechter(s) ? 'Anschluss übernehmen und freigeben …' : 'Anschluss übernehmen …', 'anschlussUebernehmen', 'text-green-700');
+                    h += e('Abmelden …', 'befehlAbmelden', 'text-orange-600')
+                        + e('Neu starten …', 'befehlNeustart', 'text-orange-600')
+                        + e('Einmal vom Netz starten (Sicherung) …', 'befehlNetzstart', 'text-orange-600');
+                    if (s.status === 'gesperrt' && !(s.anschluss_abweichung && vomWaechter(s))) h += e('Entsperren', 'entsperren', 'text-green-700');
+                    if (s.status !== 'gesperrt') h += e('Sperren …', 'sperren', 'text-red-600');
+                } else {
+                    h += '<div class="px-4 py-2 text-xs text-gray-400 max-w-[16rem]">Ohne Rosenweg-Agent: Befehle und Sperre gehen erst, wenn die Gruppenrichtlinie „Rosenweg-Agent“ angekommen ist.</div>';
+                }
+                m.innerHTML = h + linie + e('Entfernen …', 'entfernen', 'text-gray-500');
                 m.classList.remove('hidden');
                 const r = ev.currentTarget.getBoundingClientRect();
                 m.style.left = Math.max(8, Math.min(r.right - m.offsetWidth, window.innerWidth - m.offsetWidth - 8)) + 'px';

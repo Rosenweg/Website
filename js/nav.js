@@ -4,6 +4,13 @@
  * Include via: <script src="/js/nav.js"></script>
  * Then call: RosenwegNav.init({ active: 'services' })
  */
+// Wer Salz buchen darf (api/routes/salz.js LAGER_START): Rosenweg 2+4 =
+// stweg7-bewohner, 9 = r9-bewohner, Kooperation im Rosenweg 10 =
+// stweg4-bewohner, dazu die Technik. Steht im Bewohner-Menü (für Bewohner)
+// und unter „Betrieb & Admin“ (daraus leiten die Stationen ab, wer den
+// Starter der App Rosenweg Salz sieht, api/lib/stationapps.js).
+const SALZ_NAV_GRUPPEN = 'technik,praesident,stweg7-bewohner,r9-bewohner,stweg4-bewohner';
+
 // Services-Menu: kategorisierte Gruppen. Wird identisch für Desktop-Mega-Menu
 // und Mobile-Akkordion gerendert. Permissions: perm = data-perm, permAny = data-perm-any.
 const SERVICES_GROUPS = [
@@ -63,7 +70,10 @@ const SERVICES_GROUPS = [
       { label: 'Auslagen / Vorschüsse', href: 'auslagen.html', activeKey: 'auslagen', perm: 'auslagen' },
       { label: 'Stundensatz (Auslagen)', href: 'auslagen-stundensatz.html', activeKey: 'auslagen-stundensatz', perm: 'auslagen-stundensatz' },
       { label: 'Handwerker & Lieferanten', href: 'handwerker.html', activeKey: 'handwerker', perm: 'handwerker' },
-      { label: 'Salzvorrat', href: 'salz.html', activeKey: 'salz', permAny: 'technik,praesident' },
+      // Die Seite zeigt nur, was /api/salz/ich erlaubt. Die Stationen nehmen
+      // für den App-Starter zusätzlich die Gruppen, die im Portal je Lager
+      // stehen (api/lib/stationapps.js, ZUSATZ_GRUPPEN).
+      { label: 'Salzvorrat', href: 'salz.html', activeKey: 'salz', permAny: SALZ_NAV_GRUPPEN },
       { label: 'Proxmox', href: 'proxmox-verwaltung.html', activeKey: 'proxmox', perm: 'proxmox-verwaltung' },
       { label: 'Stationen', href: 'stationen.html', activeKey: 'stationen', permAny: 'technik,praesident' },
       { label: 'Sicherungen', href: 'sicherungen.html', activeKey: 'sicherungen', permAny: 'technik,praesident' },
@@ -316,6 +326,7 @@ const RosenwegNav = {
       { href: 'auslagen.html', label: 'Auslagen', group: 'Vorgänge', perm: 'auslagen' },
       { href: 'auslagen-stundensatz.html', label: 'Stundensätze', group: 'Vorgänge', perm: 'auslagen-stundensatz' },
       { href: 'handwerker.html', label: 'Handwerker', group: 'Vorgänge', perm: 'handwerker' },
+      { href: 'salz.html', label: 'Salzvorrat', group: 'Vorgänge', permAny: 'technik,praesident', aud: ['admin'] },
       { href: 'vollmachten.html', label: 'Vollmachten', group: 'Vorgänge', perm: 'vollmachten' },
       { href: 'projekte.html', label: 'Projekte', group: 'Vorgänge', perm: 'projekte' },
       { href: 'reklamationen.html', label: 'Reklamationen', group: 'Vorgänge', perm: 'reklamationen' },
@@ -467,6 +478,7 @@ const RosenwegNav = {
               <a href="https://isp.rosenweg4303.ch/wlan.html" class="${dropA('wlan')} block px-4 py-2 text-sm">📶 WLAN-Zugang</a>
               <a href="https://isp.rosenweg4303.ch/tv.html" class="${dropA('tv')} block px-4 py-2 text-sm">📺 TV / Fernsehen</a>
               <a href="https://pwa.rosenweg4303.ch/reparatur/" class="block px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">🔧 Schaden melden ↗</a>
+              <a href="${base}salz.html" data-perm-any="${SALZ_NAV_GRUPPEN}" class="${dropA('salz')} block px-4 py-2 text-sm">🧂 Salzvorrat</a>
               <a href="${base}vollmachten.html" data-perm-any="eigentuemer,ausschuss,technik,praesident,verwaltung,bewohner" class="${dropA('vollmachten')} block px-4 py-2 text-sm">📝 Vollmachten</a>
               <a href="${base}projekte.html" data-perm-any="eigentuemer" class="${dropA('projekte')} block px-4 py-2 text-sm">🏗 Projekte</a>
               <a href="${base}steuerung.html" data-perm-any="r9,stweg3,technik,praesident" class="${dropA('steuerung')} block px-4 py-2 text-sm">⚙️ Steuerung / Anlagen</a>
@@ -526,6 +538,7 @@ const RosenwegNav = {
         <a href="https://isp.rosenweg4303.ch/wlan.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📶 WLAN-Zugang</a>
         <a href="https://isp.rosenweg4303.ch/tv.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📺 TV / Fernsehen</a>
         <a href="https://pwa.rosenweg4303.ch/reparatur/" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🔧 Schaden melden ↗</a>
+        <a href="${base}salz.html" data-perm-any="${SALZ_NAV_GRUPPEN}" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🧂 Salzvorrat</a>
         <a href="${base}vollmachten.html" data-perm-any="eigentuemer,ausschuss,technik,praesident,verwaltung,bewohner" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📝 Vollmachten</a>
         <a href="${base}projekte.html" data-perm-any="eigentuemer" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🏗 Projekte</a>
         <a href="${base}steuerung.html" data-perm-any="r9,stweg3,technik,praesident" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">⚙️ Steuerung / Anlagen</a>

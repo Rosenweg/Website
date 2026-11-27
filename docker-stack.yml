@@ -193,7 +193,7 @@ services:
     # expandiert ${VAR} aus der Aufrufer-Shell -> wenn ungesetzt = LEERSTRING und
     # ueberschreibt das Secret. env_file liest /root/.env direkt (shell-unabhaengig)
     # und bringt AUCH die frueher nur per --env-add gesetzten Secrets mit
-    # (SMTP2GO_API_KEY, TRACKER_SHARED_SECRET, MAILCOW_API_*, GATEWAY_API_KEY ...).
+    # (MAIL_*_PASS, SMTP2GO_API_KEY, TRACKER_SHARED_SECRET, MAILCOW_API_*, GATEWAY_API_KEY ...).
     # NUR Nicht-Secret-Config + selbst-schuetzende ${VAR:-default} bleiben hier.
     env_file:
       - /root/.env
@@ -202,8 +202,10 @@ services:
       DB_PORT: "5432"
       DB_NAME: rosenweg
       DB_USER: rosenweg
-      SMTP_HOST: mail-eu.smtp2go.com
-      SMTP_PORT: "2525"
+      # Versand über Mailcow-Submission (587, STARTTLS) mit Gateway-User je Funktion
+      # (api/lib/mailgateway.js); Zugangsdaten MAIL_<NAME>_USER/_PASS nur in der .env.
+      MAILCOW_SMTP_HOST: "100.64.2.33"
+      MAILCOW_SMTP_SERVERNAME: mail.rosenweg4303.ch
       MAIL_FROM: "noreply@rosenweg4303.ch"
       PORT: "3000"
       AUTHENTIK_URL: "http://100.64.2.37:9000"

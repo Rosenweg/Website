@@ -41,6 +41,7 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const { pool } = require('../lib/db');
 const { authMiddleware } = require('../middleware/auth');
+const kartenAdmin = require('../lib/kartenadmin'); // Admin-Aktionen mit der Karte
 const { isTechnik, isPraesident } = require('../lib/groups');
 const { createSemaphore } = require('../lib/utils');
 const S = require('../lib/sicherungen');
@@ -524,8 +525,9 @@ function starteNachfuehren(intervalle) {
 
 function nurTechnik(req, res, next) {
   const g = req.user?.groups || [];
-  if (req.user?.isAdmin || isTechnik(g) || isPraesident(g)) return next();
-  return res.status(403).json({ error: 'Nur Technik darf Sicherungen sehen und starten' });
+  if (!(req.user?.isAdmin || isTechnik(g) || isPraesident(g))) return res.status(403).json({ error: 'Nur Technik darf Sicherungen sehen und starten' });
+  kartenAdmin.vermerken(req, res); // mit der Karte: Protokoll + Quittung
+  next();
 }
 
 function sicherungenRouter(deps = {}) {

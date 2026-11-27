@@ -1,0 +1,174 @@
+# Wiederverwendbar: Release einer Rosenweg-Android-App automatisch nach einem Merge auf main.
+#
+# Ablauf: Version aus gradle.properties (VERSION_NAME/VERSION_CODE) lesen. Gibt es den Tag
+# v<VERSION_NAME> schon, passiert nichts (Version unveraendert = kein Release). Sonst wird die
+# Release-APK gebaut, mit dem Rosenweg-Schluessel signiert (Org-Secrets, siehe unten), die
+# Signatur gegen den erwarteten SHA-256 geprueft, das GitHub-Release v<VERSION_NAME> mit der APK
+# angelegt und apps.yml fuer den Tag gestartet (-> /apps). apps.yml muss das selbst anstossen:
+# Releases, die ein Workflow mit GITHUB_TOKEN anlegt, loesen "release published" nicht aus.
+#
+# Org-Secrets (Stefan legt sie an, fuer die App-Repos freigeben):
+#   ANDROID_KEYSTORE_BASE64   Keystore (.jks) base64-kodiert
+#   ANDROID_KEYSTORE_PASSWORD Passwort des Keystores
+#   ANDROID_KEY_ALIAS         Alias des Rosenweg-Schluessels
+#   ANDROID_KEY_PASSWORD      Passwort des Schluessels
+# Fehlen sie, endet der Lauf gruen mit einem Hinweis (kein Release).
+#
+# Der Gradle-Build liest die Signatur aus SIGNING_STORE_FILE, SIGNING_STORE_PASSWORD,
+# SIGNING_KEY_ALIAS und SIGNING_KEY_PASSWORD (so in den Fossify-Forks, app/build.gradle.kts).
+# Vorbereitung (JDK, Gradle, Rosenweg-Pakete): die lokale Action .github/actions/vorbereiten
+# des aufrufenden Repos.
+#
+# Aufrufer (z.B. .github/workflows/release.yml in einem Fossify-Fork):
+#
+#   name: Release
+#   on:
+#     workflow_run: { workflows: [CI], types: [completed], branches: [main] }
+#     workflow_dispatch:
+#   permissions: { contents: write, actions: write, packages: read }
+#   jobs:
+#     release:
+#       if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+#       uses: Rosenweg/Website/.github/workflows/android-release.yml@main
+#       with: { paket: ch.rosenweg4303.calendar }
+#       secrets: inherit
+name: Android-Release
+
+on:
+  workflow_call:
+    inputs:
+      paket:
+        description: Android-Paketname (wird in der APK geprueft)
+        type: string
+        required: true
+      aufgabe:
+        description: Gradle-Aufgabe fuer die Release-APK
+        type: string
+        default: ":app:assembleFossRelease"
+      apk_ordner:
+        description: Wo die APK landet
+        type: string
+        default: app/build/outputs/apk/foss/release
+      signatur_sha256:
+        description: Erwarteter SHA-256 des Signaturzertifikats (Rosenweg-Schluessel)
+        type: string
+        default: 7b3bac26e82b6103546b96861dcf1bb89b3239424ff11fdf684975cf78c5a5ae
+      apps_workflow:
+        description: Workflow, der ein Release an /apps schickt (leer = keiner)
+        type: string
+        default: apps.yml
+
+permissions:
+  contents: write
+  actions: write
+  packages: read
+
+concurrency:
+  group: android-release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+      GITHUB_ACTOR: ${{ github.actor }}
+      KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          # Nach workflow_run: genau den Stand, den die CI gruen gemeldet hat.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Version und Voraussetzungen
+        id: v
+        run: |
+          set -euo pipefail
+          name=$(sed -n 's/^VERSION_NAME=//p' gradle.properties | tr -d '[:space:]')
+          code=$(sed -n 's/^VERSION_CODE=//p' gradle.properties | tr -d '[:space:]')
+          [ -n "$name" ] || { echo "::error::VERSION_NAME fehlt in gradle.properties"; exit 1; }
+          tag="v$name"
+          echo "Version $name (Code $code), Tag $tag"
+          echo "name=$name" >> "$GITHUB_OUTPUT"; echo "code=$code" >> "$GITHUB_OUTPUT"; echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+            echo "::notice::Tag $tag gibt es schon: Version unveraendert, kein Release."
+            echo "los=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          fehlt=""
+          [ -n "$KS_B64" ] || fehlt="$fehlt ANDROID_KEYSTORE_BASE64"
+          [ -n "$KS_PASS" ] || fehlt="$fehlt ANDROID_KEYSTORE_PASSWORD"
+          [ -n "$KEY_ALIAS" ] || fehlt="$fehlt ANDROID_KEY_ALIAS"
+          [ -n "$KEY_PASS" ] || fehlt="$fehlt ANDROID_KEY_PASSWORD"
+          if [ -n "$fehlt" ]; then
+            echo "::notice::Kein Release fuer $tag: Secrets fehlen oder sind fuer dieses Repo nicht freigegeben:$fehlt"
+            echo "los=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "los=true" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/vorbereiten
+        if: steps.v.outputs.los == 'true'
+
+      - name: Release-APK bauen und signieren
+        if: steps.v.outputs.los == 'true'
+        env:
+          AUFGABE: ${{ inputs.aufgabe }}
+        run: |
+          set -euo pipefail
+          ks="$RUNNER_TEMP/rosenweg.jks"
+          printf '%s' "$KS_B64" | base64 -d > "$ks"
+          SIGNING_STORE_FILE="$ks" SIGNING_STORE_PASSWORD="$KS_PASS" \
+          SIGNING_KEY_ALIAS="$KEY_ALIAS" SIGNING_KEY_PASSWORD="$KEY_PASS" \
+            ./gradlew --no-configuration-cache $AUFGABE
+          rm -f "$ks"
+
+      - name: APK pruefen (eine Datei, Signatur, Paket, Version)
+        if: steps.v.outputs.los == 'true'
+        id: apk
+        env:
+          ORDNER: ${{ inputs.apk_ordner }}
+          PAKET: ${{ inputs.paket }}
+          SOLL: ${{ inputs.signatur_sha256 }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          apks=("$ORDNER"/*.apk)
+          [ ${#apks[@]} -eq 1 ] || { echo "::error::Erwartet genau eine APK in $ORDNER, gefunden: ${#apks[@]} (${apks[*]:-})"; exit 1; }
+          apk="${apks[0]}"
+          case "$apk" in *unsigned*) echo "::error::APK ist unsigniert: $apk"; exit 1;; esac
+          bt=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          ist=$("$bt/apksigner" verify --print-certs "$apk" | sed -n 's/.*certificate SHA-256 digest: //p' | head -n 1 | tr -d ':' | tr 'A-F' 'a-f')
+          soll=$(printf '%s' "$SOLL" | tr -d ': ' | tr 'A-F' 'a-f')
+          [ "$ist" = "$soll" ] || { echo "::error::Signatur passt nicht zum Rosenweg-Schluessel (SHA-256 $ist)"; exit 1; }
+          badging=$("$bt/aapt2" dump badging "$apk" | head -n 1)
+          echo "$badging"
+          echo "$badging" | grep -q "name='$PAKET'" || { echo "::error::Paketname ist nicht $PAKET"; exit 1; }
+          echo "$badging" | grep -q "versionName='${{ steps.v.outputs.name }}'" || { echo "::error::versionName der APK passt nicht zu ${{ steps.v.outputs.name }}"; exit 1; }
+          echo "apk=$apk" >> "$GITHUB_OUTPUT"
+          sha256sum "$apk"
+
+      - name: GitHub-Release anlegen
+        if: steps.v.outputs.los == 'true'
+        env:
+          TAG: ${{ steps.v.outputs.tag }}
+          APK: ${{ steps.apk.outputs.apk }}
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          {
+            echo "Version ${{ steps.v.outputs.name }} (Code ${{ steps.v.outputs.code }}), automatisch nach dem Merge auf main gebaut."
+            echo
+            git log -1 --format=%B "$SHA" | head -c 3000
+          } > "$RUNNER_TEMP/notiz.md"
+          gh release create "$TAG" "$APK" --target "$SHA" --title "$TAG" --notes-file "$RUNNER_TEMP/notiz.md"
+
+      - name: An /apps schicken
+        if: steps.v.outputs.los == 'true' && inputs.apps_workflow != ''
+        env:
+          TAG: ${{ steps.v.outputs.tag }}
+          WF: ${{ inputs.apps_workflow }}
+        run: gh workflow run "$WF" -R "$GITHUB_REPOSITORY" --ref "$TAG"

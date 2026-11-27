@@ -94,6 +94,22 @@ const KATALOG = [
       pfad('%PROGRAMFILES%\\pGina\\*'),
     ],
   },
+  // Bilder und Medien (27.11.2026): die Richtlinie installiert beide auf
+  // jedem Rechner und macht sie zum Standard für Bilder bzw. Audio/Video
+  // (rosenweg-look.ps1). Darum Pflicht und nicht nur Vorgabe — eine schon
+  // gespeicherte Vorgabe auf /stationen kennte sie sonst nicht, und beim
+  // Durchsetzen öffneten Doppelklicks auf Fotos und Aufnahmen ins Leere.
+  // Die Ids bleiben (vlc stand schon im Katalog, vielleicht in Zusätzen).
+  {
+    id: 'irfanview', name: 'IrfanView (Bilder)', gruppe: 'Immer erlaubt', pflicht: true,
+    hinweis: 'Standard für Bilder, mit Plugins — verteilt von der Richtlinie „Rosenweg-Look Windows"',
+    regeln: [pfad('%PROGRAMFILES%\\IrfanView\\*')],
+  },
+  {
+    id: 'vlc', name: 'VLC (Audio und Video)', gruppe: 'Immer erlaubt', pflicht: true,
+    hinweis: 'Standard für Audio, Video und die Aufnahmen des Diktiergeräts — verteilt von der Richtlinie „Rosenweg-Look Windows"',
+    regeln: [pfad('%PROGRAMFILES%\\VideoLAN\\*')],
+  },
   {
     id: 'vm-werkzeuge', name: 'Gast-Werkzeuge (Proxmox-VM)', gruppe: 'Immer erlaubt', pflicht: true,
     hinweis: 'QEMU-Agent, SPICE, VirtIO — auf einem echten PC einfach nicht vorhanden',
@@ -137,7 +153,6 @@ const KATALOG = [
       pfad('%PROGRAMFILES%\\Adobe\\Acrobat Reader\\*')] },
 
   { id: '7zip', name: '7-Zip', gruppe: 'Werkzeuge', regeln: [pfad('%PROGRAMFILES%\\7-Zip\\*')] },
-  { id: 'vlc', name: 'VLC', gruppe: 'Werkzeuge', regeln: [pfad('%PROGRAMFILES%\\VideoLAN\\*')] },
   { id: 'copilot', name: 'Copilot', gruppe: 'Werkzeuge', regeln: [pfad('%PROGRAMFILES%\\Microsoft\\Copilot\\*')] },
   { id: 'anydesk', name: 'AnyDesk (Fernwartung)', gruppe: 'Werkzeuge', regeln: [pfad('%PROGRAMFILES%\\AnyDesk\\*')] },
 

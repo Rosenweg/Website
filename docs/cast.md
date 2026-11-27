@@ -6,8 +6,8 @@ Ein Chromecast (1., 2. Generation, nur Cast-Firmware) ist für Technik eine
 
 | | Station `display` | Chromecast |
 |---|---|---|
-| Seite | `display.rosenweg4303.ch?haus=N` | dieselbe (aus `buildConfig`, Rolle `display`) |
-| Ankündigungen / Notfall | display.html abonniert `display/#` (retained) | dasselbe — es läuft dieselbe Seite |
+| Seite | `display.rosenweg4303.ch?haus=N` | `www.rosenweg4303.ch/display-lite.html?haus=N` (aus `buildConfig`, Rolle `display`, dann `castAdresse`) |
+| Ankündigungen / Notfall | display.html abonniert `display/#` (retained) | display-lite.html fragt `/api/display/stand?haus=N` alle 10 s (dieselben retained Stände, von der API mitgeführt) |
 | Haus, Standort, Notiz, overrides | `/stationen` | `/stationen` (Art „Anzeige (Chromecast)") |
 | Neuladen | `station-display-reload`, `reload_interval_minutes` | der Empfänger, mit demselben Wert |
 | Hält die Seite offen | Kiosk-Sitzung (cage + Chromium) | **Cast-Wächter** der API |
@@ -16,6 +16,41 @@ Ein Chromecast (1., 2. Generation, nur Cast-Firmware) ist für Technik eine
 Es gibt keine freie Adresse, keine Diashow und keine Lautstärke je Gerät —
 wer die Adresse ändern muss, tut es wie bei einer Station in den overrides
 (`roles.display.url`, nur Hosts aus `roles.display.allowed_domains`).
+
+### Warum www.rosenweg4303.ch und nicht display.*
+
+`display.rosenweg4303.ch` gibt es nur im internen DNS (Juro-DNS → Edge);
+öffentlich (8.8.8.8, 1.1.1.1) hat der Name keinen Eintrag. Ein Chromecast
+fragt (vermutlich, wie üblich) fest Googles DNS statt den aus dem DHCP — er findet display.* nicht, die
+Navigation scheitert, und die Firmware beendet die App nach rund zwei
+Sekunden. Am 27. November 2026 nachgestellt: schon ein 47-KB-PNG von
+display.* beendet die App nach 1,8 s, `https://www.rosenweg4303.ch/display-lite.html?haus=9`
+läuft. `castAdresse` bildet deshalb display.* auf www.* ab (`CAST_HOSTS`),
+und `castZiel` lässt www.* zusätzlich zu den `allowed_domains` zu. www.*
+liefert dasselbe Frontend und `/api/display/*` aus.
+
+Dasselbe gilt für `cast.rosenweg4303.ch` (eigener Empfänger): auch dieser
+Name ist öffentlich nicht auflösbar. Bevor der eigene Empfänger in der
+Cast Developer Console eingetragen wird, braucht er einen öffentlichen
+DNS-Eintrag (Cloudflare) — oder er liegt unter www.*.
+
+### Warum display-lite.html
+
+Am 26. November 2026 am Chromecast 1 (Firmware 1.56, Chrome 90) nachgestellt:
+display.html startet, verbindet MQTT, und die App endet zwei bis drei Sekunden
+später. Schuld ist das Aushangbild — `/api/display/pdfbild` liefert ein A4 mit
+600 dpi (4961×7016, rund 140 MB entpackt). Eine leere Seite mit nur diesem
+Bild stürzt genauso ab, mit demselben Bild auf 1520 Punkte verkleinert läuft
+sie. Syntax und MQTT sind es nicht (Chrome 90 kann ES2020).
+
+Der Wächter schickt Chromecasts deshalb auf `display-lite.html` (Abbildung in
+`castw.castAdresse`: `/` und `/display.html` → `/display-lite.html` auf www.*, Haus und
+übrige Parameter bleiben). Die Seite ist reines ES5 ohne Bibliothek, holt den
+Stand per XHR von `GET /api/display/stand?haus=N` (öffentlich wie der
+RSS-Feed) und die Aushangbilder mit `?dpi=150`. `overrides`
+`roles.display.cast_seite: "voll"` lässt display.html stehen (für neuere
+Geräte); eine von Hand gesetzte andere Seite in `roles.display.url` bleibt
+unverändert.
 
 ## Aufbau
 
@@ -114,8 +149,8 @@ dabei nichts.
 ## Was einzurichten ist (nicht im PR erledigt)
 
 ### 1. DNS
-`cast.rosenweg4303.ch` wie `display.rosenweg4303.ch` (Cloudflare → Edge,
-CT 245). Intern (Juro-DNS/Unbound) ebenfalls auf den Edge, falls display
+`cast.rosenweg4303.ch` **öffentlich** in Cloudflare (→ Edge, CT 245) — nicht
+nur intern wie display.*: Chromecasts lösen über 8.8.8.8 auf (siehe oben). Intern (Juro-DNS/Unbound) ebenfalls auf den Edge, falls display
 dort einen internen Eintrag hat. Die Chromecasts holen den Empfänger per
 **HTTPS** mit gültigem Zertifikat — Cast verlangt das.
 
@@ -190,10 +225,9 @@ Standort. Danach erscheint er in der Stationsliste wie eine Station;
 
 ## Offen / zu prüfen am Gerät
 
-- **Chromecast 1 und display.html**: Das Chrome auf Chromecast 1 ist alt.
-  display.html nutzt moderne Syntax (optional catch binding, async/await) und
-  mqtt.min.js v5. Ob sie dort läuft, zeigt erst der erste echte Start — falls
-  nicht, braucht es eine schlanke Fassung der Anzeige (ohne neue Syntax).
+- **Chromecast 1 und display.html**: geklärt, siehe „Warum display-lite.html".
+  Das 600-dpi-Aushangbild bringt auch andere schwache Geräte an die Grenze;
+  display.html könnte ebenfalls `?dpi=…` nutzen, falls eine Tafel leer bleibt.
 - **CAF auf Chromecast 1**: Der Empfänger lädt SDK v3 und fällt bei Fehler
   auf v2 zurück; ob v3 auf Firmware 1.56 startet, am Gerät prüfen.
 - **DashCast nach Navigation**: ob die Firmware die App nach `force`
