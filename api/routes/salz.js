@@ -68,6 +68,14 @@ const BARCODE_RE = /^[\x21-\x7e]{4,64}$/;
 const CLIENT_ID_RE = /^[A-Za-z0-9-]{8,64}$/;
 const STORNO_EIGENE_STUNDEN = 24;
 
+/** Darf diese Person die Buchung rückgängig machen? (ohne Lager-Prüfung) */
+function darfRueckgaengig(b, ichKlein, verwalter, jetzt = Date.now()) {
+  if (!b || b.storniert_am) return false;
+  if (verwalter) return true;
+  const eigene = !!ichKlein && String(b.gebucht_von || '').toLowerCase() === ichKlein;
+  return eigene && jetzt - new Date(b.gebucht_am).getTime() < STORNO_EIGENE_STUNDEN * 3600 * 1000;
+}
+
 function istVerwalter(user) {
   const g = user?.groups || [];
   return Boolean(user?.isAdmin || isTechnik(g) || isPraesident(g));
@@ -459,6 +467,9 @@ function salzRouter({ rateLimitGuard }) {
         id: b.id, art: b.art, saecke: b.saecke, barcode: b.barcode, sorte: b.bezeichnung,
         kg_je_sack: b.kg_je_sack, notiz: b.notiz, gebucht_am: b.gebucht_am, storniert_am: b.storniert_am,
         eigene: String(b.gebucht_von || '').toLowerCase() === ich,
+        // Befund W23: dieselbe Regel wie DELETE /buchungen/:id, damit der Knopf
+        // „Rückgängig“ nur erscheint, wo er auch wirkt (eigene innert 24 h, Technik immer).
+        rueckgaengig: darfRueckgaengig(b, ich, verwalter),
         // Wer gebucht hat, sieht nur die Technik (Name, sonst Mail); die
         // anderen nur ihre eigenen Buchungen als solche.
         von: verwalter ? (b.von_name || b.gebucht_von) : (String(b.gebucht_von || '').toLowerCase() === ich ? (b.von_name || 'du') : null),
@@ -677,7 +688,8 @@ function salzRouter({ rateLimitGuard }) {
     }
   });
 
-  // Rückgängig: eigene Buchung innert 24 Stunden, die Technik jederzeit.
+  // Rückgängig: eigene Buchung innert 24 Stunden, die Technik jederzeit
+  // (darfRueckgaengig; das Lager prüft die Route zusätzlich).
   router.delete('/buchungen/:id', schreiben, nurBuchende, async (req, res) => {
     const id = parseInt(req.params.id, 10);
     const c = await pool.connect();
@@ -688,9 +700,8 @@ function salzRouter({ rateLimitGuard }) {
       const b = r.rows[0];
       if (!b) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'Buchung nicht gefunden' }); }
       if (b.storniert_am) { await c.query('ROLLBACK'); return res.json({ ok: true, schon: true }); }
-      const eigene = String(b.gebucht_von || '').toLowerCase() === String(req.user.email || '').toLowerCase();
-      const frisch = Date.now() - new Date(b.gebucht_am).getTime() < STORNO_EIGENE_STUNDEN * 3600 * 1000;
-      if (!istVerwalter(req.user) && !(eigene && frisch && req.salzLager.has(b.lager_id))) {
+      const verwalter = istVerwalter(req.user);
+      if (!darfRueckgaengig(b, String(req.user.email || '').toLowerCase(), verwalter) || (!verwalter && !req.salzLager.has(b.lager_id))) {
         await c.query('ROLLBACK');
         return res.status(403).json({ error: 'Rückgängig machen geht nur bei eigenen Buchungen der letzten 24 Stunden.' });
       }
@@ -716,4 +727,4 @@ function salzRouter({ rateLimitGuard }) {
   return router;
 }
 
-module.exports = { salzRouter, ensureSchema, starteSalzCron, meldelauf, einfuelllauf, lagerUebersicht, erlaubteLager, darfAlleLager, istVerwalter, buchungsGruppen, LAGER_START };
+module.exports = { salzRouter, darfRueckgaengig, ensureSchema, starteSalzCron, meldelauf, einfuelllauf, lagerUebersicht, erlaubteLager, darfAlleLager, istVerwalter, buchungsGruppen, LAGER_START };
