@@ -26,6 +26,7 @@ const rechteMigrationen = require('./lib/rechte-migrationen');
 const kontaktformular = require('./lib/kontaktformular');
 const stwegSichtLib = require('./lib/stweg-sicht');
 const { waschAdminErlaubt, waschRaumAenderbar } = require('./lib/wasch-admin');
+const waschRegeln = require('./lib/wasch-regeln');
 const adminProtokoll = require('./lib/admin-protokoll');
 const { taeglichUm } = require('./lib/tageszeit');
 const papierkorb = require('./lib/papierkorb');
@@ -2855,9 +2856,11 @@ app.post('/api/wasch/reservations', authMiddleware, async (req, res) => {
   const roomNr = parseInt(room_id, 10);
   if (!Number.isInteger(roomNr) || roomNr <= 0) return res.status(400).json({ error: 'Ungültiger Raum' });
   const istAdmin = !!req.user.isAdmin;
+  // Grenzen aus den Einstellungen (Verwalten): reservation_max_days, reservation_max_per_user
+  const einst = await waschEinstellungen();
   if (!istAdmin) {
     if (startDt.getTime() < Date.now() - 10 * 60 * 1000) return res.status(400).json({ error: 'Reservationen in der Vergangenheit sind nicht möglich' });
-    if (startDt.getTime() > Date.now() + 90 * 86400000) return res.status(400).json({ error: 'Höchstens 90 Tage im Voraus' });
+    if (startDt.getTime() > Date.now() + einst.maxTage * 86400000) return res.status(400).json({ error: `Höchstens ${einst.maxTage} Tage im Voraus` });
   }
   let untilDt = null;
   if (recurring && recurring_until) {
@@ -2874,7 +2877,7 @@ app.post('/api/wasch/reservations', authMiddleware, async (req, res) => {
         return res.status(403).json({ error: 'Keine Berechtigung für diese Waschküche' });
       }
       const offen = await pool.query('SELECT COUNT(*)::int AS n FROM wasch_reservations WHERE user_id = $1 AND cancelled = false AND end_time >= NOW()', [req.user.user_id]);
-      if (offen.rows[0].n >= 120) return res.status(429).json({ error: 'Zu viele offene Reservationen' });
+      if (offen.rows[0].n >= einst.maxOffen) return res.status(429).json({ error: `Höchstens ${einst.maxOffen} offene Reservationen je Person` });
     }
   } catch (err) {
     return res.status(500).json({ error: fehlerFuerClient(err, 'Fehler beim Erstellen der Reservierung') });
@@ -2902,7 +2905,12 @@ app.post('/api/wasch/reservations', authMiddleware, async (req, res) => {
            AND start_time < $3::timestamp AND end_time > $2::timestamp`,
           [room_id, curStart.toISOString(), curEnd.toISOString()]
         );
-        if (conflict.rows.length === 0) {
+        const gesperrt = await client.query(
+          `SELECT id FROM wasch_sperrzeiten
+           WHERE room_id=$1 AND start_time < $3::timestamp AND end_time > $2::timestamp LIMIT 1`,
+          [room_id, curStart.toISOString(), curEnd.toISOString()]
+        );
+        if (conflict.rows.length === 0 && gesperrt.rows.length === 0) {
           const result = await client.query(
             `INSERT INTO wasch_reservations (user_id, room_id, start_time, end_time, recurring, recurring_until)
              VALUES ($1, $2, $3, $4, true, $5) RETURNING *`,
@@ -2927,6 +2935,16 @@ app.post('/api/wasch/reservations', authMiddleware, async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(409).json({ error: 'Zeitraum überschneidet sich mit bestehender Reservierung' });
       }
+      const sperre = await client.query(
+        `SELECT grund FROM wasch_sperrzeiten
+         WHERE room_id=$1 AND start_time < $3::timestamp AND end_time > $2::timestamp
+         ORDER BY start_time LIMIT 1`,
+        [room_id, start_time, end_time]
+      );
+      if (sperre.rows.length > 0) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: `Gesperrt: ${sperre.rows[0].grund}`, sperrzeit: true });
+      }
 
       const result = await client.query(
         `INSERT INTO wasch_reservations (user_id, room_id, start_time, end_time)
@@ -2941,6 +2959,127 @@ app.post('/api/wasch/reservations', authMiddleware, async (req, res) => {
     res.status(500).json({ error: 'Fehler beim Erstellen der Reservierung' });
   } finally {
     client.release();
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// WASCHKÜCHE - SPERRZEITEN (je Raum; Reinigung, Wartung …)
+// ═══════════════════════════════════════════════════════════════════
+
+// Lesen wie die Belegung: wer die Raeume seiner STWEG sieht (auch die Verwaltung).
+app.get('/api/wasch/sperrzeiten', authMiddleware, async (req, res) => {
+  try {
+    const { room_id, from, to } = req.query;
+    let query = `SELECT s.id, s.room_id, s.start_time, s.end_time, s.grund, rm.name AS room_name
+       FROM wasch_sperrzeiten s JOIN wasch_rooms rm ON rm.id = s.room_id WHERE rm.active = true`;
+    const params = [];
+    if (!req.user.isAdmin) {
+      params.push([...getStwegsMitVerwaltung(req.user.groups || [])]);
+      query += ` AND (rm.stweg = ANY($${params.length}::int[]) OR (rm.stweg IS NULL AND cardinality($${params.length}::int[]) > 0))`;
+    }
+    if (room_id) { params.push(parseInt(room_id, 10) || 0); query += ` AND s.room_id = $${params.length}`; }
+    if (from) { params.push(from); query += ` AND s.end_time >= $${params.length}::timestamp`; }
+    if (to) { params.push(to); query += ` AND s.start_time <= $${params.length}::timestamp`; }
+    if (!from && !to) query += ' AND s.end_time >= NOW()';
+    query += ' ORDER BY s.start_time LIMIT 500';
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler beim Laden der Sperrzeiten' });
+  }
+});
+
+// Anlegen: Verwaltung mit Schreibrecht, nur Raeume der eigenen STWEG
+// (Entscheid Stefan 27.11.2026): eine Sperrzeit storniert die Reservationen,
+// die sie schneidet (bei Serien nur diese Termine), und benachrichtigt die
+// Betroffenen per E-Mail und Web-Push.
+//   { vorschau: true }   -> nichts gespeichert, nur { betroffen: [...] }
+//   ohne bestaetigt      -> trifft es Reservationen: 409 { bestaetigung_noetig, betroffen }
+//   { bestaetigt: true } -> speichern, stornieren, benachrichtigen
+const WASCH_BETROFFEN_SQL = `SELECT r.id, r.user_id, r.start_time, r.end_time, r.recurring, u.name AS user_name, u.wohnung, u.email
+   FROM wasch_reservations r JOIN users u ON u.id = r.user_id
+   WHERE r.room_id = $1 AND r.cancelled = false AND r.start_time < $3::timestamp AND r.end_time > $2::timestamp
+   ORDER BY r.start_time`;
+const waschBetroffenJson = (rows) => rows.map(r => ({
+  id: r.id, start_time: r.start_time, end_time: r.end_time, wiederkehrend: !!r.recurring, user_name: r.user_name, wohnung: r.wohnung,
+}));
+
+app.post('/api/wasch/sperrzeiten', authMiddleware, waschAdmin('write'), async (req, res) => {
+  const p = waschRegeln.sperrzeitPruefen(req.body);
+  if (!p.ok) return res.status(400).json({ error: p.fehler, feld: p.feld });
+  let client;
+  try {
+    const raum = (await pool.query('SELECT name, stweg, active FROM wasch_rooms WHERE id = $1', [p.raum])).rows[0];
+    if (!raum || raum.active === false) return res.status(404).json({ error: 'Raum nicht gefunden' });
+    if (!waschRaumAenderbar(req.user?.groups, raum.stweg)) return res.status(403).json({ error: 'Raum nur für die eigene STWEG' });
+    const zeit = [p.raum, req.body.start_time, req.body.end_time];
+    if (req.body.vorschau === true) {
+      const b = await pool.query(WASCH_BETROFFEN_SQL, zeit);
+      return res.json({ vorschau: true, betroffen: waschBetroffenJson(b.rows) });
+    }
+    client = await pool.connect();
+    await client.query('BEGIN');
+    // gleiche Sperre wie beim Reservieren: keine neue Reservation dazwischen
+    await client.query('SELECT pg_advisory_xact_lock($1)', [p.raum]);
+    const b = await client.query(WASCH_BETROFFEN_SQL, zeit);
+    if (b.rows.length && req.body.bestaetigt !== true) {
+      await client.query('ROLLBACK');
+      client.release();
+      client = null;
+      return res.status(409).json({
+        error: `Die Sperrzeit trifft ${b.rows.length} Reservation${b.rows.length === 1 ? '' : 'en'} – bitte bestätigen`,
+        bestaetigung_noetig: true,
+        betroffen: waschBetroffenJson(b.rows),
+      });
+    }
+    const r = await client.query(
+      `INSERT INTO wasch_sperrzeiten (room_id, start_time, end_time, grund, erstellt_von)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id, room_id, start_time, end_time, grund`,
+      [p.raum, req.body.start_time, req.body.end_time, p.grund, req.user?.email || null]
+    );
+    if (b.rows.length) {
+      await client.query('UPDATE wasch_reservations SET cancelled = true WHERE id = ANY($1::int[])', [b.rows.map(x => x.id)]);
+    }
+    await client.query('COMMIT');
+    client.release();
+    client = null;
+    // Benachrichtigen (nach dem Speichern; Fehler beim Versand stoppen nichts)
+    let benachrichtigt = 0;
+    for (const person of waschRegeln.jePerson(b.rows)) {
+      if (!person.email) continue;
+      const m = waschRegeln.sperrMeldung({
+        name: person.name, raum: raum.name, grund: p.grund, von: r.rows[0].start_time, bis: r.rows[0].end_time,
+        reservationen: person.reservationen, url: `${SITE_URL}/waschkueche.html`,
+      });
+      try {
+        await sendTemplated('wasch-sperrzeit', {
+          user_name: person.name, raum: raum.name, grund: p.grund, anzahl: person.reservationen.length,
+        }, { from: MAIL_FROM, to: person.email, subject: m.betreff, text: m.text });
+        benachrichtigt++;
+      } catch (e) {
+        console.error('[wasch-sperrzeit] Mail an', person.user_id, e.message);
+      }
+      webpushLib.sendToEmails([person.email], { title: 'Waschküche: Reservation storniert', body: m.kurz, url: `${SITE_URL}/waschkueche.html`, tag: `wasch-sperre-${r.rows[0].id}` }).catch(() => {});
+    }
+    res.json({ ...r.rows[0], storniert: b.rows.length, benachrichtigt, betroffen: waschBetroffenJson(b.rows) });
+  } catch (err) {
+    if (client) { await client.query('ROLLBACK').catch(() => {}); client.release(); }
+    res.status(500).json({ error: fehlerFuerClient(err, 'Fehler beim Speichern der Sperrzeit') });
+  }
+});
+
+app.delete('/api/wasch/sperrzeiten/:id', authMiddleware, waschAdmin('write'), async (req, res) => {
+  try {
+    const alt = (await pool.query(
+      'SELECT rm.stweg FROM wasch_sperrzeiten s JOIN wasch_rooms rm ON rm.id = s.room_id WHERE s.id = $1',
+      [parseInt(req.params.id, 10) || 0]
+    )).rows[0];
+    if (!alt) return res.status(404).json({ error: 'Sperrzeit nicht gefunden' });
+    if (!waschRaumAenderbar(req.user?.groups, alt.stweg)) return res.status(403).json({ error: 'Raum nur für die eigene STWEG' });
+    await pool.query('DELETE FROM wasch_sperrzeiten WHERE id = $1', [parseInt(req.params.id, 10)]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler beim Löschen der Sperrzeit' });
   }
 });
 
@@ -3157,7 +3296,8 @@ setTimeout(() => {
 app.get('/api/wasch/settings', authMiddleware, async (req, res) => {
   try {
     const result = await pool.query('SELECT key, value FROM wasch_settings WHERE key = ANY($1) ORDER BY key', [WASCH_SETTINGS_OEFFENTLICH]);
-    const settings = {};
+    // wirksame Werte: Standard, wo nichts gespeichert ist (lib/wasch-regeln.js)
+    const settings = { ...waschRegeln.STANDARD };
     result.rows.forEach(r => { settings[r.key] = r.value; });
     res.json(settings);
   } catch (err) {
@@ -3167,10 +3307,10 @@ app.get('/api/wasch/settings', authMiddleware, async (req, res) => {
 
 app.put('/api/wasch/settings', authMiddleware, waschAdmin('write'), async (req, res) => {
   try {
-    const settings = req.body;
-    const ALLOWED_SETTINGS = ['cost_per_kwh', 'auto_billing', 'billing_day', 'reservation_max_days', 'reservation_max_per_user'];
-    for (const [key, value] of Object.entries(settings)) {
-      if (!ALLOWED_SETTINGS.includes(key)) continue;
+    // Nur bekannte Schluessel, geprueft (lib/wasch-regeln.js FELDER)
+    const { werte, fehler } = waschRegeln.einstellungenPruefen(req.body);
+    if (fehler) return res.status(400).json({ error: fehler.text, feld: fehler.feld });
+    for (const [key, value] of Object.entries(werte)) {
       await pool.query(
         `INSERT INTO wasch_settings (key, value, updated_at) VALUES ($1, $2, NOW())
          ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
@@ -3192,6 +3332,16 @@ async function getWaschSetting(key, defaultValue) {
     const result = await pool.query('SELECT value FROM wasch_settings WHERE key = $1', [key]);
     return result.rows.length > 0 ? result.rows[0].value : defaultValue;
   } catch { return defaultValue; }
+}
+
+/** Wirksame Einstellungen der Waschkueche (Standard aus lib/wasch-regeln.js). */
+async function waschEinstellungen() {
+  try {
+    const r = await pool.query('SELECT key, value FROM wasch_settings');
+    return waschRegeln.einstellungen(r.rows);
+  } catch {
+    return waschRegeln.einstellungen([]);
+  }
 }
 
 // Access-Subsystem-Config (primär; die Waschküche konsumiert dies via unifiAccess*-Helfer).
@@ -3256,11 +3406,14 @@ async function processReservationEnd(reservation) {
 }
 
 // Monthly billing: aggregate sessions and send detailed emails
-async function runMonthlyBilling() {
-  const now = new Date();
-  const billingMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const monthStr = billingMonth.toISOString().slice(0, 7);
-  const monthStart = monthStr + '-01';
+// monat: 'YYYY-MM' (vergangen, siehe waschRegeln.abrechnungsMonat); ohne = Vormonat.
+// -> { status: 'ok', anzahl } | { status: 'schon' } | { status: 'fehler', fehler }
+async function runMonthlyBilling(monat) {
+  const wahl = waschRegeln.abrechnungsMonat(monat);
+  if (!wahl.ok) return { status: 'fehler', fehler: wahl.fehler };
+  const monthStr = wahl.monat;
+  const monthStart = wahl.start;
+  const billingMonth = new Date(Number(monthStr.slice(0, 4)), Number(monthStr.slice(5, 7)) - 1, 1);
 
   console.log(`[Waschküche] Running monthly billing for ${monthStr}`);
 
@@ -3271,7 +3424,7 @@ async function runMonthlyBilling() {
     );
     if (parseInt(existingBilling.rows[0].count) > 0) {
       console.log(`[Waschküche] Billing for ${monthStr} already exists, skipping`);
-      return;
+      return { status: 'schon' };
     }
 
     const costPerKwh = parseFloat(await getWaschSetting('cost_per_kwh', '0.30'));
@@ -3431,8 +3584,10 @@ async function runMonthlyBilling() {
     }
 
     console.log(`[Waschküche] Monthly billing complete: ${users.rows.length} users billed`);
+    return { status: 'ok', anzahl: users.rows.length };
   } catch (err) {
     console.error('[Waschküche] Monthly billing error:', err.message);
+    return { status: 'fehler', fehler: 'Abrechnung fehlgeschlagen' };
   }
 }
 
@@ -3481,10 +3636,10 @@ async function guardedManageDoorAccess() {
   try { await manageDoorAccess(); } finally { isManagingDoors = false; }
 }
 
-async function guardedRunMonthlyBilling() {
-  if (isRunningBilling) { console.log('[Waschküche] runMonthlyBilling still running, skipping'); return; }
+async function guardedRunMonthlyBilling(monat) {
+  if (isRunningBilling) { console.log('[Waschküche] runMonthlyBilling still running, skipping'); return { status: 'laeuft' }; }
   isRunningBilling = true;
-  try { await runMonthlyBilling(); } finally { isRunningBilling = false; }
+  try { return await runMonthlyBilling(monat); } finally { isRunningBilling = false; }
 }
 
 function startWaschCron() {
@@ -3497,10 +3652,10 @@ function startWaschCron() {
   activeIntervals.push(setInterval(guardedManageDoorAccess, 60 * 1000));
   setTimeout(guardedManageDoorAccess, 10 * 1000);
 
-  // Monthly billing on 1st at 08:00
-  activeIntervals.push(setInterval(() => {
+  // Monatsabrechnung am 1. um 08:00 (Vormonat), nur mit Einstellung auto_billing
+  activeIntervals.push(setInterval(async () => {
     const now = new Date();
-    if (now.getDate() === 1 && now.getHours() === 8 && now.getMinutes() < 5) {
+    if (waschRegeln.autoAbrechnungFaellig(now, await waschEinstellungen())) {
       guardedRunMonthlyBilling();
     }
   }, 5 * 60 * 1000));
@@ -3519,8 +3674,14 @@ function startWaschCron() {
 // Manual trigger for billing (admin only)
 app.post('/api/wasch/admin/billing/run', authMiddleware, waschAdmin('write'), async (req, res) => {
   try {
-    await runMonthlyBilling();
-    res.json({ success: true, message: 'Abrechnung wurde ausgeführt' });
+    // Monat aus der Auswahl (jeder vergangene Monat); doppelt abrechnen bleibt gesperrt
+    const wahl = waschRegeln.abrechnungsMonat(req.body?.month);
+    if (!wahl.ok) return res.status(400).json({ error: wahl.fehler, feld: 'month' });
+    const r = await guardedRunMonthlyBilling(wahl.monat);
+    if (r.status === 'schon') return res.status(409).json({ error: `${wahl.monat} ist schon abgerechnet` });
+    if (r.status === 'laeuft') return res.status(409).json({ error: 'Eine Abrechnung läuft gerade, bitte später nochmals' });
+    if (r.status !== 'ok') return res.status(500).json({ error: r.fehler || 'Abrechnung fehlgeschlagen' });
+    res.json({ success: true, month: wahl.monat, anzahl: r.anzahl, message: `Abrechnung ${wahl.monat}: ${r.anzahl} ${r.anzahl === 1 ? 'Person' : 'Personen'}` });
   } catch (err) {
     res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
@@ -28776,6 +28937,19 @@ async function initDB() {
         value TEXT NOT NULL,
         updated_at TIMESTAMP DEFAULT NOW()
       );
+
+      -- Sperrzeiten je Waschkueche (Reinigung, Wartung …): Reservieren lehnt sie ab
+      CREATE TABLE IF NOT EXISTS wasch_sperrzeiten (
+        id SERIAL PRIMARY KEY,
+        room_id INTEGER NOT NULL REFERENCES wasch_rooms(id) ON DELETE CASCADE,
+        start_time TIMESTAMP NOT NULL,
+        end_time TIMESTAMP NOT NULL,
+        grund TEXT NOT NULL,
+        erstellt_von TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        CHECK (end_time > start_time)
+      );
+      CREATE INDEX IF NOT EXISTS idx_wasch_sperrzeiten_raum_zeit ON wasch_sperrzeiten (room_id, end_time);
 
       -- Weitere E-Mail-Adressen einer Person (z.B. Gmail des UI-Kontos in UniFi Access)
       -- -> Hauptadresse = Rosenweg-Konto (Authentik). Pflege nur Technik/Praesident.
