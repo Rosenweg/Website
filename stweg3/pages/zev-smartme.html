@@ -312,12 +312,15 @@
         rows = (rows || []).filter(z => z.stweg == null || Number(z.stweg) === STWEG);
         if (!rows.length) { sec.classList.add('hidden'); return; }
         sec.classList.remove('hidden');
+        // Z7: In „Nur Ansicht“ bleibt die Rechnung sichtbar, Zuordnen ist nicht bedienbar.
         $('unz-body').innerHTML = rows.map(z => `<tr class="border-b last:border-0 align-top" data-id="${z.id}">
             <td class="py-2 pr-3 text-xs whitespace-nowrap">${esc((z.empfangen_am || '').slice(0, 10))}</td>
             <td class="py-2 pr-3"><span class="font-mono text-xs">${esc(z.alias_address || '—')}</span><br><span class="text-xs text-gray-500">${esc((z.betreff || '').slice(0, 60))}</span></td>
             <td class="py-2 pr-3 whitespace-nowrap">${z.betrag_chf != null ? ('CHF ' + Number(z.betrag_chf).toFixed(2)) : '<span class="text-amber-600 text-xs">kein Betrag</span>'}</td>
-            <td class="py-2 pr-3"><select class="unz-sel border rounded px-2 py-1 text-xs">${wohnungOptions()}</select><label class="block text-xs text-gray-500 mt-1"><input type="checkbox" class="unz-remail"> Re-Mail senden (an Bewohner bzw. Allgemeinzähler-Empfänger)</label></td>
-            <td class="py-2"><button class="unz-assign bg-amber-600 text-white px-3 py-1 rounded text-xs font-semibold hover:bg-amber-700">Zuordnen</button></td>
+            ${RECHTE.schreiben
+                ? `<td class="py-2 pr-3"><select class="unz-sel border rounded px-2 py-1 text-xs">${wohnungOptions()}</select><label class="block text-xs text-gray-500 mt-1"><input type="checkbox" class="unz-remail"> Re-Mail senden (an Bewohner bzw. Allgemeinzähler-Empfänger)</label></td>
+            <td class="py-2"><button class="unz-assign bg-amber-600 text-white px-3 py-1 rounded text-xs font-semibold hover:bg-amber-700">Zuordnen</button></td>`
+                : '<td class="py-2 pr-3 text-xs text-gray-500" colspan="2">Zuordnen nur Ausschuss/Verwaltung dieser STWEG</td>'}
         </tr>`).join('');
         $('unz-body').querySelectorAll('.unz-assign').forEach(btn => btn.addEventListener('click', onAssign));
     }
