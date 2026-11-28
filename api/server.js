@@ -24,6 +24,7 @@ const vollmachtRechte = require('./lib/vollmacht-rechte');
 const vollmachtApp = require('./lib/vollmacht-app');
 const projekteRechte = require('./lib/projekte-rechte');
 const hwRechteLib = require('./lib/handwerker-rechte');
+const hwNotfallLib = require('./lib/handwerker-notfall');
 const personenRechte = require('./lib/personen-rechte');
 const stwegOeffentlich = require('./lib/stweg-oeffentlich');
 const rechteSchluessel = require('./lib/rechte-schluessel');
@@ -13940,9 +13941,9 @@ async function saveHandwerkerEventZuweisungen(client, handwerkerId, zuweisungen)
   await client.query('DELETE FROM handwerker_event_zuweisungen WHERE handwerker_id = $1', [handwerkerId]);
   for (const z of zuweisungen.map(hwRechteLib.zuweisungNormal).filter(Boolean)) {
     await client.query(
-      `INSERT INTO handwerker_event_zuweisungen (event_typ_id, handwerker_id, prioritaet, stweg, hinweis)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [z.event_typ_id, handwerkerId, z.prioritaet, z.stweg, z.hinweis]
+      `INSERT INTO handwerker_event_zuweisungen (event_typ_id, handwerker_id, prioritaet, stweg, hinweis, notfall_telefon)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [z.event_typ_id, handwerkerId, z.prioritaet, z.stweg, z.hinweis, z.notfall_telefon]
     );
   }
 }
@@ -13951,7 +13952,7 @@ async function saveHandwerkerEventZuweisungen(client, handwerkerId, zuweisungen)
 async function hwZuweisungenFuer(client, req, handwerkerId, eingehende) {
   const sicht = hwSichtVon(req);
   const alt = sicht.alle ? [] : (await client.query(
-    'SELECT event_typ_id, prioritaet, stweg, hinweis FROM handwerker_event_zuweisungen WHERE handwerker_id = $1',
+    'SELECT event_typ_id, prioritaet, stweg, hinweis, notfall_telefon FROM handwerker_event_zuweisungen WHERE handwerker_id = $1',
     [handwerkerId])).rows;
   return hwRechteLib.zuweisungenZusammenfuehren(sicht, alt, eingehende);
 }
@@ -14674,6 +14675,30 @@ app.get('/api/handwerker-notfall', authMiddleware, requirePermission('handwerker
   } catch (err) {
     console.error('Notfall summary error:', err);
     res.status(500).json({ error: 'Fehler beim Laden der Notfall-Übersicht' });
+  }
+});
+
+// Notfall-Ansicht für alle angemeldeten Personen einer STWEG (E3, Entscheid Stefan
+// 28.11.2026): nur Firmenname, Priorität und die Notfallnummer der Zuordnung. Kein
+// Seitenrecht nötig; die STWEG kommt aus den Gruppen des Kontos, nie vom Aufrufer
+// (?stweg= engt nur auf eine eigene STWEG ein). Keine Mitarbeiter, Handys, Hinweise,
+// Notizen, Kosten, Bewertungen (lib/handwerker-notfall.js). Auch für geteilte Telefone
+// (portal_pfade). Nie zwischenspeichern ausser in der App („Stand vom“).
+app.get('/api/handwerker-notfall/bewohner', authMiddleware, async (req, res) => {
+  try {
+    const sicht = hwNotfallLib.notfallSicht(req.user?.groups || []);
+    const w = parseInt(req.query.stweg, 10);
+    const events = await pool.query('SELECT id, name, icon, beschreibung FROM handwerker_event_typen ORDER BY sort_order, name');
+    const zuws = await pool.query(
+      `SELECT z.event_typ_id, z.prioritaet, z.stweg, z.notfall_telefon, h.firma
+         FROM handwerker_event_zuweisungen z
+         JOIN handwerker h ON h.id = z.handwerker_id
+        WHERE h.archiviert = false AND z.notfall_telefon IS NOT NULL AND z.notfall_telefon <> ''`);
+    res.set('Cache-Control', 'private, no-store');
+    res.json(hwNotfallLib.notfallAntwort(sicht, events.rows, zuws.rows, { wunsch: Number.isFinite(w) ? w : null }));
+  } catch (err) {
+    console.error('Notfall (Bewohner) error:', err);
+    res.status(500).json({ error: 'Fehler beim Laden der Notfallnummern' });
   }
 });
 
@@ -31042,6 +31067,9 @@ async function initDB() {
         hinweis TEXT,
         created_at TIMESTAMP DEFAULT NOW()
       );
+      -- Notfallnummer der Firma für diese Zuordnung (Bereitschaft, nicht das Handy
+      -- eines Mitarbeiters); einzige Nummer der Notfall-Ansicht für Bewohner
+      ALTER TABLE handwerker_event_zuweisungen ADD COLUMN IF NOT EXISTS notfall_telefon VARCHAR(30);
       CREATE INDEX IF NOT EXISTS idx_handwerker_event_zuw_event ON handwerker_event_zuweisungen(event_typ_id);
       CREATE INDEX IF NOT EXISTS idx_handwerker_event_zuw_handwerker ON handwerker_event_zuweisungen(handwerker_id);
 

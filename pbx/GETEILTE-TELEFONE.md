@@ -153,6 +153,7 @@ Technik sie auf /smartphones gesetzt hat. Erster Eintrag also: Zeile auf /smartp
 | Rosenweg Zutritt | `ch.rosenweg4303.zutritt` | `technik,präsident,praesident` | aktiv (1.0.0) |
 | Rosenweg Waschküche | `ch.rosenweg4303.waschkueche` | `technik,präsident,praesident,r9-bewohner,r9-eigentuemer,stweg3-ausschuss` | aktiv (1.0.0) |
 | Rosenweg Wetter | `ch.rosenweg4303.wetter` | alle Bewohner (die Werte sind öffentlich) | noch keine Zeile; nach dem ersten Release auf /smartphones anlegen |
+| Rosenweg Handwerker | `ch.rosenweg4303.handwerker` | alle Bewohner (nur die Notfall-Ansicht, siehe unten) | noch keine Zeile; nach dem ersten Release auf /smartphones anlegen |
 
 - **Salz:** Eine Hauswart-Gruppe gibt es nicht; der Hauswart steht je Lager als Mailadresse
   (`salz_lager.hauswart_emails`). Die Gruppen im Katalog entsprechen `buchungsGruppen()` in
@@ -167,6 +168,12 @@ Technik sie auf /smartphones gesetzt hat. Erster Eintrag also: Zeile auf /smartp
   (`wasch_rooms`), ihre drei Gruppen hier dazunehmen. Die Hausverwaltung (`stwegN-verwaltung`)
   darf nur lesen und meldet sich an geteilten Telefonen nicht an. `portal_pfade` `/api/wasch/`;
   Räume, STWEG und das Recht „waschküche-admin“ prüft die Haupt-API selbst.
+- **Handwerker:** Auf dem Telefon nur die Notfall-Ansicht (Entscheid Stefan 28.11.2026): `portal_pfade`
+  `GET /api/handwerker-notfall/bewohner` und `GET /api/auth/me`, sonst nichts (keine Liste, Verträge,
+  Einsätze, Kosten, Mitarbeiter, Handys). Die Haupt-API nennt dort nur Firmenname, Priorität und die
+  Notfallnummer der Zuordnung, für die STWEG der Person. Die App legt die Nummern offline ab (mit „Stand vom“)
+  und löscht sie beim Personenwechsel/Abmelden. Verwaltung und Ausschuss melden sich an geteilten Telefonen
+  nicht an; sähen sie dort mehr, geht es trotzdem nur über diese eine Route.
 - **Zutritt:** Seit dem ersten Release (1.0.0) aktiv; die APK kam von selbst in die vorbereitete Zeile.
 
 ## Wartung per USB

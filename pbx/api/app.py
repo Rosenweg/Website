@@ -4163,6 +4163,10 @@ PORTAL_PFADE_STANDARD = {
                                    "GET /api/documents-kennung/", "GET /api/documents-fassungen",
                                    "GET /api/documents-fassungen/", "GET /api/documents-preview",
                                    "POST /api/documents-preview"],
+    # Rosenweg Handwerker: auf geteilten Telefonen NUR die Notfall-Ansicht (Entscheid Stefan
+    # 28.11.2026): Firmenname, Prioritaet und Notfallnummer, keine Mitarbeiter/Handys/Kosten.
+    # Liste, Vertraege, Einsaetze und Schreiben gehen dort nicht.
+    "ch.rosenweg4303.handwerker": ["GET /api/handwerker-notfall/bewohner"],
 }
 _PORTAL_PFAD = re.compile(r"/api/[A-Za-z0-9._~!$&'()*+,;=:@%/-]{1,1000}(\?[A-Za-z0-9._~!$&'()*+,;=:@%/?-]{0,1000})?")
 _PORTAL_KODIERT_VERBOTEN = re.compile(r"%(2e|2f|5c|00)", re.I)
