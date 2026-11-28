@@ -4243,6 +4243,10 @@ def _portal_gesperrt(methode, pfad):
     weg = _portal_pfad_normal(urllib.parse.unquote(pfad.split("?", 1)[0]))
     if (methode, weg) in PORTAL_AUSNAHMEN:
         return False
+    # Maschinen-Schnittstellen (Wetter-Ingest, Tracker …) sind kein Weg ueber ein Telefon
+    # (sie verlangen ohnehin ein eigenes Geheimnis; hier zusaetzlich zu)
+    if weg.endswith("/ingest") or "/ingest/" in weg:
+        return True
     return any(weg == g or weg.startswith(g + "/") for g in PORTAL_GESPERRT)
 
 
