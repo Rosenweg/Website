@@ -164,6 +164,9 @@ Authentik gesetzt (Meldung „Windows-Anmeldung wird nicht mitgeführt“).
   meldet fehlgeschlagene oder hängende Units in Knoten und Containern an die API;
   neue Befunde gehen an die Technik-WhatsApp-Gruppe, verstummte Knoten zusätzlich
   per Mail.
+- **Runner-Wächter** (`scripts/rw-runner-waechter.sh` auf pve2, jede Minute):
+  schaltet die Linux-GitHub-Runner 1–4 als Kaskade nach Warteschlange zu und ab;
+  siehe [`runner-waechter.md`](runner-waechter.md).
 - **NOC** `noc.rosenweg4303.ch`: ohne Token gekürzte Sicht; Token per
   `X-Noc-Token` bzw. `#token=` (`sicherheit.md` Abschnitt 4.7).
 

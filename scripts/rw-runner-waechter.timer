@@ -1,0 +1,10 @@
+[Unit]
+Description=Runner-Waechter: jede Minute die Warteschlange ansehen
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target
