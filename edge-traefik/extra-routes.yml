@@ -264,6 +264,9 @@ http:
       ipAllowList:
         sourceRange:
           - 100.64.0.0/10
+          - 10.0.0.0/8
+          - 172.16.0.0/12
+          - 192.168.0.0/16
     # Catch-all auf heizung.rosenweg9.ch -> direkt in die View (statt Editor).
     # Regex hostunabhaengig: Host() matcht ohne Gross-/Kleinschreibung, die Regex
     # nicht -> "HEIZUNG.rosenweg9.ch" lief frueher ungefiltert zu ioBroker durch.
