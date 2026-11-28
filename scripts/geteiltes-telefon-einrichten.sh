@@ -224,6 +224,22 @@ schritt "Seitentaste lang = Ausschaltmenü (1/2)" a shell settings put global fu
 schritt "Seitentaste lang = Ausschaltmenü (2/2)" a shell settings put global power_button_long_press 1
 schritt "\"Netzwerk und Sicherheit sperren\" aus (Neustart ohne PIN)" a shell settings put secure lock_function_val 0
 
+# XCover-Taste (nur Galaxy XCover, Stefan 28.11.2026): "Druecken" = Taschenlampe, "Bei
+# Bildschirmsperre verwenden" = ein. Laesst sich nicht ueber settings setzen: Seite oeffnen,
+# von Hand einstellen, bestaetigen.
+if a shell getprop ro.product.model | grep -qi -E 'G715|G525|G556|XCover'; then
+  a shell input keyevent 224 >/dev/null 2>&1
+  a shell am start -n 'com.android.settings/.Settings$XcoverTopKeySettingsActivity' >/dev/null 2>&1 \
+    || echo "        XCover-Taste: Seite nicht direkt erreichbar, in den Einstellungen nach \"XCover-Taste\" suchen"
+  if [ -t 0 ]; then
+    printf '        XCover-Taste: "Druecken" = Taschenlampe, "Bei Bildschirmsperre verw." = ein. Eingestellt? [j/N] '
+    read -r antwort
+    case "$antwort" in j|J|ja|Ja) echo "ok      XCover-Taste (von Hand)" ;; *) echo "FEHLER  XCover-Taste nicht bestaetigt"; FEHLER=$((FEHLER+1)) ;; esac
+  else
+    echo "HINWEIS XCover-Taste von Hand einstellen (Seite ist offen): Druecken = Taschenlampe, bei Bildschirmsperre = ein"
+  fi
+fi
+
 adb_tcp
 adb_selbst
 
@@ -242,6 +258,7 @@ echo "  adb über TCP:     Port $(a shell getprop service.adb.tcp.port | tr -d '
 SICHER=$(a shell getprop ro.adb.secure | tr -d '\r')
 echo "  adb nur mit Schlüssel: ro.adb.secure=$SICHER (soll 1)"
 [ "$SICHER" = 1 ] || { echo "FEHLER  ro.adb.secure ist nicht 1 - dieses Telefon nicht für die Fernwartung verwenden"; FEHLER=$((FEHLER+1)); }
+echo "  Find My Mobile:   $(a shell dumpsys package com.samsung.android.fmm 2>/dev/null | grep -o 'hidden=[a-z]*' | head -1 | tr -d '\r') (soll hidden=true; telefon_ausblenden)"
 echo "  Band (Overlay):   $(a shell appops get $GERAET SYSTEM_ALERT_WINDOW | tr -d '\r') (soll allow)"
 echo "  Fernwartung:      $(a shell dumpsys activity services $GERAET/org.sipdroid.sipua.rosenweg.FernwartungDienst 2>/dev/null | grep -c ServiceRecord | tr -d '\r') Dienst (1 = Tunnel läuft; Stand auf /smartphones)"
 [ $FEHLER = 0 ] && echo "Fertig, alle Schritte ok." || { echo "$FEHLER Schritt(e) fehlgeschlagen."; exit 1; }
