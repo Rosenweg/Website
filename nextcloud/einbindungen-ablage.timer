@@ -1,0 +1,11 @@
+[Unit]
+Description=Nextcloud-Einbindungen der STWEG-Ordner stuendlich nachziehen
+
+[Timer]
+OnBootSec=10min
+OnCalendar=hourly
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

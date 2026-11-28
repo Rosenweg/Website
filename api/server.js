@@ -655,6 +655,8 @@ function canManageDocs(req, res, next) {
   next();
 }
 
+const { stwegDokErlaubt } = require('./lib/dok-stweg-sicht');
+
 // P1: STWEG je Projekt fuer die Rechte am Ordner projekte/<slug>/ (kurz
 // zwischengespeichert; Anlegen/Aendern eines Projekts leert den Speicher).
 let projektStwegSpeicher = { t: 0, map: null };
@@ -704,11 +706,15 @@ function isDocPathAllowed(filePath, groups, ctx = {}) {
   // Projekte: Eigentuemer, wer das Projekt bearbeitet, Verwaltung der STWEG des Projekts
   if (folder === 'projekte') return projekteRechte.projektDokRecht(groups, ctx.projektePerm, filePath, ctx.projekte).lesen;
   // Lesen: Bewohner/Eigentuemer/Ausschuss der STWEG und deren Hausverwaltung
-  // (stwegN-verwaltung). Gleiche Regel wie die Fileserver-Tabelle
-  // fileserver-lxc/ordnerrechte/tabelle.txt (Zeilen stweg1 … meg) – beide aendern.
+  // (stwegN-verwaltung), reine Bewohner aber nur stwegN/bewohner/. Gleiche Regel
+  // wie die Fileserver-Tabelle fileserver-lxc/ordnerrechte/tabelle.txt (Zeilen
+  // stweg1 … meg und stwegN/bewohner) und die Nextcloud – alle aendern.
   const stwegs = getStwegsMitVerwaltung(groups);
   const nr = folderStwegNr(folder);
-  return nr !== null && stwegs.has(nr);
+  if (nr === null || !stwegs.has(nr)) return false;
+  // Eigentuemer-Unterlagen: reine Bewohner (Mieter) nur stwegN/bewohner/
+  // (lib/dok-stweg-sicht.js, Entscheid 28.11.2026; tabelle.txt zieht mit).
+  return stwegDokErlaubt(filePath, groups, nr);
 }
 
 // Unterordner, die eigene Routen schreiben und ausliefern (Auslagen-Belege,
