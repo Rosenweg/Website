@@ -57,6 +57,13 @@ ssh root@100.64.2.21 'pct exec 106 -- sh -c "/usr/local/bin/doc-github-backup.sh
 
 Zurück: `/usr/local/bin/doc-github-backup.sh.vor-sicherheit-2026-11-17`.
 
+**Ab 28.11.2026 (Fund R3, Vollmachten):** `Vollmachten/` (unterschriebene
+Vollmachten der API) geht nie nach GitHub. Das Skript nimmt den Ordner mit
+`git add -A -- . ':(exclude)Vollmachten'` nicht auf und nimmt ihn aus dem Index,
+falls er dort doch steht (die Dateien bleiben auf der Freigabe). Zusätzlich steht
+`Vollmachten/` in der `.gitignore` von `Rosenweg/documents`. Einspielen auf CT 106
+erst nach Freigabe durch Stefan.
+
 ## sync-avatars-to-ad.py (CT 108)
 
 Schreibt die Benutzerbilder aus Authentik ins AD-Attribut `thumbnailPhoto`.
