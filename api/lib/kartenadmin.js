@@ -177,12 +177,15 @@ async function quittungSenden(email, liste) {
  * Für die Admin-Wächter: Schreibende Admin-Aktion mit der Karte -> nach der
  * Antwort ins Protokoll und in die Quittung. Blockiert nie. Einmal je Anfrage.
  */
-function vermerken(req, res) {
-  if (!istKartenSitzung(req) || req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return false;
+// opts.lesend: auch ein Lesezugriff zaehlt (Admin sieht ein WLAN-Passwort oder eine
+// fremde VPN-Konfiguration an, Entscheid Stefan 28.11.2026); opts.text: Aktion in Worten.
+function vermerken(req, res, opts = {}) {
+  if (!istKartenSitzung(req)) return false;
+  if (!opts.lesend && (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS')) return false;
   if (req._kartenAdminVermerk) return false;
   req._kartenAdminVermerk = true;
   const k = kontext(req);
-  const text = aktionText(k.methode, k.pfad);
+  const text = opts.text || aktionText(k.methode, k.pfad);
   const fertig = () => eintragenUndQuittieren(k, text, res?.statusCode || 0);
   if (res && typeof res.once === 'function') res.once('finish', fertig); else fertig();
   return true;

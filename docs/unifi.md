@@ -108,7 +108,7 @@ Internet 2 ──── WAN2 (Failover)
 | RK-Technik | 3 | 100.64.3.0/24 | Corporate | Ja | Technik-Management |
 | RK-OSPF | 6 | 100.64.6.0/26 | Corporate | Nein | OSPF Routing |
 | RK-BGP | 7 | 100.64.6.64/26 | Corporate | Ja | BGP Routing |
-| Rosenweg-Guest | 8 | 192.168.2.0/24 | Guest | Ja | Gast-WLAN (isoliert) |
+| Rosenweg-Guest | 8 | 192.168.2.0/24 | Guest | Ja | Gast-WLAN, offen, Clients untereinander isoliert (L2), Hotspot-Zone. Am 28.11.2026 in UniFi nachgesehen: Subnetz stimmt. Achtung: dasselbe Netz nutzt wg-control auf CT 113 *intern* für seinen Tunnel (siehe unten „VPN“) |
 | RK-Clients | 9 | 100.64.9.0/24 | Corporate | Ja | Kooperations-Clients |
 
 ### Gebäude-Netzwerke (Clients)
@@ -158,8 +158,16 @@ Format: `<HausNr><laufendeNr>` — erste Ziffer(n) = Hausnummer, Rest = fortlauf
 
 | Name | Subnet | Typ | Beschreibung |
 |------|--------|-----|-------------|
-| Rosenweg Wireguard Client | 192.168.9.0/24 | Remote User VPN | WireGuard VPN Server |
+| Rosenweg Wireguard Client | 192.168.9.0/24 | Remote User VPN | WireGuard-Server der UDM (Zone „Vpn“) |
+| One-Click VPN | 192.168.14.0/24 | Remote User VPN | WireGuard-Server der UDM (Zone „Vpn“) |
 | WG-HEL1 | 192.168.200.2/24 | VPN Client | Site-to-Site VPN |
+| wg-control (CT 113) | 192.168.2.0/24 | eigener WireGuard-Server, **kein UniFi-Netz** | VPN der Bewohner (`POST /api/isp/vpn-accounts`) und Laptop-Tunnel. Das Netz existiert nur in CT 113 (`wg0`, `192.168.2.1`); jeder Peer wird in sein Heim-VLAN genatet (Absender `100.64.<VLAN>.250`) und gilt für die UDM als Gerät dieses VLANs. Gleiche Adressen wie das Gast-WLAN, stört aber nicht, weil sie CT 113 nie verlassen. |
+
+Stand 28.11.2026 (nur gelesen): Die beiden UDM-VPNs (Zone „Vpn“) dürfen per Regel
+„Rosenweg Kooperation erlaubt“ alles in der Zone Rosenweg Kooperation (VLAN 2, 9, …),
+also auch udpxy `100.64.9.24:4022`. wg-control-Peers erreichen udpxy wie die Geräte
+ihres Heim-VLANs über „Allow TV udpxy Rosenweg N“ (je Haus eine Regel), Peers in
+VLAN 9 liegen im selben Netz wie udpxy.
 
 ## VLAN-Schema
 

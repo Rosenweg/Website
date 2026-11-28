@@ -30,6 +30,7 @@ const stwegSichtLib = require('./lib/stweg-sicht');
 const { waschAdminErlaubt, waschRaumAenderbar } = require('./lib/wasch-admin');
 const waschRegeln = require('./lib/wasch-regeln');
 const adminProtokoll = require('./lib/admin-protokoll');
+const ispZugang = require('./lib/isp-zugang');
 const { taeglichUm } = require('./lib/tageszeit');
 const papierkorb = require('./lib/papierkorb');
 const verteilerVerwaltung = require('./lib/verteiler-verwaltung');
@@ -1979,48 +1980,25 @@ app.get('/api/wifi', authMiddleware, async (req, res) => {
     const rosenweg = wlans.find(w => w.name === 'Rosenweg' && w.enabled);
     if (!rosenweg) return res.status(404).json({ error: 'WLAN nicht gefunden' });
 
-    // Extract house numbers from Authentik groups (e.g. "r9-bewohner", "r14-eigentuemer")
-    // bewohner groups take priority over eigentuemer
-    const groups = req.user.groups || [];
-    const bewohnerHaeuser = new Set();
-    const eigentuemerHaeuser = new Set();
-    for (const g of groups) {
-      const m = g.match(/^r(\d+)-(bewohner|eigentuemer)$/i);
-      if (m) {
-        if (m[2].toLowerCase() === 'bewohner') bewohnerHaeuser.add(parseInt(m[1]));
-        else eigentuemerHaeuser.add(parseInt(m[1]));
-      }
-    }
-    // Only show houses where user is bewohner; eigentuemer without bewohner see nothing
-    const hausNummern = bewohnerHaeuser;
-
-    // Plus: Häuser aus den zugewiesenen Wohnungen ableiten (Wohnung oder
-    // Hobbyraum in irgendeinem Haus). So sieht jemand mit Wohnung RW9 +
-    // Hobbyraum RW2 auch das RW2-Clients-WLAN, nicht nur RW9.
+    // Haus-WLAN nur fuer Personen, die dort WOHNEN, und erst ab dem Einzugsdatum
+    // (Entscheid Stefan 28.11.2026, lib/isp-zugang.js). Massgebend sind allein die
+    // Wohnungs-Kontakte mit Rolle und gueltig_ab: nicht die Authentik-Gruppen (die
+    // bleiben nach dem Auszug noch bis zur Kontoloeschung) und nicht mehr die selbst
+    // gepflegte Strasse (Befund R6). Nicht bewohnende Eigentuemer und Wohnungs-
+    // Verwalter sehen kein Haus-WLAN. Wohnung oder Hobbyraum in einem Haus -> dessen
+    // Clients-WLAN (Wohnung RW9 + Hobbyraum RW2 -> RW9 und RW2).
+    const hausNummern = new Set();
     const userEmailForHaus = (req.user.email || '').toLowerCase();
     let userWohnungen = [];
     try {
       userWohnungen = await getUserVlanOptions(userEmailForHaus);
       for (const opt of userWohnungen) {
         if (opt.kind === 'wohnung' || opt.kind === 'hobbyraum') {
-          // VLAN-Schema: <HausNr>*10+9 → HausNr = (vlan-9)/10
-          const haus = opt.vlan ? Math.round((opt.vlan - 9) / 10) : null;
-          if (haus && haus >= 1 && haus <= 18) hausNummern.add(haus);
+          const haus = ispZugang.hausAusVlan(opt.vlan);
+          if (haus) hausNummern.add(haus);
         }
       }
     } catch {}
-
-    // Fallback: extract from strasse field. Die Strasse pflegt jede Person selbst ->
-    // nur Haeuser einer STWEG zulassen, der sie per Authentik-Gruppe angehoert.
-    if (hausNummern.size === 0) {
-      const userId = req.user.user_id || req.user.id;
-      const userRow = await pool.query('SELECT strasse FROM users WHERE id = $1', [userId]);
-      const strasse = userRow.rows[0]?.strasse || '';
-      const hausMatch = strasse.match(/rosenweg\s+(\d+)/i);
-      const STWEG_HAEUSER = { 1: [17, 18], 2: [13, 14, 16], 3: [9], 4: [10, 12], 5: [5, 6, 8], 6: [1], 7: [2, 4] };
-      const erlaubt = new Set([...getUserStwegs(groups)].flatMap(nr => STWEG_HAEUSER[nr] || []));
-      if (hausMatch && erlaubt.has(parseInt(hausMatch[1]))) hausNummern.add(parseInt(hausMatch[1]));
-    }
 
     // Find PPSKs for all user's houses (still nur falls vorhanden — nicht jedes
     // Haus muss eine eigene PPSK-Konfiguration haben).
@@ -2037,7 +2015,7 @@ app.get('/api/wifi', authMiddleware, async (req, res) => {
               network: net.name,
               vlan: net.vlan,
               subnet: net.subnet,
-              rolle: bewohnerHaeuser.has(hausNr) ? 'bewohner' : 'eigentuemer',
+              rolle: 'bewohner',
             });
             break;
           }
@@ -2096,13 +2074,19 @@ app.get('/api/wifi', authMiddleware, async (req, res) => {
       }
     }
 
-    // Build all PPSKs for admins
+    // Alle PPSKs (Haeuser und private Netze) nur fuer Technik/Praesident und nur auf
+    // ausdrueckliche Anfrage (?alle=1, Knopf auf wlan.html) - jedes Ansehen steht im
+    // Protokoll, auch mit der Karte (Befund R4, Regel "Karte wie Schluessel").
+    const admin = ispIsAdmin(req);
     let allPpsks = null;
-    if (req.user.isAdmin) {
+    if (admin && /^(1|ja|true)$/i.test(String(req.query.alle || ''))) {
       allPpsks = (rosenweg.private_preshared_keys || []).map(ppsk => {
         const net = netMap[ppsk.networkconf_id] || {};
         return { network: net.name, vlan: net.vlan, password: ppsk.password };
       });
+      await ispAdminSichtProtokoll(req, 'wlan-passwoerter-angesehen', 'alle WLAN-Passwörter (PPSK)',
+        `${allPpsks.length} Passwörter: ${allPpsks.map(p => p.network || '?').join(', ').slice(0, 1500)}`,
+        'Internet (ISP): alle WLAN-Passwörter angesehen');
     }
 
     res.json({
@@ -2110,6 +2094,7 @@ app.get('/api/wifi', authMiddleware, async (req, res) => {
       wlans: userWlans,
       guest: { ssid: 'Rosenweg-Guest', password: null, security: 'open' },
       allPpsks,
+      kann_alle_sehen: admin,
     });
   } catch (err) {
     console.error('WiFi info error:', err.message);
@@ -6771,6 +6756,8 @@ async function saveKontakte(client, wohnungId, kontakte, stweg) {
   }
 
   if (stweg) trackRemovedKontakte(wohnungId, stweg, oldKontakte, incoming).catch(() => {});
+  // Auszug/Rollenwechsel: VPN-Zugaenge abgleichen, wenn die Aenderung gespeichert ist.
+  vpnAbgleichBald();
 
   // Auto-Vollmacht-Entwurf für Verwalter: bei jedem neuen oder
   // aktualisierten Verwalter-Kontakt wird ein Entwurf erzeugt, falls
@@ -7281,6 +7268,12 @@ async function lokalesKontoNachLoeschung(email) {
     await pool.query('UPDATE api_tokens SET revoked_at = NOW() WHERE LOWER(user_email) = $1 AND revoked_at IS NULL', [e]);
     for (const [t, v] of tokenCache) { if (String(v.user?.email || '').toLowerCase() === e) tokenCache.delete(t); }
     appTokensVergessen(e);
+    // VPN-Zugaenge der Person sperren (Entscheid Stefan 28.11.2026), solange kein
+    // anderes Konto mit dieser Adresse besteht.
+    if (!nochKonto) {
+      const n = await vpnSperrenFuerEmail(e, 'Konto gelöscht');
+      if (n) console.log(`[Authentik] ${n} VPN-Zugang/-Zugaenge von ${e} gesperrt`);
+    }
     // Anlage: Hintergrundbild der geteilten Telefone usw. (lib/pbxperson.js)
     const pbx = await require('./lib/pbxperson').personLoeschen({ url: PBX_API_URL, secret: PBX_SHARED_SECRET, email: e });
     if (!pbx.ok) console.warn(`[Authentik] Anlage-Daten nach Loeschung nicht entfernt: ${pbx.grund}`);
@@ -7812,6 +7805,8 @@ async function autoArchiveSupersededKontakte() {
     }
     await pool.query(`UPDATE wohnungen_kontakte SET ersetzt_vorgaenger = false
                        WHERE ersetzt_vorgaenger AND gueltig_ab <= CURRENT_DATE`);
+    // Wer heute ausgezogen ist, verliert seinen VPN-Zugang (bzw. wer heute einzieht, wird gesehen).
+    vpnAbgleichBald(0);
     // ZEV: nach dem Auto-Archive (sauberer Bewohner-Stand) Aliase syncen + Wechsel melden.
     await processZevDaily();
   } catch (err) {
@@ -21939,6 +21934,18 @@ function ispIsAdmin(req) {
   return admin;
 }
 
+// Technik/Praesident sieht ein WLAN-Passwort (Haus oder privates Netz) oder eine fremde
+// VPN-Konfiguration an -> Eintrag im Protokoll (admin_protokoll, Bereich 'isp'), mit der
+// Karte zusaetzlich im Kartenprotokoll mit Quittung (Entscheid Stefan 28.11.2026, Regel
+// "Karte wie Schluessel: Admin mit Karte nur protokollieren, nie sperren"). Gesperrt
+// wird nichts; ein Fehler beim Schreiben haelt die Antwort nicht auf.
+async function ispAdminSichtProtokoll(req, aktion, ziel, detail, kartenText) {
+  try {
+    await adminProtokoll.eintragen(pool, null, req, { bereich: 'isp', aktion, ziel, detail });
+  } catch (e) { console.error('[isp-protokoll]', e.message); }
+  kartenAdmin.vermerken(req, req.res, { lesend: true, text: kartenText || `Internet (ISP): ${aktion}` });
+}
+
 // Hilfsfunktion: hat user die Wohnung X als Eigentümer/Mieter/Bewohner?
 async function userOwnsWohnung(email, wohnungId) {
   if (!email || !wohnungId) return false;
@@ -22555,7 +22562,7 @@ async function nocDashboardHandler(req, res) {
     try {
       const r = await pool.query(
         `SELECT COUNT(*) FILTER (WHERE active) AS act,
-                COUNT(*) FILTER (WHERE NOT active) AS pen
+                COUNT(*) FILTER (WHERE NOT active AND gesperrt_am IS NULL) AS pen
            FROM isp_vpn_accounts`);
       vpnActive = parseInt(r.rows[0].act, 10) || 0;
       vpnPending = parseInt(r.rows[0].pen, 10) || 0;
@@ -23600,12 +23607,15 @@ app.put('/api/isp/subscribers/me/:id/mac', authMiddleware, async (req, res) => {
     const gruppen = (req.user.groups || []).map(g => String(g).toLowerCase());
     const admin = isTechnik(gruppen) || isPraesident(gruppen);
 
-    // Gehoert der Anschluss dieser Person? (Admins duerfen ohnehin.)
+    // Gehoert der Anschluss dieser Person? Nur wer dort WOHNT (ab Einzug), nicht ein
+    // Eigentuemer der vermieteten Wohnung oder ein Verwalter - sonst wanderte die
+    // Port-Bindung des Mieters weg (Befund R1). Admins duerfen ohnehin.
     const eig = await pool.query(
       `SELECT s.* FROM isp_subscribers s
         WHERE s.id = $1 AND ($3::boolean OR s.wohnung_id IN (
           SELECT k.wohnung_id FROM wohnungen_kontakte k JOIN personen p ON p.id = k.person_id
-           WHERE k.archiviert_am IS NULL
+            JOIN wohnungen w ON w.id = k.wohnung_id
+           WHERE ${ispZugang.wohntSql('k', 'w')}
              AND ( LOWER(p.email) = $2
                    OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(p.emails, '[]'::jsonb)) e
                                WHERE LOWER(e) = $2) )))`,
@@ -23653,12 +23663,13 @@ app.put('/api/isp/subscribers/me/:id/mac', authMiddleware, async (req, res) => {
 app.get('/api/isp/subscribers/me', authMiddleware, async (req, res) => {
   try {
     const email = (req.user.email || '').toLowerCase();
-    // Welche Wohnungen gehoeren zu dieser Person? Kontakt an der Wohnung,
-    // ueber die Hauptadresse oder eine der hinterlegten Zweitadressen.
+    // Welche Anschluesse gehoeren zu dieser Person? Nur Wohnungen, in denen sie WOHNT
+    // (ab Einzug, lib/isp-zugang.js), ueber die Hauptadresse oder eine Zweitadresse.
     const w = await pool.query(
       `SELECT DISTINCT k.wohnung_id
          FROM wohnungen_kontakte k JOIN personen p ON p.id = k.person_id
-        WHERE k.archiviert_am IS NULL
+         JOIN wohnungen w ON w.id = k.wohnung_id
+        WHERE ${ispZugang.wohntSql('k', 'w')}
           AND ( LOWER(p.email) = $1
                 OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(p.emails, '[]'::jsonb)) e
                             WHERE LOWER(e) = $1) )`,
@@ -23756,7 +23767,8 @@ app.get('/api/isp/fixed-ips', authMiddleware, async (req, res) => {
                            WHERE w.id IN (
                              SELECT DISTINCT k.wohnung_id FROM wohnungen_kontakte k
                                JOIN personen p ON p.id = k.person_id
-                              WHERE LOWER(p.email) = $1 AND k.archiviert_am IS NULL
+                               JOIN wohnungen kw ON kw.id = k.wohnung_id
+                              WHERE LOWER(p.email) = $1 AND ${ispZugang.wohntSql('k', 'kw')}
                            ) ORDER BY ip.ip_typ, ip.ip_address`, [email]);
     res.json({ fixed_ips: r.rows, is_admin: admin });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -23860,14 +23872,19 @@ function classifyVpnEntry(bezeichnung) {
   return { kind: 'unbekannt', kindOrder: 9, vlan: null };
 }
 
-async function getUserVlanOptions(email) {
+// Einheiten (Wohnung > Hobbyraum > Parkplatz) einer Person mit ihrem Client-VLAN.
+// Standard: nur Einheiten, in denen sie WOHNT, ab dem Einzugsdatum (lib/isp-zugang.js,
+// Entscheid Stefan 28.11.2026) - Grundlage fuer Haus-WLAN, VPN-Optionen, VPN anlegen,
+// Laptop-Tunnel und Netz-Antraege. alleKontakte: jeder aktive Kontakt (nur fuer die
+// Technik beim Bearbeiten eines bestehenden Netz-Antrags).
+async function getUserVlanOptions(email, { alleKontakte = false } = {}) {
   if (!email) return [];
   const r = await pool.query(
     `SELECT w.id AS wohnung_id, w.bezeichnung, w.stweg
        FROM wohnungen_kontakte wk
        JOIN wohnungen w ON w.id = wk.wohnung_id
        JOIN personen p  ON p.id = wk.person_id
-      WHERE wk.archiviert_am IS NULL
+      WHERE ${alleKontakte ? 'wk.archiviert_am IS NULL' : ispZugang.wohntSql('wk', 'w')}
         AND ( LOWER(p.email) = LOWER($1)
               OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(p.emails,'[]'::jsonb)) e
                           WHERE LOWER(e) = LOWER($1)) )`,
@@ -23891,9 +23908,30 @@ async function resolveHomeVlanForEmail(email) {
   return opts.length > 0 ? opts[0].vlan : null;
 }
 
+// Wo liegt der private Schluessel? 'geraet' | 'server' | null (unbekannt, Altbestand).
+function vpnSchluesselOrt(v) {
+  return v?.schluessel_ort === 'geraet' || v?.schluessel_ort === 'server' ? v.schluessel_ort : null;
+}
+// Gesperrt (Auszug, Kontoloeschung) oder Schluessel nur auf dem Geraet: keine Konfiguration.
+function vpnAbrufSperre(v) {
+  if (v?.gesperrt_am) return { status: 410, error: `Dieser VPN-Zugang ist gesperrt (${v.gesperrt_grund || 'kein Wohnsitz mehr'}).` };
+  if (vpnSchluesselOrt(v) === 'geraet') return { status: 409, error: 'Der private Schlüssel liegt auf dem Gerät — der Server hat keine Konfiguration und keinen QR-Code.' };
+  return null;
+}
+// Technik/Praesident ruft die Konfiguration einer anderen Person ab -> Protokoll.
+async function vpnFremdSichtProtokoll(req, v, was) {
+  const eigene = (v.user_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+  if (eigene) return;
+  await ispAdminSichtProtokoll(req, 'vpn-konfiguration-angesehen', `VPN #${v.id} · ${v.user_email || '?'}`,
+    `${was}${v.bezeichnung ? ' · ' + v.bezeichnung : ''}${v.assigned_ip ? ' · ' + v.assigned_ip : ''}`,
+    `Internet (ISP): VPN-${was} einer anderen Person angesehen`);
+}
+
 app.get('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
   try {
-    const admin = ispIsAdmin(req);
+    // ?nur=meine: auch Technik/Praesident bekommen nur die eigenen (App "Meine VPN").
+    const istAdmin = ispIsAdmin(req);
+    const admin = istAdmin && !ispZugang.nurMeine(req.query);
     const email = (req.user.email || '').toLowerCase();
     const r = admin
       ? await pool.query('SELECT * FROM isp_vpn_accounts ORDER BY active DESC, user_email, backend')
@@ -23920,7 +23958,8 @@ app.get('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
         });
       } catch {}
     }
-    res.json({ vpn_accounts: rows, is_admin: admin });
+    rows = rows.map(v => ({ ...v, schluessel: vpnSchluesselOrt(v), gesperrt: !!v.gesperrt_am }));
+    res.json({ vpn_accounts: rows, is_admin: istAdmin, nur_meine: istAdmin && !admin });
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err, 'VPN-Zugänge konnten nicht geladen werden') }); }
 });
 
@@ -23932,7 +23971,8 @@ app.get('/api/isp/vpn-accounts/options', authMiddleware, async (req, res) => {
       return res.status(403).json({ error: 'Du kannst nur eigene Optionen abfragen' });
     }
     const options = await getUserVlanOptions(target);
-    res.json({ options, default: options[0]?.vlan || null });
+    res.json({ options, default: options[0]?.vlan || null,
+      ...(options.length ? {} : { hinweis: 'VPN ins Hausnetz gibt es nur für Personen, die in einer Wohnung wohnen, ab dem Einzugsdatum.' }) });
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err, 'VLAN-Optionen konnten nicht geladen werden') }); }
 });
 
@@ -24089,10 +24129,11 @@ app.post('/api/stations/:id/tunnel', stationsRouter.appSession, async (req, res)
       const peer = await antwort.json();
       await pool.query(
         `INSERT INTO isp_vpn_accounts (user_email, backend, username, public_key, assigned_ip,
-                                       config_path, active, notizen, bezeichnung)
-         VALUES ($1, 'wireguard', $2, $3, $4, $5, true, $6, $7)`,
+                                       config_path, active, notizen, bezeichnung, schluessel_ort, wohnsitz_gesehen_am)
+         VALUES ($1, 'wireguard', $2, $3, $4, $5, true, $6, $7, $8, CASE WHEN $9::boolean THEN NOW() END)`,
         [email, peer.id, peer.public_key, peer.assigned_ip, `wg-control/${peer.id}`,
-          `Station ${stationId}, VLAN ${wunsch.vlan}`, wunsch.name],
+          `Station ${stationId}, VLAN ${wunsch.vlan}`, wunsch.name, schluessel[wunsch.zweck] ? 'geraet' : 'server',
+          wunsch.zweck === 'wohnung'],
       );
       tunnel.push({
         // Was die Station in den NetworkManager schreibt: der lesbare Name.
@@ -24232,7 +24273,15 @@ app.post('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
     if (vlan && !ispIsAdmin(req) && !userOpts.some(o => o.vlan === vlan)) {
       return res.status(403).json({ error: 'Dieses VLAN gehört nicht zu deinen zugewiesenen Einheiten' });
     }
-    if (!vlan) return res.status(400).json({ error: 'Keine Heim-Wohnung in der Objektverwaltung — VLAN nicht ermittelbar' });
+    if (!vlan) return res.status(400).json({ error: 'VPN ins Hausnetz gibt es nur für Personen, die in einer Wohnung wohnen (ab dem Einzugsdatum). In der Objektverwaltung ist für dich keine solche Wohnung erfasst.' });
+
+    // Schluessel auf dem Geraet (Befund L3/R3): bringt das Geraet seinen oeffentlichen
+    // Schluessel mit, erzeugt wg-control keinen privaten und kennt ihn nie. Ohne ihn
+    // bleibt der Server-Weg als Rueckfall fuer alte Geraete (gekennzeichnet).
+    const publicKey = b.public_key === undefined || b.public_key === null ? '' : String(b.public_key).trim();
+    if (publicKey && !ispZugang.wgPublicKeyGueltig(publicKey)) {
+      return res.status(400).json({ error: 'Der öffentliche Schlüssel ist kein WireGuard-Schlüssel (44 Zeichen Base64, endet auf =). Den privaten Schlüssel nie hier eintragen.' });
+    }
 
     // D-3: der Name landet als Kommentar in wg0.conf — nur unbedenkliche Zeichen.
     // Ohne Angabe die Mailadresse, auf erlaubte Zeichen reduziert.
@@ -24244,7 +24293,7 @@ app.post('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
       if (!rateLimitGuard('isp-vpn-create', target, 10, 60 * 60 * 1000).ok) {
         return res.status(429).json({ error: 'Zu viele neue VPN-Konten — bitte später erneut.' });
       }
-      const n = await pool.query('SELECT COUNT(*)::int AS n FROM isp_vpn_accounts WHERE LOWER(user_email) = $1', [target]);
+      const n = await pool.query('SELECT COUNT(*)::int AS n FROM isp_vpn_accounts WHERE LOWER(user_email) = $1 AND gesperrt_am IS NULL', [target]);
       if ((n.rows[0]?.n || 0) >= 10) return res.status(429).json({ error: 'Höchstens 10 VPN-Konten pro Person — bitte alte löschen.' });
     }
 
@@ -24252,16 +24301,27 @@ app.post('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
       name: peerName,
       email: target,
       vlan,
+      ...(publicKey ? { public_key: publicKey } : {}),
     });
     const peer = await wgResp.json();
+    const ort = publicKey ? 'geraet' : 'server';
 
     const r = await pool.query(
-      `INSERT INTO isp_vpn_accounts (user_email, backend, username, public_key, assigned_ip, config_path, active, notizen, bezeichnung)
-       VALUES ($1, 'wireguard', $2, $3, $4, $5, true, $6, $7) RETURNING *`,
+      `INSERT INTO isp_vpn_accounts (user_email, backend, username, public_key, assigned_ip, config_path, active, notizen, bezeichnung, schluessel_ort, wohnsitz_gesehen_am)
+       VALUES ($1, 'wireguard', $2, $3, $4, $5, true, $6, $7, $8, CASE WHEN $9::boolean THEN NOW() END) RETURNING *`,
       [target, peer.id, peer.public_key, peer.assigned_ip, `wg-control/${peer.id}`,
-       `vlan=${vlan} name=${peer.name}`, (b.bezeichnung || '').trim() || null],
+       `vlan=${vlan} name=${peer.name}`, (b.bezeichnung || '').trim() || null, ort,
+       userOpts.some(o => o.vlan === vlan)],
     );
-    res.json({ ...r.rows[0], config: peer.config, vlan });
+    if (publicKey) {
+      // Kein privater Schluessel auf dem Server: nur die Vorlage, in die das Geraet seinen
+      // eigenen privaten Schluessel einsetzt (Platzhalter %PRIVATKEY% von wg-control).
+      return res.json({ ...r.rows[0], vlan, schluessel: 'geraet', config_vorlage: peer.config,
+        platzhalter: '%PRIVATKEY%',
+        hinweis: 'Der private Schlüssel bleibt auf deinem Gerät. Setze ihn in der Zeile PrivateKey ein.' });
+    }
+    res.json({ ...r.rows[0], config: peer.config, vlan, schluessel: 'server',
+      hinweis: 'Rückfall für Geräte ohne eigenen Schlüssel: der private Schlüssel liegt auch auf dem Server. Besser den Schlüssel auf dem Gerät erzeugen und nur den öffentlichen Schlüssel eintragen.' });
   } catch (err) {
     console.error('[isp-vpn-create]', err.message);
     res.status(err.status || 500).json({ error: err.message });
@@ -24312,6 +24372,155 @@ app.delete('/api/isp/vpn-accounts/:id', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ─── VPN beim Auszug und bei der Kontoloeschung sperren ──────────────
+// (Entscheid Stefan 28.11.2026, Befund R2/L4.) Gesperrt heisst: der Peer bei wg-control
+// wird entfernt (wg-control kennt kein Abschalten; nur so endet der Zugang wirklich),
+// die Zeile bleibt mit gesperrt_am/gesperrt_grund als Nachweis stehen (active=false).
+// Der Abgleich laeuft taeglich und kurz nach jeder Kontakt-Aenderung. Er sperrt nur
+// Zugaenge, deren Person seit dieser Aenderung einmal als Bewohner gesehen wurde;
+// Altbestand (heute schon ausgezogen, nie bewohnt) wird nur gemeldet:
+// GET /api/isp/vpn-accounts/wohnsitz, sperren von Hand: POST …/:id/sperren.
+// VPN_AUSZUG_SPERREN=aus: nur melden, nie selbst sperren.
+const vpnAuszugSperrenAn = () => !/^(aus|0|nein|false)$/i.test(process.env.VPN_AUSZUG_SPERREN || '');
+
+async function vpnZugangSperren(v, grund) {
+  if (v.username && (v.backend || 'wireguard') === 'wireguard') {
+    if (!WG_CONTROL_TOKEN) throw new Error('wg-control nicht konfiguriert');
+    try { await wgControl('DELETE', `/peers/${encodeURIComponent(v.username)}`); }
+    catch (e) { if (e.status !== 404) throw e; } // schon weg: trotzdem als gesperrt vermerken
+  }
+  await pool.query(
+    `UPDATE isp_vpn_accounts SET active = false, gesperrt_am = NOW(), gesperrt_grund = $2, updated_at = NOW()
+      WHERE id = $1 AND gesperrt_am IS NULL`, [v.id, String(grund || '').slice(0, 200)]);
+  console.log(`[isp-vpn] Zugang #${v.id} gesperrt: ${grund}`);
+}
+
+// Kontakte je Mailadresse (Kontakt-Adresse, Hauptadresse oder Zweitadresse der Person),
+// mit dem VLAN der Einheit. Datumsvergleich in SQL (Zeitzone der Datenbank).
+async function vpnWohnsitzKontakte(emails) {
+  const map = new Map();
+  if (!emails.length) return map;
+  const r = await pool.query(
+    `SELECT a.email, k.rolle, w.bewohnt_von, w.bezeichnung,
+            (k.archiviert_am IS NOT NULL) AS archiviert,
+            (k.gueltig_ab IS NOT NULL AND k.gueltig_ab > CURRENT_DATE) AS kuenftig
+       FROM unnest($1::text[]) AS a(email)
+       JOIN wohnungen_kontakte k ON TRUE
+       JOIN wohnungen w ON w.id = k.wohnung_id
+       LEFT JOIN personen p ON p.id = k.person_id
+      WHERE LOWER(k.email) = a.email OR LOWER(p.email) = a.email
+         OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(p.emails, '[]'::jsonb)) e
+                     WHERE LOWER(e) = a.email)`, [emails]);
+  for (const row of r.rows) {
+    if (!map.has(row.email)) map.set(row.email, []);
+    map.get(row.email).push({
+      rolle: row.rolle, bewohnt_von: row.bewohnt_von,
+      archiviert_am: row.archiviert ? true : null,
+      gueltig_ab: row.kuenftig ? '9999-12-31' : null,
+      vlan: classifyVpnEntry(row.bezeichnung).vlan,
+    });
+  }
+  return map;
+}
+
+async function vpnWohnsitzAbgleich({ nurMelden = false } = {}) {
+  const konten = (await pool.query(
+    `SELECT id, user_email, backend, username, bezeichnung, notizen, assigned_ip, created_at,
+            gesperrt_am, wohnsitz_gesehen_am
+       FROM isp_vpn_accounts WHERE gesperrt_am IS NULL ORDER BY id`)).rows;
+  const emails = [...new Set(konten.map(k => String(k.user_email || '').toLowerCase()).filter(Boolean))];
+  const kontakte = await vpnWohnsitzKontakte(emails);
+  const plan = ispZugang.vpnAbgleichPlan(konten, kontakte);
+  if (plan.gesehen.length) {
+    await pool.query('UPDATE isp_vpn_accounts SET wohnsitz_gesehen_am = NOW() WHERE id = ANY($1::int[])', [plan.gesehen]);
+  }
+  const gesperrt = [];
+  const fehler = [];
+  if (!nurMelden && vpnAuszugSperrenAn()) {
+    const nachId = new Map(konten.map(k => [k.id, k]));
+    for (const p of plan.sperren) {
+      try { await vpnZugangSperren(nachId.get(p.id), `Auszug: ${ispZugang.ART_TEXT[p.art] || p.art}`); gesperrt.push(p); }
+      catch (e) { fehler.push({ ...p, fehler: e.message }); console.error(`[isp-vpn] Sperren #${p.id}:`, e.message); }
+    }
+  }
+  return { konten, plan, gesperrt, fehler };
+}
+
+let vpnAbgleichTimer = null;
+function vpnAbgleichBald(ms = 15000) {
+  if (vpnAbgleichTimer) return;
+  vpnAbgleichTimer = setTimeout(() => {
+    vpnAbgleichTimer = null;
+    vpnWohnsitzAbgleich().then(r => {
+      if (r.gesperrt.length || r.plan.melden.length) {
+        console.log(`[isp-vpn] Abgleich: ${r.gesperrt.length} gesperrt, ${r.plan.melden.length} ohne Wohnsitz gemeldet`);
+      }
+    }).catch(e => console.error('[isp-vpn] Abgleich:', e.message));
+  }, ms);
+  vpnAbgleichTimer.unref?.();
+}
+setInterval(() => vpnAbgleichBald(0), 24 * 60 * 60 * 1000).unref?.();
+setTimeout(() => vpnAbgleichBald(0), 20 * 60 * 1000).unref?.();
+
+// Kontoloeschung: alle Zugaenge der Adresse sperren, ohne Ruecksicht auf den Wohnsitz.
+async function vpnSperrenFuerEmail(email, grund) {
+  const e = String(email || '').toLowerCase().trim();
+  if (!e) return 0;
+  const r = await pool.query(
+    'SELECT * FROM isp_vpn_accounts WHERE LOWER(user_email) = $1 AND gesperrt_am IS NULL', [e]);
+  let n = 0;
+  for (const v of r.rows) {
+    try { await vpnZugangSperren(v, grund); n++; }
+    catch (err) { console.error(`[isp-vpn] Sperren #${v.id} (${grund}):`, err.message); }
+  }
+  return n;
+}
+
+// Liste fuer die Technik: Zugaenge von Personen, die (so) nicht mehr wohnen.
+app.get('/api/isp/vpn-accounts/wohnsitz', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Präsident' });
+    const { konten, plan } = await vpnWohnsitzAbgleich({ nurMelden: true });
+    const nachId = new Map(konten.map(k => [k.id, k]));
+    const zeile = (p) => {
+      const k = nachId.get(p.id) || {};
+      return { id: p.id, user_email: k.user_email, art: p.art, art_text: ispZugang.ART_TEXT[p.art] || p.art,
+        bezeichnung: k.bezeichnung, assigned_ip: k.assigned_ip, vlan: ispZugang.vlanAusNotiz(k.notizen),
+        station: /^Station /.test(k.notizen || ''), created_at: k.created_at };
+    };
+    res.json({
+      melden: plan.melden.map(zeile),              // Altbestand: nur melden, Stefan entscheidet
+      sperren_faellig: plan.sperren.map(zeile),   // sperrt der naechste Abgleich
+      wohnen: plan.gesehen.length,
+      automatisch_sperren: vpnAuszugSperrenAn(),
+    });
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
+});
+
+app.post('/api/isp/vpn-accounts/:id/sperren', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Präsident' });
+    const id = parseInt(req.params.id, 10);
+    const r = await pool.query('SELECT * FROM isp_vpn_accounts WHERE id = $1', [id]);
+    const v = r.rows[0];
+    if (!v) return res.status(404).json({ error: 'Nicht gefunden' });
+    if (v.gesperrt_am) return res.json({ ok: true, schon_gesperrt: true });
+    const grund = String(req.body?.grund || 'von der Technik gesperrt').slice(0, 200);
+    await vpnZugangSperren(v, grund);
+    await adminProtokoll.eintragen(pool, null, req, { bereich: 'isp', aktion: 'vpn-gesperrt', ziel: `VPN #${id} · ${v.user_email || '?'}`, detail: grund })
+      .catch(e => console.error('[isp-protokoll]', e.message));
+    res.json({ ok: true });
+  } catch (err) { res.status(err.status || 500).json({ error: fehlerFuerClient(err) }); }
+});
+
+// Protokoll: angesehene WLAN-Passwoerter und VPN-Konfigurationen, Sperren (Bereich 'isp').
+app.get('/api/isp/protokoll', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Präsident' });
+    res.json({ eintraege: await adminProtokoll.lesen(pool, 'isp', req.query.limit) });
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
+});
+
 // Re-Download Client-Config (proxy zu wg-control)
 app.get('/api/isp/vpn-accounts/:id/config', authMiddleware, async (req, res) => {
   try {
@@ -24323,6 +24532,9 @@ app.get('/api/isp/vpn-accounts/:id/config', authMiddleware, async (req, res) => 
       return res.status(403).json({ error: 'Nur Owner oder Admin' });
     }
     if (!v.username) return res.status(404).json({ error: 'Keine wg-control-Referenz' });
+    const sperre = vpnAbrufSperre(v);
+    if (sperre) return res.status(sperre.status).json({ error: sperre.error });
+    await vpnFremdSichtProtokoll(req, v, 'Konfiguration');
     const r = await wgControl('GET', `/peers/${encodeURIComponent(v.username)}/config`);
     res.type('text/plain; charset=utf-8').send(await r.text());
   } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
@@ -24339,6 +24551,9 @@ app.get('/api/isp/vpn-accounts/:id/qr', authMiddleware, async (req, res) => {
       return res.status(403).json({ error: 'Nur Owner oder Admin' });
     }
     if (!v.username) return res.status(404).json({ error: 'Keine wg-control-Referenz' });
+    const sperre = vpnAbrufSperre(v);
+    if (sperre) return res.status(sperre.status).json({ error: sperre.error });
+    await vpnFremdSichtProtokoll(req, v, 'QR-Code');
     const r = await wgControl('GET', `/peers/${encodeURIComponent(v.username)}/qr`);
     const buf = Buffer.from(await r.arrayBuffer());
     res.type('image/png').send(buf);
@@ -24419,7 +24634,8 @@ function normalizeMitnutzerEmails(input, antragstellerEmail) {
 
 app.get('/api/isp/vlan-requests', authMiddleware, async (req, res) => {
   try {
-    const admin = ispIsAdmin(req);
+    const istAdmin = ispIsAdmin(req);
+    const admin = istAdmin && !ispZugang.nurMeine(req.query); // ?nur=meine
     const email = (req.user.email || '').toLowerCase();
     const r = admin
       ? await pool.query(`SELECT v.*, w.bezeichnung AS wohnung_bezeichnung, w.stweg,
@@ -24437,13 +24653,38 @@ app.get('/api/isp/vlan-requests', authMiddleware, async (req, res) => {
                            WHERE LOWER(v.antragsteller_email) = $1
                               OR $1 = ANY(COALESCE(v.mitnutzer_emails, ARRAY[]::TEXT[]))
                            ORDER BY v.created_at DESC`, [email]);
-    const rows = r.rows.map(v => ({
-      ...v,
-      is_owner: (v.antragsteller_email || '').toLowerCase() === email,
-      is_mitnutzer: (v.mitnutzer_emails || []).map(x => String(x).toLowerCase()).includes(email),
-    }));
-    res.json({ vlan_requests: rows, is_admin: admin });
+    const rows = r.rows.map(v => {
+      const isOwner = (v.antragsteller_email || '').toLowerCase() === email;
+      const isMitnutzer = (v.mitnutzer_emails || []).map(x => String(x).toLowerCase()).includes(email);
+      // WLAN-Passwort eines fremden privaten Netzes steht nicht in der Liste: die Technik
+      // holt es einzeln (GET …/:id/wlan-passwort), das steht dann im Protokoll (Befund R4).
+      const pw = (isOwner || isMitnutzer) ? {} : { wlan_password: null };
+      return { ...v, ...pw, has_wlan_password: !!v.wlan_password, is_owner: isOwner, is_mitnutzer: isMitnutzer };
+    });
+    res.json({ vlan_requests: rows, is_admin: istAdmin, nur_meine: istAdmin && !admin });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// WLAN-Passwort eines privaten Netzes: Antragsteller und Mitnutzer; Technik/Praesident
+// fuer fremde Netze nur mit Eintrag im Protokoll (auch mit der Karte).
+app.get('/api/isp/vlan-requests/:id/wlan-passwort', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const r = await pool.query('SELECT id, antragsteller_email, mitnutzer_emails, gewuenschter_name, vlan_id, wlan_password FROM isp_vlan_requests WHERE id = $1', [id]);
+    const v = r.rows[0];
+    if (!v) return res.status(404).json({ error: 'Nicht gefunden' });
+    const email = (req.user.email || '').toLowerCase();
+    const eigen = (v.antragsteller_email || '').toLowerCase() === email
+      || (v.mitnutzer_emails || []).map(x => String(x).toLowerCase()).includes(email);
+    if (!eigen && !ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Antragsteller, Mitnutzer oder Technik' });
+    if (!v.wlan_password) return res.status(404).json({ error: 'Für dieses Netz ist kein WLAN-Passwort hinterlegt' });
+    if (!eigen) {
+      await ispAdminSichtProtokoll(req, 'wlan-passwort-angesehen',
+        `Netz #${v.id} ${v.gewuenschter_name || ''}${v.vlan_id ? ' (VLAN ' + v.vlan_id + ')' : ''} · ${v.antragsteller_email || '?'}`.trim(),
+        'privates Netz', 'Internet (ISP): WLAN-Passwort eines privaten Netzes angesehen');
+    }
+    res.json({ wlan_password: v.wlan_password });
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // Felder eines Netzwerk-Antrags landen in UniFi (Netzname), im root-Bash-Skript
@@ -24617,7 +24858,7 @@ app.get('/api/isp/vlan-requests/:id/suggest', authMiddleware, async (req, res) =
     }
     // 2. Fallback: erste verfuegbare User-Wohnung (Wohnung > Hobbyraum > Parkplatz)
     if (!home) {
-      const opts = await getUserVlanOptions(v.antragsteller_email);
+      const opts = await getUserVlanOptions(v.antragsteller_email, { alleKontakte: true });
       home = opts.find(o => o.kind === 'wohnung') || opts[0];
     }
     if (!home) return res.status(400).json({ error: 'Antragsteller hat keine zugewiesene Haus-Einheit' });
@@ -24814,7 +25055,7 @@ app.get('/api/isp/vlan-requests/:id/allocation-preview', authMiddleware, async (
         homeBezeichnung = wq.rows[0]?.bezeichnung || null;
       }
       if (!homeBezeichnung) {
-        const opts = await getUserVlanOptions(v.antragsteller_email);
+        const opts = await getUserVlanOptions(v.antragsteller_email, { alleKontakte: true });
         homeBezeichnung = opts[0]?.bezeichnung || null;
       }
       const haus = vpnRwFromBezeichnung(homeBezeichnung);
@@ -26900,7 +27141,8 @@ app.get('/api/isp/mailbox-eligible-relays', authMiddleware, async (req, res) => 
 //   - persoenliche Mailbox -> NUR der zugeordnete User sieht PW (Admin nicht)
 app.get('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
   try {
-    const admin = ispIsAdmin(req);
+    const istAdmin = ispIsAdmin(req);
+    const admin = istAdmin && !ispZugang.nurMeine(req.query); // ?nur=meine
     const email = (req.user.email || '').toLowerCase();
     const r = admin
       ? await pool.query(
@@ -26929,7 +27171,7 @@ app.get('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
       if (!canSeePw) return { ...row, initial_password: null, has_initial_password: !!row.initial_password };
       return { ...row, has_initial_password: !!row.initial_password };
     });
-    res.json({ requests: rows, is_admin: admin });
+    res.json({ requests: rows, is_admin: istAdmin, nur_meine: istAdmin && !admin });
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
@@ -30651,6 +30893,18 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_isp_vpn_user ON isp_vpn_accounts(LOWER(user_email));
       CREATE INDEX IF NOT EXISTS idx_isp_vpn_active ON isp_vpn_accounts(active);
       ALTER TABLE isp_vpn_accounts ADD COLUMN IF NOT EXISTS bezeichnung TEXT;
+      -- Wo liegt der private Schluessel? 'geraet' (nur der oeffentliche kam zum Server) oder
+      -- 'server' (Rueckfall fuer alte Geraete). Der ISP-Weg reichte den oeffentlichen
+      -- Schluessel bis 28.11.2026 nie weiter: dessen Altbestand ist sicher 'server'.
+      ALTER TABLE isp_vpn_accounts ADD COLUMN IF NOT EXISTS schluessel_ort TEXT;
+      UPDATE isp_vpn_accounts SET schluessel_ort = 'server'
+       WHERE schluessel_ort IS NULL AND notizen LIKE 'vlan=% name=%';
+      -- Auszug/Kontoloeschung: Peer bei wg-control entfernt, Zeile bleibt als Nachweis.
+      ALTER TABLE isp_vpn_accounts ADD COLUMN IF NOT EXISTS gesperrt_am TIMESTAMPTZ;
+      ALTER TABLE isp_vpn_accounts ADD COLUMN IF NOT EXISTS gesperrt_grund TEXT;
+      -- Zuletzt als Bewohner gesehen (lib/isp-zugang.js): nur dann sperrt der Abgleich beim
+      -- Auszug selbst; Altbestand ohne diesen Wert wird nur gemeldet.
+      ALTER TABLE isp_vpn_accounts ADD COLUMN IF NOT EXISTS wohnsitz_gesehen_am TIMESTAMPTZ;
 
       -- PVE-Host-Meldungen (Cron/System-Mails der Proxmox-Hosts, gesammelt statt per Mail).
       CREATE TABLE IF NOT EXISTS pve_messages (

@@ -391,6 +391,7 @@ nie im Repo.**
 | `OTP_LOGIN_ENABLED=1` | OTP-Login per E-Mail einschalten (Standard: aus) |
 | `OTP_GLOBAL_MAX_10MIN` | globales Code-Limit je Zweck (Standard 1000) |
 | `NOC_PUBLIC_OPEN`, `NOC_PUBLIC_TOKEN` | NOC-Wandbild: ohne Token gekürzte Sicht |
+| `VPN_AUSZUG_SPERREN` | Standard an: der Abgleich sperrt VPN-Zugänge beim Auszug selbst (Peer entfernt, Zeile bleibt). `aus`: nur melden (`GET /api/isp/vpn-accounts/wohnsitz`) |
 | `SSH_GESPERRTE_LOGINS` | weitere Logins, die nie SSH-Zugang bekommen |
 | `STATION_PROXY_NETZE`, `STATION_INTERN_NETZE` | eigene Proxys / Hausnetz für Stationen |
 | `ZEV_ABSENDER` | erlaubte Absender der ZEV-Rechnungsmails |

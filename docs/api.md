@@ -341,6 +341,14 @@ Kurzfassung (Details [`energie-api.md`](energie-api.md)):
 | Bereich | Routen | Wer |
 |---|---|---|
 | ISP | `/api/isp/*` | angemeldet für eigene Einträge (Reverse-Proxy, Weiterleitungen, Mail-Relays, VPN, VLAN-Anträge, Postfächer); Freigaben und Verwaltung T/P (`ispIsAdmin`). Einträge von Nicht-Admins in eigenen Cloudflare-Zonen oder mit Überschneidung werden nie automatisch freigegeben ([`sicherheit.md`](sicherheit.md) 4.7). |
+| ISP: Haus-WLAN, Anschluss, VPN (nur Bewohner) | `GET /api/wifi`, `GET /api/isp/subscribers/me`, `PUT /api/isp/subscribers/me/:id/mac`, `GET /api/isp/fixed-ips`, `GET /api/isp/vpn-accounts/options`, `POST /api/isp/vpn-accounts`, `POST /api/isp/vlan-requests` (mit `wohnung_id`), Laptop-Tunnel `POST /api/stations/:id/tunnel` | nur wer in der Einheit **wohnt**, ab `gueltig_ab` (Rolle `mieter`/`bewohner`, oder `eigentuemer` bei Selbstbewohnung; nicht `verwalter`); T/P alles. Regel: `api/lib/isp-zugang.js`, Matrix: [`wiki/berechtigungen.md`](../wiki/berechtigungen.md) 2.6 |
+| ISP: alle WLAN-Passwörter | `GET /api/wifi?alle=1` → `allPpsks` (ohne `alle` nur `kann_alle_sehen`) | T/P, **protokolliert** (Bereich `isp`, mit der Karte auch Kartenprotokoll) |
+| ISP: WLAN-Passwort eines privaten Netzes | `GET /api/isp/vlan-requests/:id/wlan-passwort` | Antragsteller, Mitnutzer; T/P fremde **protokolliert**. In `GET /api/isp/vlan-requests` stehen fremde Passwörter nicht mehr (`has_wlan_password`) |
+| ISP: VPN-Zugang anlegen | `POST /api/isp/vpn-accounts` `{ vlan, bezeichnung, public_key? }` | mit `public_key` (Base64, 44 Zeichen): Schlüssel bleibt auf dem Gerät, Antwort `schluessel: 'geraet'`, `config_vorlage` mit Platzhalter `%PRIVATKEY%`, kein `config`; ohne: Rückfall, Server erzeugt den Schlüssel, Antwort `schluessel: 'server'`, `config`, `hinweis` |
+| ISP: VPN-Konfiguration, QR | `GET /api/isp/vpn-accounts/:id/config`, `…/qr` | Besitzer; T/P fremde **protokolliert**. 409 bei Schlüssel auf dem Gerät, 410 bei gesperrtem Zugang |
+| ISP: VPN beim Auszug | `GET /api/isp/vpn-accounts/wohnsitz` (Liste, sperrt nie), `POST /api/isp/vpn-accounts/:id/sperren` `{ grund }` | T/P. Täglicher Abgleich und nach Kontakt-Änderungen sperrt Zugänge von Personen, die seit 28.11.2026 als Bewohner gesehen wurden und nicht mehr wohnen; Kontolöschung sperrt alle der Adresse. Sperren = Peer bei wg-control entfernt, Zeile bleibt (`gesperrt_am`, `gesperrt_grund`). `VPN_AUSZUG_SPERREN=aus`: nur melden |
+| ISP: Protokoll | `GET /api/isp/protokoll?limit=` | T/P |
+| ISP: „nur meine“ | `?nur=meine` an `GET /api/isp/vpn-accounts`, `/vlan-requests`, `/mailbox-requests` | auch T/P bekommen nur die eigenen; Antwort `nur_meine: true` |
 | NOC | `/api/isp/noc/dashboard`, `/noc/unifi` | T/P (Token-Wandbild siehe `NOC_PUBLIC_TOKEN`) |
 | Proxmox, PVE | `/api/proxmox/*`, `GET/POST/DELETE /api/pve-messages…` | T/P |
 | PBX | `/api/pbx/ring-members`, `config`, `calls`, `trunk-status`, `test-call` | T/P |

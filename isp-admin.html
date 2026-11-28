@@ -88,6 +88,11 @@
           <button onclick="openVpnModal()" class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm">+ VPN-Konto anlegen</button>
         </div>
         <div id="vpn-list" class="bg-white rounded-lg shadow overflow-x-auto"></div>
+        <div class="flex gap-3 mt-3 text-xs">
+          <button onclick="vpnWohnsitzPruefen()" class="text-blue-600 hover:underline">Zugänge ohne Wohnsitz prüfen</button>
+          <button onclick="ispProtokoll()" class="text-blue-600 hover:underline">Protokoll: angesehene Passwörter und Konfigurationen</button>
+        </div>
+        <div id="vpn-wohnsitz" class="mt-2"></div>
       </div>
 
       <!-- Mailserver/PMG -->
@@ -598,7 +603,8 @@
           ${v.subnet_v4 ? `<div>Subnet: ${esc(v.subnet_v4)}</div>` : ''}
           ${v.dhcp_gateway ? `<div>DHCP-GW: ${esc(v.dhcp_gateway)}</div>` : ''}
           ${v.unifi_network_id ? `<div>UniFi-Net: <span class="font-mono">${esc(v.unifi_network_id.slice(-8))}</span></div>` : ''}
-          ${v.wlan_password ? `<div>WLAN-PW: <code class="bg-yellow-50 px-1 rounded">${esc(v.wlan_password)}</code></div>` : ''}
+          ${v.wlan_password ? `<div>WLAN-PW: <code class="bg-yellow-50 px-1 rounded">${esc(v.wlan_password)}</code></div>`
+            : v.has_wlan_password ? `<div>WLAN-PW: <button onclick="vlanPwZeigen(${v.id}, this)" class="text-blue-600 hover:underline" title="Wird protokolliert">anzeigen</button></div>` : ''}
           ${v.ablehnung_grund ? `<div class="text-red-700">Ablehnung: ${esc(v.ablehnung_grund)}</div>` : ''}
         </div>
         ${mits.length > 0 ? `<div class="mt-2 text-xs text-gray-500">Mitnutzer: ${mits.map(e => `<span class="font-mono">${esc(e)}</span>`).join(', ')}</div>` : ''}
@@ -1539,6 +1545,14 @@
     await loadRp();
   }
 
+  // WLAN-Passwort eines fremden privaten Netzes: einzeln holen, die API protokolliert das.
+  async function vlanPwZeigen(id, knopf) {
+    const r = await AuthentikAuth.apiFetch('/api/isp/vlan-requests/' + id + '/wlan-passwort');
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { alert('Fehler: ' + (d.error || r.status)); return; }
+    knopf.outerHTML = `<code class="bg-yellow-50 px-1 rounded">${esc(d.wlan_password)}</code>`;
+  }
+
   // === VPN-Konten ===
   async function loadVpns() {
     const r = await AuthentikAuth.apiFetch('/api/isp/vpn-accounts');
@@ -1568,14 +1582,46 @@
           <td class="px-3 py-2 text-xs">${v.bezeichnung ? esc(v.bezeichnung) : '<span class="text-gray-400 italic">—</span>'} <button onclick="renameVpn(${v.id})" class="text-indigo-600 hover:underline" title="Bezeichnung ändern">✎</button></td>
           <td class="px-3 py-2 text-xs"><span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-mono">${vpnVlanFromNotizen(v.notizen)}</span></td>
           <td class="px-3 py-2 font-mono text-xs">${esc(v.assigned_ip || '—')}</td>
-          <td class="px-3 py-2"><span class="text-xs ${v.active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'} px-2 py-0.5 rounded">${v.active ? 'aktiv' : 'inaktiv'}</span></td>
+          <td class="px-3 py-2"><span class="text-xs ${v.active && !v.gesperrt ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'} px-2 py-0.5 rounded" title="${esc(v.gesperrt_grund || '')}">${v.gesperrt ? 'gesperrt' : v.active ? 'aktiv' : 'inaktiv'}</span>
+            ${v.schluessel === 'geraet' ? '<span class="text-xs text-green-700 ml-1" title="Privater Schlüssel nur auf dem Gerät">🔒 Gerät</span>' : v.schluessel === 'server' ? '<span class="text-xs text-amber-700 ml-1" title="Rückfall: privater Schlüssel liegt auf dem Server">Server</span>' : ''}</td>
           <td class="px-3 py-2 text-xs">${fmtDt(v.last_connect_at)}</td>
           <td class="px-3 py-2 text-right space-x-2">
-            <button onclick="showVpnConfig(${v.id})" class="text-xs text-blue-600 hover:underline">.conf</button>
-            <button onclick="showVpnQr(${v.id})" class="text-xs text-blue-600 hover:underline">QR</button>
+            ${!v.gesperrt && v.schluessel !== 'geraet' ? `<button onclick="showVpnConfig(${v.id})" class="text-xs text-blue-600 hover:underline" title="Bei fremden Konten wird das protokolliert">.conf</button>
+            <button onclick="showVpnQr(${v.id})" class="text-xs text-blue-600 hover:underline" title="Bei fremden Konten wird das protokolliert">QR</button>` : ''}
+            ${!v.gesperrt ? `<button onclick="sperrVpn(${v.id})" class="text-xs text-amber-700 hover:underline" title="Peer entfernen, Eintrag bleibt">Sperren</button>` : ''}
             <button onclick="delVpn(${v.id})" class="text-xs text-red-600 hover:underline">Löschen</button>
           </td>
         </tr>`).join('')}</tbody></table>`;
+  }
+  async function sperrVpn(id) {
+    const grund = prompt('VPN-Zugang sperren: Der Peer wird vom WG-Server entfernt, der Eintrag bleibt. Grund?', 'kein Wohnsitz mehr');
+    if (grund === null) return;
+    const r = await AuthentikAuth.apiFetch('/api/isp/vpn-accounts/' + id + '/sperren', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ grund }) });
+    if (!r.ok) { alert('Fehler: ' + ((await r.json().catch(() => ({}))).error || r.status)); return; }
+    await loadVpns();
+  }
+  // Zugaenge von Personen, die (so) nicht mehr wohnen - der Altbestand wird nur gemeldet.
+  async function vpnWohnsitzPruefen() {
+    const box = document.getElementById('vpn-wohnsitz');
+    box.innerHTML = '<p class="text-xs text-gray-500">Prüfe…</p>';
+    const r = await AuthentikAuth.apiFetch('/api/isp/vpn-accounts/wohnsitz');
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { box.innerHTML = `<p class="text-xs text-red-600">${esc(d.error || r.status)}</p>`; return; }
+    const zeile = z => `<li><span class="font-mono">#${z.id}</span> ${esc(z.user_email || '?')} · ${esc(z.art_text)}${z.vlan ? ' · VLAN ' + esc(z.vlan) : ''}${z.station ? ' · Station' : ''}${z.bezeichnung ? ' · ' + esc(z.bezeichnung) : ''}</li>`;
+    box.innerHTML = `<div class="text-xs space-y-2">
+      <p>${d.wohnen} Zugänge gehören Bewohnern. Beim Auszug sperrt der tägliche Abgleich ${d.automatisch_sperren ? 'selbst' : 'nicht (VPN_AUSZUG_SPERREN=aus)'}.</p>
+      ${d.sperren_faellig.length ? `<div><strong>Wird beim nächsten Abgleich gesperrt (${d.sperren_faellig.length}):</strong><ul class="list-disc ml-5">${d.sperren_faellig.map(zeile).join('')}</ul></div>` : ''}
+      <div><strong>Ohne Wohnsitz, nur gemeldet (${d.melden.length}):</strong> ${d.melden.length ? `<ul class="list-disc ml-5">${d.melden.map(zeile).join('')}</ul><p class="text-gray-500">Diese sperrt niemand von selbst. Sperren in der Liste oben.</p>` : 'keine'}</div>
+    </div>`;
+  }
+  async function ispProtokoll() {
+    const box = document.getElementById('vpn-wohnsitz');
+    const r = await AuthentikAuth.apiFetch('/api/isp/protokoll?limit=100');
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { box.innerHTML = `<p class="text-xs text-red-600">${esc(d.error || r.status)}</p>`; return; }
+    const e = d.eintraege || [];
+    box.innerHTML = e.length ? `<table class="text-xs w-full"><tbody>${e.map(x => `<tr class="border-b"><td class="pr-2 whitespace-nowrap">${fmtDt(x.zeit)}</td><td class="pr-2">${esc(x.name || x.email || '?')} (${esc(x.art || '')})</td><td class="pr-2">${esc(x.aktion)}</td><td>${esc(x.ziel || '')}${x.detail ? ' · ' + esc(x.detail) : ''}</td></tr>`).join('')}</tbody></table>`
+      : '<p class="text-xs text-gray-500">Noch keine Einträge.</p>';
   }
   async function delVpn(id) {
     if (!confirm('VPN-Konto löschen? Der Peer wird sofort vom WG-Server entfernt.')) return;
@@ -1700,7 +1746,7 @@
   }
   async function showVpnConfig(id) {
     const r = await AuthentikAuth.apiFetch('/api/isp/vpn-accounts/' + id + '/config');
-    if (!r.ok) { alert('Fehler: ' + r.statusText); return; }
+    if (!r.ok) { let t = r.statusText; try { t = (await r.json()).error || t; } catch {} alert('Fehler: ' + t); return; }
     const cfg = await r.text();
     const v = vpnAccounts.find(x => x.id === id) || {};
     showCreatedConfig({ ...v, config: cfg });

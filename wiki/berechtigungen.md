@@ -1,6 +1,6 @@
 # Berechtigungen – wer darf was im Rosenweg-Portal
 
-Stand: 17.11.2026 (nach der Sicherheitsprüfung, PR #23). Massgebend ist, was der Code
+Stand: 28.11.2026 (ISP nur für Bewohner; vorher 17.11.2026, Sicherheitsprüfung PR #23). Massgebend ist, was der Code
 der API durchsetzt (`api/server.js`, `api/middleware/auth.js`, `api/lib/groups.js`,
 `api/routes/*.js`). Die Grundsätze und Grenzwerte stehen in
 [`docs/sicherheit.md`](../docs/sicherheit.md) (Abschnitte 3, 4.3 und 5), die Routen
@@ -248,7 +248,14 @@ Details: [`docs/energie-api.md`](../docs/energie-api.md) Abschnitt 8.
 | Bereich | Anonym | Bewohner/Mieter | Eigentümer | Ausschuss | Verwaltung | Technik | Präsident |
 |---|---|---|---|---|---|---|---|
 | ISP: eigene Reverse-Proxy-Einträge, Weiterleitungen, Mail-Relays | — | ✅ eigene, Freigabe durch Admin | ✅ eigene | ✅ eigene | ✅ eigene | ✅ alle | ✅ alle |
-| ISP: eigene VPN-Konten (max. 10, 10 / Std.) | — | ✅ eigene VLANs | ✅ | ✅ | ✅ | ✅ | ✅ |
+| ISP: Haus-WLAN (Passwort, QR) | Gast-WLAN (offen) | ✅ nur wer dort **wohnt**, ab Einzug¹ | nur wenn selbst bewohnt¹ | wie Rolle | — (auch nicht als Wohnungs-Verwalter)¹ | ✅ | ✅ |
+| ISP: alle WLAN-Passwörter (Häuser und private Netze) | — | — | — | — | — | 👁 auf Knopfdruck, **protokolliert**² | 👁 dito² |
+| ISP: WLAN-Passwort des eigenen Netzes | — | ✅ Antragsteller, Mitnutzer | dito | dito | dito | 👁 fremde: protokolliert² | 👁 dito² |
+| ISP: eigener Anschluss ansehen, Geräte-MAC ändern | — | ✅ nur wer dort wohnt, ab Einzug¹ | nur wenn selbst bewohnt¹ | wie Rolle | —¹ | ✅ alle, MAC auch leeren | ✅ dito |
+| ISP: eigene VPN-Konten anlegen (max. 10, 10 / Std.) | — | ✅ nur ins VLAN der Einheit, in der man wohnt, ab Einzug¹ | nur wenn selbst bewohnt¹ | wie Rolle | —¹ | ✅ für jede Person, jedes VLAN | ✅ dito |
+| ISP: VPN-Konfiguration und QR | — | 👁 eigene (nur Schlüssel vom Server) | dito | dito | dito | 👁 alle, fremde **protokolliert**² | 👁 dito² |
+| ISP: VPN-Zugänge sperren, Liste „ohne Wohnsitz“, ISP-Protokoll | — | — | — | — | — | ✅ | ✅ |
+| ISP: Netz-Antrag für eine Einheit | — | ✅ Einheit, in der man wohnt¹ | nur wenn selbst bewohnt¹ | wie Rolle | —¹ | ✅ alle | ✅ alle |
 | ISP: Postfach beantragen (10 / Std., max. 3 automatisch) | — | ✅ wenn Relay die Gruppe erlaubt | ✅ | ✅ | ✅ | ✅ | ✅ |
 | ISP-Admin (Freigaben, Abonnenten, feste IPs, VLAN, Router, Wartung) | Wartungsmeldungen, Status-Zusammenfassung 👁 | — | — | — | — | ✅ | ✅ |
 | NOC | gekürzte Sicht (falls `NOC_PUBLIC_OPEN`) | — | — | — | — | 👁 voll | 👁 voll |
@@ -262,6 +269,36 @@ Details: [`docs/energie-api.md`](../docs/energie-api.md) Abschnitt 8.
 | Stationen verwalten | — | — | — | — | — | ✅ | ✅ |
 | Rechteverwaltung (`rechteverwaltung`) | — | — | — | (R) | (R) | ✅ | ✅ |
 | MCP-Aufrufprotokoll | — | — | — | — | — | 👁 | 👁 |
+
+¹ **Nur Bewohner** (Entscheid Stefan 28.11.2026, `api/lib/isp-zugang.js`): Haus-WLAN,
+Anschluss, VPN und Netz-Anträge richten sich allein nach den Wohnungs-Kontakten, nicht
+nach den Authentik-Gruppen und nicht mehr nach der Strasse im Profil. „Wohnt“ heisst:
+Rolle `mieter` oder `bewohner`, oder `eigentuemer` bei `bewohnt_von = 'eigentuemer'`;
+Kontakt nicht archiviert; `gueltig_ab` leer oder erreicht. Nicht bewohnende Eigentümer,
+Wohnungs-Verwalter (`verwalter`) und `sonstige` haben keinen Zugriff; künftige Mieter
+erst ab dem Einzugsdatum. Reine Parkplatz-Nutzer bekommen das Kooperations-WLAN
+(RK-Clients) nach derselben Regel. Eigene Netze (Antragsteller, Mitnutzer) hängen nicht
+am Wohnsitz.
+**Beim Auszug** (Kontakt archiviert, Rolle oder `bewohnt_von` geändert, Umzug in ein
+anderes Haus) sperrt der Abgleich (täglich und kurz nach jeder Kontakt-Änderung) die
+VPN-Zugänge der Person: Peer bei wg-control entfernt, Eintrag bleibt mit `gesperrt_am`.
+Bei der **Kontolöschung** werden alle VPN-Zugänge der Adresse gesperrt. Zugänge von
+Personen, die schon vor dem 28.11.2026 ausgezogen waren oder nie dort wohnten, sperrt
+niemand von selbst: sie stehen in `GET /api/isp/vpn-accounts/wohnsitz` (ISP-Admin →
+VPN → „Zugänge ohne Wohnsitz prüfen“). `VPN_AUSZUG_SPERREN=aus`: nur melden.
+**VPN-Schlüssel:** Das Gerät erzeugt den Schlüssel und schickt nur den öffentlichen
+(`public_key`); der Server speichert dann keinen privaten. Ohne ihn erzeugt der Server
+den Schlüssel (Rückfall für ältere Geräte, `schluessel = 'server'`, gekennzeichnet).
+
+² **Protokoll:** Sieht Technik oder Präsident alle WLAN-Passwörter (`/api/wifi?alle=1`),
+das WLAN-Passwort eines fremden privaten Netzes
+(`/api/isp/vlan-requests/:id/wlan-passwort`) oder die Konfiguration bzw. den QR-Code
+eines fremden VPN-Zugangs an, entsteht ein Eintrag in `admin_protokoll` (Bereich `isp`,
+`GET /api/isp/protokoll`), mit der Karte zusätzlich im Kartenprotokoll
+(`admin-mit-karte`) mit Quittung. Gesperrt wird nichts (Regel „Karte wie Schlüssel“).
+Die Listen der Netz-Anträge enthalten keine fremden WLAN-Passwörter mehr.
+**Filter:** `?nur=meine` an `GET /api/isp/vpn-accounts`, `/vlan-requests` und
+`/mailbox-requests` liefert auch Technik und Präsident nur die eigenen (Apps, „Mein Zugang“).
 
 ---
 

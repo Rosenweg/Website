@@ -397,7 +397,7 @@ async function loadWlan() {
         const wlans = (data.wlans || []).sort((a, b) => a.hausNr - b.hausNr);
         console.info('[WLAN] response wlans:', wlans.length, wlans.map(w => 'RW'+w.hausNr).join(','));
         if (!wlans.length) {
-          console.warn('[WLAN] /api/wifi liefert keine wlans — pruefe Authentik-Gruppen (r{N}-bewohner) oder users.strasse');
+          console.warn('[WLAN] /api/wifi liefert keine wlans — Haus-WLAN gibt es nur fuer Personen, die in einer Wohnung wohnen (Kontakt mit Rolle und gueltig_ab in der Objektverwaltung)');
           return;
         }
         // Mein-Anschluss-Sektion unhidden falls noch nicht passiert (Subscribers
