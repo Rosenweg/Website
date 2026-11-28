@@ -3637,6 +3637,21 @@ def _loeschen_nextcloud(conn, email, k):
     return {"widerrufen": exts}
 
 
+def _loeschen_nextcloud_konto(conn, email, k):
+    """Das Nextcloud-Konto selbst loeschen (nicht nur die App-Passwoerter): nc-token auf CT 104,
+    POST /konto-loeschen. Kein Konto mit dieser E-Mail -> erledigt. Admin-Konten loescht nc-token
+    nie (409 -> Schritt bleibt offen, die Technik sieht ihn auf der Loeschungen-Seite)."""
+    if not NC_TOKEN_URL:
+        raise RuntimeError("nc-token nicht eingerichtet")
+    r = requests.post(f"{NC_TOKEN_URL}/konto-loeschen", json={"email": email},
+                      headers={"X-NC-Token-Secret": NC_TOKEN_SECRET}, timeout=120)
+    if r.status_code == 404:
+        return {"konten": 0}
+    if r.status_code != 200:
+        raise RuntimeError(f"nc-token HTTP {r.status_code}")
+    return {"konten": len((r.json() or {}).get("geloescht") or [])}
+
+
 def _loeschen_sip(conn, email, k):
     person = conn.execute("DELETE FROM telefon_sip_person WHERE lower(email) = ?", (email,)).rowcount
     privat = conn.execute("DELETE FROM telefon_sip_privat WHERE lower(email) = ?", (email,)).rowcount
@@ -3715,6 +3730,7 @@ def _loeschen_log(conn, email, k):
 PERSON_LOESCHEN_SCHRITTE = (
     ("sitzungen", _loeschen_sitzungen),     # abmelden (_telefon_abmelden)
     ("nextcloud", _loeschen_nextcloud),     # App-Passwoerter widerrufen (nc-token /widerrufen)
+    ("nextcloud_konto", _loeschen_nextcloud_konto),  # Nextcloud-Konto loeschen (nc-token /konto-loeschen)
     ("sip", _loeschen_sip),                 # SIP-Zugaenge weg, pjsip_phones.conf neu + reload
     ("combox", _loeschen_combox),           # persoenliche Sprachnachrichten (VM_PERSON_DIR)
     ("nummern", _loeschen_nummern),         # Nummer freigeben, Website melden
@@ -3722,26 +3738,42 @@ PERSON_LOESCHEN_SCHRITTE = (
     ("anrufe", _loeschen_calls),            # anonymisieren
     ("protokoll", _loeschen_log),           # anonymisieren
 )
+# Ohne Angabe von schritte (aeltere Haupt-API): wie bisher, ohne das Nextcloud-Konto. Die
+# Haupt-API verlangt nextcloud_konto nur, wenn kein anderes Konto mit der Adresse besteht.
+PERSON_LOESCHEN_STANDARD = tuple(n for n, _ in PERSON_LOESCHEN_SCHRITTE if n != "nextcloud_konto")
 
 
 @app.post("/api/pbx/person/loeschen")
 def pbx_person_loeschen():
     """Haupt-API (X-PBX-Secret) nach dem Loeschen eines Kontos (Loeschungen, processAuthentiKDeletions
     -> lokalesKontoNachLoeschung): alles Persoenliche der Person auf der Anlage, ueber die
-    bestehenden Ablaeufe (siehe PERSON_LOESCHEN_SCHRITTE). {email} ->
-    {ok (alle Schritte ok), hintergrund, schritte: {name: {ok, ..., fehler?}}}"""
+    bestehenden Ablaeufe (siehe PERSON_LOESCHEN_SCHRITTE). {email, schritte?, nummern?} ->
+    {ok (alle Schritte ok), hintergrund, nummern, schritte: {name: {ok, ..., fehler?}}}
+    schritte: nur diese (Wiederholung durch den Nachlauf der Haupt-API); nummern: Nummern
+    aus einem frueheren Versuch (dann schon freigegeben, Anrufe trotzdem anonymisieren)."""
     err = require_agi()
     if err:
         return err
-    email = str((request.get_json(silent=True) or {}).get("email") or "").strip().lower()
+    body = request.get_json(silent=True) or {}
+    email = str(body.get("email") or "").strip().lower()
     if not email or "@" not in email or len(email) > 320:
         return jsonify({"error": "email fehlt"}), 400
+    namen = {n for n, _ in PERSON_LOESCHEN_SCHRITTE}
+    verlangt = body.get("schritte")
+    if verlangt is None:
+        verlangt = PERSON_LOESCHEN_STANDARD
+    elif not isinstance(verlangt, list) or not verlangt or any(not isinstance(s, str) or s not in namen for s in verlangt):
+        return jsonify({"error": "schritte ungueltig"}), 400
+    frueher = [str(n) for n in (body.get("nummern") or []) if re.fullmatch(r"\d{2,15}", str(n))] \
+        if isinstance(body.get("nummern"), list) else []
     conn = db.connect()
     try:
-        k = {"nummern": [r["nummer"] for r in conn.execute(
-            "SELECT nummer FROM personen_nummern WHERE lower(email) = ? ORDER BY nummer", (email,))]}
+        k = {"nummern": sorted({r["nummer"] for r in conn.execute(
+            "SELECT nummer FROM personen_nummern WHERE lower(email) = ? ORDER BY nummer", (email,))} | set(frueher))}
         schritte = {}
         for name, schritt in PERSON_LOESCHEN_SCHRITTE:
+            if name not in verlangt:
+                continue
             try:
                 schritte[name] = {"ok": True, **schritt(conn, email, k)}
             except Exception as e:  # noqa: BLE001 - weiter mit dem Rest, Schritt einzeln melden
@@ -3754,7 +3786,8 @@ def pbx_person_loeschen():
                     {n: ("ok" if s["ok"] else "FEHLER") for n, s in schritte.items()})
     return jsonify({"ok": all(s["ok"] for s in schritte.values()),
                     "hintergrund": bool(schritte.get("daten", {}).get("hintergrund")),
-                    "schritte": schritte, "reihenfolge": [n for n, _ in PERSON_LOESCHEN_SCHRITTE]})
+                    "nummern": k["nummern"], "schritte": schritte,
+                    "reihenfolge": [n for n, _ in PERSON_LOESCHEN_SCHRITTE if n in verlangt]})
 
 
 @app.delete("/api/telefon/ich/hintergrund")
