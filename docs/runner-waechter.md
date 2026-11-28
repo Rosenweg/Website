@@ -133,3 +133,36 @@ API (`routes/nocrunner.js`) meldet an die Technik-WhatsApp-Gruppe (Ersatz: Mail 
 beim Android-Dauertest. **Höchstens eine Meldung pro Stunde**; ist der Stau abgebaut, folgt einmal
 eine Entwarnung. Der Wächter zählt die langen Jobs (`STAU_S`, 1200) und liefert sie im Bericht mit;
 im Trockenlauf wird nichts gemeldet.
+## Runner-Wahl in den Workflows (alle Org-Repos)
+
+Der wiederverwendbare Workflow `Rosenweg/rosenweg-basis/.github/workflows/runner-wahl.yml`
+entscheidet in einem Sekunden-Job auf `ubuntu-latest`, ob die folgenden Linux- und
+Windows-Jobs auf unseren Runnern oder auf GitHub laufen. Ausgaben `linux` und
+`windows` (JSON für `fromJSON`).
+
+| Fall | Linux | Windows |
+|---|---|---|
+| Fork-PR (Head-Repo ≠ Repo), egal ob öffentlich oder privat | `ubuntu-latest` | `windows-latest` |
+| privates Repo | `[self-hosted, Linux, rosenweg]` | `[self-hosted, Windows, rosenweg-windows]` |
+| öffentliches Repo | eigene, wenn ein Runner online und nicht busy ist **oder** ein Runner aus ist (der Wächter kann ihn zuschalten); sonst `ubuntu-latest` | eigene, wenn win-runner online und nicht busy; sonst `windows-latest` |
+| kein Zugang zur Runner-Liste (kein Secret, API-Fehler) | `ubuntu-latest` | `windows-latest` |
+
+macOS und iOS bleiben immer bei GitHub (`macos-latest`).
+
+Die Runner-Liste liest der Job mit der GitHub-App (`PAKETE_APP_ID`/`PAKETE_APP_KEY`,
+Org-Secrets für alle Repos; dieselbe App wie „Rosenweg Automatik“, Berechtigung
+Organisation → Self-hosted runners: Read). Aufrufer reichen die beiden Secrets
+ausdrücklich weiter (`secrets:`), auch bei Pull Requests; Fork-PRs und Dependabot
+bekommen sie nie, brauchen sie aber auch nicht.
+
+Einbau in einem Workflow: Job `wahl` mit `uses:` auf den Workflow, bei jedem Job
+`needs: wahl` und `runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}` (bzw.
+`.windows`). Ausdrücklich `self-hosted` festgelegte Jobs (Deploy, Stationen) bleiben,
+wie sie sind. Die Flutter-Apps nutzen die Wahl über `rosenweg-basis/app.yml`; ihr
+Aufrufer reicht dazu `PAKETE_APP_ID`/`PAKETE_APP_KEY` immer weiter. Die Kotlin-Apps
+rufen `Website/android-release.yml` mit `secrets: inherit`.
+
+Grenzen: Ist der Wächter durch die Lastgrenze gebremst, kann ein Job auf
+„zuschaltbar“ warten, obwohl GitHub frei wäre. Alle Jobs eines Laufs entscheiden
+nur einmal; viele gleichzeitige Läufe sehen alle denselben freien Runner und
+stauen sich dann auf den eigenen, bis der Wächter zugeschaltet hat.
