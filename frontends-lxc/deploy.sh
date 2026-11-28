@@ -104,7 +104,8 @@ esac
 
 mkdir -p "$WEBROOT"
 # .alt = Sicherungen von scripts/rw-web-ausrollen.sh — nicht mitloeschen
-rsync -a --delete --filter='P *.alt' "$build/" "$WEBROOT/"
+# /app/ = Web-Versionen der Apps (scripts/rw-web-ausrollen.sh --app), nicht aus dem Repo
+rsync -a --delete --filter='P *.alt' --filter='P /app/' "$build/" "$WEBROOT/"
 chown -R www-data:www-data "$WEBROOT"
 
 # 4) Config testen + reload

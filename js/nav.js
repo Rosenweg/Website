@@ -18,6 +18,12 @@ const TELEFON_NAV_GRUPPEN = 'bewohner,eigentuemer,ausschuss,technik,praesident,v
 // also Bewohner/Eigentümer, dazu das Seitenrecht „waschküche“.
 const WASCH_NAV_GRUPPEN = 'waschküche,bewohner,eigentuemer,technik,praesident';
 
+// Web-Versionen der Rosenweg-Apps (Flutter, `flutter build web`): ausgerollt nach
+// /app/<kurzname>/ (scripts/rw-web-ausrollen.sh --app), mit der Anmeldung der
+// Website (eine Anmeldung für alles). Absolute Adresse, damit der Eintrag auch
+// auf den Subdomains (stwegN., admin., ausschuss.) stimmt.
+const APP_WEB = 'https://rosenweg4303.ch/app/';
+
 // Menü „Verwaltung“ (Hausverwaltung je STWEG: stwegN-verwaltung, meg-verwaltung,
 // api/lib/groups.js VERWALTUNG_GROUPS; ÜBERGANG: alte Gruppe „Verwaltung“). Das
 // Menü selbst erscheint nur für diese Gruppen (data-nur-gruppe, auch nicht für Technik –
@@ -37,6 +43,8 @@ const VERWALTUNG_NAV = [
   { label: '📝 Vollmachten', href: 'vollmachten.html', key: 'vollmachten', permAny: 'vollmachten' },
   { label: '💸 Auslagen', href: 'auslagen.html', key: 'auslagen', permAny: 'auslagen' },
   { label: '🏗 Projekte', href: 'projekte.html', key: 'projekte', permAny: 'projekte' },
+  // Mitteilungen der STWEG schreiben: Rosenweg STWEG (Web-Version), Rechte wie in der App
+  { label: '📣 STWEG-Mitteilungen', href: APP_WEB + 'stweg/', key: 'stweg-mitteilungen', permAny: 'stweg-mitteilungen' },
   { label: '🧺 Waschküche (Belegung)', href: 'waschkueche.html', key: 'waschküche', permAny: 'waschküche-admin' },
   { label: '🔢 Zähler & Verbrauch', href: 'zaehler.html', key: 'zähler', permAny: 'zähler' },
   { label: '⚡ Energie-Monitor', href: 'energie-monitor.html', key: 'energie', permAny: 'energie-monitor' },
@@ -391,6 +399,7 @@ const RosenwegNav = {
       { href: 'unterschriftenliste-ruecklaeufe.html', label: 'Unterschriften-Rückläufe', group: 'Verwaltung', perm: 'wohnungsverwaltung', aud: ['admin', 'ausschuss'] },
       { href: 'grundbuch.html', label: 'Grundbuch', group: 'Verwaltung', perm: 'grundbuch' },
       { href: 'stweg-module.html', label: 'STWEG-Module', group: 'Verwaltung', perm: 'stweg-module', aud: ['admin', 'ausschuss'] },
+      { href: APP_WEB + 'stweg/', label: 'STWEG-Mitteilungen', group: 'Verwaltung', perm: 'stweg-mitteilungen', aud: ['admin', 'ausschuss'] },
       { href: 'mail-compose.html', label: 'Mail schreiben', group: 'Mail-Betrieb', perm: 'mail-compose' },
     ];
   },
@@ -538,6 +547,7 @@ const RosenwegNav = {
               ${stwegReklD}
               <a href="${base}mein-telefon.html" data-perm-any="${TELEFON_NAV_GRUPPEN}" class="${dropA('mein-telefon')} block px-4 py-2 text-sm">📞 Mein Telefon</a>
               <a href="${base}smartphones.html" data-perm-any="${TELEFON_NAV_GRUPPEN}" class="${dropA('smartphones')} block px-4 py-2 text-sm">📱 Smartphones</a>
+              <a href="${APP_WEB}wetter/" class="block px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">🌦 Wetter</a>
               <a href="${base}apps.html" class="${dropA('apps')} block px-4 py-2 text-sm">📲 Rosenweg-Apps</a>
               <a href="${base}waschkueche.html" data-perm-any="${WASCH_NAV_GRUPPEN}" class="${dropA('waschküche')} block px-4 py-2 text-sm">🧺 Waschküche</a>
               <a href="${base}salz.html" data-perm-any="${SALZ_NAV_GRUPPEN}" class="${dropA('salz')} block px-4 py-2 text-sm">🧂 Salzvorrat</a>
@@ -561,7 +571,7 @@ const RosenwegNav = {
               <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
             </button>
             <div class="nav-dropdown-menu hidden absolute left-0 mt-1 w-60 bg-white rounded-lg shadow-lg border py-1 z-50">
-              ${VERWALTUNG_NAV.map(v => `<a href="${base}${v.href}" data-perm-any="${v.permAny}" class="${dropA(v.key)} block px-4 py-2 text-sm">${v.label}</a>`).join('\n              ')}
+              ${VERWALTUNG_NAV.map(v => `<a href="${/^https?:/.test(v.href) ? v.href : base + v.href}" data-perm-any="${v.permAny}" class="${dropA(v.key)} block px-4 py-2 text-sm">${v.label}</a>`).join('\n              ')}
             </div>
           </div>
 
@@ -615,6 +625,7 @@ const RosenwegNav = {
         ${stwegReklM}
         <a href="${base}mein-telefon.html" data-perm-any="${TELEFON_NAV_GRUPPEN}" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📞 Mein Telefon</a>
         <a href="${base}smartphones.html" data-perm-any="${TELEFON_NAV_GRUPPEN}" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📱 Smartphones</a>
+        <a href="${APP_WEB}wetter/" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🌦 Wetter</a>
         <a href="${base}apps.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📲 Rosenweg-Apps</a>
         <a href="${base}waschkueche.html" data-perm-any="${WASCH_NAV_GRUPPEN}" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🧺 Waschküche</a>
         <a href="${base}salz.html" data-perm-any="${SALZ_NAV_GRUPPEN}" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🧂 Salzvorrat</a>
@@ -629,7 +640,7 @@ const RosenwegNav = {
 
         <div data-nur-gruppe="${VERWALTUNG_NAV_GRUPPE}">
           <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Verwaltung</div>
-          ${VERWALTUNG_NAV.map(v => `<a href="${base}${v.href}" data-perm-any="${v.permAny}" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">${v.label}</a>`).join('\n          ')}
+          ${VERWALTUNG_NAV.map(v => `<a href="${/^https?:/.test(v.href) ? v.href : base + v.href}" data-perm-any="${v.permAny}" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">${v.label}</a>`).join('\n          ')}
         </div>
 
         <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Bereiche</div>
