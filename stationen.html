@@ -899,11 +899,11 @@
         // Standort: Haus und Freitext. Bei Windows ist das Haus das, wonach
         // sich der Drucker richtet — fehlt es, steht das deutlich da.
         function standortZelle(s) {
-            const teile = [s.haus ? `Rosenweg ${s.haus}` : '', s.standort || ''].filter(Boolean);
+            const teile = [s.haus ? `Rosenweg ${s.haus}` : 'Kooperation', s.standort || ''].filter(Boolean);
             if (istWin(s) && !s.haus) {
                 const titel = 'Weder OU noch Name verraten das Haus. Unter Aktionen → Einstellen … Haus und Drucker wählen'
                     + (standardDrucker(s) ? '.' : '; bis dahin lässt Windows seinen bisherigen Standarddrucker stehen und fällt nur, wenn es den nicht gibt, auf DruckerR9 zurück.');
-                return `${teile.length ? escape(teile.join(' · ')) + '<br>' : ''}<span title="${escape(titel)}" class="px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800">Standort fehlt</span>`;
+                return `${teile.length ? escape(teile.join(' · ')) + '<br>' : ''}<span title="${escape(titel)}" class="px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800">Haus für Drucker fehlt</span>`;
             }
             const herkunft = s.ad_standort_regel ? `<div class="text-xs text-gray-400" title="Bei der Aufnahme aus dem AD abgeleitet — seither nur noch hier geändert">aus ${escape(s.ad_standort_regel)}</div>` : '';
             return (teile.length ? escape(teile.join(' · ')) : '—') + herkunft;
@@ -1123,7 +1123,7 @@
             document.getElementById('cfg-notiz').value = s.notiz || '';
             document.getElementById('cfg-kanal').value = ov.updates?.channel || '';
             const hausWahl = document.getElementById('cfg-haus');
-            hausWahl.innerHTML = '<option value="">— kein bestimmtes Haus —</option>'
+            hausWahl.innerHTML = '<option value="">Kooperation (kein bestimmtes Haus)</option>'
                 + HAEUSER.map(n => `<option value="${n}">Rosenweg ${n}</option>`).join('');
             hausWahl.value = s.haus ? String(s.haus) : '';
             document.getElementById('cfg-json').value = JSON.stringify(ov, null, 2);
@@ -2098,7 +2098,7 @@
             document.getElementById('win-standort').value = '';
             document.getElementById('win-notiz').value = '';
             document.getElementById('win-meldung').textContent = '';
-            document.getElementById('win-haus').innerHTML = '<option value="">— kein bestimmtes Haus —</option>'
+            document.getElementById('win-haus').innerHTML = '<option value="">Kooperation (kein bestimmtes Haus)</option>'
                 + HAEUSER.map(n => `<option value="${n}">Rosenweg ${n}</option>`).join('');
             document.getElementById('win-drucker').innerHTML = druckerOptionen('');
             document.getElementById('win-dialog').classList.remove('hidden');
@@ -2141,7 +2141,7 @@
         function ccOeffnen() {
             for (const f of ['cc-name', 'cc-adresse', 'cc-mac', 'cc-standort', 'cc-notiz']) document.getElementById(f).value = '';
             document.getElementById('cc-meldung').textContent = '';
-            document.getElementById('cc-haus').innerHTML = '<option value="">— kein bestimmtes Haus —</option>'
+            document.getElementById('cc-haus').innerHTML = '<option value="">Kooperation (kein bestimmtes Haus)</option>'
                 + HAEUSER.map(n => `<option value="${n}">Rosenweg ${n}</option>`).join('');
             document.getElementById('cc-dialog').classList.remove('hidden');
             document.getElementById('cc-name').focus();
@@ -2211,7 +2211,7 @@
             kioskWartend = null;
             document.getElementById('kiosk-code').value = code;
             for (const f of ['kiosk-name', 'kiosk-standort', 'kiosk-notiz', 'kiosk-pin']) document.getElementById(f).value = '';
-            document.getElementById('kiosk-haus').innerHTML = '<option value="">— kein bestimmtes Haus —</option>'
+            document.getElementById('kiosk-haus').innerHTML = '<option value="">Kooperation (kein bestimmtes Haus)</option>'
                 + HAEUSER.map(n => `<option value="${n}">Rosenweg ${n}</option>`).join('');
             document.getElementById('kiosk-meldung').textContent = '';
             document.getElementById('kiosk-geraet').classList.add('hidden');
