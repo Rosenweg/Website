@@ -4276,9 +4276,14 @@ async function alleEmails(email) {
     return [e, ...r.rows.map(x => x.a)];
   } catch { return [e]; }
 }
-async function unifiUserByEmail(email) {
+// streng: nicht erreichbar bzw. Fehler -> wirft (statt „kein Benutzer“), fuer die Konto-Loeschung
+async function unifiUserByEmail(email, { streng = false } = {}) {
   const kandidaten = await alleEmails(email); if (!kandidaten.length) return null;
-  const users = (await unifiAccessRaw('GET', '/users')).body?.data || [];
+  const antwort = await unifiAccessRaw('GET', '/users');
+  if (streng && antwort.error !== 'not_configured' && !accessOk(antwort)) {
+    throw new Error(antwort.status ? `UniFi Access HTTP ${antwort.status}` : 'UniFi Access nicht erreichbar');
+  }
+  const users = antwort.body?.data || [];
   for (const e of kandidaten) {
     const u = users.find(u => (u.email || u.user_email || '').toLowerCase().trim() === e);
     if (u) return u;
@@ -7172,6 +7177,9 @@ async function authentikKontoPerEmail(email) {
   return (usersData.results || []).find(u => u.email?.toLowerCase() === String(email).toLowerCase()) || null;
 }
 
+// Konto-Loeschung vollstaendig: Frist, Rechte, Nachlauf mit Wiederholung, Aufraeumlauf
+const kontoLoeschung = require('./lib/kontoloeschung');
+
 // Track removed kontakte for delayed Authentik user deletion
 async function trackRemovedKontakte(wohnungId, stweg, oldKontakte, newKontakte) {
   if (!AUTHENTIK_API_TOKEN) return;
@@ -7192,28 +7200,33 @@ async function trackRemovedKontakte(wohnungId, stweg, oldKontakte, newKontakte) 
     );
     if (parseInt(stillExists.rows[0].cnt) > 0) continue; // Still assigned elsewhere
 
-    // Nur reine Bewohner-/Eigentuemer-Konten dieser STWEG vormerken
-    // (Pruefung beim Loeschen wird wiederholt). Fehler -> nicht vormerken.
+    // Nur reine Bewohner-/Eigentuemer-Konten dieser STWEG automatisch loeschen
+    // (Pruefung beim Loeschen wird wiederholt). Konten mit weiteren Gruppen kommen
+    // in die Liste „manuell zu pruefen“ (Entscheid E3d). Fehler -> nicht vormerken.
+    let manuell = false;
     try {
       const konto = await authentikKontoPerEmail(email);
       if (!konto) continue;
       if (!kontoAutoLoeschbar(konto, stweg)) {
-        console.warn(`[Authentik] ${email} nicht zur Loeschung vorgemerkt: Konto hat Gruppen ausserhalb Bewohner/Eigentuemer STWEG ${stweg}`);
-        continue;
+        console.warn(`[Authentik] ${email} manuell zu pruefen: Konto hat Gruppen ausserhalb Bewohner/Eigentuemer STWEG ${stweg}`);
+        manuell = true;
       }
     } catch (e) {
       console.error(`[Authentik] Pruefung vor Loesch-Vormerkung fehlgeschlagen (${email}):`, e.message);
       continue;
     }
 
-    // Schedule for deletion in 30 days
+    // Frist 30 Tage (lib/kontoloeschung.js FRIST_TAGE); manuell zu pruefende Konten
+    // loescht der Lauf nie, das Datum ist dort nur der Zeitpunkt der Vormerkung + Frist.
+    await kontoLoeschung.bereit(pool);
     await pool.query(
-      `INSERT INTO authentik_pending_deletions (email, name, stweg, scheduled_at, reminder_sent)
-       VALUES ($1, $2, $3, NOW() + INTERVAL '30 days', false)
-       ON CONFLICT (email) DO UPDATE SET scheduled_at = NOW() + INTERVAL '30 days', cancelled = false, reminder_sent = false`,
-      [email, k.name || '', stweg]
+      `INSERT INTO authentik_pending_deletions (email, name, stweg, scheduled_at, reminder_sent, manuell_pruefen, grund)
+       VALUES ($1, $2, $3, NOW() + make_interval(days => $5::int), false, $4::boolean, CASE WHEN $4::boolean THEN 'Konto hat weitere Gruppen' END)
+       ON CONFLICT (email) DO UPDATE SET scheduled_at = NOW() + make_interval(days => $5::int), cancelled = false, reminder_sent = false,
+         manuell_pruefen = EXCLUDED.manuell_pruefen, grund = EXCLUDED.grund, stweg = EXCLUDED.stweg`,
+      [email, k.name || '', stweg, manuell, kontoLoeschung.FRIST_TAGE]
     );
-    console.log(`[Authentik] Scheduled deletion for ${email} in 30 days`);
+    console.log(`[Authentik] ${manuell ? 'Manuell zu pruefen' : 'Scheduled deletion in 30 days'}: ${email}`);
   }
 }
 
@@ -7264,7 +7277,8 @@ const loeschungenSchreiben = [requirePermission('loeschungen', 'write'), kartenA
 async function loeschVormerkung(req, res) {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) { res.status(400).json({ error: 'Ungültige ID' }); return null; }
-  const r = await pool.query('SELECT id, email, name, stweg, scheduled_at, cancelled FROM authentik_pending_deletions WHERE id = $1', [id]);
+  await kontoLoeschung.bereit(pool);
+  const r = await pool.query('SELECT id, email, name, stweg, scheduled_at, cancelled, manuell_pruefen FROM authentik_pending_deletions WHERE id = $1', [id]);
   const row = r.rows[0];
   if (!row || !stwegSichtLib.sichtErlaubt(stwegSichtLib.stwegSicht(req.user?.groups || []), row.stweg)) {
     res.status(404).json({ error: 'Nicht gefunden' });
@@ -7280,10 +7294,12 @@ const datumText = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
 
 app.get('/api/admin/pending-deletions', authMiddleware, ...loeschungenLesen, async (req, res) => {
   try {
+    await kontoLoeschung.bereit(pool);
     const params = [];
     const sicht = stwegSichtLib.sichtSql(stwegSichtLib.stwegSicht(req.user?.groups || []), 'd.stweg', params);
     const r = await pool.query(
       `SELECT d.id, d.email, d.name, d.stweg, d.scheduled_at, d.reminder_sent, d.cancelled, d.created_at,
+              d.manuell_pruefen, d.grund,
               EXTRACT(DAY FROM (d.scheduled_at - NOW()))::int AS days_until,
               EXISTS(SELECT 1 FROM wohnungen_kontakte wk WHERE LOWER(wk.email) = LOWER(d.email)) AS still_in_kontakte
          FROM authentik_pending_deletions d
@@ -7338,6 +7354,9 @@ app.put('/api/admin/pending-deletions/:id/reactivate', authMiddleware, ...loesch
 });
 
 app.delete('/api/admin/pending-deletions/:id', authMiddleware, ...loeschungenSchreiben, async (req, res) => {
+  // Stoppen und verlaengern duerfen auch Ausschuss/Verwaltung der eigenen STWEG,
+  // „Eintrag entfernen“ nur Technik (Entscheid E3b)
+  if (!kontoLoeschung.darfEntfernen(req.user?.groups)) return res.status(403).json({ error: 'Eintrag entfernen darf nur Technik' });
   try {
     const row = await loeschVormerkung(req, res);
     if (!row) return;
@@ -7345,6 +7364,67 @@ app.delete('/api/admin/pending-deletions/:id', authMiddleware, ...loeschungenSch
     await loeschProtokoll(req, 'entfernt', row, `${row.cancelled ? 'gestoppt' : 'geplant'} ${datumText(row.scheduled_at)}`, 'aus der Liste entfernt');
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Sofort loeschen (Recht auf Loeschung, Entscheid E3c): nur Technik/Praesident, nur mit
+// frischer Konto-Anmeldung (keine Karte, kein persoenliches Token), mit Protokoll. Gilt
+// auch fuer Eintraege „manuell zu pruefen“; Technik-/Praesident-/Superuser-Konten nie.
+app.post('/api/admin/pending-deletions/:id/sofort', authMiddleware, ...loeschungenSchreiben, async (req, res) => {
+  const pr = kontoLoeschung.sofortLoeschenPruefen({
+    groups: req.user?.groups, auth: req.auth, pat: !!req.pat, kanal: req.headers['x-rosenweg-kanal'],
+  });
+  if (!pr.ok) return res.status(pr.status).json({ error: pr.fehler, ...(pr.reauth ? { reauth: true, fehler: 'frisch' } : {}) });
+  try {
+    const row = await loeschVormerkung(req, res);
+    if (!row) return;
+    const user = await authentikKontoPerEmail(row.email);
+    if (kontoLoeschung.sofortGeschuetzt(user)) {
+      return res.status(409).json({ error: 'Konten von Technik oder Präsident nur über die Konten-Verwaltung löschen' });
+    }
+    if (user) await authentikAPI('DELETE', `/core/users/${user.pk}/`);
+    await pool.query('DELETE FROM authentik_pending_deletions WHERE id = $1', [row.id]);
+    await loeschProtokoll(req, 'sofort-geloescht', row,
+      `${row.manuell_pruefen ? 'manuell zu prüfen' : row.cancelled ? 'gestoppt' : 'geplant'} ${datumText(row.scheduled_at)}`,
+      user ? 'Konto sofort gelöscht' : 'kein Konto mehr in Authentik');
+    console.log(`[Authentik] Sofort geloescht durch ${req.user.email}: Vormerkung #${row.id}`);
+    await lokalesKontoNachLoeschung(row.email, { name: row.name, stweg: row.stweg });
+    res.json({ ok: true, konto: !!user });
+  } catch (err) {
+    console.error('[Authentik] Sofort loeschen:', err.message);
+    res.status(500).json({ error: 'Löschen fehlgeschlagen' });
+  }
+});
+
+// Nachlauf (Anlage, Mailbox, Karten) mit mindestens NACHLAUF_SICHTBAR_AB Fehlversuchen
+app.get('/api/admin/pending-deletions/nachlauf', authMiddleware, ...loeschungenLesen, async (req, res) => {
+  try {
+    await kontoLoeschung.bereit(pool);
+    const params = [kontoLoeschung.NACHLAUF_SICHTBAR_AB];
+    const sicht = stwegSichtLib.sichtSql(stwegSichtLib.stwegSicht(req.user?.groups || []), 'n.stweg', params);
+    const r = await pool.query(
+      `SELECT n.id, n.email, n.name, n.stweg, n.bereich, n.offen, n.versuche, n.letzter_fehler,
+              n.naechster_versuch, n.erstellt_at
+         FROM konto_loeschung_nachlauf n
+        WHERE n.erledigt_at IS NULL AND n.versuche >= $1 AND ${sicht}
+        ORDER BY n.erstellt_at ASC`, params);
+    res.json({ sichtbar_ab: kontoLoeschung.NACHLAUF_SICHTBAR_AB, eintraege: r.rows });
+  } catch (err) { res.status(500).json({ error: 'Nachlauf konnte nicht geladen werden' }); }
+});
+
+// Nachlauf jetzt erneut versuchen (statt auf den Backoff zu warten)
+app.post('/api/admin/pending-deletions/nachlauf/:id/jetzt', authMiddleware, ...loeschungenSchreiben, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige ID' });
+  try {
+    await kontoLoeschung.bereit(pool);
+    const r = await pool.query('SELECT * FROM konto_loeschung_nachlauf WHERE id = $1 AND erledigt_at IS NULL', [id]);
+    const row = r.rows[0];
+    if (!row || !stwegSichtLib.sichtErlaubt(stwegSichtLib.stwegSicht(req.user?.groups || []), row.stweg)) {
+      return res.status(404).json({ error: 'Nicht gefunden' });
+    }
+    const erg = await nachlaufEinmal(row, req);
+    res.json({ ok: erg.ok, offen: erg.offen });
+  } catch (err) { res.status(500).json({ error: 'Nachlauf fehlgeschlagen' }); }
 });
 
 // Cancel pending deletion if contact is re-added
@@ -7362,7 +7442,7 @@ async function cancelPendingDeletion(email) {
 // abgewiesen) und alle Zugaenge der Zeile beenden – Sitzungen (30 Tage gleitend) und
 // PATs galten sonst weiter. Gibt es noch ein anderes Authentik-Konto mit dieser
 // E-Mail, bleibt die Zeile aktiv (dessen naechster Login bindet sie neu).
-async function lokalesKontoNachLoeschung(email) {
+async function lokalesKontoNachLoeschung(email, { name = null, stweg = null } = {}) {
   const e = String(email || '').toLowerCase().trim();
   if (!e) return;
   try {
@@ -7384,14 +7464,131 @@ async function lokalesKontoNachLoeschung(email) {
       const n = await vpnSperrenFuerEmail(e, 'Konto gelöscht');
       if (n) console.log(`[Authentik] ${n} VPN-Zugang/-Zugaenge von ${e} gesperrt`);
     }
-    // Anlage: Hintergrundbild der geteilten Telefone usw. (lib/pbxperson.js)
-    const pbx = await require('./lib/pbxperson').personLoeschen({ url: PBX_API_URL, secret: PBX_SHARED_SECRET, email: e });
-    if (!pbx.ok) console.warn(`[Authentik] Anlage-Daten nach Loeschung nicht entfernt: ${pbx.grund}`);
     console.log(`[Authentik] Lokales Konto ${e} nach Loeschung: ${ids.length} Zeile(n)${nochKonto ? '' : ' deaktiviert'}, Sitzungen/PATs beendet`);
+    // Nachlauf (lib/kontoloeschung.js): Anlage (inkl. Nextcloud-Konto), Mailbox, Karten.
+    // Nur wenn kein anderes Konto mit dieser Adresse besteht – sonst gehoeren die Daten
+    // dem verbleibenden Konto. Gescheiterte Schritte wiederholt nachlaufFaellige().
+    if (!nochKonto) await nachlaufAnlegen(e, { name, stweg });
+    else console.warn('[Authentik] Nachlauf ausgelassen: weiteres Konto mit derselben Adresse');
   } catch (err) {
     console.error(`[Authentik] Lokales Konto ${e} nach Loeschung nicht bereinigt:`, err.message);
   }
 }
+
+// ─── Nachlauf nach der Konto-Loeschung (Punkte 2 und 4) ──────────────────
+// Je Bereich eine Zeile in konto_loeschung_nachlauf. Sofort ein Versuch; was scheitert,
+// bleibt vorgemerkt und wird mit Backoff wiederholt (15 min … 24 h). Jedes Ergebnis steht
+// im admin_protokoll (Bereich 'loeschungen'); ab NACHLAUF_SICHTBAR_AB Fehlversuchen auf
+// der Seite loeschungen.html.
+const NACHLAUF_SYSTEM = { user: { email: 'system', name: 'Löschlauf' }, auth: { art: 'system' } };
+
+async function nachlaufAnlegen(email, { name = null, stweg = null } = {}) {
+  await kontoLoeschung.bereit(pool);
+  for (const bereich of kontoLoeschung.BEREICHE) {
+    try {
+      const offen = bereich === 'anlage' ? kontoLoeschung.ANLAGE_SCHRITTE : [];
+      const r = await pool.query(kontoLoeschung.SQL_NACHLAUF_ANLEGEN, [email, bereich, name || null, stweg || null, JSON.stringify(offen)]);
+      await nachlaufEinmal(r.rows[0], NACHLAUF_SYSTEM);
+    } catch (err) {
+      console.error(`[Nachlauf] ${bereich} nicht angelegt:`, err.message);
+    }
+  }
+}
+
+// Mailcow-Mailboxen, die der Person zugeordnet sind (persoenliche, nicht geteilte)
+async function nachlaufMailbox(email) {
+  const r = await pool.query(
+    `SELECT mr.*, r.domain FROM mailbox_requests mr LEFT JOIN isp_mail_relays r ON r.id = mr.relay_id
+      WHERE LOWER(mr.assigned_user_email) = $1 AND mr.status = 'approved'`, [email]);
+  const geloescht = [];
+  for (const mr of r.rows) {
+    if (!mr.domain) throw new Error(`Mailbox #${mr.id} ohne Domain`);
+    await mailboxAnfrageLoeschen(mr, 'Konto-Löschung');
+    geloescht.push(mr.id);
+  }
+  return { geloescht };
+}
+
+// Rosenweg-Karten (NFC in UniFi Access) entziehen und Zusatzadressen entfernen
+async function nachlaufKarten(email) {
+  const u = await unifiUserByEmail(email, { streng: true });
+  let entzogen = 0;
+  const fehler = [];
+  for (const c of (u?.nfc_cards || [])) {
+    const token = c.token || c.id;
+    if (!token) continue;
+    const r = await unifiAccessRaw('PUT', `/users/${encodeURIComponent(u.id)}/nfc_cards/delete`, { token });
+    const gut = accessOk(r) && (!r.body?.code || r.body.code === 'SUCCESS');
+    await kartenProtokollieren('entziehen', { nfcId: null, displayId: c.display_id || null, email, name: null,
+      durch: 'Konto-Löschung', erfolg: gut, detail: gut ? 'Konto gelöscht' : `${r.status} ${r.body?.msg || ''}` }).catch(() => {});
+    if (gut) entzogen++; else fehler.push(r.status);
+  }
+  if (entzogen) accessKartenCacheLeeren();
+  if (fehler.length) throw new Error(`Karten nicht entzogen (HTTP ${fehler.join(', ')})`);
+  const a = await pool.query('DELETE FROM person_email_alias WHERE LOWER(haupt_email) = $1', [email]);
+  return { entzogen, aliase: a.rowCount };
+}
+
+const nachlaufDeps = {
+  anlage: ({ email, schritte, nummern }) => require('./lib/pbxperson').personLoeschen({
+    url: PBX_API_URL, secret: PBX_SHARED_SECRET, email, schritte, nummern }),
+  mailbox: nachlaufMailbox,
+  karten: nachlaufKarten,
+};
+
+/** Einen Nachlauf-Eintrag ausfuehren, Zustand speichern, protokollieren. */
+async function nachlaufEinmal(row, req) {
+  const erg = await kontoLoeschung.nachlaufAusfuehren(row, nachlaufDeps);
+  const z = kontoLoeschung.naechsterZustand(row, erg);
+  await pool.query(
+    `UPDATE konto_loeschung_nachlauf SET offen = $2::jsonb, kontext = $3::jsonb, versuche = $4, letzter_fehler = $5,
+            naechster_versuch = $6, erledigt_at = $7 WHERE id = $1`,
+    [row.id, JSON.stringify(z.offen), JSON.stringify(z.kontext || {}), z.versuche, z.letzter_fehler, z.naechster_versuch, z.erledigt_at]);
+  const t = kontoLoeschung.protokollText(row, erg, z);
+  await adminProtokoll.eintragen(pool, null, req || NACHLAUF_SYSTEM, {
+    bereich: 'loeschungen', aktion: t.aktion, ziel: row.email, alt: t.alt, neu: t.neu,
+    detail: [row.name, row.stweg ? `STWEG ${row.stweg}` : null, t.fehler].filter(Boolean).join(' · ') || null,
+  }).catch(e => console.error('[Nachlauf] Protokoll:', e.message));
+  if (!erg.ok) console.warn(`[Nachlauf] #${row.id} ${row.bereich}: Versuch ${z.versuche} fehlgeschlagen`);
+  return erg;
+}
+
+let nachlaufLaeuft = false;
+async function nachlaufFaellige() {
+  if (nachlaufLaeuft) return;
+  nachlaufLaeuft = true;
+  try {
+    await kontoLoeschung.bereit(pool);
+    const r = await pool.query(
+      `SELECT * FROM konto_loeschung_nachlauf
+        WHERE erledigt_at IS NULL AND (naechster_versuch IS NULL OR naechster_versuch <= NOW())
+        ORDER BY naechster_versuch NULLS FIRST LIMIT 50`);
+    for (const row of r.rows) await nachlaufEinmal(row, NACHLAUF_SYSTEM).catch(e => console.error('[Nachlauf]', e.message));
+  } catch (err) {
+    console.error('[Nachlauf] Lauf:', err.message);
+  } finally { nachlaufLaeuft = false; }
+}
+setInterval(nachlaufFaellige, 15 * 60 * 1000);
+setTimeout(nachlaufFaellige, 90 * 1000);
+
+// Aufraeumlauf (Punkt 3): Personen-Stammdaten und archivierte Kontakte 3 Monate nach
+// Auszug bzw. Loeschung loeschen/anonymisieren (lib/kontoloeschung.js aufraeumen)
+async function personenAufraeumen() {
+  try {
+    const r = await kontoLoeschung.aufraeumen(pool);
+    if (r.personen_geloescht || r.personen_anonymisiert || r.kontakte || r.nachlauf) {
+      console.log(`[Aufraeumen] Personen: ${r.personen_geloescht} geloescht, ${r.personen_anonymisiert} anonymisiert; Kontakte: ${r.kontakte}; Nachlauf: ${r.nachlauf}`);
+      await adminProtokoll.eintragen(pool, null, NACHLAUF_SYSTEM, {
+        bereich: 'loeschungen', aktion: 'aufraeumen', ziel: 'Personen und archivierte Kontakte',
+        neu: `${r.personen_geloescht} Person(en) gelöscht, ${r.personen_anonymisiert} anonymisiert, ${r.kontakte} Kontakt(e) anonymisiert`,
+        detail: `nach ${kontoLoeschung.AUFBEWAHRUNG_MONATE} Monaten`,
+      }).catch(() => {});
+    }
+  } catch (err) {
+    console.error('[Aufraeumen]', err.message);
+  }
+}
+taeglichUm(2, 30, personenAufraeumen, { name: 'Personen-Aufraeumen' });
 
 // Eine Vormerkung gilt nur, solange die Adresse an keiner Wohnung mehr aktiv ist.
 // trackRemovedKontakte laeuft ausserhalb der Speicher-Transaktion: wurde diese danach
@@ -7408,13 +7605,14 @@ async function nochAktiverKontakt(row) {
 async function processAuthentiKDeletions() {
   if (!AUTHENTIK_API_TOKEN) return;
   try {
+    await kontoLoeschung.bereit(pool);
     // 1. Send reminders (7 days before deletion, i.e. scheduled_at - 7 days <= NOW)
     // Drucker-Aliasse (druckerr<N>+name@…) ueberspringen — die sind keine
     // echten User-Accounts und der Reminder wuerde via Print-Notification
     // an Admins zurueckschlagen.
     const reminders = await pool.query(
       `SELECT * FROM authentik_pending_deletions
-       WHERE cancelled = false AND reminder_sent = false
+       WHERE cancelled = false AND reminder_sent = false AND NOT manuell_pruefen
        AND scheduled_at - INTERVAL '7 days' <= NOW()
        AND scheduled_at > NOW()
        AND email !~* '^druckerr\\d+\\+'`
@@ -7455,7 +7653,7 @@ async function processAuthentiKDeletions() {
     // 2. Delete users past their scheduled date — Drucker-Aliasse ebenfalls auslassen
     const deletions = await pool.query(
       `SELECT * FROM authentik_pending_deletions
-       WHERE cancelled = false AND scheduled_at <= NOW()
+       WHERE cancelled = false AND scheduled_at <= NOW() AND NOT manuell_pruefen
        AND email !~* '^druckerr\\d+\\+'`
     );
     for (const row of deletions.rows) {
@@ -7465,17 +7663,17 @@ async function processAuthentiKDeletions() {
         const user = await authentikKontoPerEmail(row.email);
         // Gruppen koennen sich seit der Vormerkung geaendert haben: nur reine
         // Bewohner-/Eigentuemer-Konten der vorgemerkten STWEG loeschen, sonst
-        // Vormerkung stornieren (bleibt in loeschungen.html sichtbar).
+        // Liste „manuell zu pruefen“ (bleibt in loeschungen.html sichtbar).
         if (user && !kontoAutoLoeschbar(user, row.stweg)) {
           console.warn(`[Authentik] Loeschung ${row.email} abgebrochen: Konto nicht nur Bewohner/Eigentuemer STWEG ${row.stweg}`);
-          await pool.query('UPDATE authentik_pending_deletions SET cancelled = true WHERE id = $1', [row.id]);
+          await pool.query(`UPDATE authentik_pending_deletions SET manuell_pruefen = true, grund = 'Konto hat weitere Gruppen' WHERE id = $1`, [row.id]);
           continue;
         }
         if (user) {
           // Hard delete per DSG/DSGVO requirements
           await authentikAPI('DELETE', `/core/users/${user.pk}/`);
           console.log(`[Authentik] Deleted user ${row.email} (pk: ${user.pk})`);
-          await lokalesKontoNachLoeschung(row.email);
+          await lokalesKontoNachLoeschung(row.email, { name: row.name, stweg: row.stweg });
         }
         await pool.query('DELETE FROM authentik_pending_deletions WHERE id = $1', [row.id]);
       } catch (err) {
@@ -28241,6 +28439,27 @@ app.post('/api/isp/mailbox-requests/:id/reset-password', authMiddleware, async (
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
+// Mailbox-Antrag loeschen: approved -> Mailbox in Mailcow loeschen, dann die Zeile.
+// Auch fuer die Konto-Loeschung (nachlaufMailbox): dort wirft ein Mailcow-Fehler, damit
+// der Nachlauf es wiederholt (die Zeile bleibt dann stehen).
+async function mailboxAnfrageLoeschen(mr, durch, { mailcowFehlerIgnorieren = false } = {}) {
+  if (mr.status === 'approved') {
+    try { await mailcowApi('POST', '/delete/mailbox', [`${mr.local_part}@${mr.domain}`]); }
+    catch (mcErr) {
+      if (!mailcowFehlerIgnorieren) throw mcErr;
+      console.warn('[mailbox-delete] Mailcow:', mcErr.message);
+    }
+  }
+  // Hard-delete: Zeile entfernen, damit der Local-Part wieder
+  // verfuegbar ist (UNIQUE-Constraint blockiert sonst Neu-Anlage).
+  // Audit-Trail laeuft über den WA-Notify-Eintrag.
+  await pool.query(`DELETE FROM mailbox_requests WHERE id=$1`, [mr.id]);
+  const ownerEmail = (mr.assigned_user_email || mr.antragsteller_email || '').toLowerCase();
+  notifyTechnikMailbox(
+    `🗑 *Mailbox geloescht*\n${mr.local_part}@${mr.domain}\nvon ${ownerEmail || '—'}\ndurch ${durch}`,
+  );
+}
+
 // DELETE: Mailbox löschen. Owner darf pending zuruecknehmen, Admin darf
 // alles. Approved -> Mailbox wird in Mailcow geloescht.
 app.delete('/api/isp/mailbox-requests/:id', authMiddleware, async (req, res) => {
@@ -28257,17 +28476,7 @@ app.delete('/api/isp/mailbox-requests/:id', authMiddleware, async (req, res) => 
     if (!admin && !(isOwner && mr.status === 'pending')) {
       return res.status(403).json({ error: 'Nur Admin (alle) bzw. Owner (nur pending)' });
     }
-    if (mr.status === 'approved') {
-      try { await mailcowApi('POST', '/delete/mailbox', [`${mr.local_part}@${mr.domain}`]); }
-      catch (mcErr) { console.warn('[mailbox-delete] Mailcow:', mcErr.message); }
-    }
-    // Hard-delete: Zeile entfernen, damit der Local-Part wieder
-    // verfuegbar ist (UNIQUE-Constraint blockiert sonst Neu-Anlage).
-    // Audit-Trail laeuft über den WA-Notify-Eintrag.
-    await pool.query(`DELETE FROM mailbox_requests WHERE id=$1`, [id]);
-    notifyTechnikMailbox(
-      `🗑 *Mailbox geloescht*\n${mr.local_part}@${mr.domain}\nvon ${ownerEmail || '—'}\ndurch ${req.user.email}`,
-    );
+    await mailboxAnfrageLoeschen(mr, req.user.email, { mailcowFehlerIgnorieren: true });
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
@@ -30905,6 +31114,8 @@ async function initDB() {
         created_at TIMESTAMP DEFAULT NOW()
       );
     `);
+    // Konto-Loeschung vollstaendig: manuell zu pruefen, Nachlauf (lib/kontoloeschung.js)
+    await client.query(kontoLoeschung.SQL_TABELLEN);
 
     // Migrate existing flat columns to kontakte table (one-time)
     const migrationCheck = await client.query(

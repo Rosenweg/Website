@@ -131,7 +131,7 @@ test('VLAN aus den Notizen', () => {
 test('Sperren: Peer entfernen, Zeile bleibt; Kontoloeschung; Hooks; NOC zaehlt Gesperrte nicht als offen', () => {
   assert.match(server, /async function vpnZugangSperren\(v, grund\) \{[\s\S]{0,400}wgControl\('DELETE'[\s\S]{0,400}UPDATE isp_vpn_accounts SET active = false, gesperrt_am = NOW\(\), gesperrt_grund = \$2/);
   assert.doesNotMatch(server.match(/async function vpnZugangSperren[\s\S]*?\n\}/)[0], /DELETE FROM isp_vpn_accounts/);
-  assert.match(server, /async function lokalesKontoNachLoeschung\(email\) \{[\s\S]{0,2500}if \(!nochKonto\) \{\s*const n = await vpnSperrenFuerEmail\(e, 'Konto gelöscht'\)/);
+  assert.match(server, /async function lokalesKontoNachLoeschung\(email[^)]*\) \{[\s\S]{0,2500}if \(!nochKonto\) \{\s*const n = await vpnSperrenFuerEmail\(e, 'Konto gelöscht'\)/);
   assert.match(server, /trackRemovedKontakte\(wohnungId, stweg, oldKontakte, incoming\)[^\n]*\n[^\n]*\n\s*vpnAbgleichBald\(\);/);
   assert.match(server, /async function autoArchiveSupersededKontakte\(\) \{[\s\S]{0,4000}vpnAbgleichBald\(0\);/);
   assert.match(server, /COUNT\(\*\) FILTER \(WHERE NOT active AND gesperrt_am IS NULL\) AS pen/);

@@ -6,6 +6,7 @@ Obsidian Vault mit der technischen Dokumentation der Rosenweg-Kooperation.
 
 ### Sicherheit
 - [Sicherheit](sicherheit.md) — Vorfälle 16./17.11.2026, Schutzmechanismen, Grenzwerte, Umgebungsvariablen, Ausrollen/Rückbau, offene Punkte
+- [Konto-Löschung](konto-loeschung.md) — Frist, Rechte, Nachlauf (Anlage, Nextcloud, Mailbox, Karten) mit Wiederholung, Aufräumlauf nach 3 Monaten, offene Bereiche (TODO)
 
 ### Infrastruktur
 - [Infrastruktur](infrastruktur.md) — Proxmox, Container je Dienst, Geheimnis-Ablagen, Datenbanken

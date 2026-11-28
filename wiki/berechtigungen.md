@@ -150,7 +150,9 @@ hat dort keine Rechte, auch wenn er dort wohnt oder Eigentümer ist.
 | Benutzerkonto ändern | — | — | — | ✅ 🅢; keine Technik-/Präsident-Konten, keine E-Mail, keine Aktivierung, keine Gruppen | — | ✅ | ✅ |
 | Gruppen zuordnen (`/api/admin/groups`) | — | — | — | ✅ nur Bewohner-/Eigentümer-Gruppen 🅢, nur an Konten, die nur solche Gruppen haben oder schon in der STWEG sind | (R) | ✅ | ✅ |
 | Benutzerkonto löschen | — | — | — | — | — | ✅ | ✅ |
-| Vorgemerkte Löschungen (`loeschungen`) | — | — | — | — | — | ✅ | ✅ |
+| Vorgemerkte Löschungen (`loeschungen`): sehen, stoppen, Timer +30 Tage | — | — | — | ✅ 🅢 (R, seit 28.11.2026 vorgegeben) | ✅ 🅢 (R, seit 28.11.2026 vorgegeben) | ✅ | ✅ |
+| Vorgemerkte Löschung: Eintrag entfernen | — | — | — | — | — | ✅ | — |
+| Konto sofort löschen (frische Konto-Anmeldung, nicht mit Karte; siehe [`docs/konto-loeschung.md`](../docs/konto-loeschung.md)) | — | — | — | — | — | ✅ | ✅ |
 | ZEV: eigene Rechnungen, PDF, „bezahlt“ | — | ✅ eigene | ✅ eigene + Wohnungen | ✅ eigene | ✅ eigene | ✅ | ✅ |
 | ZEV-Konfiguration, Wohnungen/Aliase ansehen und abgleichen (nur Ausschuss/Verwaltung **dieser** STWEG, seit 28.11.2026) | — | — | — | ✅ 🅢 | (R) 🅢 | ✅ | ✅ |
 | ZEV: Rechnungen zuordnen und umhängen (protokolliert); PDF unzugeordneter und Allgemeinzähler-Rechnungen | — | — | — | ✅ 🅢 | (R `wohnungsverwaltung` schreiben) 🅢 | ✅ auch ohne STWEG | ✅ |
@@ -380,7 +382,11 @@ Seit dem 17.11.2026 gilt in allen schreibenden STWEG-Bereichen:
   (und Technik/Präsident lesend); Positionen nur bis „eingereicht“.
 - **Automatisches Löschen von Konten** nach Auszug nur, wenn **alle** Gruppen des
   Kontos Bewohner/Eigentümer dieser STWEG sind; storniert, sobald die Adresse wieder
-  aktiver Kontakt ist.
+  aktiver Kontakt ist. Konten mit weiteren Gruppen stehen in der Liste „manuell zu
+  prüfen“. Nach der Löschung entfernt der Nachlauf auch Anlage-Daten, Nextcloud-Konto,
+  zugeordnete Mailbox und Karten; Personen-Stammdaten und archivierte Kontakte werden
+  3 Monate nach Auszug bzw. Löschung gelöscht bzw. anonymisiert
+  ([`docs/konto-loeschung.md`](../docs/konto-loeschung.md)).
 - **Konten-Bindung:** Eine Benutzerzeile gehört einem Authentik-Konto
   (`users.authentik_sub`); ein zweites Konto mit derselben E-Mail wird abgewiesen.
 - **Zugangstoken (PAT):** wirken mit den Rechten der Person, eingeschränkt durch

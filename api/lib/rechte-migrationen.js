@@ -37,6 +37,10 @@ const RECHTE_MIGRATIONEN = [
   // seiner STWEG (lib/handwerker-rechte.js; Entscheid Stefan 28.11.2026).
   // Schreiben bleibt der Verwaltung der STWEG und Technik/Praesident vorbehalten.
   { name: '2026-11-28-handwerker-ausschuss-read', page: 'handwerker', access: 'read', gruppen: AUSSCHUESSE },
+  // Konto-Loeschungen: Ausschuss und Verwaltung stoppen und verlaengern fuer die eigene
+  // STWEG (Sicht in server.js); „Eintrag entfernen“ bleibt Technik, „Sofort loeschen“
+  // Technik/Praesident (lib/kontoloeschung.js; Entscheid Stefan 28.11.2026, E3b).
+  { name: '2026-11-28-loeschungen-ausschuss-verwaltung-write', page: 'loeschungen', access: 'write', gruppen: [...AUSSCHUESSE, ...VERWALTUNGEN].filter(g => /^stweg\d+-/.test(g)) },
 ];
 
 const SQL_TABELLE = `
