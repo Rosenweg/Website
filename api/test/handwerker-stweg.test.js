@@ -91,26 +91,26 @@ test('Routen: jede schreibende mit Recht, Kartenvermerk und STWEG-Prüfung', () 
     "app.put('/api/handwerker/:id', authMiddleware, ...hwSchreibend",
     "app.put('/api/handwerker/:id/zuweisungen', authMiddleware, ...hwSchreibend",
     "app.delete('/api/handwerker/:id', authMiddleware, ...hwSchreibend",
-    "app.post(encodeURI('/api/handwerker/:id/verträge'), authMiddleware, ...hwSchreibend",
-    "app.put(encodeURI('/api/handwerker/:id/verträge/:vid'), authMiddleware, ...hwSchreibend",
-    "app.delete(encodeURI('/api/handwerker/:id/verträge/:vid'), authMiddleware, ...hwSchreibend",
-    "app.post(encodeURI('/api/handwerker/:id/aufträge'), authMiddleware, ...hwSchreibend",
-    "app.put(encodeURI('/api/handwerker/:id/aufträge/:aid'), authMiddleware, ...hwSchreibend",
-    "app.delete(encodeURI('/api/handwerker/:id/aufträge/:aid'), authMiddleware, ...hwSchreibend",
+    "app.post([encodeURI('/api/handwerker/:id/verträge'), '/api/handwerker/:id/vertraege'], authMiddleware, ...hwSchreibend",
+    "app.put([encodeURI('/api/handwerker/:id/verträge/:vid'), '/api/handwerker/:id/vertraege/:vid'], authMiddleware, ...hwSchreibend",
+    "app.delete([encodeURI('/api/handwerker/:id/verträge/:vid'), '/api/handwerker/:id/vertraege/:vid'], authMiddleware, ...hwSchreibend",
+    "app.post([encodeURI('/api/handwerker/:id/aufträge'), '/api/handwerker/:id/auftraege'], authMiddleware, ...hwSchreibend",
+    "app.put([encodeURI('/api/handwerker/:id/aufträge/:aid'), '/api/handwerker/:id/auftraege/:aid'], authMiddleware, ...hwSchreibend",
+    "app.delete([encodeURI('/api/handwerker/:id/aufträge/:aid'), '/api/handwerker/:id/auftraege/:aid'], authMiddleware, ...hwSchreibend",
   ];
   for (const r of schreibend) assert.ok(server.includes(r), r);
   for (const m of ['post', 'put', 'delete']) {
     assert.match(server, new RegExp(`app\\.${m}\\('/api/handwerker-events[^']*', authMiddleware, \\.\\.\\.hwSchreibend, requireHwEventTypen`), m);
   }
   // Keine schreibende Handwerker-Route mehr ohne hwSchreibend
-  assert.doesNotMatch(server, /app\.(post|put|delete)\((encodeURI\()?'\/api\/handwerker[^']*'\)?, authMiddleware, requirePermission\('handwerker', 'write'\)/);
+  assert.doesNotMatch(server, /app\.(post|put|delete)\((\[[^\]]*\/api\/handwerker[^\]]*\]|[^,\[]*\/api\/handwerker[^,]*), authMiddleware, requirePermission\('handwerker', 'write'\)/);
   // Hart löschen: T/P (nicht mehr nur Gruppe technik per Textvergleich)
   assert.match(server, /if \(!sicht\.alle\) return res\.status\(403\)\.json\(\{ error: 'Hartes Löschen nur für Technik und Präsident' \}\)/);
 });
 
 test('Lesen: Liste, Verträge, Einsätze, Anstehend, Notfall, Dashboard nach Sicht', () => {
-  const lesend = ["app.get('/api/handwerker', ", "app.get(encodeURI('/api/handwerker/:id/verträge')", "app.get(encodeURI('/api/handwerker/:id/aufträge')",
-    "app.get(encodeURI('/api/handwerker-verträge/anstehend')", "app.get('/api/handwerker-notfall'", "app.get('/api/handwerker/kategorien'"];
+  const lesend = ["app.get('/api/handwerker', ", "app.get([encodeURI('/api/handwerker/:id/verträge'), '/api/handwerker/:id/vertraege']", "app.get([encodeURI('/api/handwerker/:id/aufträge'), '/api/handwerker/:id/auftraege']",
+    "app.get([encodeURI('/api/handwerker-verträge/anstehend'), '/api/handwerker-vertraege/anstehend']", "app.get('/api/handwerker-notfall'", "app.get('/api/handwerker/kategorien'"];
   for (const r of lesend) {
     const i = server.indexOf(r);
     assert.ok(i > 0, r);

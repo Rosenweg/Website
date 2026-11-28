@@ -28,6 +28,8 @@ const vollmachtMail = require('./lib/vollmacht-mail');
 const projekteRechte = require('./lib/projekte-rechte');
 const hwRechteLib = require('./lib/handwerker-rechte');
 const hwNotfallLib = require('./lib/handwerker-notfall');
+const hwAppLib = require('./lib/handwerker-app');
+const hwAppRoutes = require('./routes/handwerker-app');
 const personenRechte = require('./lib/personen-rechte');
 const stwegOeffentlich = require('./lib/stweg-oeffentlich');
 const rechteSchluessel = require('./lib/rechte-schluessel');
@@ -13947,17 +13949,38 @@ app.get('/api/projects-mini', authMiddleware, async (req, res) => {
   } catch (err) { console.error('[projekte] mini', err.message); res.status(500).json({ error: 'Fehler' }); }
 });
 
+// Kandidat aus der Firmenliste (E9, Entscheid Stefan 28.11.2026): handwerker_id wählt eine Firma, die das
+// Konto sehen darf (lib/handwerker-rechte.js); fehlende Felder (Name, Kontakt, Telefon, E-Mail, Webseite)
+// kommen aus der Firma, freie Eingabe bleibt möglich (ohne handwerker_id). -> Felder | null (Antwort gesendet)
+async function projektKandidatAusFirma(req, res, b) {
+  const k = { ...b, handwerker_id: null };
+  if (b.handwerker_id === undefined || b.handwerker_id === null || b.handwerker_id === '') return k;
+  const hid = parseInt(b.handwerker_id, 10);
+  const { rows: [h] } = Number.isFinite(hid) && hid > 0 ? await pool.query('SELECT * FROM handwerker WHERE id = $1 AND archiviert = false', [hid]) : { rows: [] };
+  if (!h || !hwRechteLib.hwLesen(hwSichtVon(req), h.stweg)) { res.status(400).json({ error: 'Diese Firma gibt es in der Handwerkerliste nicht (oder sie gehört zu einer anderen STWEG).', feld: 'handwerker_id' }); return null; }
+  const leer = (v) => v === undefined || v === null || String(v).trim() === '';
+  if (leer(k.name)) k.name = h.firma;
+  if (leer(k.kontakt)) k.kontakt = h.ansprechpartner || null;
+  if (leer(k.telefon)) k.telefon = h.telefon || h.mobile || null;
+  if (leer(k.email)) k.email = h.email || null;
+  if (leer(k.webseite)) k.webseite = h.website || null;
+  k.handwerker_id = h.id;
+  return k;
+}
+
 // POST /api/projects/:slug/candidates - Add candidate
 app.post('/api/projects/:slug/candidates', authMiddleware, requireProjektBearbeiten, async (req, res) => {
   try {
     const { rows: [project] } = await pool.query('SELECT id FROM projects WHERE slug = $1', [req.params.slug]);
     if (!project) return res.status(404).json({ error: 'Projekt nicht gefunden' });
-    const { name, kontakt, telefon, email, webseite, offerte_betrag, offerte_details, bewertung, status, notizen } = req.body;
+    const k = await projektKandidatAusFirma(req, res, req.body || {});
+    if (!k) return;
+    const { name, kontakt, telefon, email, webseite, offerte_betrag, offerte_details, bewertung, status, notizen } = k;
     if (!String(name || '').trim()) return res.status(400).json({ error: 'Name erforderlich' });
     const { rows: [row] } = await pool.query(
-      `INSERT INTO project_candidates (project_id, name, kontakt, telefon, email, webseite, offerte_betrag, offerte_details, bewertung, status, notizen)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [project.id, String(name).trim(), kontakt, telefon, email, webseite, offerte_betrag, offerte_details, bewertung || null, status || 'angefragt', notizen]);
+      `INSERT INTO project_candidates (project_id, name, kontakt, telefon, email, webseite, offerte_betrag, offerte_details, bewertung, status, notizen, handwerker_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      [project.id, String(name).trim(), kontakt, telefon, email, webseite, offerte_betrag, offerte_details, bewertung || null, status || 'angefragt', notizen, k.handwerker_id]);
     res.json(row);
   } catch (err) {
     console.error('[projekte] kandidat-neu', err.message);
@@ -13970,7 +13993,19 @@ app.post('/api/projects/:slug/candidates', authMiddleware, requireProjektBearbei
 const KANDIDAT_FELDER = ['name', 'kontakt', 'telefon', 'email', 'webseite', 'offerte_betrag', 'offerte_details', 'bewertung', 'status', 'notizen'];
 app.put('/api/projects/:slug/candidates/:id', authMiddleware, requireProjektBearbeiten, async (req, res) => {
   try {
-    const t = projekteRechte.teilUpdate(req.body, KANDIDAT_FELDER);
+    // Teil-Update: nur die mitgeschickten Felder. Wird eine Firma verknuepft (handwerker_id),
+    // fuellt sie nur mitgeschickte, leere Kontaktfelder.
+    const b = req.body || {};
+    let quelle = b;
+    let felder = KANDIDAT_FELDER;
+    if (Object.prototype.hasOwnProperty.call(b, 'handwerker_id')) {
+      const k = await projektKandidatAusFirma(req, res, b);
+      if (!k) return;
+      quelle = { handwerker_id: k.handwerker_id };
+      for (const f of KANDIDAT_FELDER) if (Object.prototype.hasOwnProperty.call(b, f)) quelle[f] = k[f];
+      felder = [...KANDIDAT_FELDER, 'handwerker_id'];
+    }
+    const t = projekteRechte.teilUpdate(quelle, felder);
     if (!t.sets.length) return res.status(400).json({ error: 'Keine Änderung angegeben' });
     const n = t.werte.length;
     const { rows: [row] } = await pool.query(
@@ -14527,6 +14562,8 @@ async function syncLetzterAuftrag(client, handwerkerId) {
   await client.query(
     `UPDATE handwerker SET
        letzter_auftrag = (SELECT MAX(datum) FROM handwerker_auftraege WHERE handwerker_id = $1),
+       -- E10: Gesamtsterne = Durchschnitt der Einsatz-Bewertungen; ohne Bewertungen bleibt der bisherige Wert
+       bewertung = COALESCE((SELECT ROUND(AVG(bewertung))::int FROM handwerker_auftraege WHERE handwerker_id = $1 AND bewertung IS NOT NULL), bewertung),
        updated_at = NOW()
      WHERE id = $1`,
     [handwerkerId]
@@ -14579,12 +14616,20 @@ function sanitizeVertrag(b) {
     jahres_kosten_chf: Number.isFinite(kosten) ? kosten : null,
     status: ['aktiv','gekuendigt','pausiert'].includes(b.status) ? b.status : 'aktiv',
     vertragsdokument_url: trim(b.vertragsdokument_url),
+    vertragsdokument_pfad: trim(b.vertragsdokument_pfad),   // Pfad in Unterlagen (hwVertragDokument prüft)
     notiz: trim(b.notiz),
     stweg: Number.isFinite(stweg) && stweg >= 1 && stweg <= 8 ? stweg : null,
   };
 }
+/** Pfad in Unterlagen prüfen (STWEG-Ordner, den das Konto sehen darf). false = Antwort gesendet. */
+function hwVertragDokument(req, res, v) {
+  const r = hwAppLib.dokumentPfad(v.vertragsdokument_pfad, hwSichtVon(req));
+  if (r.fehler) { res.status(400).json({ error: r.fehler, feld: 'vertragsdokument_pfad' }); return false; }
+  v.vertragsdokument_pfad = r.pfad;
+  return true;
+}
 
-app.get(encodeURI('/api/handwerker/:id/verträge'), authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
+app.get([encodeURI('/api/handwerker/:id/verträge'), '/api/handwerker/:id/vertraege'], authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!(await hwFirmaLesbar(req, res, id))) return;
@@ -14595,30 +14640,31 @@ app.get(encodeURI('/api/handwerker/:id/verträge'), authMiddleware, requirePermi
       params
     );
     const sicht = hwSichtVon(req);
-    res.json({ verträge: result.rows.map(v => ({ ...v, darf_aendern: hwRechteLib.hwSchreiben(sicht, v.stweg) })) });
+    res.json({ verträge: result.rows.map(v => ({ ...v, darf_aendern: hwRechteLib.hwSchreiben(sicht, v.stweg), kuendigung_bis: hwAppLib.kuendigungBis(v) })) });
   } catch (err) {
     console.error('Verträge list error:', err);
     res.status(500).json({ error: 'Fehler beim Laden der Verträge' });
   }
 });
 
-app.post(encodeURI('/api/handwerker/:id/verträge'), authMiddleware, ...hwSchreibend, async (req, res) => {
+app.post([encodeURI('/api/handwerker/:id/verträge'), '/api/handwerker/:id/vertraege'], authMiddleware, ...hwSchreibend, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!(await hwFirmaLesbar(req, res, id))) return;
     const v = sanitizeVertrag(req.body || {});
     if (!v.titel) return res.status(400).json({ error: 'Titel ist Pflichtfeld' });
     if (!hwRechteLib.hwSchreiben(hwSichtVon(req), v.stweg)) return res.status(403).json({ error: HW_NUR_EIGENE });
+    if (!hwVertragDokument(req, res, v)) return;
     const result = await pool.query(
       `INSERT INTO handwerker_vertraege
          (handwerker_id, titel, beschreibung, frequenz_einheit, frequenz_intervall, naechster_termin,
           startet_am, endet_am, kuendigungsfrist_tage, jahres_kosten_chf, status,
-          vertragsdokument_url, notiz, stweg)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+          vertragsdokument_url, notiz, stweg, vertragsdokument_pfad)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        RETURNING *`,
       [id, v.titel, v.beschreibung, v.frequenz_einheit, v.frequenz_intervall, v.naechster_termin,
        v.startet_am, v.endet_am, v.kuendigungsfrist_tage, v.jahres_kosten_chf, v.status,
-       v.vertragsdokument_url, v.notiz, v.stweg]
+       v.vertragsdokument_url, v.notiz, v.stweg, v.vertragsdokument_pfad]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -14628,7 +14674,7 @@ app.post(encodeURI('/api/handwerker/:id/verträge'), authMiddleware, ...hwSchrei
   }
 });
 
-app.put(encodeURI('/api/handwerker/:id/verträge/:vid'), authMiddleware, ...hwSchreibend, async (req, res) => {
+app.put([encodeURI('/api/handwerker/:id/verträge/:vid'), '/api/handwerker/:id/vertraege/:vid'], authMiddleware, ...hwSchreibend, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const vid = parseInt(req.params.vid, 10);
@@ -14642,15 +14688,16 @@ app.put(encodeURI('/api/handwerker/:id/verträge/:vid'), authMiddleware, ...hwSc
     if (!hwRechteLib.hwSchreiben(sicht, alt.rows[0].stweg) || !hwRechteLib.hwSchreiben(sicht, v.stweg)) {
       return res.status(403).json({ error: HW_NUR_EIGENE });
     }
+    if (!hwVertragDokument(req, res, v)) return;
     const result = await pool.query(
       `UPDATE handwerker_vertraege SET
          titel=$1, beschreibung=$2, frequenz_einheit=$3, frequenz_intervall=$4, naechster_termin=$5,
          startet_am=$6, endet_am=$7, kuendigungsfrist_tage=$8, jahres_kosten_chf=$9, status=$10,
-         vertragsdokument_url=$11, notiz=$12, stweg=$13, updated_at=NOW()
-       WHERE id=$14 AND handwerker_id=$15 RETURNING *`,
+         vertragsdokument_url=$11, notiz=$12, stweg=$13, vertragsdokument_pfad=$14, updated_at=NOW()
+       WHERE id=$15 AND handwerker_id=$16 RETURNING *`,
       [v.titel, v.beschreibung, v.frequenz_einheit, v.frequenz_intervall, v.naechster_termin,
        v.startet_am, v.endet_am, v.kuendigungsfrist_tage, v.jahres_kosten_chf, v.status,
-       v.vertragsdokument_url, v.notiz, v.stweg, vid, id]
+       v.vertragsdokument_url, v.notiz, v.stweg, v.vertragsdokument_pfad, vid, id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Vertrag nicht gefunden' });
     res.json(result.rows[0]);
@@ -14660,7 +14707,7 @@ app.put(encodeURI('/api/handwerker/:id/verträge/:vid'), authMiddleware, ...hwSc
   }
 });
 
-app.delete(encodeURI('/api/handwerker/:id/verträge/:vid'), authMiddleware, ...hwSchreibend, async (req, res) => {
+app.delete([encodeURI('/api/handwerker/:id/verträge/:vid'), '/api/handwerker/:id/vertraege/:vid'], authMiddleware, ...hwSchreibend, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const vid = parseInt(req.params.vid, 10);
@@ -14683,7 +14730,7 @@ app.delete(encodeURI('/api/handwerker/:id/verträge/:vid'), authMiddleware, ...h
 });
 
 // Anstehende Wartungen über alle Handwerker (nur sichtbare STWEG und Firmen)
-app.get(encodeURI('/api/handwerker-verträge/anstehend'), authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
+app.get([encodeURI('/api/handwerker-verträge/anstehend'), '/api/handwerker-vertraege/anstehend'], authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
     const days = Math.min(365, Math.max(7, parseInt(req.query.days, 10) || 90));
     const sicht = hwSichtVon(req);
@@ -14702,14 +14749,14 @@ app.get(encodeURI('/api/handwerker-verträge/anstehend'), authMiddleware, requir
         ORDER BY v.naechster_termin ASC, h.firma ASC`,
       params
     );
-    res.json({ verträge: result.rows, days });
+    res.json({ verträge: result.rows.map(v => ({ ...v, kuendigung_bis: hwAppLib.kuendigungBis(v) })), days });
   } catch (err) {
     console.error('Verträge anstehend error:', err);
     res.status(500).json({ error: 'Fehler beim Laden der anstehenden Wartungen' });
   }
 });
 
-app.get(encodeURI('/api/handwerker/:id/aufträge'), authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
+app.get([encodeURI('/api/handwerker/:id/aufträge'), '/api/handwerker/:id/auftraege'], authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!(await hwFirmaLesbar(req, res, id))) return;
@@ -14739,6 +14786,7 @@ function sanitizeAuftrag(b) {
     stweg: Number.isFinite(stweg) && stweg >= 1 && stweg <= 8 ? stweg : null,
     notiz: trim(b.notiz),
     vertrag_id: Number.isFinite(vertragId) ? vertragId : null,
+    ...hwAppLib.bewertungNormal(b),   // E10: Sterne und kurzer sachlicher Text je Einsatz
   };
 }
 
@@ -14750,7 +14798,7 @@ async function hwVertragPasst(client, req, handwerkerId, vertragId) {
   return !!r.rows[0] && hwRechteLib.hwLesen(hwSichtVon(req), r.rows[0].stweg);
 }
 
-app.post(encodeURI('/api/handwerker/:id/aufträge'), authMiddleware, ...hwSchreibend, async (req, res) => {
+app.post([encodeURI('/api/handwerker/:id/aufträge'), '/api/handwerker/:id/auftraege'], authMiddleware, ...hwSchreibend, async (req, res) => {
   const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
@@ -14761,9 +14809,9 @@ app.post(encodeURI('/api/handwerker/:id/aufträge'), authMiddleware, ...hwSchrei
     if (!(await hwVertragPasst(client, req, id, a.vertrag_id))) return res.status(400).json({ error: 'Vertrag gehört nicht zu dieser Firma' });
     await client.query('BEGIN');
     const result = await client.query(
-      `INSERT INTO handwerker_auftraege (handwerker_id, datum, beschreibung, kosten, stweg, notiz, vertrag_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [id, a.datum, a.beschreibung, a.kosten, a.stweg, a.notiz, a.vertrag_id]
+      `INSERT INTO handwerker_auftraege (handwerker_id, datum, beschreibung, kosten, stweg, notiz, vertrag_id, bewertung, bewertung_text)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [id, a.datum, a.beschreibung, a.kosten, a.stweg, a.notiz, a.vertrag_id, a.bewertung, a.bewertung_text]
     );
     await syncLetzterAuftrag(client, id);
     if (a.vertrag_id) await recomputeNaechsterTermin(client, a.vertrag_id);
@@ -14779,7 +14827,7 @@ app.post(encodeURI('/api/handwerker/:id/aufträge'), authMiddleware, ...hwSchrei
   }
 });
 
-app.put(encodeURI('/api/handwerker/:id/aufträge/:aid'), authMiddleware, ...hwSchreibend, async (req, res) => {
+app.put([encodeURI('/api/handwerker/:id/aufträge/:aid'), '/api/handwerker/:id/auftraege/:aid'], authMiddleware, ...hwSchreibend, async (req, res) => {
   const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
@@ -14798,9 +14846,10 @@ app.put(encodeURI('/api/handwerker/:id/aufträge/:aid'), authMiddleware, ...hwSc
     if (!(await hwVertragPasst(client, req, id, a.vertrag_id))) return res.status(400).json({ error: 'Vertrag gehört nicht zu dieser Firma' });
     await client.query('BEGIN');
     const result = await client.query(
-      `UPDATE handwerker_auftraege SET datum=$1, beschreibung=$2, kosten=$3, stweg=$4, notiz=$5, vertrag_id=$6
-       WHERE id=$7 AND handwerker_id=$8 RETURNING *`,
-      [a.datum, a.beschreibung, a.kosten, a.stweg, a.notiz, a.vertrag_id, aid, id]
+      `UPDATE handwerker_auftraege SET datum=$1, beschreibung=$2, kosten=$3, stweg=$4, notiz=$5, vertrag_id=$6,
+              bewertung=$7, bewertung_text=$8
+       WHERE id=$9 AND handwerker_id=$10 RETURNING *`,
+      [a.datum, a.beschreibung, a.kosten, a.stweg, a.notiz, a.vertrag_id, a.bewertung, a.bewertung_text, aid, id]
     );
     if (result.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -14821,7 +14870,7 @@ app.put(encodeURI('/api/handwerker/:id/aufträge/:aid'), authMiddleware, ...hwSc
   }
 });
 
-app.delete(encodeURI('/api/handwerker/:id/aufträge/:aid'), authMiddleware, ...hwSchreibend, async (req, res) => {
+app.delete([encodeURI('/api/handwerker/:id/aufträge/:aid'), '/api/handwerker/:id/auftraege/:aid'], authMiddleware, ...hwSchreibend, async (req, res) => {
   const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
@@ -22247,6 +22296,13 @@ async function updateReklamation(id, fields, actor) {
   }
   if (b.notiz !== undefined && (b.notiz || '') !== (before.notiz || '')) logReklEvent(id, who, `Notiz geändert: "${String(b.notiz || '').slice(0, 80)}"`).catch(() => {});
   if (b.archiviert !== undefined && (!!b.archiviert) !== (!!before.archiviert)) logReklEvent(id, who, b.archiviert ? '📦 Archiviert' : '↩ Aus Archiv zurückgeholt').catch(() => {});
+  // Rosenweg Handwerker (E8): nur Vorschläge, die die Verwaltung bestätigt (nichts geht von selbst an die Firma)
+  if (b.handwerker_id && Number(b.handwerker_id) !== Number(before.handwerker_id || 0)) {
+    hwAppRoutes.vorschlagAnlegen(pool, 'benachrichtigung', updated).catch((e) => console.warn('[handwerker-vorschlag]', e.message));
+  }
+  if (b.status === 'erledigt' && before.status !== 'erledigt' && updated.handwerker_id) {
+    hwAppRoutes.vorschlagAnlegen(pool, 'einsatz', updated).catch((e) => console.warn('[handwerker-vorschlag]', e.message));
+  }
   // Persoenliche Benachrichtigung an neu zugewiesenes Technik-Mitglied.
   if (b.zugewiesen_an !== undefined && b.zugewiesen_an && b.zugewiesen_an !== before.zugewiesen_an) {
     notifyReklAssignee(updated, b.zugewiesen_an).catch(() => {});
@@ -22358,6 +22414,7 @@ async function autoAssignReklamation(reklId) {
       let firma = '#' + rule.handwerker_id;
       try { const h = await pool.query('SELECT firma FROM handwerker WHERE id = $1', [rule.handwerker_id]); if (h.rows[0]?.firma) firma = h.rows[0].firma; } catch {}
       logReklEvent(reklId, 'System', `Auto-zugewiesen an Handwerker: ${firma}`).catch(() => {});
+      hwAppRoutes.vorschlagAnlegen(pool, 'benachrichtigung', { ...rekl, handwerker_id: rule.handwerker_id }).catch(() => {});
     } else {
       await pool.query('UPDATE reklamationen SET zugewiesen_an = $2, handwerker_id = NULL, updated_at = NOW() WHERE id = $1', [reklId, rule.zugewiesen_an]);
       logReklEvent(reklId, 'System', `Auto-zugewiesen an: ${rule.zugewiesen_an}`).catch(() => {});
@@ -25325,6 +25382,11 @@ require('./routes/app-tunnel').appTunnelRoutes(app, { pool, rateLimitGuard });
 // Persoenliche App-Daten (z.B. Wecker der Rosenweg Uhr) auf allen Geraeten einer Person gleich:
 // GET/PUT /api/me/app-daten/:app -> routes/app-daten.js (Modell und Konfliktregel: lib/app-daten.js)
 require('./routes/app-daten').appDatenRoutes(app, { pool, authMiddleware });
+// Rosenweg Handwerker (App): Erinnerungen, Vorschläge aus Reparatur, Export-Protokoll, Mitarbeiter löschen
+hwAppRoutes.handwerkerAppRoutes(app, {
+  pool, authMiddleware, requirePermission, hwSchreibend, hwSichtVon, hwFirmaLesbar, hwFirmaAntwort,
+  objProtokoll, loggedSendMail, logReklEvent, syncLetzterAuftrag, kartenProtokollieren: kartenAdmin.mitKarteProtokollieren,
+});
 
 // Karten-Anmeldung der Rosenweg-Apps auf privaten Geraeten (Entscheid Stefan 26.11.2026):
 // Rosenweg-Karte ans Handy -> eigene, widerrufbare Sitzung je App. Begruendung in routes/app-karte.js.
@@ -31761,6 +31823,18 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_handwerker_vertraege_naechst ON handwerker_vertraege(naechster_termin) WHERE status = 'aktiv';
 
       ALTER TABLE handwerker_auftraege ADD COLUMN IF NOT EXISTS vertrag_id INTEGER REFERENCES handwerker_vertraege(id) ON DELETE SET NULL;
+      -- Welle 3.3 (Rosenweg Handwerker): Einsatz aus einer Reparatur-Meldung (E8), Bewertung je Einsatz (E10),
+      -- Vertragsdokument als Pfad in Unterlagen (E7)
+      ALTER TABLE handwerker_auftraege ADD COLUMN IF NOT EXISTS reklamation_id INTEGER;
+      ALTER TABLE handwerker_auftraege ADD COLUMN IF NOT EXISTS bewertung INTEGER CHECK (bewertung >= 1 AND bewertung <= 5);
+      ALTER TABLE handwerker_auftraege ADD COLUMN IF NOT EXISTS bewertung_text TEXT;
+      ALTER TABLE handwerker_vertraege ADD COLUMN IF NOT EXISTS vertragsdokument_pfad TEXT;
+      DO $$ BEGIN
+        IF to_regclass('public.project_candidates') IS NOT NULL THEN
+          ALTER TABLE project_candidates ADD COLUMN IF NOT EXISTS handwerker_id INTEGER REFERENCES handwerker(id) ON DELETE SET NULL;
+        END IF;
+      END $$;
+      ${hwAppRoutes.SCHEMA_SQL}
       CREATE INDEX IF NOT EXISTS idx_handwerker_auftraege_vertrag ON handwerker_auftraege(vertrag_id);
 
       DO $$ BEGIN
