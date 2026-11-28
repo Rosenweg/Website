@@ -207,7 +207,11 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `GET /api/public/ausschuss`, `/api/public/technik`, `/api/verwaltungen/public` | öffentliche Kontakte |
 | `GET /api/stweg/:stweg/wohnungen` | ohne Anmeldung nur `anzahl` (`eingeschraenkt: true`); Belegung, Besonderheiten, Wertquote je Wohnung nur mit Anmeldung als Mitglied der STWEG, ihre Verwaltung, T/P (F1, 28.11.2026) |
 | `GET /api/stweg/:stweg/overview` | Zahlen zur STWEG (ohne Namen) |
-| `GET /api/stweg-modules`, `/api/stweg-sections/:stweg` | Inhalte der STWEG-Seiten (öffentlich; der Editor weist darauf hin). `/api/stweg-content` ist seit 28.11.2026 entfernt |
+| `GET /api/stweg-modules` | aktive Module je STWEG (bekannt: nur `waschkueche`; `seiten-editor` entfällt) |
+| `GET /api/stweg/meine` | Gemeinschaften des Kontos (Rolle, `darf`, Module, `dokZugang`) für Rosenweg STWEG; `kooperation.schreiben` |
+| `GET /api/stweg/:nr/mitteilungen` | Mitteilungen (Markdown `text` und gerendertes `html`); `nr` 0 = Kooperation; ohne Anmeldung nur `oeffentlich`; `?wichtig=1`; Schreibende sehen mit `?alle=1` auch abgelaufene |
+| `GET /api/stweg-bilder/:id` | Bild einer Mitteilung (Sicht wie die Mitteilung) |
+| `GET /api/stweg/:nr/kontakte.pdf`, `/wohnungen.pdf`, `GET /api/meg/einstellplaetze.pdf` | PDF mit Vermerk „vertraulich“ (Einstellplätze nur Verwalter der MEG) |
 | `GET /api/verteiler/by-stweg/:stweg` | Namen und Adressen der Verteiler einer STWEG |
 | `GET /api/calendar` | Termine (503, wenn `GOOGLE_CALENDAR_ICS_URL` fehlt) |
 | `GET /api/public/project/:slug`, `…/document/:path` | öffentlich geschaltete Projekte: Kandidaten nur `id, name, webseite, status`, nur als öffentlich markierte Anhänge (`oeffentlich`) |
@@ -274,7 +278,8 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `GET /api/stweg/:nr/kontakte`, `GET /api/kontakte/:stweg` | Gruppe dieser STWEG oder T/P; `PUT /api/kontakte` nur T/P |
 | `GET/POST/PUT/DELETE /api/verwaltungen…` | Ausschuss/T/P; Ausschuss liest eigene + STWEG-übergreifende, ändert nur eigene; die Hausverwaltung (`stwegN-verwaltung`) liest ihren eigenen Eintrag ohne Plattform-Passwort und Notizen und ändert nur Kontaktpersonen und Kontaktdaten (PUT, `…/kontakte`); anlegen/löschen nicht |
 | `GET /api/verwaltungen/kontakte` | angemeldet, gefiltert nach Sichtbarkeitsstufe und STWEG |
-| `POST /api/stweg-modules`, `/api/stweg-sections/:stweg/:section` | A🅢 oder T/P; Inhalte nur, wenn das Modul Seiten-Editor aktiv ist; `GET /api/stweg-sections-rechte` liefert die STWEGs, die das Konto speichern darf |
+| `POST /api/stweg-modules` | A🅢 oder T/P; nur bekannte Module (`waschkueche`) |
+| `POST/PUT/DELETE /api/stweg/:nr/mitteilungen[/:id]`, `POST /api/stweg/:nr/bilder` | Technik/Präsident; sonst Seitenrecht `stweg-mitteilungen` = write UND Ausschuss oder Verwaltung dieser STWEG; Kooperation (nr 0) nur T/P. Löschen blendet aus; `GET …/:id/verlauf` zeigt die Fassungen. Die alten Abschnitte (`stweg_sections`) werden beim Start als Mitteilungen übernommen |
 | `GET /api/stweg/:nr/kontakte` | Mitglieder der STWEG (auch Mieter), ihre Verwaltung, T/P alle; nur Kontakte, die schon gelten (`gueltig_ab` leer oder erreicht) |
 | `GET /api/stweg/:stweg/events` | Gruppe dieser STWEG; `POST`, `PUT /:id`, `DELETE /:id`: T/P oder Recht `stweg-termine` schreiben + Ausschuss/Verwaltung dieser STWEG (`lib/termine.js`), Fehler am Feld `{error, feld}` |
 | `GET /api/termine?stweg=` | Rosenweg Termine: Termine der eigenen STWEG(s) in einer Liste (`stwegs` je Termin), `stwegs` mit `schreiben` und `kalender` (Nextcloud-Kalender aus `TERMINE_NEXTCLOUD_KALENDER`, sonst null); `stweg=3,5` oder `alle` (T/P alle, sonst nur sichtbare → 403) |

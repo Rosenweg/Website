@@ -391,7 +391,6 @@ const RosenwegNav = {
       { href: 'unterschriftenliste-ruecklaeufe.html', label: 'Unterschriften-Rückläufe', group: 'Verwaltung', perm: 'wohnungsverwaltung', aud: ['admin', 'ausschuss'] },
       { href: 'grundbuch.html', label: 'Grundbuch', group: 'Verwaltung', perm: 'grundbuch' },
       { href: 'stweg-module.html', label: 'STWEG-Module', group: 'Verwaltung', perm: 'stweg-module', aud: ['admin', 'ausschuss'] },
-      { href: 'stweg-seite-editor.html', label: 'STWEG-Seite bearbeiten', group: 'Verwaltung', perm: 'stweg-seite-editor', aud: ['admin', 'ausschuss'] },
       { href: 'mail-compose.html', label: 'Mail schreiben', group: 'Mail-Betrieb', perm: 'mail-compose' },
     ];
   },

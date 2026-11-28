@@ -42,26 +42,19 @@ test('server.js: Wohnungsliste mit optionaler Anmeldung, Kontakte erst ab guelti
   assert.match(teil, /stwegOeffentlich\.stwegMitglied\(req\.user\.groups \|\| \[\], stweg\)/);
   assert.match(teil, /stwegOeffentlich\.wohnungenOeffentlich\(result\.rows\)/);
   assert.equal(so.KONTAKT_GILT_SQL, '(k.gueltig_ab IS NULL OR k.gueltig_ab <= CURRENT_DATE)');
-  const k = src.indexOf("app.get('/api/stweg/:nr/kontakte'");
+  const k = src.indexOf('async function stwegKontakteLaden');
   assert.match(src.slice(k, k + 1800), /\$\{stwegOeffentlich\.KONTAKT_GILT_SQL\}/);
   // Zugang zur Kontaktliste bleibt: eigene STWEG (auch Mieter), Verwaltung, T/P
   assert.match(src.slice(k, k + 1200), /isVerwaltungFor\(allUserGroups, nr\)/);
 });
 
-test('Altroute stweg-content entfernt, Abschnitte mit Karten-Protokoll', () => {
+test('Altroute stweg-content und alte Abschnitte entfernt, Mitteilungen ersetzen sie', () => {
   const src = lies('api/server.js');
   assert.doesNotMatch(src, /app\.(get|post)\('\/api\/stweg-content/);
-  assert.match(src, /app\.post\('\/api\/stweg-sections\/:stweg\/:section', authMiddleware, kartenAdmin\.mitKarteProtokollieren,/);
-  assert.match(src, /app\.get\('\/api\/stweg-sections-rechte', authMiddleware,/);
-  for (const f of ['stweg3/index.html', 'stweg-seite-editor.html']) assert.doesNotMatch(lies(f), /stweg-content/, f);
-});
-
-test('F3/F9: Editor zeigt „öffentlich sichtbar“ und fragt den Server nach dem Recht', () => {
-  const html = lies('stweg-seite-editor.html');
-  assert.match(html, /\/api\/stweg-sections-rechte/);
-  assert.doesNotMatch(html, /g\.match\(\/\^stweg\(\\d\+\)-\/\)/);   // kein Raten aus Gruppennamen
-  assert.match(html, /🌐 Öffentlich sichtbar/);
-  assert.match(html, /öffentlich sichtbar — ohne Anmeldung für alle lesbar/);
+  assert.doesNotMatch(src, /app\.(get|post)\('\/api\/stweg-sections/);
+  assert.match(src, /app\.use\('\/api\/stweg', stwegApp\.router\)/);
+  assert.match(lies('api/routes/stweg-app.js'), /schreibGate[\s\S]*kartenAdmin\.vermerken/);
+  assert.doesNotMatch(lies('stweg3/index.html'), /stweg-content|stweg-sections\//);
 });
 
 test('STWEG-3-Seite: Wohnungsliste mit Anmeldung, sonst nur Anzahl', () => {
