@@ -60,7 +60,7 @@ const ANLEITUNGEN = {
       'mail-archiv-und-empfaenger.pdf': 'Mail-Archiv und Empfänger',
       'hausverwaltung-und-briefe.pdf': 'Hausverwaltung und Briefe',
       'dokumente-hochladen-und-ordnen.pdf': 'Dokumente hochladen und ordnen',
-      'stweg-seite-bearbeiten.pdf': 'STWEG-Seite bearbeiten',
+      'stweg-mitteilungen-schreiben.pdf': 'STWEG-Mitteilungen schreiben (App Rosenweg STWEG)',
       'terminumfragen.pdf': 'Terminumfragen',
       'zev-rechnungen-zuordnen.pdf': 'ZEV-Stromrechnungen zuordnen (Rosenweg 9)',
       'meg-einstellplaetze-verwalten.pdf': 'MEG: Einstellplätze verwalten',
