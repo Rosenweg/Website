@@ -172,6 +172,16 @@
       "text": "Vollmachten für die Versammlung erteilen, digital signieren oder als Foto-PDF hochladen, ansehen und drucken; Verwaltung und Ausschuss sehen, wer wen vertritt.",
       "fuer": "Für Eigentümer (erteilen) und alle Bevollmächtigten (ansehen). Alle Vollmachten und „Wer vertritt wen“: Ausschuss und Verwaltung mit Recht „Vollmachten“, Technik und Präsident.",
       "_notiz": "Flutter, alle Plattformen (Entscheide Stefan 28.11.2026). Stationen: SEITE=rosenweg-vollmachten (Seite vollmachten.html)."
+    },
+    "stweg": {
+      "name": "Rosenweg STWEG",
+      "repo": "Rosenweg/rosenweg-stweg",
+      "paket": "ch.rosenweg4303.stweg",
+      "logo": "/img/apps/rosenweg-stweg.png?v=20261128",
+      "reihenfolge": 110,
+      "text": "Meine Gemeinschaft: Mitteilungen deiner STWEG (auch die wichtigen als Benachrichtigung), Kontaktliste, Hausverwaltung, Ausschuss, Wohnungen und bei der MEG die Einstellplätze, mit Sprüngen zu Termine, Unterlagen, Projekte, Reparatur und Waschküche. Mitteilungen schreiben mit Text, Bild und Sichtbarkeit.",
+      "fuer": "Für alle Bewohner und Eigentümer. Mitteilungen schreiben: Ausschuss und Verwaltung ihrer STWEG; Kooperation: Technik und Präsident.",
+      "_notiz": "Flutter, alle Plattformen (Klärung STWEG 28.11.2026). Ersetzt stwegN/index.html (Kontakte, Hausverwaltung) und den Seiten-Editor; Push ohne Server-Registrierung (Abfrage im Hintergrund, nur Mitteilungen mit „wichtig“, Opt-in je STWEG). Stationen: keine STWEG-Seite im Stationen-Menü, daher kein stationen_seite."
     }
   },
   "katalog": {

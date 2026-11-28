@@ -7,6 +7,9 @@ const { pool } = require('../lib/db');
 const { authMiddleware } = require('../middleware/auth');
 const { darfMegPlaetzeVerwalten, darfMegPlaetzeSehen, megPlatzAenderung, sortierePlaetze } = require('../lib/meg');
 
+const druckApi = require('../lib/druckapi');
+const stwegApp = require('../lib/stweg-app');
+
 const router = express.Router();
 
 // MEG-Platzverwaltung: Technik/Praesident, MEG-Ausschuss (Ausschuss fuer
@@ -47,6 +50,16 @@ router.get('/einstellplaetze', authMiddleware, async (req, res) => {
       ? p
       : { id: p.id, platz_nr: p.platz_nr, typ: p.typ, status: p.status }));
   } catch (err) { res.status(500).json({ error: 'Fehler beim Laden' }); }
+});
+
+// PDF der Platzliste mit Namen (Rosenweg STWEG): nur die Verwalter der MEG, mit Vermerk „vertraulich“.
+router.get('/einstellplaetze.pdf', authMiddleware, megManageGate, async (req, res) => {
+  try {
+    const rows = sortierePlaetze((await pool.query('SELECT * FROM meg_einstellplaetze')).rows);
+    const html = stwegApp.einstellplaetzeHtml(rows, req.user?.name || req.user?.email || 'unbekannt');
+    const pdf = await druckApi.htmlZuPdf(html);
+    res.set('Content-Type', 'application/pdf').set('Content-Disposition', 'inline; filename="einstellplaetze-meg.pdf"').set('Cache-Control', 'no-store').send(pdf);
+  } catch (err) { console.error('[meg-pdf]', err.message); res.status(502).json({ error: 'PDF konnte nicht erstellt werden' }); }
 });
 
 router.post('/einstellplaetze', authMiddleware, megManageGate, async (req, res) => {

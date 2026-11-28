@@ -11,6 +11,7 @@ const sanitizeHtml = require('sanitize-html');
 
 // ─── Ausgelagerte Module (inkrementeller Router-Split) ───────────────
 const { escapeHtml, createSemaphore, normalizePhone, safeId, geheimnisGleich, fehlerFuerClient, hatSteuerzeichen } = require('./lib/utils');
+const stwegAppLib = require('./lib/stweg-app'); // Rosenweg STWEG: Rollen, Mitteilungen, Druck
 const druckApi = require('./lib/druckapi'); // Druck-API CT 111 und Gotenberg (Druck per Mail, Scanner-Zettel)
 
 // STWEG-Gruppen-Mapping + pure Klassifizierer -> lib/groups.js
@@ -6605,10 +6606,11 @@ function wohnungSort(a, b) {
   return pa.floor - pb.floor || pa.num - pb.num;
 }
 
-app.get('/api/stweg/:nr/kontakte', authMiddleware, async (req, res) => {
-  try {
-    const nr = parseInt(req.params.nr);
-    if (!nr || nr < 1 || nr > 8) return res.status(404).json({ error: 'STWEG nicht gefunden' });
+// Kontaktliste einer STWEG (Name, Mail, Nummer nach Sicht); Fehler als { status, error } geworfen.
+// Genutzt vom JSON-Endpunkt und vom PDF (Rosenweg STWEG).
+async function stwegKontakteLaden(req, nr) {
+  {
+    if (!nr || nr < 1 || nr > 8) throw { status: 404, error: 'STWEG nicht gefunden' };
 
     // Check access: user must be in this STWEG's groups or Technik
     const stwegGroups = STWEG_GROUPS[nr];
@@ -6617,7 +6619,7 @@ app.get('/api/stweg/:nr/kontakte', authMiddleware, async (req, res) => {
     const hasAccess = allUserGroups.some(g => g === 'technik' || g === 'präsident' || g === 'praesident') ||
                       allUserGroups.some(g => accessGroups.includes(g)) ||
                       isVerwaltungFor(allUserGroups, nr);
-    if (!hasAccess) return res.status(403).json({ error: 'Kein Zugriff auf diese STWEG' });
+    if (!hasAccess) throw { status: 403, error: 'Kein Zugriff auf diese STWEG' };
 
     // Load apartments + contacts from Verwaltungs-DB
     const wRes = await pool.query('SELECT * FROM wohnungen WHERE stweg = $1', [nr]);
@@ -6679,12 +6681,54 @@ app.get('/api/stweg/:nr/kontakte', authMiddleware, async (req, res) => {
     for (const w of wohnungen) w.bewohner = w.bewohner.map(mitSicht);
     ausschuss = ausschuss.map(mitSicht);
 
-    res.json({ stweg: nr, wohnungen, ausschuss });
+    return { stweg: nr, wohnungen, ausschuss };
+  }
+}
+
+app.get('/api/stweg/:nr/kontakte', authMiddleware, async (req, res) => {
+  try {
+    res.json(await stwegKontakteLaden(req, parseInt(req.params.nr)));
   } catch (err) {
+    if (err && err.status) return res.status(err.status).json({ error: err.error });
     console.error('Kontakte error:', err);
     res.status(500).json({ error: 'Fehler beim Laden der Kontakte' });
   }
 });
+
+// PDF fuer Kontaktliste, Wohnungsliste und MEG-Einstellplaetze (Rosenweg STWEG, Entscheid 10):
+// vom Server (Gotenberg), mit Vermerk „vertraulich, erstellt fuer <Name> am <Datum>“.
+async function stwegPdfSenden(req, res, html, name) {
+  try {
+    const pdf = await druckApi.htmlZuPdf(html, { semaphore: gotenbergSemaphore });
+    res.set('Content-Type', 'application/pdf').set('Content-Disposition', `inline; filename="${name}"`).set('Cache-Control', 'no-store').send(pdf);
+  } catch (e) {
+    console.error('[stweg-pdf]', e.message);
+    res.status(502).json({ error: 'PDF konnte nicht erstellt werden' });
+  }
+}
+const pdfFuer = (req) => req.user?.name || req.user?.email || 'unbekannt';
+
+app.get('/api/stweg/:nr/kontakte.pdf', authMiddleware, async (req, res) => {
+  try {
+    const d = await stwegKontakteLaden(req, parseInt(req.params.nr));
+    await stwegPdfSenden(req, res, stwegAppLib.kontaktlisteHtml(d, pdfFuer(req)), `kontaktliste-stweg${d.stweg}.pdf`);
+  } catch (err) {
+    if (err && err.status) return res.status(err.status).json({ error: err.error });
+    res.status(500).json({ error: 'Fehler beim Laden der Kontakte' });
+  }
+});
+
+app.get('/api/stweg/:stweg/wohnungen.pdf', authMiddleware, async (req, res) => {
+  try {
+    const stweg = parseInt(req.params.stweg, 10);
+    if (!stweg || stweg < 1 || stweg > 8) return res.status(400).json({ error: 'Ungueltige STWEG' });
+    if (!stwegOeffentlich.stwegMitglied(req.user.groups || [], stweg)) return res.status(403).json({ error: 'Kein Zugriff auf diese STWEG' });
+    const r = await pool.query('SELECT bezeichnung, stockwerk, zimmer, flaeche_m2, typ, besonderheiten, bewohnt_von, wertquote_zaehler, wertquote_nenner FROM wohnungen WHERE stweg = $1', [stweg]);
+    r.rows.sort((a, b) => wohnungSort(a.bezeichnung, b.bezeichnung));
+    await stwegPdfSenden(req, res, stwegAppLib.wohnungslisteHtml(stweg, r.rows, pdfFuer(req)), `wohnungsliste-stweg${stweg}.pdf`);
+  } catch (err) { res.status(500).json({ error: 'Fehler' }); }
+});
+
 
 // ─── Wohnungsverwaltung ─────────────────────────────────────────────
 
@@ -19564,7 +19608,7 @@ app.get('/api/stweg-modules', async (req, res) => {
   try {
     const r = await pool.query('SELECT stweg, module FROM stweg_modules WHERE active = true');
     const map = {};
-    r.rows.forEach(x => { (map[x.stweg] = map[x.stweg] || []).push(x.module); });
+    r.rows.filter(x => stwegAppLib.MODULE.includes(x.module)).forEach(x => { (map[x.stweg] = map[x.stweg] || []).push(x.module); });
     res.json(map);
   } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
 });
@@ -19577,6 +19621,7 @@ app.post('/api/stweg-modules', authMiddleware, kartenAdmin.mitKarteProtokolliere
     const module = String(req.body?.module || '').trim();
     const active = !!req.body?.active;
     if (!Number.isFinite(stweg) || !module) return res.status(400).json({ error: 'stweg + module noetig' });
+    if (!stwegAppLib.MODULE.includes(module)) return res.status(400).json({ error: `Unbekanntes Modul: ${module}` });
     const groups = req.user?.groups || [];
     const admin = isTechnik(groups) || isPraesident(groups);
     if (!admin && !getAusschussStwegs(groups).has(stweg)) {
@@ -19595,92 +19640,13 @@ app.post('/api/stweg-modules', authMiddleware, kartenAdmin.mitKarteProtokolliere
 // Seite nutzt sie mehr (Nachfolger: /api/stweg-sections), und das POST hatte kein
 // Karten-Protokoll. Die Tabelle stweg_content bleibt unangetastet (keine Daten loeschen).
 
-// ─── STWEG-Seiten-Abschnitte (Modul "seiten-editor", WYSIWYG) ───────
-const STWEG_SECTIONS = ['willkommen', 'aktuelles', 'infos', 'termine'];
-const SANITIZE_OPTS = {
-  allowedTags: ['p', 'br', 'span', 'div', 'strong', 'b', 'em', 'i', 'u', 's', 'blockquote',
-    'ul', 'ol', 'li', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre', 'code', 'hr',
-    'img', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'colgroup', 'col', 'caption'],
-  allowedAttributes: {
-    a: ['href', 'target', 'rel'],
-    img: ['src', 'alt', 'width', 'height'],
-    td: ['colspan', 'rowspan'],
-    th: ['colspan', 'rowspan'],
-    '*': ['style'],
-  },
-  // class nur aus fester Liste: die Seite laedt Tailwind, frei waehlbare Klassen
-  // (fixed inset-0 z-50 ...) erlaubten ein seitenfuellendes Phishing-Overlay.
-  // Liste = was CKEditor 5 (stweg-seite-editor.html) selbst erzeugt.
-  allowedClasses: {
-    img: ['image', 'image_resized', 'image-style-*'],
-    table: ['table'],
-    span: ['text-tiny', 'text-small', 'text-big', 'text-huge', 'marker-*', 'pen-*'],
-  },
-  allowedStyles: {
-    '*': {
-      'text-align': [/^left$/, /^right$/, /^center$/, /^justify$/],
-      'color': [/^#(0x)?[0-9a-fA-F]{3,8}$/, /^rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)$/],
-      'background-color': [/^#(0x)?[0-9a-fA-F]{3,8}$/, /^rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)$/],
-      'width': [/^\d+(?:px|%)$/],
-      'height': [/^\d+(?:px|%)$/],
-    },
-  },
-  allowedSchemes: ['http', 'https', 'mailto', 'tel'],
-  allowedSchemesByTag: { img: ['http', 'https', 'data'] },
-  allowProtocolRelative: false,
-  transformTags: { a: sanitizeHtml.simpleTransform('a', { rel: 'noopener noreferrer' }) },
-};
-
-pool.query(`CREATE TABLE IF NOT EXISTS stweg_sections (
-  stweg      INTEGER NOT NULL,
-  section    TEXT NOT NULL,
-  html       TEXT NOT NULL DEFAULT '',
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_by TEXT,
-  PRIMARY KEY (stweg, section)
-)`).catch(e => console.error('[stweg-sections] table init:', e.message));
-
-// GET: alle Abschnitte einer STWEG (public, fuers Rendern + Editor-Laden).
-app.get('/api/stweg-sections/:stweg', async (req, res) => {
-  try {
-    const stweg = parseInt(req.params.stweg, 10);
-    const r = await pool.query('SELECT section, html, updated_at FROM stweg_sections WHERE stweg=$1', [stweg]);
-    const out = {};
-    // Auch beim Ausliefern bereinigen: aeltere Inhalte wurden mit lockereren Regeln gespeichert.
-    r.rows.forEach(x => { out[x.section] = { html: sanitizeHtml(x.html || '', SANITIZE_OPTS), updated_at: x.updated_at }; });
-    res.json(out);
-  } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
-});
-
-// GET: in welchen STWEGs darf das Konto Abschnitte speichern? Gleiche Regel wie
-// das POST unten (T/P alle, sonst der Ausschuss seiner STWEG(s)). Der Editor bietet
-// nur diese an (F9, Klaerung STWEG 28.11.2026) statt aus Gruppennamen zu raten.
-app.get('/api/stweg-sections-rechte', authMiddleware, (req, res) => {
-  const groups = req.user?.groups || [];
-  const admin = isTechnik(groups) || isPraesident(groups);
-  res.json({ stwegs: admin ? [1, 2, 3, 4, 5, 6, 7, 8] : [...getAusschussStwegs(groups)].sort((a, b) => a - b), oeffentlich: true });
-});
-
-// POST: einen Abschnitt speichern. Admin jede STWEG, Ausschuss eigene — Modul aktiv — HTML sanitisiert.
-app.post('/api/stweg-sections/:stweg/:section', authMiddleware, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
-  try {
-    const stweg = parseInt(req.params.stweg, 10);
-    const section = String(req.params.section || '');
-    if (!Number.isFinite(stweg)) return res.status(400).json({ error: 'stweg ungueltig' });
-    if (!STWEG_SECTIONS.includes(section)) return res.status(400).json({ error: 'unbekannter Abschnitt' });
-    const groups = req.user?.groups || [];
-    const admin = isTechnik(groups) || isPraesident(groups);
-    if (!admin && !getAusschussStwegs(groups).has(stweg)) return res.status(403).json({ error: 'Nur die eigene STWEG' });
-    const m = await pool.query("SELECT 1 FROM stweg_modules WHERE stweg=$1 AND module='seiten-editor' AND active=true", [stweg]);
-    if (!m.rows.length) return res.status(403).json({ error: 'Modul Seiten-Editor nicht aktiv' });
-    const clean = sanitizeHtml(String(req.body?.html ?? ''), SANITIZE_OPTS);
-    await pool.query(
-      `INSERT INTO stweg_sections (stweg, section, html, updated_at, updated_by) VALUES ($1,$2,$3,NOW(),$4)
-         ON CONFLICT (stweg, section) DO UPDATE SET html=EXCLUDED.html, updated_at=NOW(), updated_by=EXCLUDED.updated_by`,
-      [stweg, section, clean, req.user?.email || null]);
-    res.json({ ok: true, html: clean });
-  } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
-});
+// ─── STWEG-Mitteilungen (Rosenweg STWEG) ────────────────────────────
+// Ersetzt die Abschnitte (stweg_sections, Modul "seiten-editor"): Mitteilungen als Liste
+// von Eintraegen in Markdown, siehe routes/stweg-app.js. Die alten Abschnitte werden beim
+// Start einmal uebernommen; die Tabelle stweg_sections bleibt unveraendert.
+const stwegApp = require('./routes/stweg-app');
+app.use('/api/stweg', stwegApp.router);
+app.use('/api/stweg-bilder', stwegApp.bilder);
 
 // Wer darf hinein: lib/zaehler-technik.js (Technik, Praesident, Verwaltung STWEG 3,
 // r9-eigentuemer) — dieselbe Regel liefert /api/auth/me als energie.technik.
