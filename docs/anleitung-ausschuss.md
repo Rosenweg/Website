@@ -36,7 +36,7 @@ Ausschuss sitzt und in STWEG 3 wohnt, kann STWEG 3 ansehen, aber nicht ändern.
 | Auslagen prüfen, genehmigen, ablehnen | ja, eigene STWEG + STWEG-übergreifende; nie eigene | – | – |
 | Auslage „ausbezahlt“ setzen | nein | ja | ja |
 | Mail schreiben (Composer) | ja, geht in die Outbox | – | Outbox freigeben |
-| ZEV-Rechnungen zuordnen | ja, nur unzugeordnete der eigenen STWEG | – | umhängen, Rechnungen ohne STWEG |
+| ZEV-Rechnungen zuordnen und umhängen | ja, eigene STWEG (protokolliert) | ja, eigene STWEG | Rechnungen ohne STWEG |
 | Unterschriftenlisten, Rückläufe | ja | ja, mit Gruppe der STWEG | – |
 | Vollmachten prüfen (KI) | ja, eigene STWEG | ja | – |
 | Vollmacht „Papier aktivieren“ | nein | ja | ja |
@@ -507,8 +507,9 @@ Stand einer Mail also an die Technik.
 
 ## 8. ZEV-Rechnungen zuordnen
 
-Seite: **ZEV / smart-me** (`stweg3/pages/zev-smartme.html`, zurzeit nur STWEG 3). Für
-Verwaltung, Ausschuss und Technik.
+Seite: **ZEV / smart-me** (`stweg3/pages/zev-smartme.html`, zurzeit nur STWEG 3) oder
+die App **Rosenweg ZEV**, Bereich „Abrechnen“. Für Ausschuss und Verwaltung dieser
+STWEG und Technik; andere Gruppen der STWEG sehen Konfiguration und Wohnungen nicht.
 
 Jede Wohnung hat einen Mail-Alias `zev.<bewohner>@<domain>`, an den smart-me die
 Stromrechnung schickt. Die Rechnung wird dem aktuellen Bewohner zugeordnet und
@@ -527,10 +528,16 @@ keiner Wohnung zugeordnet werden konnte. Sie erscheinen in keiner Bewohner-Ansic
 Empfänger ist automatisch der aktuelle Kontakt der Wohnung in der Reihenfolge Mieter,
 Bewohner, Eigentümer.
 
+Das PDF einer unzugeordneten Rechnung oder einer Allgemeinzähler-Rechnung lässt sich
+zum Prüfen öffnen (in der App). Rechnungen von Wohnungen bleiben privat.
+
+Bereits zugeordnete Rechnungen (Abschnitt „Zugeordnete Rechnungen“) kann der Ausschuss
+und die Verwaltung der STWEG seit 27.11.2026 selbst umhängen. Jede Änderung steht im
+Protokoll; beim neuen Empfänger ist die Rechnung wieder offen.
+
 | Meldung | Bedeutung |
 |---|---|
 | „Bitte eine Wohnung wählen.“ | Auswahl fehlt |
-| „Rechnung ist bereits zugeordnet. Umhängen nur durch Technik.“ | bereits zugeordnete Rechnungen ändert nur die Technik |
 | „Kein Zugriff auf diese STWEG“ | Wohnung oder Rechnung gehört zu einer anderen STWEG, oder die Rechnung hat keine STWEG (dann ordnet die Technik zu) |
 
 ### 8.2 Konfiguration und Aliase

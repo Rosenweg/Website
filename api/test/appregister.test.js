@@ -43,6 +43,12 @@ test('apps-register.json ist gueltig und kennt die bisherigen Apps', () => {
   assert.ok(!daten.apps.termine.technik);
   assert.equal(daten.apps.termine.logo, '/img/apps/rosenweg-termine.png?v=20261128');
   assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.termine.logo.split('?')[0])));
+  // Rosenweg ZEV (Flutter, 28.11.2026)
+  assert.equal(daten.apps.zev.paket, 'ch.rosenweg4303.zev');
+  assert.equal(daten.apps.zev.repo, 'Rosenweg/rosenweg-zev');
+  assert.ok(!daten.apps.zev.technik);
+  assert.equal(daten.apps.zev.logo, '/img/apps/rosenweg-zev.png?v=20261128');
+  assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.zev.logo.split('?')[0])));
 });
 
 test('pruefen findet Fehler', () => {
