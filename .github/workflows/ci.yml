@@ -11,7 +11,8 @@ permissions:
 
 jobs:
   syntax-check:
-    runs-on: ubuntu-latest
+    # eigene Runner (CT 140/145), Fork-PRs auf GitHub-Runnern
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Linux","rosenweg"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -65,7 +66,8 @@ jobs:
 
   kerberos-pruefer:
     # Prueft Kerberos-Tickets der Agent-Anmeldung (api/kerberos-pruefer, Protokoll v2)
-    runs-on: ubuntu-latest
+    # eigene Runner (CT 140/145), Fork-PRs auf GitHub-Runnern
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Linux","rosenweg"]') || 'ubuntu-latest' }}
     defaults:
       run:
         working-directory: api/kerberos-pruefer
@@ -81,7 +83,8 @@ jobs:
   adb-zentrale:
     # Endpunkt des adb-Tunnels der geteilten Telefone (pbx/adb-zentrale): Format, vet, Tests
     # mit echtem WireGuard-Handshake (Netzstapel im Prozess, kein Root noetig), Skripte
-    runs-on: ubuntu-latest
+    # eigene Runner (CT 140/145), Fork-PRs auf GitHub-Runnern
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Linux","rosenweg"]') || 'ubuntu-latest' }}
     defaults:
       run:
         working-directory: pbx/adb-zentrale
@@ -98,7 +101,8 @@ jobs:
 
   edge-plugin:
     # Eigenes Traefik-Plugin (edge-traefik/plugins/echteip): Format, vet, Tests
-    runs-on: ubuntu-latest
+    # eigene Runner (CT 140/145), Fork-PRs auf GitHub-Runnern
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Linux","rosenweg"]') || 'ubuntu-latest' }}
     defaults:
       run:
         working-directory: edge-traefik/plugins/echteip
