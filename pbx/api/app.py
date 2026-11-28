@@ -2776,9 +2776,12 @@ def _apps_einspielen(schluessel, plattform, quelle, version_soll=None):
             if plattform == "android":
                 katalog = conn.execute("SELECT apk_datei FROM telefon_apps WHERE paket = ? AND art = 'apk'",
                                        (paket_soll,)).fetchone()
-                if not katalog and register and not conn.execute(
+                ohne = {x.strip() for x in re.split(r"[,\s]+", _cfg(conn).get(
+                    "telefon_katalog_ohne", "ch.rosenweg4303.kiosk")) if x.strip()}
+                if not katalog and register and paket_soll not in ohne and not conn.execute(
                         "SELECT 1 FROM telefon_apps WHERE paket = ?", (paket_soll,)).fetchone():
-                    # Jede Rosenweg-App gehoert auch auf die geteilten Telefone (Stefan 28.11.2026):
+                    # Jede Rosenweg-App gehoert auch auf die geteilten Telefone (Stefan 28.11.2026),
+                    # ausser den Ausnahmen in config telefon_katalog_ohne (Standard: Kiosk = TV-Startseite):
                     # beim ersten Android-Release selbst in den Katalog aufnehmen, fuer alle sichtbar.
                     # Die App prueft ihre Rechte selbst; Freigabe/Gruppen aendert die Technik auf /smartphones.
                     reihe = (conn.execute("SELECT COALESCE(MAX(reihenfolge), 0) FROM telefon_apps").fetchone()[0] or 0) + 10
