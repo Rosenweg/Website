@@ -308,7 +308,7 @@
   const LED = { rot: 'led-red', gelb: 'led-amber', gruen: 'led-green', blau: 'led-blau', grau: 'led-grau' };
 
   function stationKarte(s) {
-    const ort = [s.rolle_text, s.haus ? 'R' + s.haus : null, s.standort].filter(Boolean).join(' · ');
+    const ort = [s.rolle_text, s.haus ? 'R' + s.haus : 'Kooperation', s.standort].filter(Boolean).join(' · ');
     const was = [s.os, s.agent].filter(Boolean).join(' · ');
     const zeit = s.zustand === 'ohne-agent' ? '—'
       : s.zustand === 'online' ? fmtAlter(s.alter_min)
