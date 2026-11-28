@@ -18,7 +18,10 @@
       "logo": "/img/apps/rosenweg-salz.png?v=20261127",
       "reihenfolge": 20,
       "text": "Salzvorrat der Enthärtungsanlagen: Anlieferung und eingefüllte Säcke mit dem Barcode buchen, Bestand, Reichweite und „Nächster Sack etwa am …“ je Lager.",
-      "fuer": "Buchen dürfen die Bewohner von Rosenweg 2, 4 und 9, die Kooperation (Lager im Rosenweg 10) und die Technik. Alle anderen sehen nur einen Hinweis."
+      "fuer": "Buchen dürfen die Bewohner von Rosenweg 2, 4 und 9, die Kooperation (Lager im Rosenweg 10) und die Technik. Alle anderen sehen nur einen Hinweis.",
+      "logos": {
+        "gruen": "/img/apps/rosenweg-salz-gruen.png?v=20261128"
+      }
     },
     "kiosk": {
       "name": "Rosenweg Kiosk",
@@ -59,7 +62,10 @@
       "reihenfolge": 35,
       "text": "Die eigene Rosenweg-Nummer einstellen: Weiterleitung und Voicemail, wo du angemeldet bist (geteilte Telefone, eigene Handys), Anmelde-QR für geteilte Telefone und Apps. Telefoniert wird mit Rosenweg Telefon.",
       "fuer": "Für alle mit einer Rosenweg-Nummer.",
-      "_notiz": "Plan Flutter-Apps Welle 1 (27.11.2026): bündelt mein-telefon.html, pbx/web/telefon.html und den Teil „eigenes Handy“ von smartphones.html; die Web-Seiten bleiben. Kennung ohne Unterstrich (Rücksprung-Schema, iOS-Bundle-ID)."
+      "_notiz": "Plan Flutter-Apps Welle 1 (27.11.2026): bündelt mein-telefon.html, pbx/web/telefon.html und den Teil „eigenes Handy“ von smartphones.html; die Web-Seiten bleiben. Kennung ohne Unterstrich (Rücksprung-Schema, iOS-Bundle-ID).",
+      "logos": {
+        "gruen": "/img/apps/rosenweg-mein-telefon-gruen.png?v=20261128"
+      }
     },
     "reparatur": {
       "name": "Rosenweg Reparatur",
@@ -70,7 +76,11 @@
       "text": "Schäden melden mit Foto (auch per QR-Code am Ort), eigene Meldungen verfolgen, Meldungen der eigenen STWEG ansehen; Technik, Ausschuss und Verwaltung bearbeiten und weisen zu.",
       "fuer": "Für alle Bewohner und Eigentümer. Bearbeiten: Technik, Präsident, Ausschuss und Verwaltung (für ihre STWEG).",
       "technik": false,
-      "_notiz": "Flutter, alle Plattformen (Plan Welle 1). Ersetzt in der App pwa/reparatur (angemeldet), reklamationen.html und stwegN/pages/reklamationen.html; die Web-Seiten bleiben, auch der oeffentliche Melde-Ort-QR. Push ohne ntfy (Entscheid Stefan 27.11.2026): Abfrage beim Oeffnen."
+      "_notiz": "Flutter, alle Plattformen (Plan Welle 1). Ersetzt in der App pwa/reparatur (angemeldet), reklamationen.html und stwegN/pages/reklamationen.html; die Web-Seiten bleiben, auch der oeffentliche Melde-Ort-QR. Push ohne ntfy (Entscheid Stefan 27.11.2026): Abfrage beim Oeffnen.",
+      "logos": {
+        "blau": "/img/apps/rosenweg-reparatur-blau.png?v=20261128",
+        "gruen": "/img/apps/rosenweg-reparatur-gruen.png?v=20261128"
+      }
     },
     "mailfreigabe": {
       "name": "Rosenweg Mail-Freigabe",
@@ -91,7 +101,11 @@
       "reihenfolge": 70,
       "text": "Waschküche reservieren: Belegung als Wochenraster, freie Zeit antippen, einmal oder jede Woche; eigene Termine stornieren, Erinnerung beim Öffnen. Für den Ausschuss STWEG 3: Räume, Nutzungen, Abrechnung und Preis.",
       "fuer": "Für die Bewohnerinnen und Bewohner einer STWEG mit Waschküche (heute STWEG 3, Rosenweg 9). Verwalten mit dem Recht „Waschküche-Admin“.",
-      "_notiz": "Flutter, alle Plattformen (Welle 1). Web-Seiten waschkueche.html und stweg3/pages/waschkueche-*.html bleiben. Erinnerung ohne Push (Entscheid Stefan 27.11.2026: kein ntfy)."
+      "_notiz": "Flutter, alle Plattformen (Welle 1). Web-Seiten waschkueche.html und stweg3/pages/waschkueche-*.html bleiben. Erinnerung ohne Push (Entscheid Stefan 27.11.2026: kein ntfy).",
+      "logos": {
+        "blau": "/img/apps/rosenweg-waschkueche-blau.png?v=20261128",
+        "gruen": "/img/apps/rosenweg-waschkueche-gruen.png?v=20261128"
+      }
     },
     "termine": {
       "name": "Rosenweg Termine",
@@ -100,7 +114,11 @@
       "logo": "/img/apps/rosenweg-termine.png?v=20261128",
       "reihenfolge": 80,
       "text": "Versammlungen, Sitzungen, Wartungen und weitere Termine deiner STWEG an einem Ort: in den eigenen Kalender übernehmen und rechtzeitig erinnern lassen.",
-      "fuer": "Für alle Bewohner und Eigentümer (Termine ihrer STWEG). Eintragen und ändern: Ausschuss und Verwaltung für ihre STWEG, Technik und Präsident."
+      "fuer": "Für alle Bewohner und Eigentümer (Termine ihrer STWEG). Eintragen und ändern: Ausschuss und Verwaltung für ihre STWEG, Technik und Präsident.",
+      "logos": {
+        "blau": "/img/apps/rosenweg-termine-blau.png?v=20261128",
+        "gruen": "/img/apps/rosenweg-termine-gruen.png?v=20261128"
+      }
     },
     "zev": {
       "name": "Rosenweg ZEV",
@@ -110,7 +128,11 @@
       "reihenfolge": 90,
       "text": "Stromrechnungen aus dem ZEV deines Hauses: ansehen, als bezahlt markieren, PDF teilen; Verbrauch und Solaranteil je Jahr, mit dem Netzstrompreis zum Vergleich.",
       "fuer": "Für Bewohner und Eigentümer in Häusern mit ZEV (heute Haus 9). Zuordnen, Umhängen und Konfiguration: Ausschuss und Verwaltung ihrer STWEG, Technik und Präsident.",
-      "_notiz": "Flutter, alle Plattformen. Rechnungen stellt smart-me/Axova aus; die App zeigt, ordnet zu und meldet Wechsel (Entscheid Stefan 28.11.2026). Web-Seiten stweg3/pages/zev-*.html bleiben."
+      "_notiz": "Flutter, alle Plattformen. Rechnungen stellt smart-me/Axova aus; die App zeigt, ordnet zu und meldet Wechsel (Entscheid Stefan 28.11.2026). Web-Seiten stweg3/pages/zev-*.html bleiben.",
+      "logos": {
+        "blau": "/img/apps/rosenweg-zev-blau.png?v=20261128",
+        "gruen": "/img/apps/rosenweg-zev-gruen.png?v=20261128"
+      }
     },
     "tv": {
       "name": "Rosenweg TV",
@@ -141,7 +163,11 @@
       "reihenfolge": 85,
       "text": "Strom live, Verbrauch, Kosten und die Solaranlage – für dein Haus am Rosenweg.",
       "fuer": "Für alle Bewohner und Eigentümer mit Zähler; die Solaranlage auch ohne Anmeldung. Ausschuss und Verwaltung sehen die Zähler ihrer STWEG, die Technik verwaltet die Zähler.",
-      "_notiz": "Flutter, alle Plattformen. Bündelt Energie-Monitor, Mein Zähler, Solaranlage live, Zähler-Technik und Zählerverwaltung. Live über MQTT (Rückfall HTTP), Widget „Solar jetzt“ (Android, iOS). Rechnungen bleiben in Rosenweg ZEV. Web-Seiten bleiben vorerst."
+      "_notiz": "Flutter, alle Plattformen. Bündelt Energie-Monitor, Mein Zähler, Solaranlage live, Zähler-Technik und Zählerverwaltung. Live über MQTT (Rückfall HTTP), Widget „Solar jetzt“ (Android, iOS). Rechnungen bleiben in Rosenweg ZEV. Web-Seiten bleiben vorerst.",
+      "logos": {
+        "blau": "/img/apps/rosenweg-energie-blau.png?v=20261128",
+        "gruen": "/img/apps/rosenweg-energie-gruen.png?v=20261128"
+      }
     },
     "unterlagen": {
       "name": "Rosenweg Unterlagen",
@@ -151,7 +177,73 @@
       "reihenfolge": 110,
       "text": "Die Unterlagen der Gemeinschaft: Ordner von Allgemein und deiner STWEG ansehen, suchen und sehen, was neu ist; PDF, Bilder und Office-Dateien direkt in der App. Einzelne Dateien für unterwegs merken.",
       "fuer": "Für alle Bewohner und Eigentümer (Mieter sehen in ihrer STWEG den Ordner „bewohner“). Ablegen, ordnen, Kamera-Scan als PDF und Papierkorb: Ausschuss für Allgemein und seine STWEG, Technik und Präsident überall.",
-      "_notiz": "Flutter, alle Plattformen. Löst index.html#dokumente nicht ab (die Seite bleibt). Entscheide Stefan 28.11.2026: offizielle Ablage, Bearbeiten über Nextcloud, Projektordner pflegt Rosenweg Projekte."
+      "_notiz": "Flutter, alle Plattformen. Löst index.html#dokumente nicht ab (die Seite bleibt). Entscheide Stefan 28.11.2026: offizielle Ablage, Bearbeiten über Nextcloud, Projektordner pflegt Rosenweg Projekte.",
+      "logos": {
+        "blau": "/img/apps/rosenweg-unterlagen-blau.png?v=20261128",
+        "gruen": "/img/apps/rosenweg-unterlagen-gruen.png?v=20261128"
+      }
+    },
+    "projekte": {
+      "name": "Rosenweg Projekte",
+      "repo": "Rosenweg/rosenweg-projekte",
+      "paket": "ch.rosenweg4303.projekte",
+      "logo": "/img/apps/rosenweg-projekte.png?v=20261128",
+      "reihenfolge": 120,
+      "text": "Projekte deiner STWEG und der Kooperation begleiten: Zeitachse, Offerten, Unterlagen, Budget und Kommentare. Neuigkeiten kommen als Benachrichtigung.",
+      "fuer": "Für Eigentümer (Projekte ihrer STWEG und der Kooperation), Ausschuss und Verwaltung. Anlegen und bearbeiten: Ausschuss, Verwaltung mit Recht Projekte = schreiben, Technik und Präsident. Mieter sehen keine Projekte.",
+      "_notiz": "Flutter, alle Plattformen. Löst projekte.html ab (Entscheide Stefan 28.11.2026, P1-P12). Farbe: grün Technik/Präsident, blau Ausschuss und Verwaltung mit Schreibrecht, sonst rot.",
+      "logos": {
+        "blau": "/img/apps/rosenweg-projekte-blau.png?v=20261128",
+        "gruen": "/img/apps/rosenweg-projekte-gruen.png?v=20261128"
+      }
+    },
+    "vollmachten": {
+      "name": "Rosenweg Vollmachten",
+      "repo": "Rosenweg/rosenweg-vollmachten",
+      "paket": "ch.rosenweg4303.vollmachten",
+      "logo": "/img/apps/rosenweg-vollmachten.png?v=20261128",
+      "reihenfolge": 100,
+      "text": "Vollmachten für die Versammlung erteilen, digital signieren oder als Foto-PDF hochladen, ansehen und drucken; Verwaltung und Ausschuss sehen, wer wen vertritt.",
+      "fuer": "Für Eigentümer (erteilen) und alle Bevollmächtigten (ansehen). Alle Vollmachten und „Wer vertritt wen“: Ausschuss und Verwaltung mit Recht „Vollmachten“, Technik und Präsident.",
+      "_notiz": "Flutter, alle Plattformen (Entscheide Stefan 28.11.2026). Stationen: SEITE=rosenweg-vollmachten (Seite vollmachten.html).",
+      "logos": {
+        "blau": "/img/apps/rosenweg-vollmachten-blau.png?v=20261128",
+        "gruen": "/img/apps/rosenweg-vollmachten-gruen.png?v=20261128"
+      }
+    },
+    "stweg": {
+      "name": "Rosenweg STWEG",
+      "repo": "Rosenweg/rosenweg-stweg",
+      "paket": "ch.rosenweg4303.stweg",
+      "logo": "/img/apps/rosenweg-stweg.png?v=20261128",
+      "reihenfolge": 110,
+      "text": "Meine Gemeinschaft: Mitteilungen deiner STWEG (auch die wichtigen als Benachrichtigung), Kontaktliste, Hausverwaltung, Ausschuss, Wohnungen und bei der MEG die Einstellplätze, mit Sprüngen zu Termine, Unterlagen, Projekte, Reparatur und Waschküche. Mitteilungen schreiben mit Text, Bild und Sichtbarkeit.",
+      "fuer": "Für alle Bewohner und Eigentümer. Mitteilungen schreiben: Ausschuss und Verwaltung ihrer STWEG; Kooperation: Technik und Präsident.",
+      "_notiz": "Flutter, alle Plattformen (Klärung STWEG 28.11.2026). Ersetzt stwegN/index.html (Kontakte, Hausverwaltung) und den Seiten-Editor; Push ohne Server-Registrierung (Abfrage im Hintergrund, nur Mitteilungen mit „wichtig“, Opt-in je STWEG). Stationen: keine STWEG-Seite im Stationen-Menü, daher kein stationen_seite.",
+      "logos": {
+        "blau": "/img/apps/rosenweg-stweg-blau.png?v=20261128",
+        "gruen": "/img/apps/rosenweg-stweg-gruen.png?v=20261128"
+      }
+    },
+    "internet": {
+      "name": "Rosenweg Internet",
+      "repo": "Rosenweg/rosenweg-internet",
+      "paket": "ch.rosenweg4303.internet",
+      "logo": "/img/apps/rosenweg-internet.png?v=20261128",
+      "reihenfolge": 110,
+      "text": "Dein Anschluss und das Rosenweg-Netz: Störungen im Haus, WLAN mit QR-Code (Haus und Gast), WireGuard-VPN mit Schlüssel auf dem Gerät, Speedtest ins Haus, Mailboxen.",
+      "fuer": "Für Bewohner mit Wohnung im Rosenweg, ab dem Einzug (Mieter, Mitbewohner, selbst bewohnende Eigentümer). Auf den geteilten Telefonen nur Übersicht und Gast-WLAN.",
+      "_notiz": "Flutter, alle Plattformen. Immer rot, keine Verwaltung (die bleibt in der ISP-Verwaltung, Welle 4). Der WireGuard-Schlüssel entsteht auf dem Gerät, die API bekommt nur public_key (Entscheid Stefan 28.11.2026). Web-Seiten isp.html, isp-mein-zugang.html und wlan.html bleiben."
+    },
+    "personen": {
+      "name": "Rosenweg Personen",
+      "repo": "Rosenweg/rosenweg-personen",
+      "paket": "ch.rosenweg4303.personen",
+      "logo": "/img/apps/rosenweg-personen.png?v=20261128",
+      "reihenfolge": 130,
+      "text": "Personen deiner STWEG pflegen: Kontaktdaten ändern, Dubletten mit Vorschau zusammenführen, Konto-Löschungen begleiten sowie Bewohner und Gruppen verwalten.",
+      "fuer": "Für Ausschuss und Verwaltung ihrer STWEG sowie Technik und Präsident. „Sofort löschen“ nur Technik und Präsident, mit frischer Anmeldung mit dem Konto. Nicht für Bewohner.",
+      "_notiz": "Immer blau, kein Wechsel nach Gruppe. Nicht auf den Stationen, nicht im Katalog der geteilten Telefone (Personendaten, nichts offline)."
     }
   },
   "katalog": {
@@ -210,7 +302,11 @@
     "ch.rosenweg4303.messages": {
       "repo": "Rosenweg/messages-rosenweg",
       "logo": "/img/apps/rosenweg-messenger.png?v=20261127",
-      "text": "Chats, Ankündigungen, Notfall-Meldungen und SMS."
+      "text": "Chats, Ankündigungen, Notfall-Meldungen und SMS.",
+      "logos": {
+        "blau": "/img/apps/rosenweg-messenger-blau.png?v=20261128",
+        "gruen": "/img/apps/rosenweg-messenger-gruen.png?v=20261128"
+      }
     },
     "ch.rosenweg4303.notes": {
       "repo": "Rosenweg/notes-rosenweg",

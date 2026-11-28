@@ -151,6 +151,7 @@ Technik sie auf /smartphones gesetzt hat. Erster Eintrag also: Zeile auf /smartp
 | Rosenweg Mein Telefon | `ch.rosenweg4303.meintelefon` | leer = alle, die sich anmelden dürfen | aktiv (1.0.1) |
 | Rosenweg Reparatur | `ch.rosenweg4303.reparatur` | leer = alle, die sich anmelden dürfen | aktiv (1.0.0) |
 | Rosenweg Zutritt | `ch.rosenweg4303.zutritt` | `technik,präsident,praesident` | aktiv (1.0.0) |
+| Rosenweg Projekte | `ch.rosenweg4303.projekte` | `technik,präsident,praesident` + je STWEG `stwegN-eigentuemer`, `stwegN-ausschuss`, `stwegN-verwaltung` (Mieter sehen keine Projekte) | noch keine Zeile; nach dem ersten Release auf /smartphones anlegen |
 | Rosenweg Waschküche | `ch.rosenweg4303.waschkueche` | `technik,präsident,praesident,r9-bewohner,r9-eigentuemer,stweg3-ausschuss` | aktiv (1.0.0) |
 | Rosenweg Wetter | `ch.rosenweg4303.wetter` | alle Bewohner (die Werte sind öffentlich) | noch keine Zeile; nach dem ersten Release auf /smartphones anlegen |
 | Rosenweg Handwerker | `ch.rosenweg4303.handwerker` | alle Bewohner (nur die Notfall-Ansicht, siehe unten) | noch keine Zeile; nach dem ersten Release auf /smartphones anlegen |
@@ -168,12 +169,13 @@ Technik sie auf /smartphones gesetzt hat. Erster Eintrag also: Zeile auf /smartp
   (`wasch_rooms`), ihre drei Gruppen hier dazunehmen. Die Hausverwaltung (`stwegN-verwaltung`)
   darf nur lesen und meldet sich an geteilten Telefonen nicht an. `portal_pfade` `/api/wasch/`;
   Räume, STWEG und das Recht „waschküche-admin“ prüft die Haupt-API selbst.
-- **Handwerker:** Auf dem Telefon nur die Notfall-Ansicht (Entscheid Stefan 28.11.2026): `portal_pfade`
-  `GET /api/handwerker-notfall/bewohner` und `GET /api/auth/me`, sonst nichts (keine Liste, Verträge,
-  Einsätze, Kosten, Mitarbeiter, Handys). Die Haupt-API nennt dort nur Firmenname, Priorität und die
-  Notfallnummer der Zuordnung, für die STWEG der Person. Die App legt die Nummern offline ab (mit „Stand vom“)
-  und löscht sie beim Personenwechsel/Abmelden. Verwaltung und Ausschuss melden sich an geteilten Telefonen
-  nicht an; sähen sie dort mehr, geht es trotzdem nur über diese eine Route.
+- **Handwerker:** Wie am eigenen Gerät (Linie 28.11.2026, ersetzt „nur Notfall-Ansicht“); die Haupt-API prüft die
+  Rechte. Bewohner sehen die Notfall-Ansicht über `GET /api/handwerker-notfall/bewohner` (Firmenname, Priorität,
+  Notfallnummer der Zuordnung für die STWEG der Person); die App legt sie offline ab und löscht sie beim
+  Personenwechsel/Abmelden.
+- **Projekte:** Auf geteilten Telefonen dieselben Rechte wie am eigenen Gerät (28.11.2026, ersetzt P11): lesen,
+  kommentieren, bearbeiten, Dateien. Welche Projekte die Person sieht und bearbeiten darf, prüft die Haupt-API
+  je Projekt (eigene STWEG und Kooperation); das Löschen bleibt Technik/Präsident.
 - **Zutritt:** Seit dem ersten Release (1.0.0) aktiv; die APK kam von selbst in die vorbereitete Zeile.
 
 ## Wartung per USB
@@ -511,6 +513,12 @@ Daten gelöscht — die Akku-Ausnahme und die Freigabe des Anrufkontos gingen ve
   - Die Netz-Rückfrage von „Debugging über WLAN“ bestätigt die Bedienungshilfe nur im WLAN „Rosenweg“; in einem anderen, noch nicht vertrauten Netz (Zugangspunkt) muss sie einmal jemand bestätigen.
   - Zum Testen per adb: `am broadcast -a ch.rosenweg4303.telefon.ADB_SELBST_WIEDERHERSTELLEN -n ch.rosenweg4303.telefon/org.sipdroid.sipua.rosenweg.AdbFreigabe` (Ergebnis im Log `RosenwegAdbSelbst`).
 
+### Protokoll und installierter Stand von Rosenweg Gerät (ab 1.4-rosenweg.83)
+
+- **Protokoll:** Gerät sendet etwa jede Minute seine Rosenweg-Zeilen (Tags `Rosenweg…`, `StartReceiver`, Abstürze) und alle 5 Minuten Systemzeilen zu HOME, Launcher und Installationen der eigenen Pakete (über den eigenen adb-Zugang) an `POST /api/telefon/<ext>/log` (Geräte-Anmeldung, nur die eigene Nebenstelle). Vorher werden Telefonnummern, Mailadressen, lange Schlüssel und der Name der angemeldeten Person unkenntlich gemacht. Ist die Anlage nicht erreichbar, hält das Telefon höchstens 2 MB zurück. Tabelle `telefon_geraetelog`, 14 Tage (Aufräumen stündlich und bei jedem Empfang). Lesen: `GET /api/telefon/<ext>/log?stufe=W&tag=Sperre&von=&bis=&limit=` (Technik/Präsident); auf /smartphones der Knopf „Protokoll“ je Telefon.
+- **Installierter Stand:** Gerät meldet mit `POST /api/telefon/apps-ist` `{apps: {paket: versionCode}}`, was installiert ist (nach jedem Abgleich bei Änderung, sonst alle 6 Stunden, und nach jeder Installation). Bis .82 füllte nur der adb-Updater `telefon_apps_ist`; war adb nicht erreichbar, blieb die Tabelle leer (XCover 2101, 28.11.2026).
+- **Katalog:** `GET /api/telefon/katalog` liefert einen ETag; Gerät fragt alle 15 Minuten mit `If-None-Match` (304 bei unverändertem Katalog) und prüft zusätzlich alle 6 Stunden alles von Grund auf.
+
 ### Apps per adb aktualisieren (adb-Updater, Entwurf 26. November 2026)
 
 Stefan: „Das zentrale System soll sich per adb mit den geteilten Telefonen verbinden und neue App-Versionen selbst einspielen.“ Rosenweg Gerät holt den Katalog zwar selbst (beim Start, bei der Anmeldung, sonst höchstens alle 6 Stunden) und installiert still als Device Owner. Der adb-Weg kommt dazu, weil
@@ -616,3 +624,11 @@ Rosenweg Telefon ohne Rosenweg Gerät (eigenes Handy) registriert sich über **T
 - **pbx-api:** `PBX_SIP_TRANSPORT_PRIVAT` (Vorgabe `tls`) bestimmt Transport und Port der eigenen Handys; geteilte Telefone bleiben bei `PBX_SIP_TRANSPORT`.
 - **`POST /api/telefon/privat/stand`** `{user, password}`: Rosenweg Telefon fragt regelmäßig nach. 200 = aktuelle Zugangsdaten (so kommt auch der Wechsel auf TLS aufs Handy), 401 = Zugang gibt es nicht mehr (im Web auf /smartphones abgemeldet) → die App meldet sich ab und fragt nicht weiter.
 - Sprache (RTP) ist noch unverschlüsselt; SRTP ist ein eigener Schritt.
+
+## Freigaben und Dateien (28.11.2026)
+
+Alle Rosenweg-Apps erreichen auf geteilten Telefonen alles unter `/api/` wie am eigenen Gerät
+(`PORTAL_PFADE_STANDARD`); gesperrt bleiben nur Passwort, Zugangstoken, Passkeys, MQTT-Zugang und die
+Anmelde-Wege von `auth/` (`PORTAL_GESPERRT`). Einzelne ältere Absätze oben, die „nur lesen“ oder
+bestimmte `portal_pfade` nennen, gelten damit nicht mehr. Dateien gehen in Stücken (Download 320 KB,
+Upload 180 KB), bis 64 MB. Siehe `pbx/README.md`.

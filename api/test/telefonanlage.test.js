@@ -119,8 +119,9 @@ test('server.js bindet die Routen mit PBX_API_URL und PBX_SHARED_SECRET ein', ()
   assert.match(s, /require\('\.\/routes\/telefonanlage'\)\.telefonanlageRoutes\(app, \{\s*authMiddleware, pbxUrl: PBX_API_URL, pbxGeheimnis: \(\) => PBX_SHARED_SECRET,/);
 });
 
-test('Anlage: Portal-Pfade fuer Mein Telefon und Kopf nur mit Geheimnis', () => {
+test('Anlage: Portal-Pfade für alle Apps (/api/), Ausweise gesperrt, Kopf nur mit Geheimnis', () => {
   const py = fs.readFileSync(path.join(W, 'pbx', 'api', 'app.py'), 'utf8');
-  assert.match(py, /"ch\.rosenweg4303\.meintelefon": \["\/api\/telefonanlage\/"/);
+  assert.match(py, /PORTAL_PFADE_STANDARD = \{"\*": \["\/api\/"\]\}/);
+  assert.match(py, /PORTAL_GESPERRT = \("change-password", "me\/tokens", "me\/passkeys", "auth"/);
   assert.match(py, /def _im_auftrag\(\):/);
 });

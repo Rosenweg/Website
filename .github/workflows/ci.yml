@@ -10,8 +10,18 @@ permissions:
   contents: read
 
 jobs:
+  # Runner-Wahl (Rosenweg/rosenweg-basis, runner-wahl.yml): privat immer eigene,
+  # oeffentlich eigene wenn frei oder zuschaltbar, Forks nie. macOS bleibt bei GitHub.
+  wahl:
+    uses: Rosenweg/rosenweg-basis/.github/workflows/runner-wahl.yml@main
+    secrets:
+      PAKETE_APP_ID: ${{ secrets.PAKETE_APP_ID }}
+      PAKETE_APP_KEY: ${{ secrets.PAKETE_APP_KEY }}
+
   syntax-check:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    timeout-minutes: 20
+    needs: wahl
     steps:
       - uses: actions/checkout@v4
 
@@ -46,7 +56,8 @@ jobs:
         run: npm install --prefix api --no-save --no-package-lock --omit=dev castv2@0.1.10 qrcode@1.5.4
 
       - name: API-Tests ohne Datenbank (node --test api/test/)
-        run: node --test api/test/
+        # --test-force-exit: offene Timer (lib/auth.js u.a.) hielten den Lauf sonst ewig offen
+        run: node --test --test-force-exit api/test/
 
       - name: Kontakte-Sync (Verzeichnis ohne echte Nummern)
         run: python3 -m unittest discover -s contacts-sync -v
@@ -57,6 +68,14 @@ jobs:
           "$RUNNER_TEMP/pbx/bin/pip" install --quiet -r pbx/api/requirements.txt
           cd pbx/api && "$RUNNER_TEMP/pbx/bin/python" -m unittest test_karten_verwalter test_apps_stand test_fernwartung test_nextcloud_zugang test_hintergrund -v
 
+      # Eigene Runner haben php-cli aus Debian (CT 140/145); setup-php braucht sudo
+      # und laeuft darum nur auf GitHub-Runnern.
+      - uses: shivammathur/setup-php@v2
+        if: runner.environment == 'github-hosted'
+        with:
+          php-version: '8.4'
+          coverage: none
+
       - name: Z-Push-Sicht je Konto (PHP, Befund F1-7)
         run: |
           php -l zpush/sicht.php
@@ -65,7 +84,9 @@ jobs:
 
   kerberos-pruefer:
     # Prueft Kerberos-Tickets der Agent-Anmeldung (api/kerberos-pruefer, Protokoll v2)
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    timeout-minutes: 15
+    needs: wahl
     defaults:
       run:
         working-directory: api/kerberos-pruefer
@@ -81,7 +102,9 @@ jobs:
   adb-zentrale:
     # Endpunkt des adb-Tunnels der geteilten Telefone (pbx/adb-zentrale): Format, vet, Tests
     # mit echtem WireGuard-Handshake (Netzstapel im Prozess, kein Root noetig), Skripte
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    timeout-minutes: 15
+    needs: wahl
     defaults:
       run:
         working-directory: pbx/adb-zentrale
@@ -98,7 +121,9 @@ jobs:
 
   edge-plugin:
     # Eigenes Traefik-Plugin (edge-traefik/plugins/echteip): Format, vet, Tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    timeout-minutes: 15
+    needs: wahl
     defaults:
       run:
         working-directory: edge-traefik/plugins/echteip

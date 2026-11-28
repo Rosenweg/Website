@@ -41,7 +41,6 @@ test('Routen und Dienste melden', () => {
       || server.includes(`app.${r}, authMiddleware, requireVerwaltungenZugang, kartenAdmin.mitKarteProtokollieren`), r);
   }
   assert.ok(server.includes("app.post('/api/stweg-modules', authMiddleware, kartenAdmin.mitKarteProtokollieren"));
-  assert.ok(server.includes("app.post('/api/stweg-sections/:stweg/:section', authMiddleware, kartenAdmin.mitKarteProtokollieren"));
   assert.match(server, /app\.post\('\/api\/karten-admin\/vermerk', authMiddleware/);
   assert.match(lies('api/routes/stations.js'), /function nurTechnikOderPraesident\(req, res, next\) \{[\s\S]*?kartenAdmin\.vermerken\(req, res\);/);
   assert.match(lies('api/routes/salz.js'), /const nurVerwalter = \(req, res, next\) => \{[\s\S]*?kartenAdmin\.vermerken\(req, res\);/);

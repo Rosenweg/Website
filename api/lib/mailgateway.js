@@ -5,7 +5,7 @@
 // Mailcow lässt nur die eigene Adresse als Umschlag-Absender zu (553 "not owned
 // by user"), deshalb ist die Gateway-Adresse immer der Umschlag-Absender.
 //
-// Konfiguration (je Gateway <NAME> aus MAIL_GATEWAYS, Vorgabe "2fa,noreply"):
+// Konfiguration (je Gateway <NAME> aus MAIL_GATEWAYS, Vorgabe "2fa,vollmachten,noreply"):
 //   MAIL_<NAME>_USER  z. B. MAIL_2FA_USER=2fa@rosenweg4303.ch
 //   MAIL_<NAME>_PASS  Passwort des Mailcow-Postfachs (nur .env)
 // Ein neuer Gateway-User: Postfach in Mailcow anlegen, Name in MAIL_GATEWAYS,
@@ -19,6 +19,8 @@ const GATEWAY_REGELN = [
   // Bestätigungen und Zweitfaktor: Karten-Bestätigungslinks, Codes, neue Geräte
   ['2fa', /^(karten-bestaetigung|karten-admin-quittung|otp-login|reklamation-code|doodle-code)$/],
   ['2fa', /-neues-geraet$/],
+  // Vollmachten: bevollmächtigt, neue Vollmacht für die Wohnung, eingegangen, läuft ab
+  ['vollmachten', /^vollmacht-(bevollmaechtigt|miteigentuemer|eingegangen|ablauf)$/],
 ];
 
 function envName(gateway) {
@@ -27,7 +29,7 @@ function envName(gateway) {
 
 /** Liest die Gateway-User aus der Umgebung -> { name: { name, user, pass } } (nur vollständige). */
 function gatewaysLesen(env = process.env) {
-  const namen = String(env.MAIL_GATEWAYS || `2fa,${RUECKFALL}`)
+  const namen = String(env.MAIL_GATEWAYS || `2fa,vollmachten,${RUECKFALL}`)
     .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
   if (!namen.includes(RUECKFALL)) namen.push(RUECKFALL);
   const gw = {};

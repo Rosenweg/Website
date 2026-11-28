@@ -33,6 +33,7 @@
     .noc-big { font-size: 1.85rem; font-weight: 700; color: #f1f5f9; font-variant-numeric: tabular-nums; line-height: 1.1; }
     .noc-mid { font-size: 1.15rem; font-weight: 600; color: #f1f5f9; font-variant-numeric: tabular-nums; line-height: 1.15; }
     .noc-wert { margin-left: auto; font-family: ui-monospace, monospace; font-size: .72rem; color: #f1f5f9; font-variant-numeric: tabular-nums; }
+    .noc-svc[data-svc="wetter"] .noc-wert { white-space: normal; text-align: right; font-size: .65rem; line-height: 1.2; }
     .noc-svc { display: flex; align-items: center; gap: .5rem; background: rgba(15,23,42,0.5); border: 1px solid #334155; padding: .4rem .6rem; border-radius: .5rem; }
     .noc-led { width: .55rem; height: .55rem; border-radius: 50%; background: #94a3b8; box-shadow: 0 0 6px rgba(148,163,184,0.5); display: inline-block; flex-shrink: 0; }
     .led-green { background: #34d399; box-shadow: 0 0 8px #34d399; animation: noc-pulse 2s infinite; }
@@ -105,7 +106,7 @@
         const [k, l] = s.split(':');
         return `<div class="noc-svc" data-svc="${k}"><span class="noc-led led-amber"></span><span class="text-xs text-slate-300">${l}</span></div>`;
       }).join('')}
-      ${[['wacht', 'Dienstwacht'], ['nextcloud', 'Nextcloud'], ['q-relay', 'Relay-Queue'], ['q-pmg', 'PMG-Queue']].map(([k, l]) =>
+      ${[['wacht', 'Dienstwacht'], ['nextcloud', 'Nextcloud'], ['q-relay', 'Relay-Queue'], ['q-pmg', 'PMG-Queue'], ['wetter', 'Wetterstation']].map(([k, l]) =>
         `<div class="noc-svc" data-svc="${k}"><span class="noc-led led-amber"></span><span class="text-xs text-slate-300">${l}</span>` +
         `<span class="noc-wert" data-el="${k}">—</span></div>`).join('')}
     </div>`;
@@ -279,6 +280,21 @@
     </div>
     <div data-el="apps-liste" class="noc-stationen"><div class="text-xs text-slate-500 font-mono">lade…</div></div>
     <div data-el="apps-bild" class="mt-2" hidden></div>`;
+
+  // Runner (GitHub Actions, api/routes/nocrunner.js): eine Karte je Runner, dazu Warteschlange,
+  // letzter Schaltvorgang des Runner-Waechters (pve2) und sein Zustand. Rot = soll laufen, ist offline.
+  const RUNNER = `
+    <div class="flex items-center justify-between mt-5 mb-2">
+      <div class="flex items-center gap-2">
+        <span class="noc-led led-grau" data-el="led-runner"></span>
+        <span class="text-[11px] font-mono uppercase tracking-wider text-slate-300">Runner · GitHub Actions</span>
+        <span class="text-[10px] text-slate-500 font-mono" data-el="runner-kopf"></span>
+      </div>
+      <span class="text-[10px] text-slate-500 font-mono" data-el="runner-fehler"></span>
+    </div>
+    <div data-el="runner-liste" class="noc-stationen"><div class="text-xs text-slate-500 font-mono">lade…</div></div>
+    <div class="text-[10px] text-slate-500 font-mono mt-1 whitespace-pre-line" data-el="runner-fuss"></div>
+    <div class="text-[10px] font-mono mt-1" data-el="runner-offen"></div>`;
 
   // Alter eines Lebenszeichens, kurz: 3 min, 2 h, 4 T.
   const fmtAlter = (min) => {
@@ -507,7 +523,7 @@
     }
 
     ziel.className = 'noc-cockpit' + (modus === 'wandbild' ? ' noc-wandbild' : '') + ' sm:rounded-2xl ' + (ziel.className || '');
-    ziel.innerHTML = `<div class="noc-inner">${KOPF(modus)}${MAIL}${UNIFI}${STATIONEN}${FERNWARTUNG}${APPS}${SERVER}</div>`;
+    ziel.innerHTML = `<div class="noc-inner">${KOPF(modus)}${MAIL}${UNIFI}${STATIONEN}${FERNWARTUNG}${APPS}${RUNNER}${SERVER}</div>`;
     const el = (n) => ziel.querySelector(`[data-el="${n}"]`);
     const setz = (n, wert, klasse) => { const e = el(n); if (!e) return; e.textContent = wert; if (klasse) e.className = klasse; };
     // Eine Kachel in der Dienste-Leiste: Lampe, Wert, Erklaerung beim Draufzeigen.
@@ -802,6 +818,108 @@
       }, 'apps');
     }
 
+    const fmtDauer = (sek) => (sek == null ? '—' : sek < 90 ? sek + ' s' : Math.round(sek / 60) + ' min');
+    const fmtMb = (b) => (b == null ? '—' : b >= 1073741824 ? (b / 1073741824).toFixed(1) + ' GB' : Math.round(b / 1048576) + ' MB');
+
+    function runnerKarte(r, cts) {
+      const text = { busy: 'Job', idle: 'frei', startet: 'startet', aus: 'aus' }[r.zustand] || r.zustand;
+      const j = r.job;
+      let jobZeilen = '';
+      if (j) {
+        const wo = [j.repo, j.workflow, j.job].filter(Boolean).join(' · ');
+        const was = [j.branch, j.pr ? 'PR #' + j.pr : null].filter(Boolean).join(' · ');
+        const proz = j.prozent != null ? j.prozent : null;
+        const rest = j.rest_s != null ? ' · noch ~' + fmtDauer(j.rest_s) : '';
+        jobZeilen = `<div class="noc-st-was">${j.url ? `<a href="${esc(j.url)}" target="_blank" rel="noopener" class="underline">${esc(wo || 'Job')}</a>` : esc(wo)}</div>`
+          + (was ? `<div class="noc-st-was">${esc(was)}</div>` : '')
+          + (proz != null ? `<div class="h-1.5 rounded bg-slate-700 my-1"><div class="h-1.5 rounded bg-cyan-400" style="width:${proz}%"></div></div>
+              <div class="noc-st-was">${proz} %${rest} · ${esc(fmtDauer(j.laufzeit_s))}</div>` : '')
+          + (j.schritt ? `<div class="noc-st-was">Schritt ${j.schritte_fertig != null ? (j.schritte_fertig + 1) + '/' + j.schritte_gesamt + ': ' : ''}${esc(j.schritt)}</div>` : '');
+      }
+      let last = '';
+      if (r.art === 'windows' && r.vm) {
+        last = `CPU ${r.vm.cpu != null ? Math.round(r.vm.cpu * 100) : '—'} % · RAM ${fmtMb(r.vm.ram)}/${fmtMb(r.vm.ram_gesamt)}`;
+      } else if (r.dienst_ram_b != null || r.dienst_cpu_pct != null) {
+        last = `Runner: CPU ${r.dienst_cpu_pct != null ? r.dienst_cpu_pct + ' %' : '—'} · RAM ${fmtMb(r.dienst_ram_b)}`;
+      }
+      return `<div class="noc-st st-${r.ampel}" title="${esc(r.name)}">
+        <div class="noc-st-kopf"><span class="noc-led ${LED[r.ampel]}"></span>
+          <span class="noc-st-name">${esc(r.name.replace(/^rosenweg-/, ''))}</span><span class="noc-st-zeit">${esc(text)}</span></div>
+        <div class="noc-st-was">${esc([r.art, r.knoten, r.ct, r.online ? 'online' : 'offline'].filter(Boolean).join(' · '))}</div>
+        ${jobZeilen}${last ? `<div class="noc-st-was">${esc(last)}</div>` : ''}
+      </div>`;
+    }
+
+    function malRunner(d) {
+      sicher(() => {
+        setz('runner-fehler', (d.warnungen || []).join(' · '));
+        el('led-runner').className = 'noc-led ' + (LED[d.ampel] || 'led-grau');
+        setz('runner-kopf', d.wartend != null ? '· ' + d.wartend + ' Job(s) warten' : '');
+        el('runner-liste').innerHTML = (d.runner || []).length ? d.runner.map((r) => runnerKarte(r, d.cts)).join('')
+          : '<div class="text-xs text-slate-500 font-mono">noch kein Bericht</div>';
+        const w = d.waechter || {};
+        const sch = d.letzter_schaltvorgang;
+        const cts = (d.cts || []).map((c) => `CT ${c.ct} (${c.knoten}): Last ${c.last != null ? c.last.toFixed(1) : '—'}/${c.kerne || '—'}`
+          + `, RAM ${c.ram_gesamt_b != null && c.ram_frei_b != null ? fmtMb(c.ram_gesamt_b - c.ram_frei_b) + '/' + fmtMb(c.ram_gesamt_b) : '—'}`).join(' · ');
+        const rl = d.release;
+        let relZeile = '';
+        if (rl) {
+          const lauf = (rl.laeuft || []).map((x) => x.repo.replace(/^rosenweg-/, '') + ' ' + x.tag + (x.versuche ? ' (2. Versuch)' : '')).join(', ') || '—';
+          const wart = (rl.wartend || []).map((x) => x.repo.replace(/^rosenweg-/, '') + ' ' + x.tag).join(', ') || '—';
+          const let_ = rl.letzte ? rl.letzte.repo.replace(/^rosenweg-/, '') + ' ' + rl.letzte.tag + ' ' + rl.letzte.ergebnis : '—';
+          const skip = (rl.uebersprungen || []).length ? ' · übersprungen: ' + rl.uebersprungen.map((x) => x.repo.replace(/^rosenweg-/, '') + ' ' + x.tag).join(', ') : '';
+          relZeile = '\nRelease-Warteschlange' + (rl.aktiv ? '' : ' (aus)') + ': läuft: ' + lauf + ' · wartend: ' + wart + ' · letzte: ' + let_ + skip;
+        }
+        const stauZeile = d.stau && d.stau.aktiv ? '\nSTAU: ' + d.stau.lange + ' Jobs warten länger als ' + d.stau.grenze_min + ' Min (insgesamt ' + d.stau.wartend + ', ältester ' + Math.round((d.stau.aeltester_s || 0) / 60) + ' Min)' : '';
+        const queue = (d.warteschlange || []).map((q) => `${q.repo} · ${q.job} (${fmtDauer(q.wartezeit_s)})`).join(' | ');
+        setz('runner-fuss', 'Wächter: ' + ({ ok: 'läuft', still: 'still', fehler: 'Fehler', nie: 'nie gemeldet' }[w.zustand] || '—')
+          + (w.alter_min != null ? ' (' + fmtAlter(w.alter_min) + ')' : '')
+          + (w.trocken ? ' · Trockenlauf' : '')
+          + (sch && sch.text ? ' · zuletzt: ' + sch.text + (sch.zeit ? ' (' + new Date(sch.zeit).toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' }) + ')' : '') : '')
+          + stauZeile + relZeile + (cts ? '\n' + cts : '') + (queue ? '\nWarten: ' + queue : ''));
+        // alle offenen Laeufe der Organisation: wo laufen die Jobs, was wartet
+        const of = d.offen || [];
+        const sum = of.reduce((a, o) => ({ eigen: a.eigen + o.eigen, github: a.github + o.github, mac: a.mac + o.mac, wartend: a.wartend + o.wartend }), { eigen: 0, github: 0, mac: 0, wartend: 0 });
+        const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        const zeile = (o) => {
+          const name = o.repo ? esc(o.repo.replace(/^rosenweg-/, '')) + ' · ' + esc(o.workflow) + (o.pr ? ' #' + o.pr : o.branch ? ' (' + esc(o.branch) + ')' : '') : esc(o.status);
+          const wo = [o.eigen ? o.eigen + ' eigen' : '', o.github ? o.github + ' GitHub' : '', o.mac ? o.mac + ' macOS' : '', o.wartend ? '<span class="text-amber-400">' + o.wartend + ' wartend</span>' : ''].filter(Boolean).join(', ') || '—';
+          const link = o.url ? '<a class="hover:underline" target="_blank" rel="noopener" href="' + esc(o.url) + '">' + name + '</a>' : name;
+          return '<div class="flex justify-between gap-2 text-slate-400"><span class="truncate">' + link + '</span><span class="shrink-0">' + wo + ' · ' + o.fertig + '/' + o.gesamt + ' · ' + fmtDauer(o.alter_s) + '</span></div>';
+        };
+        el('runner-offen').innerHTML = '<div class="text-slate-300 mb-0.5">Offene Läufe: ' + of.length + ' · Jobs laufend ' + sum.eigen + ' eigen, ' + sum.github + ' GitHub, ' + sum.mac + ' macOS · wartend ' + sum.wartend + '</div>'
+          + of.slice(0, 25).map(zeile).join('') + (of.length > 25 ? '<div class="text-slate-500">… und ' + (of.length - 25) + ' weitere</div>' : '');
+      }, 'runner');
+    }
+
+    // Wetterstation: gelb, wenn Ersatzwerte von MeteoSchweiz laufen (API: lib/wetter-ersatz.js)
+    async function wetterTest() {
+      if (document.hidden) return;
+      try {
+        const r = await holen('/api/isp/noc/public/wetter');
+        if (!r.ok) { dienst('wetter', false, 'HTTP ' + r.status, 'Wetterstation: keine Antwort der API'); return; }
+        const w = await r.json();
+        dienst('wetter', w.ampel === 'gruen' ? true : w.ampel === 'gelb' ? 'warn' : false,
+          w.ampel === 'gruen' ? 'ok' : w.text, w.text);
+      } catch (e) { dienst('wetter', false, 'weg', 'Wetterstation: ' + e.message); }
+    }
+
+    async function runnerTest() {
+      if (document.hidden) return;
+      try {
+        const r = await holen('/api/isp/noc/public/runner');
+        if (!r.ok) {
+          el('led-runner').className = 'noc-led led-red';
+          setz('runner-fehler', 'Runner: HTTP ' + r.status);
+          return;
+        }
+        malRunner(await r.json());
+      } catch (e) {
+        el('led-runner').className = 'noc-led led-red';
+        setz('runner-fehler', 'Runner: ' + e.message);
+      }
+    }
+
     async function appsTest() {
       if (document.hidden) return;
       try {
@@ -921,10 +1039,10 @@
       if (el('utc')) setz('utc', now.toISOString().slice(11, 19));
     }
 
-    el('jetzt').addEventListener('click', () => { laden(); ampeln(); stationen(); fernwartung(); appsTest(); server(); });
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) { laden(); stationen(); fernwartung(); appsTest(); server(); } });
+    el('jetzt').addEventListener('click', () => { laden(); ampeln(); stationen(); fernwartung(); appsTest(); runnerTest(); server(); wetterTest(); });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { laden(); stationen(); fernwartung(); appsTest(); runnerTest(); server(); wetterTest(); } });
 
-    uhr(); laden(); ampeln(); stationen(); fernwartung(); appsTest(); server();
+    uhr(); laden(); ampeln(); stationen(); fernwartung(); appsTest(); runnerTest(); server(); wetterTest();
     const t1 = setInterval(uhr, 1000);
     const t2 = setInterval(laden, intervallMs);
     const t3 = setInterval(ampeln, Math.max(intervallMs, 60000));
@@ -936,7 +1054,9 @@
     const t6 = setInterval(fernwartung, Math.max(intervallMs, 30000));
     // Apps-Test: läuft stündlich - jede Minute nachsehen genügt.
     const t7 = setInterval(appsTest, Math.max(intervallMs, 60000));
-    return { laden, ampeln, stationen, fernwartung, appsTest, server, beenden: () => { [t1, t2, t3, t4, t5, t6, t7].forEach(clearInterval); } };
+    const t8 = setInterval(runnerTest, Math.max(intervallMs, 20000));
+    const t9 = setInterval(wetterTest, Math.max(intervallMs, 30000));
+    return { laden, ampeln, stationen, fernwartung, appsTest, runnerTest, server, wetterTest, beenden: () => { [t1, t2, t3, t4, t5, t6, t7, t8, t9].forEach(clearInterval); } };
   }
 
   global.NocCockpit = { starten };

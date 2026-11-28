@@ -26,6 +26,11 @@ test('Verwaltungsmenü: jede Seite gibt es, Adresse ohne Umlaut, jeder Eintrag m
   for (const g of Object.values(VERWALTUNG_GROUPS)) assert.ok(navGruppen.includes(g), g + ' fehlt im Menü');
   assert.ok(k.VERWALTUNG_NAV.length >= 5);
   for (const v of k.VERWALTUNG_NAV) {
+    // Web-Versionen der Apps (Flutter) liegen nicht im Repo, sondern unter /app/<kurzname>/
+    if (/^https:\/\/rosenweg4303\.ch\/app\/[a-z0-9-]+\/$/.test(v.href)) {
+      assert.ok(v.permAny && v.permAny.split(',').every(Boolean), v.label + ' ohne Recht');
+      continue;
+    }
     assert.match(v.href, /^[a-z0-9-]+\.html$/, v.href);
     assert.ok(fs.existsSync(path.join(WURZEL, v.href)), v.href + ' fehlt');
     assert.ok(v.permAny && v.permAny.split(',').every(Boolean), v.label + ' ohne Recht');
@@ -94,4 +99,12 @@ test('STWEG-Seiten: Reklamationsseite der STWEG im Bewohner-Menü (Desktop und H
   assert.equal(probe('www.rosenweg4303.ch', '/index.html'), null);
   assert.equal(probe('stweg5.rosenweg4303.ch', '/'), '/pages/reklamationen.html');
   assert.equal(probe('www.rosenweg4303.ch', '/stweg3/index.html'), '/stweg3/pages/reklamationen.html');
+});
+
+test('Web-Versionen der Apps: Wetter im Bewohner-Menü, STWEG-Mitteilungen im Verwaltungsmenü', () => {
+  // Desktop und Handy
+  assert.equal(quelle.split('href="${APP_WEB}wetter/"').length - 1, 2);
+  const k = konstanten();
+  assert.ok(k.VERWALTUNG_NAV.some(v => v.href === 'https://rosenweg4303.ch/app/stweg/' && v.permAny === 'stweg-mitteilungen'));
+  assert.match(quelle, /href: APP_WEB \+ 'stweg\/'.*perm: 'stweg-mitteilungen'/);
 });

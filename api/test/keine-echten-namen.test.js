@@ -9,7 +9,7 @@ const W = path.join(__dirname, '..', '..');
 const lies = (p) => fs.readFileSync(path.join(W, p), 'utf8');
 
 test('Brief-Tracking: Prompt mit Musternamen, Absender aus BRIEF_ABSENDER', () => {
-  const src = lies('api/server.js');
+  const src = lies('api/routes/briefe.js');
   assert.match(src, /const BRIEF_ABSENDER = String\(process\.env\.BRIEF_ABSENDER \|\| ''\)/);
   assert.match(src, /z\.B\. "Max Muster" oder "Anna Beispiel & Beat Beispiel" oder "Muster Immobilien AG"/);
   assert.match(src, /Der Empfänger ist NICHT der Absender/);

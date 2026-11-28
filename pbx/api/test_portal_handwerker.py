@@ -1,5 +1,5 @@
-"""Rosenweg Handwerker auf geteilten Telefonen: nur die Notfall-Ansicht fuer Bewohner
-(Entscheid Stefan 28.11.2026). Liste, Vertraege, Einsaetze, Kosten und Schreiben gehen dort nicht.
+"""Rosenweg Handwerker auf geteilten Telefonen: wie am eigenen Geraet (Linie 28.11.2026,
+ersetzt "nur Notfall-Ansicht"); die Haupt-API prueft die Rechte. Die Sperren gelten weiter.
 
 Laufen lassen: cd pbx/api && python3 -m unittest test_portal_handwerker -v
 """
@@ -15,29 +15,17 @@ H = "ch.rosenweg4303.handwerker"
 
 
 class PortalHandwerkerTest(unittest.TestCase):
-    def test_nur_die_notfall_ansicht(self):
+    def test_notfall_ansicht_und_liste(self):
         r = pbx.PORTAL_PFADE_STANDARD
         self.assertTrue(pbx._portal_erlaubt(r, H, "GET", "/api/handwerker-notfall/bewohner"))
         self.assertTrue(pbx._portal_erlaubt(r, H, "GET", "/api/handwerker-notfall/bewohner?stweg=3"))
+        self.assertTrue(pbx._portal_erlaubt(r, H, "GET", "/api/handwerker"))
         self.assertTrue(pbx._portal_erlaubt(r, H, "GET", "/api/auth/me"))
 
-    def test_nichts_sonst(self):
+    def test_sperren_bleiben(self):
         r = pbx.PORTAL_PFADE_STANDARD
-        for methode, pfad in [
-            ("GET", "/api/handwerker"),
-            ("GET", "/api/handwerker-notfall"),          # Verwaltungsroute mit Mitarbeitern und Handys
-            ("GET", "/api/handwerker/7/vertraege"),
-            ("GET", "/api/handwerker/7/auftraege"),
-            ("GET", "/api/handwerker-export"),
-            ("POST", "/api/handwerker"),
-            ("PUT", "/api/handwerker/7"),
-            ("DELETE", "/api/handwerker/7"),
-            ("POST", "/api/handwerker-notfall/bewohner"),
-        ]:
+        for methode, pfad in [("POST", "/api/change-password"), ("GET", "/api/me/tokens"), ("POST", "/api/auth/login")]:
             self.assertFalse(pbx._portal_erlaubt(r, H, methode, pfad), f"{methode} {pfad}")
-
-    def test_andere_apps_bekommen_es_nicht(self):
-        self.assertFalse(pbx._portal_erlaubt(pbx.PORTAL_PFADE_STANDARD, "ch.rosenweg4303.salz", "GET", "/api/handwerker-notfall/bewohner"))
 
 
 if __name__ == "__main__":

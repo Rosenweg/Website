@@ -150,7 +150,9 @@ hat dort keine Rechte, auch wenn er dort wohnt oder Eigentümer ist.
 | Benutzerkonto ändern | — | — | — | ✅ 🅢; keine Technik-/Präsident-Konten, keine E-Mail, keine Aktivierung, keine Gruppen | — | ✅ | ✅ |
 | Gruppen zuordnen (`/api/admin/groups`) | — | — | — | ✅ nur Bewohner-/Eigentümer-Gruppen 🅢, nur an Konten, die nur solche Gruppen haben oder schon in der STWEG sind | (R) | ✅ | ✅ |
 | Benutzerkonto löschen | — | — | — | — | — | ✅ | ✅ |
-| Vorgemerkte Löschungen (`loeschungen`) | — | — | — | — | — | ✅ | ✅ |
+| Vorgemerkte Löschungen (`loeschungen`): sehen, stoppen, Timer +30 Tage | — | — | — | ✅ 🅢 (R, seit 28.11.2026 vorgegeben) | ✅ 🅢 (R, seit 28.11.2026 vorgegeben) | ✅ | ✅ |
+| Vorgemerkte Löschung: Eintrag entfernen | — | — | — | — | — | ✅ | — |
+| Konto sofort löschen (frische Konto-Anmeldung, nicht mit Karte; siehe [`docs/konto-loeschung.md`](../docs/konto-loeschung.md)) | — | — | — | — | — | ✅ | ✅ |
 | ZEV: eigene Rechnungen, PDF, „bezahlt“ | — | ✅ eigene | ✅ eigene + Wohnungen | ✅ eigene | ✅ eigene | ✅ | ✅ |
 | ZEV-Konfiguration, Wohnungen/Aliase ansehen und abgleichen (nur Ausschuss/Verwaltung **dieser** STWEG, seit 28.11.2026) | — | — | — | ✅ 🅢 | (R) 🅢 | ✅ | ✅ |
 | ZEV: Rechnungen zuordnen und umhängen (protokolliert); PDF unzugeordneter und Allgemeinzähler-Rechnungen | — | — | — | ✅ 🅢 | (R `wohnungsverwaltung` schreiben) 🅢 | ✅ auch ohne STWEG | ✅ |
@@ -171,7 +173,8 @@ hat dort keine Rechte, auch wenn er dort wohnt oder Eigentümer ist.
 | Grundbuch: STWEG einer Parzelle zuordnen (protokolliert; Vorschlag aus Wertquoten, Anzahl und Adressen, nur nach Bestätigung übernommen) | — | — | — | — | — | ✅ | ✅ |
 | MEG-Einstellplätze | freie Plätze | 👁 nur MEG-Mitglieder, ohne Fremddaten | 👁 nur MEG-Mitglieder, ohne Fremddaten | ✅ nur MEG-Ausschuss | ✅ nur MEG-Verwaltung | ✅ | ✅ |
 | Projekte lesen (inkl. Kandidaten, Kontakte, Notizen, Kommentare) | öffentliche Projekte (eingeschränkt, siehe unten) | — (auch keine Titel, keine Projekt-Umfragen) | 👁 🅢 + Kooperation | 👁 🅢 + Kooperation (auch ohne Eigentümergruppe) | (R `projekte` lesen) 👁 🅢 + Kooperation | 👁 alle | 👁 alle |
-| Projekte kommentieren (nur Name sichtbar, keine E-Mail) | — | — | ✅ 🅢 + Kooperation | als Eigentümer | — | ✅ | ✅ |
+| Projekte kommentieren (nur Name sichtbar, keine E-Mail; eigene Kommentare 15 Minuten ändern/löschen) | — | — | ✅ 🅢 + Kooperation | ✅ 🅢 + Kooperation | ✅ 🅢 + Kooperation (P10, 28.11.2026) | ✅ | ✅ |
+| Projekt ganz löschen (mit Protokoll; sonst „archiviert“) | — | — | — | — | — | ✅ | ✅ |
 | Auslagen eines Projekts: E-Mail der einreichenden Person | — | — | — (nur Name) | — (nur Name) | 👁 🅢 | 👁 | 👁 |
 | Projekte bearbeiten (Kandidaten, Zeitplan, Anhänge, Budget, öffentlich) | — | — | — | ✅ 🅢 + Kooperation | (R `projekte` schreiben) 🅢 | ✅ | ✅ |
 | Projekt öffentlich schalten (mit Bestätigung), Anhang einzeln öffentlich markieren | — | — | — | ✅ 🅢 + Kooperation | (R `projekte` schreiben) 🅢 | ✅ | ✅ |
@@ -215,11 +218,12 @@ Schalten werden bisherige Anhänge nicht öffentlich.
 | Mail-Vorlagen, Freigabe-Regeln | — | — | — | — | — | ✅ | ✅ |
 | E-Mail-Verteiler (Listen, senden, Mitglieder) | Liste je STWEG 👁 | — | — | — | — | ✅ | ✅ |
 | An geschützte STWEG-Verteiler schreiben, Bewohner-Rundmails empfangen | — | nach Gruppe | nach Gruppe | nach Gruppe | ✅ nur Verteiler ihrer STWEG(s) (Gruppe oder Vertrag) | ✅ | ✅ |
-| E-Mail-Archiv lesen, Löschantrag stellen | — | — | — | 👁 ✅ **ganzes Archiv** (jede STWEG) | — | ✅ | ✅ |
-| Löschantrag bestätigen (4-Augen) | — | — | — | ✅ nicht den eigenen | — | ✅ nicht den eigenen | ✅ nicht den eigenen |
+| E-Mail-Archiv lesen (Recht „email-archiv“; Zugriffe protokolliert) | — | — | — | 👁 eigene STWEG(s) + „haus“ | 👁 ihre STWEG(s) + „haus“ | 👁 alles | 👁 alles |
+| E-Mail-Archiv: Löschantrag stellen | — | — | — | ✅ | — | ✅ | ✅ |
+| Löschantrag bestätigen (4-Augen, Mail-Archiv und Briefe) | — | — | — | ✅ andere Person (Konto-ID), nur derselben STWEG | — | ✅ nicht den eigenen | ✅ nicht den eigenen |
 | E-Mail-Log, Versandstatus, DMARC, SMTP-Kontingent | — | — | — | — | — | 👁 | 👁 |
-| Briefe (Fotos versendeter Briefe) | — | — | — | ✅ (jede STWEG) | — | ✅ | ✅ |
-| Dokumente lesen | — | 👁 `allgemein`, `scans`, aus der eigenen STWEG nur `stwegN/bewohner/` (Datenschutz, 28.11.2026) | + `projekte`, ganzer Ordner der eigenen STWEG | + `fotos_von_versendeten_briefen` | 👁 `allgemein`, `scans`, ihre STWEG(s), mit Recht „projekte“ die Projekte ihrer STWEG(s) und ohne STWEG | 👁 alles | 👁 alles |
+| Briefe (Fotos versendeter Briefe), erfassen, Löschantrag | — | — | — | ✅ eigene STWEG(s) | — | ✅ alle | ✅ alle |
+| Dokumente lesen | — | 👁 `allgemein`, `scans`, aus der eigenen STWEG nur `stwegN/bewohner/` (Datenschutz, 28.11.2026) | + `projekte`, ganzer Ordner der eigenen STWEG | (Brief-Fotos nur über „Briefe“) | 👁 `allgemein`, `scans`, ihre STWEG(s), mit Recht „projekte“ die Projekte ihrer STWEG(s) und ohne STWEG | 👁 alles | 👁 alles |
 | Dokumente schreiben, verschieben, löschen | — | — | — | ✅ `allgemein`, eigene STWEG, `projekte/<Projekt>` der eigenen STWEG bzw. ohne STWEG | ✅ `projekte/<Projekt>` ihrer STWEG(s) mit Recht „projekte“ = schreiben | ✅ | ✅ |
 | Gesperrte Ordner `auslagen/`, `anzeigen/`, `reklamationen/`, `unterschriftenlisten/`, `grundbuch-bilder/` über die Dokumenten-API | — | — | — | — | — | ✅ | ✅ |
 
@@ -345,6 +349,10 @@ Seit dem 17.11.2026 gilt in allen schreibenden STWEG-Bereichen:
   `grundbuch_anteile.stweg`, je Parzelle von Technik/Präsident zugeordnet).
   Das Telefonbuch zeigt die Handwerker weiter für alle angemeldeten Personen.
 - Nicht STWEG-gebunden sind bewusst: Briefe und E-Mail-Archiv.
+- E-Mail-Archiv und Briefe sind seit 28.11.2026 STWEG-gebunden (Archiv: Mails
+  ohne eindeutige STWEG = „haus“, für alle Ausschüsse und Verwaltungen).
+- Nicht STWEG-gebunden sind bewusst: Grundbuch-
+  Verifikation und – falls erteilt – Handwerker (gemeinsam gepflegt).
 
 ---
 
@@ -380,7 +388,11 @@ Seit dem 17.11.2026 gilt in allen schreibenden STWEG-Bereichen:
   (und Technik/Präsident lesend); Positionen nur bis „eingereicht“.
 - **Automatisches Löschen von Konten** nach Auszug nur, wenn **alle** Gruppen des
   Kontos Bewohner/Eigentümer dieser STWEG sind; storniert, sobald die Adresse wieder
-  aktiver Kontakt ist.
+  aktiver Kontakt ist. Konten mit weiteren Gruppen stehen in der Liste „manuell zu
+  prüfen“. Nach der Löschung entfernt der Nachlauf auch Anlage-Daten, Nextcloud-Konto,
+  zugeordnete Mailbox und Karten; Personen-Stammdaten und archivierte Kontakte werden
+  3 Monate nach Auszug bzw. Löschung gelöscht bzw. anonymisiert
+  ([`docs/konto-loeschung.md`](../docs/konto-loeschung.md)).
 - **Konten-Bindung:** Eine Benutzerzeile gehört einem Authentik-Konto
   (`users.authentik_sub`); ein zweites Konto mit derselben E-Mail wird abgewiesen.
 - **Zugangstoken (PAT):** wirken mit den Rechten der Person, eingeschränkt durch

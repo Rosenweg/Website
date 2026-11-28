@@ -12,8 +12,11 @@
 //                wie bei den Dateien in projektDokRecht).
 //                Reine Bewohner (Mieter) lesen nichts – auch keine Titel
 //                (projects-mini, doodle/projects) und keine Projekt-Umfragen.
-//   kommentieren Technik/Praesident und Eigentuemer (unveraendert); die
-//                Verwaltung liest nur.
+//   kommentieren wer das Projekt lesen darf (projektLesen), auch die Verwaltung
+//                (Entscheid Stefan 28.11.2026, P10: sie liest mit und muss
+//                antworten koennen). Eigene Kommentare 15 Minuten aendern oder
+//                loeschen, danach nur, wer das Projekt bearbeitet.
+//   loeschen     ein ganzes Projekt nur Technik/Praesident, mit Protokoll (P12).
 //   bearbeiten   projektBearbeiten (unten).
 //
 // STWEG-gebunden sind auch die Auslagen eines Projekts: die Verwaltung sieht
@@ -94,9 +97,78 @@ function oeffentlicheAnhaenge(anhaenge) {
     .map(a => ({ id: a.id, target_type: a.target_type, target_id: a.target_id, doc_path: a.doc_path }));
 }
 
-function projekteKommentieren(groups) {
+// Kommentieren (P10): wer das Projekt lesen darf. Gleiche Regel wie projektLesen.
+function projektKommentieren(groups, perm, stweg) {
+  return projektLesen(groups, perm, stweg);
+}
+
+// Eigene Kommentare aendern oder loeschen: nur der Verfasser, nur kurz danach.
+const KOMMENTAR_FRIST_MIN = 15;
+function kommentarEigenAenderbar(kommentar, email, jetzt = Date.now()) {
+  if (!kommentar || !email) return false;
+  if (String(kommentar.user_email || '').trim().toLowerCase() !== String(email).trim().toLowerCase()) return false;
+  const t = new Date(kommentar.created_at).getTime();
+  return Number.isFinite(t) && jetzt - t <= KOMMENTAR_FRIST_MIN * 60000;
+}
+
+// Ein ganzes Projekt loeschen (P12): nur Technik/Praesident. Alle anderen
+// setzen den Status auf „archiviert“.
+function projektLoeschen(groups) {
   const g = groups || [];
-  return isTechnik(g) || isPraesident(g) || istEigentuemer(g);
+  return isTechnik(g) || isPraesident(g);
+}
+
+// Abgeleitetes Seitenrecht fuer /api/auth/me: „projekte-bearbeiten“ = write, wenn
+// das Konto irgendein Projekt anlegen oder bearbeiten darf (Technik/Praesident,
+// Ausschuss, Verwaltung mit projekte = schreiben). Die Farbe der App Rosenweg
+// Projekte folgt ihm (blau); Verwaltung mit nur „lesen“ bleibt rot.
+function projekteBearbeitenRecht(groups, perm) {
+  return darfAnlegen(projektAnlegenAuswahl(groups, perm)) ? 'write' : undefined;
+}
+
+// Gelesene Projekte nach ?stweg=3|8|allgemein und ?status=aktiv,geplant (L1)
+function projekteFiltern(projekte, { stweg, status } = {}) {
+  let l = projekte || [];
+  if (stweg !== undefined && stweg !== null && String(stweg) !== '') {
+    const w = String(stweg).toLowerCase();
+    l = l.filter(p => (w === 'allgemein' || w === 'kooperation') ? ohne(p.stweg) : String(p.stweg) === w);
+  }
+  if (status) {
+    const erlaubt = new Set(String(status).split(',').map(x => x.trim()).filter(Boolean));
+    l = l.filter(p => erlaubt.has(p.status));
+  }
+  return l;
+}
+
+// Teil-Update (L4): nur die gesendeten Felder setzen. spalten = erlaubte Namen.
+// -> { sets: ['a = $1', …], werte: [...] } (Platzhalter ab $start). Leerer Text = NULL.
+function teilUpdate(body, spalten, start = 1) {
+  const sets = [];
+  const werte = [];
+  for (const sp of spalten) {
+    if (body && Object.prototype.hasOwnProperty.call(body, sp) && body[sp] !== undefined) {
+      werte.push(body[sp] === '' ? null : body[sp]);
+      sets.push(`${sp} = $${start + werte.length - 1}`);
+    }
+  }
+  return { sets, werte };
+}
+
+// Zeitachsen-Eintrag als Termin in Rosenweg Termine (P7): Felder fuer stweg_events.
+// Kooperations-Projekte (stweg NULL) laufen unter der MEG (Nummer 8).
+const TERMIN_KOOPERATION = 8;
+function terminAusEintrag(projekt, eintrag) {
+  const datum = String(eintrag.datum || '').slice(0, 10);
+  const zeit = /^\d{2}:\d{2}/.test(String(eintrag.uhrzeit || '')) ? String(eintrag.uhrzeit).slice(0, 5) : null;
+  return {
+    stweg: ohne(projekt.stweg) ? TERMIN_KOOPERATION : Number(projekt.stweg),
+    title: `Projekt ${projekt.title}: ${eintrag.titel}`.slice(0, 255),
+    description: [eintrag.beschreibung, `Projekt „${projekt.title}“ (projekt/${projekt.slug})`].filter(Boolean).join('\n\n').slice(0, 4000),
+    start_date: `${datum} ${zeit || '00:00'}:00`,
+    all_day: !zeit,
+    location: eintrag.ort ? String(eintrag.ort).slice(0, 255) : null,
+    category: 'sonstiges',
+  };
 }
 
 // Auslagen eines Projekts: null = alle (wie bisher fuer Eigentuemer/Technik),
@@ -179,7 +251,8 @@ const PROJEKT_STATUS = ['geplant', 'aktiv', 'abgeschlossen', 'archiviert'];
 module.exports = {
   projekteLesen, projektLesen, lesbareProjekte, auslageEmailSehen, kommentarOhneEmail,
   OEFFENTLICH_KANDIDAT, oeffentlicherKandidat, oeffentlicheAnhaenge,
-  projekteKommentieren, projektAuslagenSicht,
+  projektKommentieren, kommentarEigenAenderbar, KOMMENTAR_FRIST_MIN, projektLoeschen, projekteBearbeitenRecht,
+  projekteFiltern, teilUpdate, terminAusEintrag, TERMIN_KOOPERATION, projektAuslagenSicht,
   projektBearbeiten, projektAnlegenAuswahl, darfAnlegen, slugAusTitel, PROJEKT_STATUS,
   projektDokRecht,
 };

@@ -13,10 +13,13 @@
 //
 //   apps:    Apps mit eigenem Repo für mehrere Plattformen (Flutter), Schlüssel
 //            = kurzer Name ("vm", "salz"). Felder: name, repo, paket, logo,
-//            reihenfolge, text, fuer, technik?
+//            reihenfolge, text, fuer, technik?, logos?
 //   katalog: Android-Apps aus dem Katalog der geteilten Telefone, Schlüssel =
-//            Paketname. Felder: repo, logo?, name?, text?, fuer?, technik?,
+//            Paketname. Felder: repo, logo?, name?, text?, fuer?, technik?, logos?,
 //            nicht_oeffentlich? (kein Download auf /apps)
+//   logos:   (apps und katalog) Symbole der anderen Gruppenfarben, { blau, gruen }:
+//            Pfad wie logo. 'logo' ist das rote Standard-Symbol; /apps zeigt
+//            je App alle vorhandenen Farben nebeneinander.
 //   aufgegeben (freiwillig): Apps, die es nicht mehr gibt, Schlüssel = Paketname.
 //            Felder: name?, ersetzt_durch? (Paketname). /apps zeigt sie nicht mehr,
 //            auch wenn sie noch im Katalog der geteilten Telefone steht; ein Paket
@@ -28,6 +31,7 @@ const path = require('path');
 
 const PAKET_RE = /^[a-z][a-z0-9_]*(\.[a-z0-9_]+){1,6}$/;
 const SCHLUESSEL_RE = /^[a-z][a-z0-9-]{0,30}$/;
+const LOGO_RE = /^\/[A-Za-z0-9/_.-]+(\?v=[A-Za-z0-9]{1,20})?$/;
 const REPO_RE = /^Rosenweg\/[A-Za-z0-9._-]{1,100}$/;
 
 // Im Container liegt die Datei neben server.js, im Repo eine Ebene über api/.
@@ -53,6 +57,14 @@ function pruefen(d) {
     else karte.set(wert, wo);
   };
   const text = (v) => v === undefined || typeof v === 'string';
+  const logos = (v, wo) => {
+    if (v === undefined) return;
+    if (!v || typeof v !== 'object' || Array.isArray(v)) { fehler.push(`${wo}: logos ist kein Objekt`); return; }
+    for (const [farbe, pfad] of Object.entries(v)) {
+      if (farbe !== 'blau' && farbe !== 'gruen') fehler.push(`${wo}: logos.${farbe} unbekannt (blau, gruen)`);
+      else if (typeof pfad !== 'string' || !LOGO_RE.test(pfad)) fehler.push(`${wo}: logos.${farbe} ist kein Pfad`);
+    }
+  };
   for (const [k, e] of Object.entries(apps || {})) {
     const wo = `apps.${k}`;
     if (!SCHLUESSEL_RE.test(k)) fehler.push(`${wo}: Schlüssel ungültig`);
@@ -63,6 +75,7 @@ function pruefen(d) {
     if (!Number.isInteger(e.reihenfolge)) fehler.push(`${wo}: reihenfolge fehlt`);
     for (const f of ['logo', 'text', 'fuer']) if (!text(e[f])) fehler.push(`${wo}: ${f} ist kein Text`);
     if (e.technik !== undefined && typeof e.technik !== 'boolean') fehler.push(`${wo}: technik ist kein Ja/Nein`);
+    logos(e.logos, wo);
   }
   for (const [p, e] of Object.entries(katalog || {})) {
     const wo = `katalog.${p}`;
@@ -70,6 +83,7 @@ function pruefen(d) {
     if (!e || typeof e !== 'object') { fehler.push(`${wo}: kein Objekt`); continue; }
     if (!REPO_RE.test(String(e.repo || ''))) fehler.push(`${wo}: repo ungültig`); else merken('repo', e.repo, wo);
     for (const f of ['logo', 'name', 'text', 'fuer']) if (!text(e[f])) fehler.push(`${wo}: ${f} ist kein Text`);
+    logos(e.logos, wo);
     for (const f of ['technik', 'nicht_oeffentlich']) {
       if (e[f] !== undefined && typeof e[f] !== 'boolean') fehler.push(`${wo}: ${f} ist kein Ja/Nein`);
     }

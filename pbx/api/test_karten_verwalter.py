@@ -127,32 +127,38 @@ class KartenUmzugTest(unittest.TestCase):
             r = self.client.get("/api/telefon/karten/personen", headers={"Authorization": "Bearer rw_app_" + "z" * 43})
         self.assertEqual(r.status_code, 502)
 
-    def test_zutritt_darf_auf_geteilten_telefonen_karten_und_access(self):
+    def test_zutritt_auf_geteilten_telefonen_wie_am_eigenen_geraet(self):
+        # Alles unter /api/ ist erlaubt (Entscheid 28.11.2026); was die Person darf, sagt die
+        # Haupt-API (Technik/Praesident, Rechte). Gesperrt: nur Ausweise und Maschinen-Wege.
         regeln = pbx.PORTAL_PFADE_STANDARD
         z = "ch.rosenweg4303.zutritt"
         self.assertTrue(pbx._portal_erlaubt(regeln, z, "POST", "/api/karten/info"))
         self.assertTrue(pbx._portal_erlaubt(regeln, z, "GET", "/api/access/users"))
         self.assertTrue(pbx._portal_erlaubt(regeln, z, "GET", "/api/apps/sitzungen?alle=1"))
         self.assertTrue(pbx._portal_erlaubt(regeln, z, "DELETE", "/api/apps/sitzungen/abc"))
-        self.assertFalse(pbx._portal_erlaubt(regeln, z, "PUT", "/api/permissions"))
-        self.assertFalse(pbx._portal_erlaubt(regeln, "ch.rosenweg4303.salz", "POST", "/api/karten/info"))
+        # Rechteverwaltung geht ueber das Telefon nur, weil die Haupt-API die Person prueft
+        # (requirePermission 'rechteverwaltung', api/test/anlage-rechte.test.js belegt das)
+        self.assertTrue(pbx._portal_erlaubt(regeln, z, "PUT", "/api/permissions"))
+        self.assertTrue(pbx._portal_erlaubt(regeln, "ch.rosenweg4303.salz", "POST", "/api/karten/info"))
 
-    def test_wetter_darf_nur_verlauf_lesen(self):
+    def test_wetter_ingest_kein_weg_ueber_telefone(self):
         regeln = pbx.PORTAL_PFADE_STANDARD
         w = "ch.rosenweg4303.wetter"
         self.assertTrue(pbx._portal_erlaubt(regeln, w, "GET", "/api/wetter/r9/history?h=24"))
         self.assertFalse(pbx._portal_erlaubt(regeln, w, "POST", "/api/wetter/r9/ingest"))
-        self.assertFalse(pbx._portal_erlaubt(regeln, w, "GET", "/api/wasch/rooms"))
+        self.assertFalse(pbx._portal_erlaubt(regeln, w, "POST", "/api/isp/relay-status/ingest"))
+        self.assertFalse(pbx._portal_erlaubt(regeln, w, "POST", "/api/isp/outbound-usage/Ingest/"))
+        self.assertTrue(pbx._portal_erlaubt(regeln, w, "GET", "/api/wasch/rooms"))
 
-    def test_waschkueche_darf_nur_wasch(self):
+    def test_waschkueche_wie_am_eigenen_geraet(self):
         regeln = pbx.PORTAL_PFADE_STANDARD
         w = "ch.rosenweg4303.waschkueche"
         self.assertTrue(pbx._portal_erlaubt(regeln, w, "GET", "/api/wasch/rooms"))
         self.assertTrue(pbx._portal_erlaubt(regeln, w, "POST", "/api/wasch/reservations"))
         self.assertTrue(pbx._portal_erlaubt(regeln, w, "DELETE", "/api/wasch/reservations/5/series"))
         self.assertTrue(pbx._portal_erlaubt(regeln, w, "GET", "/api/auth/me"))
-        self.assertFalse(pbx._portal_erlaubt(regeln, w, "GET", "/api/access/users"))
-        self.assertFalse(pbx._portal_erlaubt(regeln, "ch.rosenweg4303.salz", "GET", "/api/wasch/rooms"))
+        self.assertTrue(pbx._portal_erlaubt(regeln, w, "GET", "/api/access/users"))
+        self.assertFalse(pbx._portal_erlaubt(regeln, w, "POST", "/api/change-password"))
 
 
 class KartenProtokollUebernahmeTest(unittest.TestCase):

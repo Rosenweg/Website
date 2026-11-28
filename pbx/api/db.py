@@ -346,6 +346,19 @@ CREATE TABLE IF NOT EXISTS telefon_apps_ist (
     PRIMARY KEY (ext, paket)
 );
 
+-- Protokoll der Geraete-App (Rosenweg Geraet) je geteiltem Telefon, 14 Tage. Die App maskiert
+-- Nummern, Mailadressen und Namen vor dem Senden; hier gibt es keine Personendaten.
+CREATE TABLE IF NOT EXISTS telefon_geraetelog (
+    id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    ext    TEXT NOT NULL,
+    zeit   INTEGER NOT NULL,           -- Zeitpunkt der Zeile auf dem Telefon (Unix-Sekunden)
+    stufe  TEXT NOT NULL DEFAULT 'I',  -- V D I W E F
+    tag    TEXT NOT NULL DEFAULT '',
+    text   TEXT NOT NULL DEFAULT '',
+    empfangen INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS telefon_geraetelog_ext_zeit ON telefon_geraetelog (ext, zeit);
+
 -- Versionsstand der Rosenweg-Apps auf den Geraeten (Updater der Apps, Stefan 27.11.2026: "die
 -- Apps melden ihre Version ... ohne Personendaten"). geraet = SHA-256-Kennung (Android: aus der
 -- ANDROID_ID, Computer: aus der Maschinen-ID), nicht umkehrbar. Eine Meldung ersetzt alle Zeilen
