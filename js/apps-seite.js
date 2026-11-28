@@ -241,6 +241,9 @@
             const d = await r.json();
             if (d.signatur_sha256) $('signatur').textContent = d.signatur_sha256;
             state.liste = Array.isArray(d.liste) ? d.liste : listeAusAlt(d);
+            // Alphabetisch nach Namen, ohne das vorangestellte "Rosenweg" (Stefan 28.11.2026)
+            const ohneVorsatz = n => String(n || '').replace(/^Rosenweg\s+/i, '');
+            state.liste.sort((a, b) => ohneVorsatz(a.name).localeCompare(ohneVorsatz(b.name), 'de-CH', { sensitivity: 'base' }));
             zaehlen();
             hinweis();
             const g = decodeURIComponent(location.hash.slice(1));
