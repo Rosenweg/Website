@@ -17058,6 +17058,41 @@ app.get('/api/personen/:id', authMiddleware, requireWohnungsverwaltungRead, asyn
   }
 });
 
+// GET /api/personen/:id/verwendung — Vorschau vor dem Zusammenfuehren (Klaerung L11):
+// wo wird die Person verwendet (Wohnungen der eigenen Sicht, Vollmachten, Reklamationen,
+// WhatsApp, Rufgruppen), hat sie ein Konto, ist sie fuer dieses Konto geschuetzt (dann
+// fuehrt nur die Technik zusammen). Wer aendern darf (userCanEditPerson), sieht sie.
+app.get('/api/personen/:id/verwendung', authMiddleware, requireWohnungsverwaltungWrite, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
+    if (!(await userCanEditPerson(req.user, id))) {
+      return res.status(403).json({ error: 'Diese Person gehört nicht zu einer STWEG, für die du als Ausschuss oder Verwaltung zuständig bist' });
+    }
+    const p = await pool.query('SELECT id, name, email FROM personen WHERE id = $1', [id]);
+    if (!p.rows[0]) return res.status(404).json({ error: 'Nicht gefunden' });
+    const scope = personenScope(req.user);
+    const wp = [id];
+    let wScope = '';
+    if (scope) { wp.push(scope); wScope = ' AND w.stweg = ANY($2::int[])'; }
+    const w = await pool.query(
+      `SELECT w.stweg, w.bezeichnung, k.rolle FROM wohnungen_kontakte k JOIN wohnungen w ON w.id = k.wohnung_id
+        WHERE k.person_id = $1 AND k.archiviert_am IS NULL${wScope} ORDER BY w.stweg, w.bezeichnung`, wp);
+    const konto = await pool.query(
+      `SELECT EXISTS (SELECT 1 FROM users u WHERE u.active IS NOT FALSE AND COALESCE($1::text, '') <> '' AND LOWER(u.email) = LOWER($1::text)) AS konto`,
+      [p.rows[0].email]);
+    res.json({
+      person: { id: p.rows[0].id, name: p.rows[0].name },
+      wohnungen: w.rows,
+      verweise: await personenRechte.verwendungZaehlen(pool, id),
+      hat_konto: !!konto.rows[0]?.konto,
+      geschuetzt: await personGeschuetztFuer(req.user, id),
+    });
+  } catch (err) {
+    res.status(500).json({ error: fehlerFuerClient(err, 'Fehler beim Laden') });
+  }
+});
+
 // PUT /api/personen/:id — Person aktualisieren (Trigger propagiert auf alle Kontakte)
 app.put('/api/personen/:id', authMiddleware, requireWohnungsverwaltungWrite, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   try {
