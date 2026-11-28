@@ -57,6 +57,9 @@ app.use('/api/scan-upload', ausweisVorBody('application/octet-stream', geheimVor
 app.use('/api/vollmachten/:id/upload-signed', ausweisVorBody('application/pdf', (req, res, next) => authMiddleware(req, res, next)), express.raw({ type: 'application/pdf', limit: '20mb' }));
 // PBX-Voicemail-Upload: Asterisk-AGI laedt das WAV als Raw-Body hoch
 app.use('/api/pbx/voicemail', ausweisVorBody('audio/wav', (req, res, next) => requirePbxSecret(req, res, next)), express.raw({ type: 'audio/wav', limit: '50mb' }));
+// Brief-Foto als Base64 (bis 15 MB Bild = rund 20 MB JSON); sonst griffe die
+// 15-MB-Grenze in routes/briefe.js nie (globale Grenze unten 10 MB).
+app.use('/api/briefe/upload', ausweisVorBody('application/json', (req, res, next) => authMiddleware(req, res, next)), express.json({ limit: '21mb' }));
 app.use(express.json({ limit: '10mb' }));
 // Bestätigungslinks aus der Karten-Mail (api/lib/kartenadmin.js) sind Formular-POSTs
 // auf derselben Seite, geschützt durch das einmalige Token im Pfad. Wegen
@@ -706,8 +709,10 @@ function canViewKontakteHistory(req, res, next) {
 
 /** Check if a document path is allowed for a user */
 // ctx (docRechteKontext): Projekte + Seitenrecht „projekte“ fuer projekte/<slug>/ (P1).
+// archiv/ (Mail-Anhaenge) und Brief-Fotos nur ueber ihre Route, auch fuer
+// Technik/Praesident (Zugriffsprotokoll, STWEG-Sicht; docNurEigeneRoute).
 function isDocPathAllowed(filePath, groups, ctx = {}) {
-  if (isTechnik(groups) || isPraesident(groups)) return true;
+  if (isTechnik(groups) || isPraesident(groups)) return !docNurEigeneRoute(filePath);
   // Belege/Fotos/PDFs mit eigener Route und eigener Rechtepruefung nicht
   // zusaetzlich ueber die allgemeine Dokumenten-API fuer alle freigeben.
   const sperre = docSperrOrdner(filePath);
@@ -733,12 +738,13 @@ function isDocPathAllowed(filePath, groups, ctx = {}) {
 // Reklamationsfotos, Unterschriftenlisten-PDFs, Anzeigen, Deckblaetter der
 // Druckauftraege mit Namen/Adressen): lesen/schreiben
 // ueber die Dokumenten-API nur Technik/Praesident – sonst lesbar fuer alle
-// bzw. faelschbar. Brief-Fotos (Empfaengeradressen) lesen nur Ausschuss.
+// bzw. faelschbar. Brief-Fotos (Empfaengeradressen) ebenso: der Ausschuss sieht
+// sie ueber /api/briefe nur fuer seine STWEG (Entscheid Stefan 28.11.2026).
 // Grundbuch-Auszuege (allgemein/grundbuch-bilder, Namen+Adressen) nur ueber
 // /api/grundbuch/.../bild mit dessen Rechtepruefung.
 // Pruefung segmentweise, case-insensitiv, leere/'.'-Segmente uebersprungen.
-const DOC_SPERR_ORDNER = new Set(['auslagen', 'anzeigen', 'reklamationen', 'unterschriftenlisten', 'grundbuch-bilder', 'druckauftraege']);
-const DOC_AUSSCHUSS_ORDNER = new Set(['fotos_von_versendeten_briefen']);
+const DOC_SPERR_ORDNER = new Set(['auslagen', 'anzeigen', 'reklamationen', 'unterschriftenlisten', 'grundbuch-bilder', 'druckauftraege', 'fotos_von_versendeten_briefen']);
+const DOC_AUSSCHUSS_ORDNER = new Set();
 function docSperrOrdner(filePath) {
   const seg = String(filePath).toLowerCase().split('/').filter(x => x && x !== '.');
   const oben = seg.slice(0, Math.max(0, seg.length - 1)).slice(0, 2);
@@ -747,8 +753,20 @@ function docSperrOrdner(filePath) {
   return null;
 }
 
+// Ordner, die nur ihre eigene Route aendert – auch Technik/Praesident nicht
+// ueber die Dokumenten-API (kein Loeschen am Vier-Augen-Weg und am Protokoll
+// vorbei): archiv/ (E-Mail-Archiv-Anhaenge, oberste Ebene) und die Brief-Fotos.
+// Liefert 'archiv' | 'briefe' | null.
+function docNurEigeneRoute(filePath) {
+  const seg = String(filePath).toLowerCase().split('/').filter(x => x && x !== '.');
+  if (seg[0] === 'archiv') return 'archiv';
+  if (seg.slice(0, 2).includes('fotos_von_versendeten_briefen')) return 'briefe';
+  return null;
+}
+
 /** Check if user can write to a document path */
 function canWriteDocPath(filePath, groups, ctx = {}) {
+  if (docNurEigeneRoute(filePath)) return false;
   if (isTechnik(groups) || isPraesident(groups)) return true;
   // Pfad ohne '/' ist ein Eintrag der obersten Ebene (z. B. ganzer Ordner
   // 'stweg5') – nicht als 'allgemein' werten, sonst ganze STWEG-Ordner
@@ -4959,7 +4977,8 @@ async function verteilerRundmailSenden(req) {
         `INSERT INTO email_archive (from_email, from_name, to_addresses, subject, text_body, html_body, message_id, email_date)
          VALUES ($1, $2, $3, $4, $5, $6, $7, NOW()) ON CONFLICT (message_id) DO NOTHING`,
         [a.from_email, a.from_name, a.to_addresses, a.subject, a.text_body, a.html_body, a.message_id],
-      ).catch(e => console.error('[verteiler-direct] Archivieren fehlgeschlagen:', e.message));
+      ).then(() => require('./routes/email-archive').stwegZuordnen())
+        .catch(e => console.error('[verteiler-direct] Archivieren fehlgeschlagen:', e.message));
     }
 
     return { status: 200, body: { success: true, sent, failed: failed.length }, gesendet: sent > 0 };
@@ -6090,6 +6109,8 @@ async function archiveEmail(rawSource, messageId) {
     [fromEmail, fromName, toAddresses, subject, parsed.text || '', parsed.html || '', messageId, emailDate]
   );
   const archiveId = result.rows[0].id;
+  // STWEG aus der Verteiler-Adresse (sonst 'haus'), siehe routes/email-archive.js
+  await require('./routes/email-archive').stwegZuordnen();
 
   // Save attachments to document storage
   const attachmentsMeta = [];
@@ -13157,187 +13178,10 @@ app.post('/api/documents/move', authMiddleware, canManageDocs, async (req, res) 
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// BRIEFE TRACKING — Versendete Briefe, Empfänger via OpenRouter Vision
+// BRIEFE TRACKING -> routes/briefe.js (STWEG-Sicht, Vier-Augen-Loeschen,
+// Hinweis + Tageslimit fuer die externe Texterkennung)
 // ═══════════════════════════════════════════════════════════════════
-
-const BRIEFE_DIR = 'allgemein/fotos_von_versendeten_briefen';
-// WebStamp-Tracking-Format: 98.01.018499.705XXXXX (8-stellige laufende Nr, beginnt mit 705)
-const TRACKING_PREFIX_DOTTED = '98.01.018499.705';
-const TRACKING_PREFIX_PLAIN = '9801018499705';
-
-function parseBriefFilename(filename) {
-  const m = filename.match(/^(.+)-(\d{5})\.(jpe?g|png)$/i);
-  if (!m) return null;
-  const nameSlug = m[1];
-  const tracking5 = m[2];
-  const display = nameSlug
-    .replace(/-und-/g, ' & ')
-    .replace(/-/g, ' ')
-    .replace(/\b\w/g, c => c.toUpperCase());
-  return {
-    filename,
-    name: display,
-    nameSlug,
-    tracking5,
-    trackingDotted: `${TRACKING_PREFIX_DOTTED}${tracking5}`,
-    trackingPlain: `${TRACKING_PREFIX_PLAIN}${tracking5}`,
-  };
-}
-
-function nameToSlug(name) {
-  return String(name)
-    .replace(/&/g, ' und ')
-    .replace(/ä/gi, 'ae').replace(/ö/gi, 'oe').replace(/ü/gi, 'ue').replace(/ß/g, 'ss')
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-zA-Z0-9]+/g, '-')
-    .replace(/-+/g, '-').replace(/^-|-$/g, '')
-    .toLowerCase();
-}
-
-// GET /api/briefe — Alle Brief-Fotos im Ordner mit geparsten Tracking-Nummern
-app.get('/api/briefe', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
-  try {
-    const dir = pathModule.join(DOCS_PATH, BRIEFE_DIR);
-    let files;
-    try { files = await fs.readdir(dir); }
-    catch (e) {
-      if (e.code === 'ENOENT') return res.json({ briefe: [], dir: BRIEFE_DIR });
-      throw e;
-    }
-    const briefe = [];
-    for (const f of files) {
-      const parsed = parseBriefFilename(f);
-      if (!parsed) continue;
-      try {
-        const stat = await fs.stat(pathModule.join(dir, f));
-        briefe.push({ ...parsed, mtime: stat.mtime.toISOString(), size: stat.size });
-      } catch {}
-    }
-    briefe.sort((a, b) => b.tracking5.localeCompare(a.tracking5));
-    res.json({ briefe, dir: BRIEFE_DIR });
-  } catch (err) {
-    console.error('[Briefe-List]', err.message);
-    res.status(500).json({ error: 'Liste konnte nicht geladen werden' });
-  }
-});
-
-// POST /api/briefe/upload — Foto hochladen, OCR via Haiku 4.5, umbenennen, ablegen
-// Body: { bild_base64, bild_filename }
-// Absender der Briefe als Hinweis fuer die Texterkennung (Name, Adresse). Steht
-// in der Umgebung, nicht im Code: das Repo ist oeffentlich (Befund W28).
-const BRIEF_ABSENDER = String(process.env.BRIEF_ABSENDER || '').replace(/[`$\\]/g, '').slice(0, 200);
-app.post('/api/briefe/upload', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
-  try {
-    const { bild_base64, bild_filename } = req.body || {};
-    if (!bild_base64) return res.status(400).json({ error: 'bild_base64 fehlt' });
-
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: 'OPENROUTER_API_KEY nicht konfiguriert' });
-
-    const ext = (bild_filename || 'jpeg').split('.').pop().toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (!['jpg', 'jpeg', 'png'].includes(ext)) return res.status(400).json({ error: 'Nur JPG/PNG erlaubt' });
-    const buf = Buffer.from(bild_base64, 'base64');
-    if (buf.length > 15 * 1024 * 1024) return res.status(400).json({ error: 'Datei zu gross (>15MB)' });
-    const mime = ext === 'png' ? 'image/png' : 'image/jpeg';
-    const dataUrl = `data:${mime};base64,${bild_base64}`;
-
-    const systemPrompt = `Du extrahierst Empfänger und Tracking aus dem Foto eines Schweizer WebStamp-Couverts (A-Post Plus).
-Antworte AUSSCHLIESSLICH mit gueltigem JSON, keine Markdown-Codebloecke, kein erklaerender Text.
-
-Schema:
-{
-  "tracking": string|null,    // Volle Tracking-Nr unter dem Barcode, Format "98.01.018499.705XXXXX". 8 Ziffern beginnend mit 705.
-  "empfänger": string|null,  // Vollstaendiger Empfänger-Name (Person ODER Firma), z.B. "Max Muster" oder "Anna Beispiel & Beat Beispiel" oder "Muster Immobilien AG"
-  "strasse": string|null,
-  "plz": string|null,
-  "ort": string|null
-}
-
-WICHTIG: Der Empfänger ist NICHT der Absender (Absenderzeile ueber dem Adressfeld bzw. oben links${BRIEF_ABSENDER ? ': ' + BRIEF_ABSENDER : ''}). Lies das Empfänger-Adressfeld.
-Wenn ein Feld nicht erkennbar ist, setze null.`;
-
-    const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://www.rosenweg4303.ch',
-        'X-Title': 'Rosenweg Brief-Tracking-OCR',
-      },
-      signal: AbortSignal.timeout(45_000),
-      body: JSON.stringify({
-        model: 'anthropic/claude-haiku-4.5',
-        max_tokens: 512,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: [
-            { type: 'text', text: 'Extrahiere Empfänger und Tracking aus diesem Brief-Foto.' },
-            { type: 'image_url', image_url: { url: dataUrl } },
-          ]},
-        ],
-      }),
-    });
-
-    if (!orRes.ok) {
-      const errText = await orRes.text().catch(() => '');
-      console.error('[Briefe-OCR] OpenRouter error', orRes.status, errText.slice(0, 300));
-      return res.status(502).json({ error: `OCR-Service-Fehler (HTTP ${orRes.status})` });
-    }
-    const orJson = await orRes.json();
-    const content = orJson.choices?.[0]?.message?.content || '';
-    let jsonText = content.trim();
-    const fence = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (fence) jsonText = fence[1].trim();
-    let parsed;
-    try { parsed = JSON.parse(jsonText); }
-    catch (e) {
-      console.error('[Briefe-OCR] JSON-Parse fehlgeschlagen:', jsonText.slice(0, 300));
-      return res.status(502).json({ error: 'OCR-Antwort ist kein gueltiges JSON', raw: content });
-    }
-
-    const trackDigits = String(parsed.tracking || '').replace(/\D/g, '');
-    const tail8 = trackDigits.slice(-8);
-    if (!/^705\d{5}$/.test(tail8)) {
-      return res.status(422).json({ error: 'Tracking-Nr nicht erkannt oder Format unerwartet', ocr: parsed });
-    }
-    const tracking5 = tail8.slice(-5);
-
-    if (!parsed.empfänger || typeof parsed.empfänger !== 'string') {
-      return res.status(422).json({ error: 'Empfänger nicht erkannt', ocr: parsed });
-    }
-    const nameSlug = nameToSlug(parsed.empfänger);
-    if (!nameSlug) return res.status(422).json({ error: 'Empfänger nicht in Dateiname konvertierbar' });
-
-    const newFilename = `${nameSlug}-${tracking5}.jpeg`;
-    const dir = pathModule.join(DOCS_PATH, BRIEFE_DIR);
-    await fs.mkdir(dir, { recursive: true });
-    const newPath = pathModule.join(dir, newFilename);
-    try {
-      await fs.access(newPath);
-      return res.status(409).json({
-        error: `Datei existiert bereits: ${newFilename}`,
-        filename: newFilename, ocr: parsed,
-      });
-    } catch {}
-
-    await fs.writeFile(newPath, buf);
-    res.json({
-      success: true,
-      filename: newFilename,
-      tracking5,
-      trackingDotted: `${TRACKING_PREFIX_DOTTED}${tracking5}`,
-      trackingPlain: `${TRACKING_PREFIX_PLAIN}${tracking5}`,
-      empfänger: parsed.empfänger,
-      strasse: parsed.strasse,
-      plz: parsed.plz,
-      ort: parsed.ort,
-      model: orJson.model,
-    });
-  } catch (err) {
-    console.error('[Briefe-Upload]', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+app.use('/api/briefe', require('./routes/briefe'));
 
 // ─── Proxmox VE Management ──────────────────────────────────────────
 
@@ -31543,6 +31387,10 @@ async function initDB() {
         CONSTRAINT four_eyes CHECK (confirmed_by IS NULL OR confirmed_by != requested_by)
       );
     `);
+    // STWEG-Bindung, Konto-IDs der Antraege, Zugriffsprotokoll (Entscheide 28.11.2026)
+    await require('./routes/email-archive').schemaSicherstellen(client);
+    // Brief-Ablage: STWEG je Brief, Loeschantraege, Protokoll, Tageszaehler der Texterkennung
+    await require('./routes/briefe').schemaSicherstellen(client);
 
     // Connection log for FPÜV compliance (6 months retention)
     await client.query(`
@@ -33631,6 +33479,8 @@ initDB()
         .catch(e => console.error('[sicherungen] Schema:', e.message));
       // Android-Dauertest: Tabelle, und alle 15 min prüfen, ob CT 149 noch Läufe schickt
       androidDauertest.starten(activeIntervals);
+      // E-Mail-Archiv: nach 10 Jahren anonymisieren, Datei-Reste erneut entfernen (taeglich)
+      require('./routes/email-archive').aufbewahrungStarten(activeIntervals);
       // Mitgelieferte Dokumente (Beispielmappe) in die Ablage, siehe lib/ablage.js
       setTimeout(() => require('./lib/ablage').ablageAbgleichen(), 20 * 1000);
       // Cleanup expired sessions every hour
