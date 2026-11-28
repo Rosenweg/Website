@@ -99,12 +99,12 @@ test('Zusammenfassung und Reihenfolge: rot zuerst, entfernte fallen weg', () => 
   assert.equal(z.ampel, 'rot');
 });
 
-test('öffentliche Sicht: Kennung, Standort, Versionen weg', () => {
+test('öffentliche Sicht: Kennung und Standort bleiben, Versionen weg', () => {
   const out = n.stationenOeffentlich(n.stationenFuerNoc([
     { id: 'laptop-wohnung-12', role: 'laptop', standort: 'Büro', last_seen_at: vor(1), agent_protokoll: 2, agent_version: '2.0' },
   ], JETZT));
-  assert.equal(out.stationen[0].id, 'Station 1');
-  assert.equal(out.stationen[0].standort, null);
+  assert.equal(out.stationen[0].id, 'laptop-wohnung-12');
+  assert.equal(out.stationen[0].standort, 'Büro');
   assert.equal(out.stationen[0].agent, null);
   assert.equal(out.zusammenfassung.online, 1);
 });

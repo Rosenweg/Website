@@ -144,14 +144,15 @@ function stationenFuerNoc(zeilen, jetzt = Date.now()) {
   return { zusammenfassung: zs, stationen: liste };
 }
 
-// Anonyme Wandbild-Sicht (NOC_PUBLIC_OPEN ohne Token): wie bei den
-// Anschlüssen nur Nummer, Rolle, Haus und Zustand.
+// Wandbild-Sicht (NOC_PUBLIC_OPEN ohne Token): Kennung und Standort wie in der
+// Verwaltung (Entscheid Stefan 28.11.2026: Stationen nicht anonymisieren; es sind
+// Gerätenamen, keine Personen). Ohne Betriebssystem- und Agent-Versionen.
 function stationenOeffentlich(out) {
   return {
     ...out,
-    stationen: (out.stationen || []).map((s, i) => ({
-      id: 'Station ' + (i + 1), rolle: s.rolle, rolle_text: s.rolle_text, haus: s.haus,
-      standort: null, zustand: s.zustand, alter_min: s.alter_min, os: null, agent: null,
+    stationen: (out.stationen || []).map((s) => ({
+      id: s.id, rolle: s.rolle, rolle_text: s.rolle_text, haus: s.haus,
+      standort: s.standort, zustand: s.zustand, alter_min: s.alter_min, os: null, agent: null,
       ampel: s.ampel, hinweise: s.hinweise,
     })),
   };

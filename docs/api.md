@@ -218,7 +218,7 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `GET /api/unterschriftenliste/verify-json`, `verify`, `snapshot/:hash.pdf` | Echtheitsprüfung (30 / 10 Min. je Client) |
 | `GET /api/display/pdf/:name`, `pdfbild/:name`, `geraetedatei/…`, `rss` | Anzeigen im Treppenhaus |
 | `GET /api/isp/noc/public/*`, `/api/isp/status-summary`, `/api/isp/maintenance/public` | NOC-Wandbild (gekürzt), Störungen |
-| `GET /api/isp/noc/public/stationen` (Token) bzw. `/api/isp/noc/stationen` (Technik/Präsident) | Stationen im NOC: Zusammenfassung + je Gerät Kennung, Rolle, Haus, Standort, Ampel, OS/Agent — **ohne** Personen, IPs, Overrides (`api/lib/nocstationen.js`, 15 s Cache); anonym (`NOC_PUBLIC_OPEN`) nur „Station n“ |
+| `GET /api/isp/noc/public/stationen` (Token) bzw. `/api/isp/noc/stationen` (Technik/Präsident) | Stationen im NOC: Zusammenfassung + je Gerät Kennung, Rolle, Haus, Standort, Ampel, OS/Agent — **ohne** Personen, IPs, Overrides (`api/lib/nocstationen.js`, 15 s Cache); anonym (`NOC_PUBLIC_OPEN`) mit Kennung und Standort, ohne OS/Agent |
 | `GET /api/isp/noc/public/server` (Token) bzw. `/api/isp/noc/server` (Technik/Präsident) | Server im NOC: Proxmox-Knoten (CPU/RAM/Last/Uptime, HA-LRM), Quorum, HA, Ceph-Health mit Gründen, SSD-Abnutzung (100 − `wearout`), Gäste mit Autostart, die nicht laufen; PBS-Belegung, GC/Prüf-/Aufräum-Jobs, fehlgeschlagene Aufgaben (24 h), letzte Sicherung je Gast (> 36 h gelb). Nur lesend über `PVE_AUDIT_TOKEN` (PVEAuditor) und `PBS_AUDIT_TOKEN` (Audit), 30 s Cache (`api/routes/nocserver.js`, `api/lib/nocserver.js`) |
 | `GET /api/meg/einstellplaetze/verfuegbar` | freie Einstellplätze (ohne Personendaten) |
 | `GET /api/tv/playlist.m3u`, `/api/tv/epg.xml` | TV-Senderliste |

@@ -137,6 +137,12 @@ test('Zwei Geräte hinter derselben Adresse, verschiedene Startzeit -> gemeldet'
   assert.ok(w.doppelteErkennen([...a, ...b]));
 });
 
+test('Gestellte Uhr: ein Ausreisser bei der Startzeit, gleiche Adressen -> nichts (win11-1, 28.11.2026)', () => {
+  const a = [0, 5, 10, 15, 20].map((m) => lz(m, '10.9.0.5', 60));
+  const b = [7].map((m) => lz(m, '10.9.0.5', 58.5)); // Startzeit 90 s später, einmal
+  assert.equal(w.doppelteErkennen([...a, ...b]), null);
+});
+
 test('Ohne Laufzeit (alter Agent) zählt die Adresse allein', () => {
   const a = [0, 5, 10].map((m) => lz(m, '10.9.0.5', null));
   assert.equal(w.doppelteErkennen(a), null);
