@@ -4161,7 +4161,8 @@ PORTAL_PFADE_STANDARD = {
     "ch.rosenweg4303.unterlagen": ["GET /api/documents", "GET /api/documents/", "GET /api/documents-ordner",
                                    "GET /api/documents-suche", "GET /api/documents-neu", "GET /api/documents-rechte",
                                    "GET /api/documents-kennung/", "GET /api/documents-fassungen",
-                                   "GET /api/documents-fassungen/", "POST /api/documents-preview"],
+                                   "GET /api/documents-fassungen/", "GET /api/documents-preview",
+                                   "POST /api/documents-preview"],
 }
 _PORTAL_PFAD = re.compile(r"/api/[A-Za-z0-9._~!$&'()*+,;=:@%/-]{1,1000}(\?[A-Za-z0-9._~!$&'()*+,;=:@%/?-]{0,1000})?")
 _PORTAL_KODIERT_VERBOTEN = re.compile(r"%(2e|2f|5c|00)", re.I)

@@ -251,7 +251,8 @@ test('Server: Schreib-Routen leeren das Verzeichnis, Verschieben zieht Kennung m
 });
 
 test('Server: Vorschau je Fassung (L12), Range beim Herunterladen', () => {
-  const v = route("app.post('/api/documents-preview'");
+  assert.match(src, /app\.get\('\/api\/documents-preview', authMiddleware/);
+  const v = route('async function dokumentVorschau(');
   assert.match(v, /cacheKey = `\$\{filePath\}\|\$\{stVorschau\.size\}\|\$\{Math\.floor\(stVorschau\.mtimeMs\)\}`/);
   assert.match(v, /previewCache\.get\(cacheKey\)/);
   assert.match(v, /previewCache\.set\(cacheKey,/);

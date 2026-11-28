@@ -12312,9 +12312,13 @@ function vorschauSenden(req, res, pdf) {
   return res.send(pdf.subarray(b.von, b.bis + 1));
 }
 
-app.post('/api/documents-preview', authMiddleware, async (req, res) => {
+// POST mit {path} (Web) oder GET ?path= (App: Herunterladen mit Fortschritt,
+// stueckweise ueber den Portal-Weg der geteilten Telefone)
+app.post('/api/documents-preview', authMiddleware, (req, res) => dokumentVorschau(req, res, req.body?.path));
+app.get('/api/documents-preview', authMiddleware, (req, res) => dokumentVorschau(req, res, typeof req.query.path === 'string' ? req.query.path : ''));
+
+async function dokumentVorschau(req, res, filePath) {
   try {
-    const filePath = req.body?.path;
     if (!filePath || filePath.includes('..') || filePath.startsWith('/') || /[%\\]/.test(filePath) || /\0/.test(filePath)) {
       return res.status(400).json({ error: 'Ungültiger Pfad' });
     }
@@ -12386,7 +12390,7 @@ app.post('/api/documents-preview', authMiddleware, async (req, res) => {
     console.error('Document preview error:', err.message);
     res.status(500).json({ error: 'Vorschau konnte nicht erstellt werden' });
   }
-});
+}
 
 // GET /api/documents/:path(*) - Download a document
 app.get('/api/documents/:path(*)', authMiddleware, async (req, res) => {
