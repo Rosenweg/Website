@@ -354,12 +354,28 @@ jemand anderes noch angemeldet ist, könnte sich so selbst einen QR holen
 (abfotografieren, der Kamera zeigen) und die „Bestätigung“ wäre wertlos. Darum
 zählt für E nur ein QR mit `ausgestellt_art` website, otp, app oder authentik.
 
-**Restrisiko bei C:** Ein QR aus einer Karten-Anmeldung ergibt eine QR-Sitzung,
-die beim Erneuern das Konto (Authentik) prüft, nicht die Karte. Wird eine
-verlorene Karte nur in UniFi Access entzogen, laufen solche Sitzungen weiter.
-Darum: bei verlorener Karte immer auch **„Alle Apps abmelden“** (Profil bzw.
-Rosenweg Zutritt, `POST /api/apps/sitzungen/alle-abmelden`); die Person bekommt
-bei jedem solchen Einlösen eine Mail.
+**Karte entzogen → alles aus dieser Karte abgemeldet** (Entscheid Stefan 28.11.2026,
+`karteEntzogen` in `routes/app-karte.js`): Ein QR aus einer Karten-Anmeldung merkt
+sich die Karte (`herkunft_karte_token`, am geteilten Telefon über die Anzeige-ID, die
+die PBX im Anlage-Token mitgibt). Wird die Karte entzogen, gesperrt oder entfernt,
+meldet die API alle Karten-Sitzungen dieser Karte **und** alle QR-/App-Sitzungen
+daraus ab, verwirft offene Anmelde-QR aus ihr und beendet laufende
+Signatur-Bestätigungen mit ihr. Dazu kommen ein Eintrag im Kartenprotokoll
+(`app-abmeldung`) und im `admin_protokoll` (Bereich `apps`,
+`karte-entzogen-abgemeldet`) sowie eine Mail an die Person. Ausgelöst wird es von:
+
+- Kartenverwaltung „Entziehen“ und „Löschen“, auch wenn die Karte schon ohne Inhaber ist
+- `DELETE /api/access/users/:id/nfc/:token` und `DELETE /api/access/me/nfc/:token`
+- der Konto-Löschung (Nachlauf Karten)
+- dem Erneuern einer Sitzung, wenn UniFi Access die Karte nicht mehr der Person zuordnet
+  (Entzug direkt in UniFi Access; spätestens beim nächsten Erneuern, also nach höchstens
+  15 Minuten Nutzung)
+
+Nicht erfasst: die Anmeldung am geteilten Telefon selbst (sie endet beim Abmelden,
+beim Neustart oder bei der nächsten Person) und ein QR, der aus einer
+QR-Anmeldung am Sperrbildschirm des geteilten Telefons stammt (dort gibt es keine
+Karte). „Alle Apps abmelden“ (`POST /api/apps/sitzungen/alle-abmelden`) bleibt der
+Weg für alles.
 
 #### Rechtsverbindlichkeit und Beweiskraft der Signatur mit Karte oder QR
 

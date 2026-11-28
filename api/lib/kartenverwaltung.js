@@ -108,7 +108,11 @@ function kartenVerwaltung(deps) {
       const k = await deps.accessKarteZurUid(nfcId, true);
       if (!k) return { status: 404, body: { error: 'Karte nicht bekannt' } };
       const besitzer = deps.accessKartenBesitzerId(k);
-      if (!besitzer) return { status: 200, body: { ok: true, schon: true, display_id: k.display_id || null } };
+      if (!besitzer) {
+        // Schon ohne Inhaber (z. B. direkt in UniFi Access entzogen): Sitzungen trotzdem abmelden
+        if (deps.nachEntzug) await deps.nachEntzug({ token: k.token, anzeige: k.display_id || null }, durch, 'karte entzogen (Kartenverwaltung)');
+        return { status: 200, body: { ok: true, schon: true, display_id: k.display_id || null } };
+      }
       const wer = deps.accessKartenBesitzerName(k);
       const r = await deps.unifiAccessRaw('PUT', `/users/${encodeURIComponent(besitzer)}/nfc_cards/delete`, { token: k.token });
       deps.accessKartenCacheLeeren();
@@ -117,6 +121,8 @@ function kartenVerwaltung(deps) {
       await deps.kartenProtokollieren('entziehen', { nfcId, displayId: k.display_id, name: wer, durch, erfolg: gut,
         detail: gut ? '' : `${r.status} ${r.body?.msg || ''}` });
       if (!gut) return { status: 502, body: { error: r.body?.msg || 'Entziehen in UniFi Access fehlgeschlagen' } };
+      // Alle Sitzungen dieser Karte abmelden (Karten- und daraus erzeugte QR-Sitzungen, Entscheid 28.11.2026)
+      if (deps.nachEntzug) await deps.nachEntzug({ token: k.token, anzeige: k.display_id || null }, durch, 'karte entzogen (Kartenverwaltung)');
       return { status: 200, body: { ok: true, display_id: k.display_id || null, name: wer } };
     } catch (e) { return fehlerAntwort(e); }
   }
@@ -135,6 +141,7 @@ function kartenVerwaltung(deps) {
       await deps.kartenProtokollieren('loeschen', { nfcId, displayId: k.display_id, name: '', durch, erfolg: gut,
         detail: gut ? '' : `${r.status} ${r.body?.msg || ''}` });
       if (!gut) return { status: 502, body: { error: r.body?.msg || 'Loeschen in UniFi Access fehlgeschlagen' } };
+      if (deps.nachEntzug) await deps.nachEntzug({ token: k.token, anzeige: k.display_id || null }, durch, 'karte geloescht (Kartenverwaltung)');
       return { status: 200, body: { ok: true, display_id: k.display_id || null } };
     } catch (e) { return fehlerAntwort(e); }
   }

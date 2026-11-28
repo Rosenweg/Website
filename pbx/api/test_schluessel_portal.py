@@ -46,5 +46,26 @@ class SchluesselPortal(unittest.TestCase):
         self.assertFalse(pbx._portal_erlaubt(R, "ch.rosenweg4303.salz", "POST", "/api/vollmachten/5/sign-digital"))
 
 
+class KarteImAnlageToken(unittest.TestCase):
+    """Die Anzeige-ID der Karte vom Sperrbildschirm geht im Anlage-Token mit (28.11.2026)."""
+
+    def _inhalt(self, sitzung):
+        import base64
+        import json
+        pbx.PORTAL_ANLAGE_SECRET = "test"
+        t = pbx._portal_token(sitzung, "2098", MT, "POST", "/api/apps/qr-ausweis")
+        teil = t.split(".")[1]
+        return json.loads(base64.urlsafe_b64decode(teil + "=" * (-len(teil) % 4)))
+
+    def test_mit_karte(self):
+        p = self._inhalt({"user_id": "7", "email": "anna@example.ch", "karte": "0042"})
+        self.assertEqual(p["karte"], "0042")
+        self.assertEqual(p["pfad"], "apps/qr-ausweis")
+
+    def test_ohne_karte(self):
+        self.assertNotIn("karte", self._inhalt({"user_id": "7", "email": "anna@example.ch", "karte": None}))
+        self.assertNotIn("karte", self._inhalt({"user_id": "7", "email": "anna@example.ch"}))
+
+
 if __name__ == "__main__":
     unittest.main()

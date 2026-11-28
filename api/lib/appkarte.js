@@ -191,6 +191,71 @@ function qrVomKonto(ausgestelltArt) {
   return KONTO_ARTEN.has(String(ausgestelltArt || ''));
 }
 
+// ─── Karte entzogen: alle Sitzungen dieser Karte abmelden (Entscheid Stefan 28.11.2026) ──
+// Wird eine Karte entzogen, gesperrt oder entfernt, meldet die API alle Sitzungen ab, die
+// über sie entstanden sind: die Karten-Sitzungen selbst (access_karten_token) und QR-/App-
+// Sitzungen aus einem Anmelde-QR, den eine Karten-Anmeldung ausgestellt hat (herkunft_karte_token,
+// ersatzweise nur die Anzeige-ID herkunft_karte, wenn das Token beim Ausstellen nicht bekannt war).
+
+/** Karten-Herkunft aus der Karten-Sitzung der Anfrage (selbst Karte oder daraus erzeugt). -> {token, besitzer, anzeige} | null */
+function kartenHerkunftAusSitzung(sitzung) {
+  const s = sitzung || {};
+  if (s.karte_token) return { token: String(s.karte_token), besitzer: s.karte_besitzer ? String(s.karte_besitzer) : null, anzeige: s.karte || null };
+  if (s.herkunft_karte_token || s.herkunft_karte) {
+    return { token: s.herkunft_karte_token ? String(s.herkunft_karte_token) : null,
+      besitzer: s.herkunft_karte_besitzer ? String(s.herkunft_karte_besitzer) : null, anzeige: s.herkunft_karte || null };
+  }
+  return null;
+}
+
+/**
+ * WHERE-Teil fuer "alle Sitzungen dieser Karte". Mit Token: Karten-Sitzung oder Herkunft ueber
+ * das Token; mit Anzeige-ID zusaetzlich Herkunft nur ueber die Anzeige (Zeilen ohne Token).
+ * -> { where, params } | null (weder Token noch Anzeige)
+ */
+// nurHerkunft: nur die Herkunfts-Spalten (fuer app_qr_ausweise, die keine Karten-Spalten hat).
+function entzugBedingung({ token, anzeige } = {}, { nurHerkunft = false } = {}) {
+  const t = token ? String(token) : '';
+  const a = anzeige ? String(anzeige) : '';
+  if (!t && !a) return null;
+  const teile = [];
+  const params = [];
+  if (t) {
+    params.push(t);
+    if (!nurHerkunft) teile.push(`access_karten_token = $${params.length}`);
+    teile.push(`herkunft_karte_token = $${params.length}`);
+  }
+  if (a) {
+    params.push(a);
+    teile.push(`(herkunft_karte_token IS NULL AND herkunft_karte = $${params.length})`);
+    if (!t && !nurHerkunft) teile.push(`(access_karten_token IS NULL AND karte_anzeige = $${params.length})`);
+  }
+  return { where: `(${teile.join(' OR ')})`, params };
+}
+
+/** Mail an die Person: diese Anmeldungen sind abgemeldet, weil die Karte entzogen wurde. */
+function entzugMail({ name, anzeige, sitzungen, portal }) {
+  const zeilen = (sitzungen || []).map(x => `  • ${x.app_name || x.app || 'App'} auf ${x.geraet_name || 'unbekanntem Gerät'}`
+    + (x.art && x.art !== 'karte' ? ' (aus einem Anmelde-QR)' : ''));
+  return {
+    subject: 'Rosenweg-Karte entzogen: deine App-Anmeldungen sind abgemeldet',
+    text: [
+      `Hallo ${name || ''}`.trim() + ',',
+      '',
+      `deine Rosenweg-Karte${anzeige ? ' ' + anzeige : ''} wurde entzogen, gesperrt oder entfernt. Darum sind diese`,
+      'Anmeldungen jetzt abgemeldet, auch die aus einem Anmelde-QR, der mit der Karte ausgestellt wurde:',
+      '',
+      ...zeilen,
+      '',
+      'Mit dem Rosenweg-Konto oder einer neuen Karte kannst du dich jederzeit wieder anmelden.',
+      'Warst du das nicht oder ist die Karte verloren? Melde dich bei der Technik (technik@rosenweg4303.ch).',
+      `Übersicht: ${portal || 'https://www.rosenweg4303.ch'}/profil.html#app-sitzungen`,
+      '',
+      'Rosenweg 4303',
+    ].join('\n'),
+  };
+}
+
 /** Ohne Karte angemeldet (QR oder Handy): beim Erneuern Konto statt Karte prüfen. */
 function ohneKarte(art) {
   return art === 'qr' || art === 'handy';
@@ -242,4 +307,5 @@ module.exports = {
   oeffentlicherSchluessel, erneuernText, unterschriftGueltig, anzeigeText,
   anmeldungPruefen, qrAnmeldungPruefen, gebremst, abzuloesen, istTechnikOderPraesident,
   neuerBenutzerCode, benutzerCode, handyCodePruefen, ohneKarte, qrAusstellenErlaubt, qrVomKonto, KONTO_ARTEN,
+  kartenHerkunftAusSitzung, entzugBedingung, entzugMail,
 };

@@ -4145,6 +4145,7 @@ app.post('/api/access/users/:id/nfc', authMiddleware, adminOnly, async (req, res
 app.delete('/api/access/users/:id/nfc/:token', authMiddleware, adminOnly, async (req, res) => {
   const r = await unifiAccessRaw('PUT', `/users/${encodeURIComponent(req.params.id)}/nfc_cards/delete`, { token: req.params.token });
   if (!accessGuard(res, r)) return;
+  if (accessOk(r)) karteEntzogenMelden({ token: req.params.token }, req.user?.email || 'admin', 'karte entfernt (Zutritt, Admin)');
   res.status(accessOk(r) ? 200 : r.status).json(r.body || {});
 });
 
@@ -4508,7 +4509,10 @@ app.delete('/api/access/me/nfc/:token', authMiddleware, async (req, res) => {
   const u = await unifiUserByEmail(req.user?.email);
   if (!u) return res.status(404).json({ error: 'Kein UniFi-Benutzer gefunden' });
   const r = await unifiAccessRaw('PUT', `/users/${encodeURIComponent(u.id)}/nfc_cards/delete`, { token: req.params.token });
-  if (accessOk(r)) return res.json({ success: true });
+  if (accessOk(r)) {
+    karteEntzogenMelden({ token: req.params.token }, req.user?.email || 'selbst', 'karte entfernt (selbst)');
+    return res.json({ success: true });
+  }
   res.status(r.status === 0 ? 502 : r.status).json({ error: 'Entfernen fehlgeschlagen' });
 });
 
@@ -7625,6 +7629,7 @@ async function nachlaufKarten(email) {
     const gut = accessOk(r) && (!r.body?.code || r.body.code === 'SUCCESS');
     await kartenProtokollieren('entziehen', { nfcId: null, displayId: c.display_id || null, email, name: null,
       durch: 'Konto-Löschung', erfolg: gut, detail: gut ? 'Konto gelöscht' : `${r.status} ${r.body?.msg || ''}` }).catch(() => {});
+    if (gut) await karteEntzogenMelden({ token, anzeige: c.display_id || null }, 'Konto-Löschung', 'karte entzogen (Konto gelöscht)');
     if (gut) entzogen++; else fehler.push(r.status);
   }
   if (entzogen) accessKartenCacheLeeren();
@@ -20587,6 +20592,36 @@ const { normNfcId, nfcIdGueltig } = require('./lib/kartenverwaltung');
 // Kartenliste kurz zwischenspeichern (nur um das Token zur UID zu finden; Status und
 // Besitzer werden bei jeder Anfrage live ueber /tokens/{token} gelesen).
 let accessKartenCache = { zeit: 0, karten: null };
+// Karte entzogen, gesperrt oder entfernt (Entscheid Stefan 28.11.2026): alle Sitzungen, die
+// ueber diese Karte entstanden sind, abmelden (routes/app-karte.js karteEntzogen: Karten-
+// Sitzungen und QR-/App-Sitzungen daraus, Protokoll, Mail). Haelt den Aufrufer nie auf.
+let appKarteDienst = null;
+async function karteEntzogenMelden(karte, durch, grund) {
+  try {
+    if (!appKarteDienst) return 0;
+    return await appKarteDienst.karteEntzogen(karte || {}, { durch: String(durch || 'system'), grund });
+  } catch (e) {
+    console.error('[app-karte] Abmelden nach Kartenentzug:', e.message);
+    return 0;
+  }
+}
+
+// Anzeige-ID (vom Sperrbildschirm der geteilten Telefone) -> Access-Token der Karte, nur wenn
+// genau eine Karte diese Anzeige hat und sie der Person gehoert. -> {token, besitzer} | null
+async function karteZurAnzeige(anzeige, email) {
+  const a = String(anzeige || '').trim();
+  const e = String(email || '').toLowerCase().trim();
+  if (!a || !e) return null;
+  const treffer = (await accessKartenListe()).filter(k => String(k.display_id || '') === a);
+  if (treffer.length !== 1) return null;
+  const k = treffer[0];
+  const besitzer = accessKartenBesitzerId(k);
+  if (!besitzer) return null;
+  const person = await kartenPerson(besitzer);
+  if (String(person?.email || '').toLowerCase() !== e) return null;
+  return { token: k.token, besitzer };
+}
+
 const ACCESS_KARTEN_TTL_MS = 30 * 1000;
 async function accessKartenListe(frisch = false) {
   if (!frisch && accessKartenCache.karten && Date.now() - accessKartenCache.zeit < ACCESS_KARTEN_TTL_MS) {
@@ -20812,6 +20847,7 @@ let pbxKartenVerwaltung = null;
 const pbxKarten = () => (pbxKartenVerwaltung ??= require('./lib/kartenverwaltung').kartenVerwaltung({
   accessKarteZurUid, accessKarteImportieren, karteNachschlagen, unifiUserByEmail, unifiAccessRaw, accessOk,
   accessKartenBesitzerId, accessKartenBesitzerName, accessKartenCacheLeeren, kartenProtokollieren,
+  nachEntzug: (karte, durch, grund) => karteEntzogenMelden(karte, durch, grund),
 }));
 const pbxDurch = (req) => String(req.body?.durch || 'pbx').slice(0, 200);
 app.post('/api/pbx/karte/zuordnen', requirePbxSecret, async (req, res) => {
@@ -25232,10 +25268,10 @@ require('./routes/app-daten').appDatenRoutes(app, { pool, authMiddleware });
 
 // Karten-Anmeldung der Rosenweg-Apps auf privaten Geraeten (Entscheid Stefan 26.11.2026):
 // Rosenweg-Karte ans Handy -> eigene, widerrufbare Sitzung je App. Begruendung in routes/app-karte.js.
-require('./routes/app-karte').appKarteRoutes(app, {
+appKarteDienst = require('./routes/app-karte').appKarteRoutes(app, {
   pool, authMiddleware, requireUserLogin, absenderIp: require('./middleware/auth').absenderIp,
   loggedSendMail, MAIL_FROM, karteNachschlagen, accessKarteLive, accessKartenBesitzerId, kartenPerson,
-  kartenProtokollieren, authentikUserByEmail,
+  kartenProtokollieren, authentikUserByEmail, karteZurAnzeige,
 });
 
 // Kartenverwaltung (Rosenweg Zutritt, Website): /api/karten/* -> routes/karten.js. Aus der Telefonanlage
@@ -25244,6 +25280,7 @@ require('./routes/karten').kartenRoutes(app, {
   pool, authMiddleware, requireTechnikOrPraesident, requirePbxSecret, kartenProtokollieren,
   accessKarteZurUid, accessKarteImportieren, karteNachschlagen, unifiUserByEmail, unifiAccessRaw, accessOk,
   accessKartenBesitzerId, accessKartenBesitzerName, accessKartenCacheLeeren,
+  nachEntzug: (karte, durch, grund) => karteEntzogenMelden(karte, durch, grund),
 });
 
 // Rosenweg Mein Telefon auf geteilten Telefonen: /api/telefonanlage/* reicht an die Telefonanlage

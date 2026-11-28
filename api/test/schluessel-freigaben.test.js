@@ -99,7 +99,7 @@ test('C: Routen nehmen Karte an, protokollieren, Herkunft an der Sitzung, Mail b
   assert.match(src, /app\.get\('\/api\/apps\/qr-ausweis\/:id', authMiddleware, qrAusstellen,/);
   assert.doesNotMatch(src, /qr-ausweis'?[^\n]*requireUserLogin/);
   assert.match(src, /aktion: 'app-qr-ausgestellt'/);
-  assert.match(src, /ausgestellt_art, ausgestellt_vermerk\)/);
+  assert.match(src, /ausgestellt_art, ausgestellt_vermerk, herkunft_karte, herkunft_karte_token, herkunft_karte_besitzer\)/);
   assert.match(src, /ADD COLUMN IF NOT EXISTS herkunft TEXT/);
   assert.match(src, /if \(!bekannt \|\| ausKarte\) \{\s*neuesGeraetMelden/);
   // Lebensdauer und Einmal-Nutzung unveraendert

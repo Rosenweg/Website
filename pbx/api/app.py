@@ -2000,8 +2000,9 @@ def telefon_karte():
         name = re.sub(r'[\x00-\x1f\x7f"<>\\]', "", name) or "Unbekannt"
         gruppen = json.dumps(sorted({str(g).lower() for g in (person.get("groups") or [])}))
         _telefon_abmelden(conn, ext, f"abgeloest:{karte}")
-        conn.execute("INSERT INTO telefon_sitzungen (ext, user_id, email, name, gruppen) VALUES (?,?,?,?,?)",
-                     (ext, str(person.get("user_id") or ""), email, name, gruppen))
+        anzeige = re.sub(r"[^A-Za-z0-9_-]", "", str(k.get("display_id") or ""))[:40] or None
+        conn.execute("INSERT INTO telefon_sitzungen (ext, user_id, email, name, gruppen, karte) VALUES (?,?,?,?,?,?)",
+                     (ext, str(person.get("user_id") or ""), email, name, gruppen, anzeige))
         _karten_log(conn, ext, "an", email, name, karte)
         _sip_person_anlegen(conn, ext)
         conn.commit()
@@ -2053,7 +2054,7 @@ def _karten_weiterreichen(was):
             return deny
         conn = db.connect()
         try:
-            s = conn.execute("SELECT user_id, email, name, seit FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+            s = conn.execute("SELECT user_id, email, name, seit, karte FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
         finally:
             conn.close()
         if not s or not s["email"]:
@@ -4324,12 +4325,18 @@ def _portal_pfad_normal(pfad):
 def _portal_token(sitzung, ext, paket, methode, pfad, jetzt=None):
     jetzt = int(jetzt if jetzt is not None else time.time())
     kopf = _b64url(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
-    inhalt = _b64url(json.dumps({
+    daten = {
         "iss": "rosenweg-anlage", "aud": "rosenweg-portal", "sub": str(sitzung["user_id"] or ""),
         "email": sitzung["email"], "ext": ext, "paket": paket, "methode": methode,
         "pfad": _portal_pfad_normal(pfad), "iat": jetzt, "exp": jetzt + PORTAL_TOKEN_S,
         "jti": pysecrets.token_hex(16),
-    }, separators=(",", ":"), ensure_ascii=False).encode())
+    }
+    # Anzeige-ID der Karte vom Sperrbildschirm (fehlt bei QR-Anmeldung): die Haupt-API haengt
+    # einen App-QR daran und meldet ihn ab, wenn die Karte entzogen wird (28.11.2026)
+    karte = sitzung["karte"] if "karte" in sitzung.keys() else None
+    if karte:
+        daten["karte"] = str(karte)
+    inhalt = _b64url(json.dumps(daten, separators=(",", ":"), ensure_ascii=False).encode())
     sig = _b64url(hmac.new(PORTAL_ANLAGE_SECRET.encode(), f"{kopf}.{inhalt}".encode(), hashlib.sha256).digest())
     return f"{kopf}.{inhalt}.{sig}"
 
@@ -4367,7 +4374,7 @@ def telefon_portal():
                                  f"je Datei hoechstens {PORTAL_BINAER_MAX // (1024 * 1024)} MB)"}), 413
     conn = db.connect()
     try:
-        s = conn.execute("SELECT user_id, email, name, seit FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
+        s = conn.execute("SELECT user_id, email, name, seit, karte FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
         regeln = _portal_regeln(conn)
     finally:
         conn.close()

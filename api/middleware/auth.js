@@ -167,7 +167,10 @@ async function authMiddleware(req, res, next) {
       };
       req.user.isAdmin = zeile.role === 'admin' || isTechnik(groups) || isPraesident(groups);
       // requireUserLogin sperrt Token-Verwaltung & Co. auch fuer diesen Weg
-      req.anlage = { ext: String(p.ext || ''), paket: String(p.paket || ''), token };
+      // karte: Anzeige-ID der Karte, mit der sich die Person am Telefon angemeldet hat (PBX, seit
+      // 28.11.2026; fehlt bei QR-Anmeldung) — fuer die Herkunft eines App-QR und den Vermerk
+      const karte = typeof p.karte === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(p.karte) ? p.karte : '';
+      req.anlage = { ext: String(p.ext || ''), paket: String(p.paket || ''), token, karte };
       req.auth = anmeldung('anlage');
       req.absenderIp = absenderIp(req);
       return weiter(zeile.email || 'anlage:' + req.anlage.ext, 'anlage');

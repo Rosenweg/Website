@@ -106,7 +106,7 @@ function kontext(req) {
     name: req.user?.name || '',
     art: req.auth?.art || 'karte',
     sitzung: k.id || (req.anlage ? 'anlage:' + req.anlage.ext : ''),
-    karte: k.karte || '',
+    karte: k.karte || req.anlage?.karte || '',
     app: req.rosenwegApp?.text || k.app_name || k.app || req.anlage?.paket || '',
     geraet: k.geraet || (req.anlage ? 'geteiltes Telefon ' + req.anlage.ext : ''),
     ip: req.absenderIp || req.ip || '',
