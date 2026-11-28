@@ -140,3 +140,26 @@ test('Seite: Knöpfe nach den Rechten des Servers', () => {
   assert.match(html, /\/api\/handwerker\/\$\{id\}\/zuweisungen/);
   assert.match(html, /const fest = z\.event_typ_id != null && !hwDarf\(z\.stweg\);/);
 });
+
+test('Stammdaten: Verwaltung auch beim gemeinsamen Stamm, protokolliert; archivieren/löschen nicht', () => {
+  assert.equal(hw.hwStammAendern(verw3, null), true, 'gemeinsamer Stamm');
+  assert.equal(hw.hwStammAendern(verw3, 3), true);
+  assert.equal(hw.hwStammAendern(verw3, 5), false, 'fremde STWEG');
+  assert.equal(hw.hwStammAendern(aus3, null), false, 'Ausschuss nur lesen');
+  assert.equal(hw.hwStammAendern(andere, null), false);
+  assert.equal(hw.hwStammAendern(tp, 5), true);
+  assert.equal(hw.hwFirmaArchivieren(verw3, null), false, 'gemeinsamen Stamm archivieren nur T/P');
+  assert.equal(hw.hwFirmaArchivieren(verw3, 3), true);
+  assert.equal(hw.hwFirmaArchivieren(praes, null), true);
+  assert.deepEqual(hw.hwGeaenderteFelder({ firma: 'A', telefon: '1', leistungen: ['x'] }, { firma: 'A', telefon: '2', leistungen: ['x'] }), ['telefon']);
+  const put = server.slice(server.indexOf("app.put('/api/handwerker/:id', "), server.indexOf("app.put('/api/handwerker/:id/zuweisungen'"));
+  assert.match(put, /hwRechteLib\.hwStammAendern\(sicht, firma\.stweg\)/);
+  assert.match(put, /hwRechteLib\.hwFirmaArchivieren\(sicht, firma\.stweg\)/);
+  assert.match(put, /objProtokoll\(req, 'handwerker', 'firma-geaendert'/);
+  assert.match(server, /objProtokoll\(req, 'handwerker', 'firma-angelegt'/);
+  assert.match(server, /objProtokoll\(req, 'handwerker', 'firma-archiviert'/);
+  assert.match(server, /objProtokoll\(req, 'handwerker', 'firma-geloescht'/);
+  const del = server.slice(server.indexOf("app.delete('/api/handwerker/:id', "));
+  assert.match(del.slice(0, 1500), /if \(!hwRechteLib\.hwFirmaArchivieren\(sicht, firma\.stweg\)\)/);
+  assert.match(html, /h\.darf_archivieren/);
+});

@@ -648,15 +648,19 @@
         $('personen-list').querySelectorAll('input, textarea, select, button').forEach(el => { el.disabled = !stammOk; });
         $('btn-add-person').classList.toggle('hidden', !stammOk);
         $('btn-add-zuw').classList.toggle('hidden', !hwKannEintragen());
-        if (h && !stammOk) $('modal-delete').classList.add('hidden');
+        if (h && !(canWrite && h.darf_archivieren)) $('modal-delete').classList.add('hidden');
+        // Archiv-Häkchen: gemeinsamer Stamm nur Technik/Präsident
+        if (h && !h.darf_archivieren) form.elements.archiviert.disabled = true;
         const neuStweg = !h && stammOk && (hwRechte.alle || hwSchreibStwegs().length > 1);
         $('stweg-row').classList.toggle('hidden', !neuStweg);
         $('firma-stweg').disabled = !neuStweg;
         if (neuStweg) hwStwegAuswahl($('firma-stweg'), 'gemeinsamer Stamm (alle STWEG)');
         const hinweis = !canWrite ? ''
             : (h && !stammOk) ? (hwKannEintragen()
-                ? 'Diese Firma gehört zum gemeinsamen Stamm oder einer anderen STWEG. Ihre Stammdaten ändern Technik und Präsident; du pflegst hier Notfall-Zuordnungen, Verträge und Einsätze deiner STWEG.'
+                ? 'Diese Firma gehört zu einer anderen STWEG. Ihre Stammdaten ändert deren Verwaltung; du pflegst hier Notfall-Zuordnungen, Verträge und Einsätze deiner STWEG.'
                 : 'Du kannst diese Firma nur ansehen.')
+            : (h && !h.stweg && !hwRechte.alle)
+                ? 'Firma des gemeinsamen Stamms: Änderungen gelten für alle STWEG und werden protokolliert. Archivieren und Löschen machen Technik und Präsident.'
             : '';
         $('modal-hinweis').textContent = hinweis;
         $('modal-hinweis').classList.toggle('hidden', !hinweis);

@@ -8,9 +8,12 @@
 //                      Event-Typen anlegen/ändern/löschen, Firma hart löschen.
 //   Verwaltung STWEG N lesen und schreiben: Verträge, Einsätze (mit Kosten),
 //                      Notfall-Zuordnungen mit stweg = N; Firmen anlegen (die
-//                      neue Firma gehört dann zu STWEG N) und Firmen mit
-//                      stweg = N ändern/archivieren. Einträge „alle STWEG“ und
-//                      Firmen des gemeinsamen Stamms (stweg NULL) nur lesen.
+//                      neue Firma gehört dann zu STWEG N). Stammdaten (Name,
+//                      Adresse, Nummern, Mitarbeiter) ändern: Firmen mit
+//                      stweg = N UND Firmen des gemeinsamen Stamms (stweg NULL),
+//                      jede Änderung im admin_protokoll (Entscheid Stefan
+//                      28.11.2026, PR #234). Archivieren nur Firmen mit
+//                      stweg = N; Verträge/Einsätze/Zuordnungen „alle STWEG“ nur lesen.
 //   Ausschuss STWEG N  nur lesen, im selben Umfang (STWEG N und „alle“).
 //   andere mit Recht   nur Einträge „alle STWEG“ lesen, nichts schreiben.
 //
@@ -46,6 +49,26 @@ function hwSchreiben(sicht, stweg) {
 }
 
 const hwFirmaAnlegen = (sicht) => sicht.alle || sicht.schreiben.size > 0;
+
+/** Stammdaten einer Firma ändern: eigene STWEG und gemeinsamer Stamm (nicht fremde STWEG). */
+function hwStammAendern(sicht, stweg) {
+  if (sicht.alle) return true;
+  if (sicht.schreiben.size === 0) return false;
+  const n = nr(stweg);
+  return n === null || sicht.schreiben.has(n);
+}
+/** Firma archivieren (aus der Liste aller nehmen): nur eigene STWEG, gemeinsamer Stamm T/P. */
+const hwFirmaArchivieren = (sicht, stweg) => hwSchreiben(sicht, stweg);
+
+// Stammdaten-Felder (für das Protokoll: welche Felder sich geändert haben)
+const HW_STAMM_FELDER = ['kategorie', 'firma', 'ansprechpartner', 'telefon', 'mobile', 'email', 'website',
+  'adresse', 'plz', 'ort', 'notiz', 'bewertung', 'letzter_auftrag', 'empfohlen_von', 'leistungen', 'archiviert'];
+function hwGeaenderteFelder(alt, neu) {
+  const norm = (v) => (v === undefined || v === null ? ''
+    : v instanceof Date ? v.toISOString().slice(0, 10)
+    : Array.isArray(v) ? v.join(',') : String(v));
+  return HW_STAMM_FELDER.filter(f => neu && neu[f] !== undefined && norm(alt?.[f]) !== norm(neu[f]));
+}
 const hwEventTypen = (sicht) => sicht.alle;
 
 /** STWEG einer neuen Firma: T/P frei (leer = gemeinsam); Verwaltung eine ihrer STWEG. */
@@ -122,5 +145,6 @@ function hwRechte(sicht) {
 
 module.exports = {
   handwerkerSicht, hwLesen, hwSchreiben, hwFirmaAnlegen, hwEventTypen, hwNeueFirmaStweg,
+  hwStammAendern, hwFirmaArchivieren, hwGeaenderteFelder, HW_STAMM_FELDER,
   hwSichtSql, zuweisungNormal, zuweisungenZusammenfuehren, hwRechte,
 };

@@ -168,7 +168,7 @@ hat dort keine Rechte, auch wenn er dort wohnt oder Eigentümer ist.
 | Grundbuch: reservieren, erfassen | — | — | ✅ 🅢 (Anteile ohne STWEG: jede Eigentümerin) | ✅ 🅢 | — | ✅ | ✅ |
 | Grundbuch: KI-Auslese (OpenRouter/Anthropic, 30 / Std.; nur auf Knopfdruck nach Hinweis, nie per PAT/MCP) | — | — | ✅ für den eigenen reservierten Anteil 🅢 | ✅ 🅢 | — | ✅ | ✅ |
 | Grundbuch: verifizieren, Auszugsbild | — | — | nur eigenes Bild | ✅ 🅢 | — | ✅ | ✅ |
-| Grundbuch: STWEG einer Parzelle zuordnen (protokolliert) | — | — | — | — | — | ✅ | ✅ |
+| Grundbuch: STWEG einer Parzelle zuordnen (protokolliert; Vorschlag aus Wertquoten, Anzahl und Adressen, nur nach Bestätigung übernommen) | — | — | — | — | — | ✅ | ✅ |
 | MEG-Einstellplätze | freie Plätze | 👁 nur MEG-Mitglieder, ohne Fremddaten | 👁 nur MEG-Mitglieder, ohne Fremddaten | ✅ nur MEG-Ausschuss | ✅ nur MEG-Verwaltung | ✅ | ✅ |
 | Projekte lesen (inkl. Kandidaten, Kontakte, Notizen, Kommentare) | öffentliche Projekte (eingeschränkt, siehe unten) | — (auch keine Titel, keine Projekt-Umfragen) | 👁 🅢 + Kooperation | 👁 🅢 + Kooperation (auch ohne Eigentümergruppe) | (R `projekte` lesen) 👁 🅢 + Kooperation | 👁 alle | 👁 alle |
 | Projekte kommentieren (nur Name sichtbar, keine E-Mail) | — | — | ✅ 🅢 + Kooperation | als Eigentümer | — | ✅ | ✅ |
@@ -204,7 +204,8 @@ Schalten werden bisherige Anhänge nicht öffentlich.
 | Handwerker: Firmen lesen (gemeinsamer Stamm + eigene STWEG) | — | — | — | 👁 🅢 (Vorgabe `handwerker` lesen) | 👁 🅢 | 👁 | 👁 |
 | Handwerker: Verträge, Einsätze (mit Kosten), Notfall-Zuordnungen | — | — | — | 👁 🅢 | ✅ 🅢 (Einträge „alle STWEG“ nur lesen) | ✅ | ✅ |
 | Handwerker: Firma anlegen | — | — | — | — | ✅ (gehört dann zur eigenen STWEG) | ✅ (auch gemeinsamer Stamm) | ✅ |
-| Handwerker: Stammdaten ändern, archivieren | — | — | — | — | ✅ nur Firmen der eigenen STWEG | ✅ | ✅ |
+| Handwerker: Stammdaten ändern (Name, Adresse, Nummern, Mitarbeiter; protokolliert, Bereich `handwerker`) | — | — | — | — | ✅ Firmen der eigenen STWEG und des gemeinsamen Stamms | ✅ | ✅ |
+| Handwerker: Firma archivieren | — | — | — | — | ✅ nur Firmen der eigenen STWEG | ✅ | ✅ |
 | Handwerker: Notfall-Arten (Event-Typen) anlegen, ändern, löschen; Firma hart löschen | — | — | — | — | — | ✅ | ✅ |
 | Mail schreiben (Freigabe-Outbox, 50 / Std.) | — | — | — | ✅ | (R) | ✅ | ✅ |
 | Mail-Empfänger-Stammdaten | — | — | — | 👁 | (R) | ✅ | ✅ |

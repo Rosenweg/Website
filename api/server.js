@@ -13650,7 +13650,7 @@ async function hwFirmaAntwort(req, row) {
   const personenMap = await loadHandwerkerPersonen([row.id]);
   const zuwMap = await loadHandwerkerEventZuweisungen([row.id], sicht);
   return { ...row, personen: personenMap[row.id] || [], event_zuweisungen: zuwMap[row.id] || [],
-    darf_aendern: hwRechteLib.hwSchreiben(sicht, row.stweg) };
+    darf_aendern: hwRechteLib.hwStammAendern(sicht, row.stweg), darf_archivieren: hwRechteLib.hwFirmaArchivieren(sicht, row.stweg) };
 }
 
 app.get('/api/handwerker', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
@@ -13674,7 +13674,8 @@ app.get('/api/handwerker', authMiddleware, requirePermission('handwerker', 'read
     for (const r of result.rows) {
       r.personen = personenMap[r.id] || [];
       r.event_zuweisungen = zuwMap[r.id] || [];
-      r.darf_aendern = hwRechteLib.hwSchreiben(sicht, r.stweg);
+      r.darf_aendern = hwRechteLib.hwStammAendern(sicht, r.stweg);
+      r.darf_archivieren = hwRechteLib.hwFirmaArchivieren(sicht, r.stweg);
     }
     res.json({ handwerker: result.rows, rechte: hwRechteLib.hwRechte(sicht) });
   } catch (err) {
@@ -13752,6 +13753,8 @@ app.post('/api/handwerker', authMiddleware, ...hwSchreibend, async (req, res) =>
       await saveHandwerkerEventZuweisungen(client, created.id, z.liste);
     }
     await client.query('COMMIT');
+    await objProtokoll(req, 'handwerker', 'firma-angelegt', `Firma ${created.id}`,
+      [created.firma, created.stweg ? `STWEG ${created.stweg}` : 'gemeinsamer Stamm']);
     res.status(201).json(await hwFirmaAntwort(req, created));
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -13769,12 +13772,19 @@ app.put('/api/handwerker/:id', authMiddleware, ...hwSchreibend, async (req, res)
     if (!Number.isFinite(id) || id < 1) return res.status(400).json({ error: 'Ungültige ID' });
     const firma = await hwFirmaLesbar(req, res, id);
     if (!firma) return;
-    if (!hwRechteLib.hwSchreiben(hwSichtVon(req), firma.stweg)) {
-      return res.status(403).json({ error: 'Diese Firma gehört zum gemeinsamen Stamm oder einer anderen STWEG; ihre Stammdaten ändern Technik und Präsident. Notfall-Zuordnungen der eigenen STWEG gehen trotzdem.' });
+    // Stammdaten: Verwaltung auch beim gemeinsamen Stamm (protokolliert); fremde STWEG nie
+    const sicht = hwSichtVon(req);
+    if (!hwRechteLib.hwStammAendern(sicht, firma.stweg)) {
+      return res.status(403).json({ error: 'Diese Firma gehört zu einer anderen STWEG; ihre Stammdaten ändern deren Verwaltung, Technik und Präsident.' });
     }
     const h = sanitizeHandwerker(req.body || {});
     if (!h.kategorie || !h.firma) return res.status(400).json({ error: 'Kategorie und Firma sind Pflichtfelder' });
     const archivedFlag = req.body && typeof req.body.archiviert === 'boolean' ? req.body.archiviert : null;
+    // Archivieren (bzw. zurückholen) einer Firma des gemeinsamen Stamms: nur T/P
+    if (archivedFlag !== null && archivedFlag !== !!firma.archiviert && !hwRechteLib.hwFirmaArchivieren(sicht, firma.stweg)) {
+      return res.status(403).json({ error: 'Firmen des gemeinsamen Stamms archivieren Technik und Präsident' });
+    }
+    const vorher = (await pool.query('SELECT * FROM handwerker WHERE id = $1', [id])).rows[0];
     await client.query('BEGIN');
     const result = await client.query(
       `UPDATE handwerker SET
@@ -13801,6 +13811,13 @@ app.put('/api/handwerker/:id', authMiddleware, ...hwSchreibend, async (req, res)
       await saveHandwerkerEventZuweisungen(client, id, z.liste);
     }
     await client.query('COMMIT');
+    {
+      const felder = hwRechteLib.hwGeaenderteFelder(vorher, result.rows[0]);
+      if (Array.isArray(req.body?.personen)) felder.push(`Mitarbeiter (${req.body.personen.filter(p => p && p.name).length})`);
+      await objProtokoll(req, 'handwerker', 'firma-geaendert', `Firma ${id}`,
+        [result.rows[0].firma, result.rows[0].stweg ? `STWEG ${result.rows[0].stweg}` : 'gemeinsamer Stamm',
+         felder.length ? `Felder: ${felder.join(', ')}` : 'ohne Änderung']);
+    }
     res.json(await hwFirmaAntwort(req, result.rows[0]));
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -14295,11 +14312,12 @@ app.delete('/api/handwerker/:id', authMiddleware, ...hwSchreibend, async (req, r
     const hard = req.query.hard === '1';
     if (hard) {
       if (!sicht.alle) return res.status(403).json({ error: 'Hartes Löschen nur für Technik und Präsident' });
-      const result = await pool.query('DELETE FROM handwerker WHERE id = $1 RETURNING id', [id]);
+      const result = await pool.query('DELETE FROM handwerker WHERE id = $1 RETURNING id, firma', [id]);
       if (result.rows.length === 0) return res.status(404).json({ error: 'Eintrag nicht gefunden' });
+      await objProtokoll(req, 'handwerker', 'firma-geloescht', `Firma ${id}`, [result.rows[0].firma]);
       return res.json({ success: true, hard_deleted: true });
     }
-    if (!hwRechteLib.hwSchreiben(sicht, firma.stweg)) {
+    if (!hwRechteLib.hwFirmaArchivieren(sicht, firma.stweg)) {
       return res.status(403).json({ error: 'Diese Firma gehört zum gemeinsamen Stamm oder einer anderen STWEG; archivieren Technik und Präsident' });
     }
     const result = await pool.query(
@@ -14307,6 +14325,7 @@ app.delete('/api/handwerker/:id', authMiddleware, ...hwSchreibend, async (req, r
       [id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Eintrag nicht gefunden oder bereits archiviert' });
+    await objProtokoll(req, 'handwerker', 'firma-archiviert', `Firma ${id}`, [firma.stweg ? `STWEG ${firma.stweg}` : 'gemeinsamer Stamm']);
     res.json({ success: true, archived: true });
   } catch (err) {
     console.error('Handwerker delete error:', err);

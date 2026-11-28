@@ -10,6 +10,7 @@ const { pool } = require('../lib/db');
 const { authMiddleware } = require('../middleware/auth');
 const { isTechnik, isPraesident } = require('../lib/groups');
 const gb = require('../lib/grundbuch-rechte');
+const gbVorschlag = require('../lib/grundbuch-vorschlag');
 const adminProtokoll = require('../lib/admin-protokoll');
 const kartenAdmin = require('../lib/kartenadmin');
 
@@ -378,6 +379,21 @@ router.get('/anteile/:parzelle/:sub_id/bild', authMiddleware, async (req, res) =
     strom.on('error', () => { if (!res.headersSent) res.status(404).end(); else res.destroy(); });
     strom.pipe(res);
   } catch (err) { res.status(500).json({ error: 'Fehler' }); }
+});
+
+// GET /api/grundbuch/parzellen/vorschlag — Vorschlag Parzelle -> STWEG aus Wertquoten
+// der Wohnungen, Anzahl Anteile und erfassten Rosenweg-Adressen (lib/grundbuch-vorschlag.js).
+// Nur Technik/Praesident, nur lesen: schreibt nichts; Antwort nur Parzellen, STWEG
+// und Zahlen (keine Namen, keine Adressen). Uebernehmen: PUT …/:parzelle/stweg.
+router.get('/parzellen/vorschlag', authMiddleware, async (req, res) => {
+  if (!istTP(req)) return res.status(403).json({ error: 'Vorschlag nur für Technik/Präsident' });
+  try {
+    const [a, w] = await Promise.all([
+      pool.query('SELECT parzelle, anteil_z, anteil_n, wohnadressen, stweg FROM grundbuch_anteile'),
+      pool.query('SELECT stweg, wertquote_zaehler, wertquote_nenner FROM wohnungen'),
+    ]);
+    res.json({ vorschlaege: gbVorschlag.parzellenVorschlag(a.rows, w.rows) });
+  } catch (err) { res.status(500).json({ error: 'Vorschlag konnte nicht berechnet werden' }); }
 });
 
 // PUT /api/grundbuch/parzellen/:parzelle/stweg — STWEG einer Parzelle setzen

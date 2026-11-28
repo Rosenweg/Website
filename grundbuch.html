@@ -65,6 +65,16 @@
                 <div id="contributors" class="mt-3 text-xs text-gray-500"></div>
             </div>
 
+            <!-- Vorschlag Parzelle -> STWEG (nur Technik/Präsident; nichts wird ohne Bestätigung gespeichert) -->
+            <div id="vorschlag-box" class="hidden bg-white rounded-lg border p-3 mb-4">
+                <div class="flex items-center justify-between gap-2 flex-wrap">
+                    <h2 class="text-sm font-semibold text-gray-800">Parzellen den STWEG zuordnen: Vorschlag</h2>
+                    <button onclick="vorschlagLaden()" class="px-3 py-1 text-xs bg-gray-100 border rounded hover:bg-gray-200">Vorschlag berechnen</button>
+                </div>
+                <p class="text-xs text-gray-500 mt-1">Abgeleitet aus den Wertquoten der Wohnungen, der Zahl der Anteile und erfassten Rosenweg-Adressen. Gespeichert wird erst mit „Übernehmen“.</p>
+                <div id="vorschlag-liste" class="mt-2 text-sm"></div>
+            </div>
+
             <!-- Filter bar -->
             <div class="bg-white rounded-lg border p-3 mb-4 flex flex-wrap gap-3 items-center">
                 <select id="filter-parzelle" onchange="loadAnteile()" class="border rounded px-2 py-1 text-sm">
@@ -259,6 +269,7 @@
             const data = await res.json();
             anteileCache = data.anteile || [];
             if (data.rechte) RECHTE = data.rechte;
+            document.getElementById('vorschlag-box').classList.toggle('hidden', !RECHTE.stweg_zuordnen);
             // STWEG je Parzelle zuordnen: nur Technik/Präsident, wenn eine Parzelle gewählt ist
             const zu = document.getElementById('stweg-zuordnen');
             zu.classList.toggle('hidden', !(RECHTE.stweg_zuordnen && p));
@@ -467,6 +478,45 @@
             const el = document.getElementById('m-error');
             el.textContent = e.message; el.classList.remove('hidden');
         }
+    }
+
+    // Vorschlag Parzelle -> STWEG: nur anzeigen; übernehmen je Zeile oder alle sicheren
+    let VORSCHLAEGE = [];
+    async function vorschlagLaden() {
+        const box = document.getElementById('vorschlag-liste');
+        box.textContent = 'Berechne…';
+        const r = await AuthentikAuth.apiFetch('/api/grundbuch/parzellen/vorschlag');
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { box.textContent = d.error || ('Fehler ' + r.status); return; }
+        VORSCHLAEGE = d.vorschlaege || [];
+        const offen = VORSCHLAEGE.filter(v => v.vorschlag && v.aktuell !== v.vorschlag);
+        const sichere = offen.filter(v => v.sicherheit === 'hoch');
+        const name = n => Number(n) === 8 ? 'MEG (8)' : 'STWEG ' + n;
+        box.innerHTML = `<table class="min-w-full text-xs"><thead class="text-gray-500"><tr>
+              <th class="text-left py-1 pr-2">Parzelle</th><th class="text-left pr-2">Anteile</th><th class="text-left pr-2">heute</th>
+              <th class="text-left pr-2">Vorschlag</th><th class="text-left pr-2">Sicherheit</th><th class="text-left pr-2">Gründe</th><th></th></tr></thead><tbody>
+            ${VORSCHLAEGE.map(v => `<tr class="border-t">
+              <td class="py-1 pr-2 font-mono">${esc(v.parzelle)}</td><td class="pr-2">${esc(v.anteile)}</td>
+              <td class="pr-2">${v.aktuell == null ? '—' : esc(v.aktuell === 'gemischt' ? 'gemischt' : name(v.aktuell))}</td>
+              <td class="pr-2">${v.vorschlag ? esc(name(v.vorschlag)) : '—'}</td>
+              <td class="pr-2">${esc(v.sicherheit)}</td>
+              <td class="pr-2 text-gray-500">${v.gruende ? esc(`${v.gruende.wertquoten} Wertquoten, ${v.gruende.adressen} Adressen${v.gruende.anzahl_gleich ? ', Anzahl gleich' : ''}${v.gruende.zweitbeste ? ` · danach ${name(v.gruende.zweitbeste.stweg)} (${v.gruende.zweitbeste.punkte})` : ''}`) : ''}</td>
+              <td>${v.vorschlag && v.aktuell !== v.vorschlag ? `<button onclick="vorschlagUebernehmen([${Number(v.parzelle)}])" class="px-2 py-0.5 bg-blue-600 text-white rounded">Übernehmen</button>` : ''}</td>
+            </tr>`).join('')}</tbody></table>
+            ${sichere.length ? `<button onclick="vorschlagUebernehmen(${JSON.stringify(sichere.map(v => Number(v.parzelle)))})" class="mt-2 px-3 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700">Alle sicheren übernehmen (${sichere.length})</button>` : ''}`;
+    }
+    async function vorschlagUebernehmen(parzellen) {
+        const liste = VORSCHLAEGE.filter(v => parzellen.includes(Number(v.parzelle)) && v.vorschlag);
+        if (!liste.length) return;
+        if (!confirm(`${liste.length} Parzelle(n) zuordnen?\n\n` + liste.map(v => `Parzelle ${v.parzelle} → STWEG ${v.vorschlag}`).join('\n')
+            + '\n\nDanach sehen nur noch der Ausschuss dieser STWEG sowie Technik und Präsident die Namen.')) return;
+        for (const v of liste) {
+            const r = await AuthentikAuth.apiFetch(`/api/grundbuch/parzellen/${encodeURIComponent(v.parzelle)}/stweg`, {
+                method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ stweg: v.vorschlag }),
+            });
+            if (!r.ok) { alert(`Parzelle ${v.parzelle}: ` + ((await r.json().catch(() => ({}))).error || r.status)); break; }
+        }
+        await Promise.all([vorschlagLaden(), loadAnteile()]);
     }
 
     // Technik/Präsident: STWEG der gewählten Parzelle setzen (alle Anteile der Parzelle)
