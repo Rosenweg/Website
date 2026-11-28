@@ -77,6 +77,7 @@ ausserhalb über den Sprunghost `ssh -J stefan@10.0.10.149 …`.
 | 108 | dc1 | pve2 | 100.64.2.30 | Samba-AD-DC, Passwort-API (8446), Avatar-Sync | [`active-directory.md`](active-directory.md) |
 | 136 | dc2 | pve3 | – | zweiter DC | [`../ad-dc/README.md`](../ad-dc/README.md) |
 | 131 | core-messenger | pve2 | 100.64.2.56 | Messenger-Backend | – |
+| 146 | speedtest | pve2 | 100.64.2.64 | LibreSpeed (nginx + php-fpm, ohne Telemetrie/DB, kein Zugriffslog) für die Rosenweg-Internet-App; `https://speedtest.rosenweg4303.ch/backend/` (`empty.php`, `garbage.php`, `getIP.php`), nur intern (Name nur im internen DNS, Traefik `ipAllowList` 100.64.0.0/10) | [`../edge-traefik/README.md`](../edge-traefik/README.md) |
 | 260 | nfs-shared | pve2 | 100.64.2.35 | NFS | – |
 | 500–518 | rw*-usernetze-router | pve1 | 100.64.x.250 | je ein Router pro Haus (`router-api`) | `routing.md` |
 | 901 | iobroker-technik | – | 100.64.90.50 | ioBroker (Heizung), nur hinter Authentik | `edge-traefik/README.md` |
