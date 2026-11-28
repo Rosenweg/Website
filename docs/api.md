@@ -323,6 +323,7 @@ Kurzfassung (Details [`energie-api.md`](energie-api.md)):
 | `/api/energie-admin/*` | Recht `energie-config` (GET read, sonst write); 503 ohne `ENERGY_ADMIN_API_KEY` |
 | `GET /api/zaehler-technik` | Gruppe `technik`, `präsident`, `verwaltung` oder `r9-eigentuemer`; volle Sicht nur Technik/Präsident oder `energie-config:read` |
 | `/api/zähler/*` | Recht `zähler` (`POST /api/zähler/benutzer` T/P) |
+| `GET /api/strompreis/elcom?gemeinde=4252&jahr=2026&kategorie=H4` | angemeldet; Standardprodukt des Netzbetreibers aus ElCom/LINDAS (`lib/elcom.js`, je Jahr/Kategorie einen Tag zwischengespeichert, bei Ausfall der letzte Wert mit `veraltet: true`). Antwort `{quelle:'elcom', gemeinde, bfs, jahr, kategorie, netzbetreiber, rp_kwh:{total, energie, netz, abgaben, kev, messung}, chf_kwh, stand}`; 404 ohne Daten, 502 ohne LINDAS. Nur zum Vergleich in Rosenweg ZEV und Energie, nie in Tarife |
 
 ### 4.9 Technik, Netz und Nebendienste
 

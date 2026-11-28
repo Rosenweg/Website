@@ -8235,6 +8235,26 @@ app.delete('/api/verwaltungen/kontakte/:kid', authMiddleware, requireAusschussOr
   } catch (err) { console.error('[verwaltungs-kontakt-delete]', err.message); res.status(500).json({ error: 'Fehler' }); }
 });
 
+// ─── Strompreis der ElCom (Vergleich, lib/elcom.js) ───────────────────────
+// Standardprodukt des Netzbetreibers je Gemeinde aus LINDAS, je Jahr/Kategorie
+// einen Tag zwischengespeichert. Nur Anzeige („Netzstrom wäre X Rp./kWh“) in
+// Rosenweg ZEV und Rosenweg Energie, nie in Tarife (Entscheid Stefan 28.11.2026).
+// GET /api/strompreis/elcom?gemeinde=4252&jahr=2026&kategorie=H4 (alles optional)
+const elcom = require('./lib/elcom');
+app.get('/api/strompreis/elcom', authMiddleware, async (req, res) => {
+  const p = elcom.elcomParameter(req.query || {});
+  if (p.fehler) return res.status(400).json({ error: p.fehler });
+  try {
+    const preis = await elcom.elcomPreis(p.bfs, p.jahr, p.kategorie);
+    if (!preis) return res.status(404).json({ error: `Keine ElCom-Daten für Gemeinde ${p.bfs}, ${p.jahr}, ${p.kategorie}` });
+    res.set('Cache-Control', 'private, max-age=3600');
+    res.json(preis);
+  } catch (e) {
+    console.warn('[elcom]', e.message);
+    res.status(502).json({ error: 'ElCom (LINDAS) gerade nicht erreichbar' });
+  }
+});
+
 // ─── ZEV / smart-me Strom-Abrechnung (optionales Modul, generisch je STWEG) ───
 // Pro Eigentuemer ein Mailcow-Alias `zev.<name>@<domain>`. smart-me schickt die
 // ZEV-Rechnung an den Alias; Mailcow faechert nativ auf: aktueller Bewohner +
