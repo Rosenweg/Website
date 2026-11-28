@@ -55,8 +55,9 @@ jobs:
             ${{ env.API_IMAGE }}:${{ github.sha }}
 
   build-website:
-    # eigene Runner (CT 140/145): nur push/workflow_dispatch, nie Fork-PRs
-    runs-on: [self-hosted, Linux, rosenweg]
+    # Runner-Wahl: eigener Runner wenn frei, sonst GitHub
+    runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    needs: wahl
     permissions:
       contents: read
       packages: write
@@ -132,8 +133,9 @@ jobs:
             ${{ env.STWEG_IMAGE }}:${{ github.sha }}
 
   build-energy-collector:
-    # eigene Runner (CT 140/145): nur push/workflow_dispatch, nie Fork-PRs
-    runs-on: [self-hosted, Linux, rosenweg]
+    # Runner-Wahl: eigener Runner wenn frei, sonst GitHub
+    runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    needs: wahl
     permissions:
       contents: read
       packages: write
