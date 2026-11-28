@@ -2347,6 +2347,17 @@ _APP_PAKET = re.compile(r"[a-z][a-z0-9_]*(\.[a-z0-9_]+){1,6}")
 _APP_REPO = re.compile(r"Rosenweg/[A-Za-z0-9._-]{1,100}")
 
 
+_APP_LOGO_PFAD = re.compile(r"/[A-Za-z0-9/_.-]+(\?v=[A-Za-z0-9]{1,20})?")
+
+
+def _apps_logos(logos):
+    """Symbole der Gruppenfarben aus dem Register: nur {blau, gruen} mit gueltigem Pfad."""
+    if not isinstance(logos, dict):
+        return {}
+    return {f: p for f, p in logos.items()
+            if f in ("blau", "gruen") and isinstance(p, str) and _APP_LOGO_PFAD.fullmatch(p)}
+
+
 def _apps_register_uebernehmen(d, quelle):
     """Register pruefen und die vier Namen neu binden (atomar je Name). True = uebernommen."""
     global APPS_REGISTER, APPS_KATALOG_REPOS, APPS_KATALOG_INFO, APPS_OEFFENTLICH_OHNE, APPS_AUFGEGEBEN
@@ -2367,7 +2378,7 @@ def _apps_register_uebernehmen(d, quelle):
             if not _APP_PAKET.fullmatch(paket) or not _APP_REPO.fullmatch(e["repo"]):
                 raise ValueError(f"katalog.{paket}")
             repos[e["repo"]] = paket
-            i = {f: v for f, v in e.items() if f in ("logo", "name", "text", "fuer", "technik")}
+            i = {f: v for f, v in e.items() if f in ("logo", "logos", "name", "text", "fuer", "technik")}
             if i:
                 info[paket] = i
             if e.get("nicht_oeffentlich"):
@@ -2597,7 +2608,7 @@ def _apps_liste(rows, apps, karten, nur_anzeige):
     reihe = {r["paket"]: i for i, r in enumerate(rows)}
     liste = []
 
-    def eintrag(paket, name, text, fuer, logo, downloads, technik, version, stand, nur=False):
+    def eintrag(paket, name, text, fuer, logo, downloads, technik, version, stand, nur=False, logos=None):
         gruppen = []
         if not nur and any(d["plattform"] == "android" for d in downloads) and not technik:
             gruppen.append("handy")
@@ -2608,7 +2619,7 @@ def _apps_liste(rows, apps, karten, nur_anzeige):
         if technik:
             gruppen.append("technik")
         return {"paket": paket, "name": name, "text": text or "", "fuer": fuer or "",
-                "logo": logo or "/logo-rosenweg.png", "gruppen": gruppen, "geteilte_telefone": paket in im_katalog,
+                "logo": logo or "/logo-rosenweg.png", "logos": _apps_logos(logos), "gruppen": gruppen, "geteilte_telefone": paket in im_katalog,
                 "nur_anzeige": nur, "version": version or "", "stand": stand or "", "downloads": downloads}
 
     for app_id, e in sorted(APPS_REGISTER.items(), key=lambda x: x[1]["reihenfolge"]):
@@ -2617,7 +2628,7 @@ def _apps_liste(rows, apps, karten, nur_anzeige):
             continue
         haupt = max(k["downloads"], key=lambda d: d["stand"] or "")
         liste.append(eintrag(e["paket"], e["name"], e["text"], e["fuer"], e["logo"], k["downloads"],
-                             bool(e.get("technik")), haupt["version"], haupt["stand"]))
+                             bool(e.get("technik")), haupt["version"], haupt["stand"], logos=e.get("logos")))
     for a in apps:
         if a["paket"] in karte_nach_paket:
             continue
@@ -2625,12 +2636,13 @@ def _apps_liste(rows, apps, karten, nur_anzeige):
         dl = {"plattform": "android", "titel": "Android", "version": a["version_name"], "groesse": a["groesse"],
               "sha256": a["sha256"], "stand": a["stand"], "url": a["url"], "notiz": a["notiz"]}
         liste.append(eintrag(a["paket"], info.get("name") or a["name"], info.get("text"), info.get("fuer"),
-                             info.get("logo"), [dl], bool(info.get("technik")), a["version_name"], a["stand"]))
+                             info.get("logo"), [dl], bool(info.get("technik")), a["version_name"], a["stand"],
+                             logos=info.get("logos")))
     for r in nur_anzeige:
         info = APPS_KATALOG_INFO.get(r["paket"], {})
         liste.append(eintrag(r["paket"], info.get("name") or r["name"], info.get("text"), info.get("fuer"),
                              info.get("logo"), [], bool(info.get("technik")), r["version_name"], r["updated_at"],
-                             nur=True))
+                             nur=True, logos=info.get("logos")))
     # Register-Apps vorne (nach 'reihenfolge'), danach die Katalog-Apps in der Reihenfolge der Telefone
     n = sum(1 for x in liste if x["paket"] in karte_nach_paket)
     return liste[:n] + sorted(liste[n:], key=lambda x: reihe.get(x["paket"], 10**6))
