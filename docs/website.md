@@ -186,6 +186,29 @@ nginx braucht nach `rw-web-ausrollen.sh` kein Neuladen — es liest die Dateien
 bei jeder Anfrage. Zurück: die `.alt`-Datei wieder auf den alten Namen
 umbenennen.
 
+### Web-Versionen der Apps (`/app/<kurzname>/`)
+
+Die Flutter-Apps gibt es auch als Seite unter `https://rosenweg4303.ch/app/<kurzname>/`
+(mit der Anmeldung der Website, siehe `docs/plans/flutter-apps-wellen-3-4.md`).
+Der Job `web` in `rosenweg-basis` baut das Archiv `<app>-web.tar.gz` und hängt es
+ans Release der App. Ausgerollt wird es mit demselben Skript:
+
+```bash
+scripts/rw-web-ausrollen.sh --app wetter --pruefen   # was liegt draussen, was käme
+scripts/rw-web-ausrollen.sh --app wetter             # neuestes Release (gh), auf fe-www und fe-isp
+scripts/rw-web-ausrollen.sh --app wetter --tag v1.0.1
+scripts/rw-web-ausrollen.sh --app wetter --zurueck   # vorige Fassung (zweimal = wieder vor)
+```
+
+Das Archiv wird vorher geprüft (Prüfsumme aus `SHA256SUMS`, nur relative Pfade,
+`<base href="/app/<kurzname>/">`, Anmeldung der Website eingebunden), nach
+`/var/www/.rw-app/<kurzname>/neu` entpackt und gegen `/var/www/rosenweg/app/<kurzname>/`
+getauscht; die vorige Fassung bleibt als `alt` außerhalb des Web-Roots. nginx
+liefert `/app/` mit `no-cache` (ETag-Prüfung bei jedem Aufruf). `deploy.sh` lässt
+`/app/` beim Spiegeln stehen. Erst `deploy.sh` (nginx-Regel `location ^~ /app/`),
+dann das Archiv.
+
+
 Dahinter stehen zwei Vorfälle vom 5. September 2026:
 
 - **`noc-fullscreen.html` liegt zweimal** — auf fe-www (`www.…/noc-fullscreen.html`)

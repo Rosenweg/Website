@@ -25,8 +25,23 @@ Welle 3 beginnt, sobald Welle 2 ganz auf /apps ist.
    - der Updater drin ist;
    - die Gruppenfarbe nach den freigeschalteten Funktionen wechselt;
    - das Logo Turm + Weg + Rose zeigt;
-   - sie bei Bedarf im Katalog der geteilten Telefone und als Stationspaket steht.
-6. **Web-Seiten:** Sie bleiben, solange eine App mehrere Seiten bündelt. 1:1 ersetzte Seiten werden abgelöst.
+   - sie bei Bedarf im Katalog der geteilten Telefone und als Stationspaket steht;
+   - es die **Web-Version unter `/app/<name>/` mit gemeinsamer Anmeldung** gibt (siehe unten).
+6. **Web-Seiten:** Sie bleiben, solange eine App mehrere Seiten bündelt. 1:1 ersetzte Seiten werden abgelöst, aber erst nach Stefans OK je App. Bis dahin zeigt das Menü auf `/app/<name>/` und die alte Seite bleibt liegen.
+
+### Web-Version unter /app/<name>/ (Entscheid Stefan 28.11.2026)
+
+Jede App wird zusätzlich mit `flutter build web` gebaut, liegt unter `https://rosenweg4303.ch/app/<name>/` (auch auf isp.) und ersetzt im Menü die alte Seite. **Es gibt nur eine Anmeldung für die ganze Website.** Die Web-App hat keinen eigenen Anmeldeschirm und keinen eigenen Client in Authentik: sie ruft `js/authentik-auth.js` der Website auf und nutzt deren Sitzung (Token in localStorage und im Cookie auf `.rosenweg4303.ch`). Ohne Sitzung geht es zur normalen Anmeldung der Website und danach zurück auf die Seite; Abmelden in der App meldet auf der ganzen Website ab. Rechte, Gruppen und Gruppenfarbe kommen aus derselben API (`/api/auth/me`). Technik dazu: `rosenweg-basis` `docs/web.md`.
+
+**Weitere App umstellen** (je App, 10 Minuten plus Prüfung):
+
+1. `rosenweg_basis` auf eine Fassung mit Web (≥ 0.9.0).
+2. In der App `…/rosenweg-basis/werkzeug/web-einrichten.sh <app-ordner>` (legt `web/` an, schaltet `web: true` in `.github/workflows/app.yml` ein; `--kurz`, wenn der Kurzname vom Repo-Namen abweicht).
+3. `flutter build web --release --base-href /app/<name>/` muss laufen. Eigener Code: kein `dart:io` ohne `!kIsWeb`, Dateien über `dateiSpeichern`/`dateiTeilen` und Bytes, nichts mit `dart:ffi` in geladenen Dateien. Im Browser mit der Seite prüfen: eingeloggt, ausgeloggt, Abmelden, Rechte je Gruppe.
+4. PR, Merge, Release: der Job `web` hängt `<app>-web.tar.gz` ans Release.
+5. Ausrollen: `scripts/rw-web-ausrollen.sh --app <name>` (neuestes Release; `--tag`, `--pruefen`, `--zurueck` für den Rückweg). Es liegt auf fe-www und fe-isp unter `/var/www/rosenweg/app/<name>/`; `frontends-lxc/deploy.sh` lässt `/app/` stehen.
+6. `js/nav.js`: Menüeintrag auf `https://rosenweg4303.ch/app/<name>/` (Konstante `APP_WEB`), die alte Seite danach nicht mehr verlinken. Entfernt wird sie erst nach Stefans OK.
+7. Das Ausrollen und der Menüeintrag gehören zum Release der App („fertig“), nicht zu einem späteren Aufräumen.
 
 ## Welle 3 – Verwaltung und Ausschuss
 
