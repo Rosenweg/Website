@@ -45,6 +45,11 @@ rosenweg-runner-4|100.64.2.22|145}"
 export BERICHT_BASE="${BERICHT_BASE:-}" BERICHT_TOKEN="${BERICHT_TOKEN:-}"
 # Ein Lauf = eine Entscheidung + weitere Messungen im Abstand MESS_S (NOC-Anzeige alle ~20 s)
 export MESS_S="${MESS_S:-20}" MESSUNGEN="${MESSUNGEN:-3}" WIN_VM="${WIN_VM:-142}"
+# Release-Warteschlange (Flutter-Apps, app.yml): erst mit RELEASE_QUEUE=1 aktiv. Dann startet der
+# Waechter faellige Releases per workflow_dispatch (veroeffentlichen=true), 1 gleichzeitig, 2 wenn
+# weniger als 2 macOS-Jobs laufen und nicht alle eigenen Runner belegt sind.
+export RELEASE_QUEUE="${RELEASE_QUEUE:-0}" RELEASE_PARALLEL_MAX="${RELEASE_PARALLEL_MAX:-2}" RELEASE_PRUEF_S="${RELEASE_PRUEF_S:-300}"
+export RELEASE_WORKFLOW="${RELEASE_WORKFLOW:-app.yml}" RELEASE_BRANCH="${RELEASE_BRANCH:-main}" STAU_S="${STAU_S:-1200}"
 export LOKAL_IP="${LOKAL_IP:-100.64.2.21}"
 [ -r "$APP_KEY" ] || { echo "rw-runner-waechter: App-Schluessel $APP_KEY fehlt" >&2; exit 1; }
 mkdir -p "$(dirname "$STATE")"
@@ -200,9 +205,12 @@ def messen_vm(vmid):
 def iso(t):
     return calendar.timegm(time.strptime(t, "%Y-%m-%dT%H:%M:%SZ")) if t else None
 
+mac_laeuft = [0]
+
 def jobs_lesen(tok, laeufe, dauern):
     """laeufe: [(repo, lauf)] -> (laufend {runner_name: info}, wartend [info])"""
     laufend, wartend = {}, []
+    mac_laeuft[0] = 0
     jetzt = time.time()
     for repo, lauf in laeufe:
         d = api("/repos/%s/%s/actions/runs/%d/jobs?filter=latest&per_page=100" % (ORG, repo, lauf["id"]), tok, etag=True)
@@ -214,6 +222,8 @@ def jobs_lesen(tok, laeufe, dauern):
                 l = dauern.setdefault(schluessel, [])
                 if j["id"] not in [x[0] for x in l]:
                     l.append([j["id"], dauer]); del l[:-5]
+            elif j["status"] == "in_progress" and any("macos" in l for l in j.get("labels", [])):
+                mac_laeuft[0] += 1
             elif j["status"] == "in_progress" and j.get("runner_name"):
                 schritte = j.get("steps") or []
                 fertig = sum(1 for x in schritte if x["status"] == "completed")
@@ -241,6 +251,109 @@ def laeufe_lesen(tok, repos):
             laeufe += [(repo, x) for x in d["workflow_runs"]]
     return laeufe
 
+
+# ── Release-Warteschlange ──
+def b64dec(t): return base64.b64decode(t).decode("utf-8", "replace")
+
+def tag_da(tok, repo, tag):
+    d = api("/repos/%s/%s/git/matching-refs/tags/%s" % (ORG, repo, tag), tok, etag=True)
+    return any(x["ref"] == "refs/tags/" + tag for x in d)
+
+def release_schritt(tok, zustand, frei_eigene, laeuft_runner_voll):
+    """Fuehrt die Warteschlange. Gibt den Bericht fuer das NOC zurueck (oder None)."""
+    rel = zustand.setdefault("_rel", {"apps": {}, "laeuft": {}, "uebersprungen": {}, "letzte": None, "repos": [], "repos_zeit": 0, "pruef_zeit": 0})
+    aktiv = E["RELEASE_QUEUE"] == "1"
+    # 1. Flutter-App-Repos (Aufrufer von basis app.yml), stuendlich neu bestimmen
+    if now - rel["repos_zeit"] > 3600 or not rel["repos"]:
+        liste = []
+        for repo in repos:
+            try:
+                d = api("/repos/%s/%s/contents/.github/workflows/%s" % (ORG, repo, E["RELEASE_WORKFLOW"]), tok, etag=True)
+                if "rosenweg-basis/.github/workflows/app.yml@" in b64dec(d.get("content", "")): liste.append(repo)
+            except RuntimeError:
+                pass   # 404: kein solcher Workflow
+        rel["repos"], rel["repos_zeit"] = liste, now
+    # 2. Faellige Versionen (alle RELEASE_PRUEF_S): pubspec-Version ohne Tag
+    if now - rel["pruef_zeit"] >= int(E["RELEASE_PRUEF_S"]):
+        rel["pruef_zeit"] = now
+        for repo in rel["repos"]:
+            try:
+                f = api("/repos/%s/%s/contents/pubspec.yaml?ref=%s" % (ORG, repo, E["RELEASE_BRANCH"]), tok, etag=True)
+                m = re.search(r"^version:\s*([0-9]+\.[0-9]+\.[0-9]+)", b64dec(f["content"]), re.M)
+                if not m: continue
+                tag = "v" + m.group(1)
+                if tag_da(tok, repo, tag):
+                    rel["apps"].pop(repo, None); continue
+                c = api("/repos/%s/%s/commits?path=pubspec.yaml&sha=%s&per_page=1" % (ORG, repo, E["RELEASE_BRANCH"]), tok, etag=True)
+                seit = c[0]["commit"]["committer"]["date"] if c else time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
+                rel["apps"][repo] = {"tag": tag, "seit": seit}
+            except RuntimeError as e:
+                log("Release-Pruefung %s: %s" % (repo, e), err=False)
+    # 3. Laufende Releases beobachten
+    for repo, l in list(rel["laeuft"].items()):
+        try:
+            d = api("/repos/%s/%s/actions/workflows/%s/runs?event=workflow_dispatch&per_page=5" % (ORG, repo, E["RELEASE_WORKFLOW"]), tok)
+            seit_t = iso(l["seit"])
+            lauf = next((x for x in d["workflow_runs"] if x["id"] == l.get("run_id")), None) or \
+                   next((x for x in d["workflow_runs"] if iso(x["created_at"]) >= seit_t - 30), None)
+            if lauf: l["run_id"], l["url"] = lauf["id"], lauf["html_url"]
+            if lauf and lauf["status"] == "completed":
+                ok = tag_da(tok, repo, l["tag"])
+                if ok:
+                    rel["letzte"] = {"repo": repo, "tag": l["tag"], "ergebnis": "fertig", "seit": l["seit"]}
+                    log("Release fertig: %s %s" % (repo, l["tag"]))
+                    del rel["laeuft"][repo]
+                elif l.get("versuche", 0) < 1 and not TROCKEN:
+                    log("Release %s %s fehlgeschlagen -> ein neuer Versuch" % (repo, l["tag"]))
+                    release_starten(tok, repo, l["tag"], rel, versuche=1)
+                else:
+                    rel["uebersprungen"]["%s %s" % (repo, l["tag"])] = {"repo": repo, "tag": l["tag"], "seit": l["seit"], "url": l.get("url")}
+                    rel["letzte"] = {"repo": repo, "tag": l["tag"], "ergebnis": "fehlgeschlagen", "seit": l["seit"]}
+                    log("Release %s %s uebersprungen (zweimal fehlgeschlagen)" % (repo, l["tag"]), err=True)
+                    del rel["laeuft"][repo]
+            elif not lauf and now - iso(l["seit"]) > 900:
+                # nach 15 Minuten kein Lauf zu sehen: Start ist ins Leere gegangen
+                log("Release %s %s: kein Lauf gefunden -> zurueck in die Warteschlange" % (repo, l["tag"]), err=True)
+                del rel["laeuft"][repo]
+        except RuntimeError as e:
+            log("Release-Lauf %s: %s" % (repo, e))
+    # 4. Naechstes starten, nach Merge-Zeit
+    wartend = sorted(((v["seit"], r, v["tag"]) for r, v in rel["apps"].items()
+                      if r not in rel["laeuft"] and "%s %s" % (r, v["tag"]) not in rel["uebersprungen"]))
+    parallel = 1
+    if int(E["RELEASE_PARALLEL_MAX"]) >= 2 and mac_laeuft[0] < 2 and not laeuft_runner_voll: parallel = 2
+    hinweis = None
+    if aktiv:
+        while wartend and len(rel["laeuft"]) < parallel:
+            seit, repo, tag = wartend.pop(0)
+            if TROCKEN:
+                log("Release wuerde starten: %s %s (faellig seit %s)" % (repo, tag, seit)); break
+            if not release_starten(tok, repo, tag, rel):
+                hinweis = "Start nicht moeglich (Berechtigung Actions: Write der GitHub-App?)"; break
+    else:
+        hinweis = "Warteschlange ausgeschaltet (RELEASE_QUEUE=0): Releases starten wie bisher beim Merge"
+    return {"aktiv": aktiv, "parallel_max": parallel, "hinweis": hinweis,
+            "laeuft": [{"repo": r, "tag": l["tag"], "seit": l["seit"], "versuche": l.get("versuche", 0), "url": l.get("url")} for r, l in rel["laeuft"].items()],
+            "wartend": [{"repo": r, "tag": t, "seit": s_} for s_, r, t in wartend][:20],
+            "uebersprungen": list(rel["uebersprungen"].values())[-10:],
+            "letzte": rel["letzte"]}
+
+def release_starten(tok, repo, tag, rel, versuche=0):
+    """workflow_dispatch mit veroeffentlichen=true am Zweig main. False bei Fehler."""
+    daten = json.dumps({"ref": E["RELEASE_BRANCH"], "inputs": {"veroeffentlichen": "true"}}).encode()
+    r = urllib.request.Request("https://api.github.com/repos/%s/%s/actions/workflows/%s/dispatches" % (ORG, repo, E["RELEASE_WORKFLOW"]),
+        data=daten, method="POST", headers={"Authorization": "Bearer " + tok, "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "rw-runner-waechter", "Content-Type": "application/json"})
+    calls["gesamt"] += 1
+    try:
+        urllib.request.urlopen(r, timeout=30).read()
+    except urllib.error.HTTPError as e:
+        log("Release-Start %s %s: HTTP %s" % (repo, tag, e.code), err=True)
+        return False
+    rel["laeuft"][repo] = {"tag": tag, "seit": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time())), "versuche": versuche, "run_id": None}
+    schalten("Release gestartet: %s %s%s" % (repo, tag, " (zweiter Versuch)" if versuche else ""))
+    return True
+
 try:
     tok = app_token()
     api_runner = {r["name"]: r for r in seiten("/orgs/%s/actions/runners" % ORG, tok, "runners")}
@@ -259,6 +372,8 @@ try:
     laeufe = laeufe_lesen(tok, repos)
     laufend, wartend_liste = jobs_lesen(tok, laeufe, dauern)
     wartend = len(wartend_liste)
+    stau = {"wartend": wartend, "lange": sum(1 for w in wartend_liste if (w.get("wartezeit_s") or 0) > int(E["STAU_S"])),
+            "aeltester_s": max([w.get("wartezeit_s") or 0 for w in wartend_liste], default=0)}
 
     for r in runner:
         a = ctl(r, "is-active", r["unit"])
@@ -323,6 +438,13 @@ try:
                             if p.returncode: raise RuntimeError("Stopp %s: %s" % (r["name"], p.stderr.strip()))
                             r["aktiv"] = False
 
+    release = None
+    try:
+        voll = all(r["aktiv"] and r["busy"] for r in runner)
+        release = release_schritt(tok, zustand, not voll, voll)
+    except Exception as e:
+        log("Release-Warteschlange: %s" % e, err=True)
+
     zustand["_etags"] = {p: [et, d] for p, (et, d) in etags.items()}
     if not TROCKEN:
         tmp = E["STATE"] + ".tmp"
@@ -367,7 +489,8 @@ try:
                                   "dienst_aktiv": True, "soll_an": True, "job": laufend.get(n_) if bz else None,
                                   "vm": vm})
         bericht_senden({"runner": eintraege, "cts": ctinfo, "wartend": wartend, "warteschlange": wartend_liste[:10],
-                        "trocken": TROCKEN, "letzter_schaltvorgang": letzter, "api_aufrufe": dict(calls)})
+                        "trocken": TROCKEN, "letzter_schaltvorgang": letzter, "api_aufrufe": dict(calls),
+                        "release": release, "stau": stau})
     log("API-Aufrufe in diesem Lauf: %d (davon 304: %d)" % (calls["gesamt"], calls["304"]))
 except Exception as e:
     log("FEHLER: %s" % e, err=True)

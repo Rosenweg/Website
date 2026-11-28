@@ -76,3 +76,60 @@ Einrichtung: `BERICHT_BASE` und `BERICHT_TOKEN` in
 `/etc/rosenweg-runner-waechter.conf` (pve2); dasselbe Token als
 `RUNNER_WAECHTER_TOKEN` in der Umgebung der API (CT 128), optional
 `RUNNER_WAECHTER_IPS` (Standard `100.64.2.21`).
+
+## Release-Warteschlange (Flutter-Apps)
+
+Ziel: Nie mehr 14 Releases gleichzeitig. Ein Merge auf `main` startet in einer Flutter-App
+**kein** Release mehr, der Wächter führt die Reihe.
+
+- **app.yml** (`rosenweg-basis`): Mit der Org-Variable `RELEASE_WARTESCHLANGE=true` meldet der Job
+  `version` bei einem Push nur „Release fällig“ (Hinweis im Lauf, es bauen weiter Linux/Android als
+  Prüfung). Ohne die Variable bleibt alles wie bisher.
+- **Aufrufer** (`.github/workflows/app.yml` jeder App): `workflow_dispatch` hat die Eingabe
+  `veroeffentlichen`; mit ihr (nur am Zweig `main`) gehen Version, Release-Schlüssel und
+  `veroeffentlichen` durch. Umbau je Repo mit `scripts/rw-aufrufer-warteschlange.py`, gestaffelt mit
+  `rw-massen-pr.sh`.
+- **Wächter** (`RELEASE_QUEUE=1` in `/etc/rosenweg-runner-waechter.conf`): Alle `RELEASE_PRUEF_S`
+  (300) Sekunden vergleicht er je App-Repo die Version in `pubspec.yaml` auf `main` mit den Tags. Fehlt
+  `v<version>`, ist das Release fällig; sortiert wird nach der Zeit des Commits, der die Version
+  gesetzt hat (Merge-Zeit). Er startet es per `workflow_dispatch` (`veroeffentlichen=true`, Zweig `main`)
+  und wartet, bis der Lauf zu Ende ist. **1** Release gleichzeitig, **2** wenn weniger als 2 macOS-Jobs
+  laufen und nicht alle eigenen Runner belegt sind (`RELEASE_PARALLEL_MAX`).
+- **Fehler:** Fehlt nach dem Lauf der Tag, startet er das Release **einmal** neu; scheitert auch das,
+  wird es übersprungen (steht im NOC rot, Warnung) und die Reihe geht weiter.
+- **Berechtigung:** Der Start braucht für die GitHub-App „Rosenweg Automatik“ die Repository-
+  Berechtigung **Actions: Read and write** (bisher nur Read). Ohne sie meldet der Wächter „Start nicht
+  möglich“ und startet nichts.
+- **Kotlin-Apps** (`release.yml`, ausgelöst durch erfolgreiche CI über `workflow_run`): bisher nicht in
+  der Reihe. Sie lösen nach jedem Merge mit neuer `VERSION_NAME` ein einzelnes, kurzes Release auf
+  einem Runner aus (kein macOS, kein Windows) und stauen deshalb kaum. Soll es später auch dort
+  eine Reihe geben, müsste `release.yml` statt `workflow_run` ein `workflow_dispatch` bekommen und
+  der Wächter die Tags `v<VERSION_NAME>` gegen `gradle.properties` vergleichen.
+- **NOC:** Zeile „Release-Warteschlange“ in der Kachel Runner: läuft / wartend / letzte / übersprungen.
+- **Einschalten** erst, wenn alle Aufrufer umgestellt sind: Reihenfolge (1) Basis-PR mergen, (2) Aufrufer
+  per `rw-massen-pr.sh` umstellen und mergen, (3) `RELEASE_QUEUE=1` auf pve2, (4) Org-Variable
+  `RELEASE_WARTESCHLANGE=true` setzen. Aus: Variable löschen, dann starten Pushes wieder selbst.
+
+## Massenänderungen gestaffelt
+
+`scripts/rw-massen-pr.sh` legt CI-Änderungen in vielen Repos gestaffelt an. Regel: **höchstens 3
+Repos gleichzeitig in der Prüfung** und Neues nur, wenn **weniger als 5 Jobs warten** und **keine
+Release-Läufe laufen oder anstehen**; sonst wartet das Skript (60 s). Die Lage liest es aus dem NOC
+(`NOC_URL`, `NOC_TOKEN`), sonst zählt es selbst.
+
+```bash
+scripts/rw-massen-pr.sh neu --zweig ci/x --titel "..." --skript ./aendern.sh repo1 repo2 ...
+scripts/rw-massen-pr.sh anstossen --zweig ci/runner-wahl --mergen repo1 repo2 ...   # --trocken zeigt nur
+```
+
+`anstossen` startet fehlgeschlagene oder abgebrochene Läufe bestehender PRs neu und führt grüne
+PRs mit `--mergen` zusammen; rote bleiben offen und werden gemeldet. Die Regel für Agenten steht in
+`docs/entwickeln.md`.
+
+## Stau-Alarm
+
+Warten **mehr als 10 Jobs länger als 20 Minuten** (Label `rosenweg`), wird die NOC-Kachel rot und die
+API (`routes/nocrunner.js`) meldet an die Technik-WhatsApp-Gruppe (Ersatz: Mail an technik@), wie
+beim Android-Dauertest. **Höchstens eine Meldung pro Stunde**; ist der Stau abgebaut, folgt einmal
+eine Entwarnung. Der Wächter zählt die langen Jobs (`STAU_S`, 1200) und liefert sie im Bericht mit;
+im Trockenlauf wird nichts gemeldet.

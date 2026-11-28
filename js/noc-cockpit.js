@@ -859,12 +859,22 @@
         const sch = d.letzter_schaltvorgang;
         const cts = (d.cts || []).map((c) => `CT ${c.ct} (${c.knoten}): Last ${c.last != null ? c.last.toFixed(1) : '—'}/${c.kerne || '—'}`
           + `, RAM ${c.ram_gesamt_b != null && c.ram_frei_b != null ? fmtMb(c.ram_gesamt_b - c.ram_frei_b) + '/' + fmtMb(c.ram_gesamt_b) : '—'}`).join(' · ');
+        const rl = d.release;
+        let relZeile = '';
+        if (rl) {
+          const lauf = (rl.laeuft || []).map((x) => x.repo.replace(/^rosenweg-/, '') + ' ' + x.tag + (x.versuche ? ' (2. Versuch)' : '')).join(', ') || '—';
+          const wart = (rl.wartend || []).map((x) => x.repo.replace(/^rosenweg-/, '') + ' ' + x.tag).join(', ') || '—';
+          const let_ = rl.letzte ? rl.letzte.repo.replace(/^rosenweg-/, '') + ' ' + rl.letzte.tag + ' ' + rl.letzte.ergebnis : '—';
+          const skip = (rl.uebersprungen || []).length ? ' · übersprungen: ' + rl.uebersprungen.map((x) => x.repo.replace(/^rosenweg-/, '') + ' ' + x.tag).join(', ') : '';
+          relZeile = '\nRelease-Warteschlange' + (rl.aktiv ? '' : ' (aus)') + ': läuft: ' + lauf + ' · wartend: ' + wart + ' · letzte: ' + let_ + skip;
+        }
+        const stauZeile = d.stau && d.stau.aktiv ? '\nSTAU: ' + d.stau.lange + ' Jobs warten länger als ' + d.stau.grenze_min + ' Min (insgesamt ' + d.stau.wartend + ')' : '';
         const queue = (d.warteschlange || []).map((q) => `${q.repo} · ${q.job} (${fmtDauer(q.wartezeit_s)})`).join(' | ');
         setz('runner-fuss', 'Wächter: ' + ({ ok: 'läuft', still: 'still', fehler: 'Fehler', nie: 'nie gemeldet' }[w.zustand] || '—')
           + (w.alter_min != null ? ' (' + fmtAlter(w.alter_min) + ')' : '')
           + (w.trocken ? ' · Trockenlauf' : '')
           + (sch && sch.text ? ' · zuletzt: ' + sch.text + (sch.zeit ? ' (' + new Date(sch.zeit).toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' }) + ')' : '') : '')
-          + (cts ? '\n' + cts : '') + (queue ? '\nWarten: ' + queue : ''));
+          + stauZeile + relZeile + (cts ? '\n' + cts : '') + (queue ? '\nWarten: ' + queue : ''));
       }, 'runner');
     }
 
