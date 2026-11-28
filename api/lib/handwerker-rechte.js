@@ -21,6 +21,7 @@
 // Firmen) legt initDB an; bestehende Firmen bleiben gemeinsam.
 // Telefonbuch (lib/telefonbuch.js) und Handynummern bleiben unverändert.
 const { isTechnik, isPraesident, getAusschussStwegs, verwaltungStwegs } = require('./groups');
+const { notfallNummer } = require('./handwerker-notfall');
 
 const ohne = (s) => s === null || s === undefined || s === '';
 const nr = (s) => (ohne(s) ? null : Number(s));
@@ -102,9 +103,11 @@ function zuweisungNormal(z) {
     prioritaet: Number.isFinite(prio) && prio >= 1 ? prio : 1,
     stweg: Number.isFinite(s) && s >= 1 && s <= 8 ? s : null,
     hinweis,
+    // Notfallnummer der Firma für diese Zuordnung (Notfall-Ansicht der Bewohner)
+    notfall_telefon: notfallNummer(z.notfall_telefon),
   };
 }
-const zKey = (z) => `${z.event_typ_id}|${z.prioritaet}|${z.stweg ?? ''}|${z.hinweis ?? ''}`;
+const zKey = (z) => `${z.event_typ_id}|${z.prioritaet}|${z.stweg ?? ''}|${z.hinweis ?? ''}|${z.notfall_telefon ?? ''}`;
 
 /**
  * Notfall-Zuordnungen einer Firma speichern, ohne fremde STWEG anzutasten.

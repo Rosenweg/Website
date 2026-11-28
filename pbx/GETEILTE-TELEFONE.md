@@ -154,6 +154,7 @@ Technik sie auf /smartphones gesetzt hat. Erster Eintrag also: Zeile auf /smartp
 | Rosenweg Projekte | `ch.rosenweg4303.projekte` | `technik,präsident,praesident` + je STWEG `stwegN-eigentuemer`, `stwegN-ausschuss`, `stwegN-verwaltung` (Mieter sehen keine Projekte) | noch keine Zeile; nach dem ersten Release auf /smartphones anlegen |
 | Rosenweg Waschküche | `ch.rosenweg4303.waschkueche` | `technik,präsident,praesident,r9-bewohner,r9-eigentuemer,stweg3-ausschuss` | aktiv (1.0.0) |
 | Rosenweg Wetter | `ch.rosenweg4303.wetter` | alle Bewohner (die Werte sind öffentlich) | noch keine Zeile; nach dem ersten Release auf /smartphones anlegen |
+| Rosenweg Handwerker | `ch.rosenweg4303.handwerker` | alle Bewohner (nur die Notfall-Ansicht, siehe unten) | noch keine Zeile; nach dem ersten Release auf /smartphones anlegen |
 
 - **Salz:** Eine Hauswart-Gruppe gibt es nicht; der Hauswart steht je Lager als Mailadresse
   (`salz_lager.hauswart_emails`). Die Gruppen im Katalog entsprechen `buchungsGruppen()` in
@@ -168,6 +169,10 @@ Technik sie auf /smartphones gesetzt hat. Erster Eintrag also: Zeile auf /smartp
   (`wasch_rooms`), ihre drei Gruppen hier dazunehmen. Die Hausverwaltung (`stwegN-verwaltung`)
   darf nur lesen und meldet sich an geteilten Telefonen nicht an. `portal_pfade` `/api/wasch/`;
   Räume, STWEG und das Recht „waschküche-admin“ prüft die Haupt-API selbst.
+- **Handwerker:** Wie am eigenen Gerät (Linie 28.11.2026, ersetzt „nur Notfall-Ansicht“); die Haupt-API prüft die
+  Rechte. Bewohner sehen die Notfall-Ansicht über `GET /api/handwerker-notfall/bewohner` (Firmenname, Priorität,
+  Notfallnummer der Zuordnung für die STWEG der Person); die App legt sie offline ab und löscht sie beim
+  Personenwechsel/Abmelden.
 - **Projekte:** Auf geteilten Telefonen dieselben Rechte wie am eigenen Gerät (28.11.2026, ersetzt P11): lesen,
   kommentieren, bearbeiten, Dateien. Welche Projekte die Person sieht und bearbeiten darf, prüft die Haupt-API
   je Projekt (eigene STWEG und Kooperation); das Löschen bleibt Technik/Präsident.
