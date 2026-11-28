@@ -20,6 +20,7 @@ const { nummernKanal, darfEchteNummernSehen, istTechnikOderPraesident, interneNu
 const { zevAliasAddress, zevGotoTargets, zevDarfRechnungSehen, zevStwegFuerEmpfaenger, zevAliasAusFormular, zevAktuellerBewohner, zevWechselMelden, zevAdminFuerStweg, zevRechte, zevAdminDarfPdf, zevMitIso, zevStatistik } = require('./lib/zev');
 const reklMelder = require('./lib/reklamation-melder');
 const vollmachtRechte = require('./lib/vollmacht-rechte');
+const vollmachtApp = require('./lib/vollmacht-app');
 const projekteRechte = require('./lib/projekte-rechte');
 const rechteSchluessel = require('./lib/rechte-schluessel');
 const rechteMigrationen = require('./lib/rechte-migrationen');
@@ -27930,6 +27931,7 @@ function buildVollmachtHtml(v, opts = {}) {
         <table class="kv" style="margin-top:4px;">
           <tr><td class="lbl">Signiert am</td><td>${fmtDate(g.signed_at)} · ${fmtTime(g.signed_at)}</td></tr>
           <tr><td class="lbl">Identität</td><td>${vmEscapeHtml(g.email || '')}</td></tr>
+          ${g.signed_bestaetigung ? `<tr><td class="lbl">Bestätigung</td><td>${vmEscapeHtml(g.signed_bestaetigung)}</td></tr>` : ''}
           <tr><td class="lbl">IP-Adresse</td><td>${nachweis ? vmEscapeHtml(g.signed_ip || '—') : 'hinterlegt (einsehbar für Technik/Präsident)'}</td></tr>
         </table>
       </div>`;
@@ -28135,6 +28137,15 @@ function buildVollmachtHtml(v, opts = {}) {
         ? `<div style="margin-top:10px;"><div style="color:#6b7280;font-size:9pt;font-weight:500;margin-bottom:4px;">Geltungsbereich / konkrete Befugnisse</div><div class="geltung">${vmEscapeHtml(v.geltungsbereich)}</div></div>`
         : '<p style="color:#9ca3af;font-style:italic;margin:8px 0 0;">(kein spezifischer Geltungsbereich angegeben)</p>'}
     </div>
+
+    ${v.termin_id && v.termin_titel ? `<h2><span class="icon">🗳</span>Versammlung</h2>
+    <div class="card">
+      <table class="kv">
+        <tr><td class="lbl">Versammlung</td><td><strong>${vmEscapeHtml(v.termin_titel)}</strong></td></tr>
+        ${v.termin_start ? `<tr><td class="lbl">Datum</td><td>${fmtDate(v.termin_start)}${v.termin_start && !v.termin_ganztags ? ' · ' + fmtTime(v.termin_start).slice(0, 5) + ' Uhr' : ''}</td></tr>` : ''}
+      </table>
+      ${v.weisung ? `<div style="margin-top:10px;"><div style="color:#6b7280;font-size:9pt;font-weight:500;margin-bottom:4px;">Weisung für die Stimmabgabe</div><div class="geltung">${vmEscapeHtml(v.weisung)}</div></div>` : ''}
+    </div>` : ''}
 
     <h2><span class="icon">📅</span>Gültigkeit</h2>
     <div class="validity">
@@ -28354,68 +28365,244 @@ app.post('/api/vollmachten/bootstrap-verwalter', authMiddleware, async (req, res
 });
 
 // Liste Vollmachten — Admin sieht alle, sonst nur eigene (vergeben + erhalten)
+// Personen-IDs des Kontos (personen.email): ein Bevollmaechtigter wird auch ueber
+// die Person erkannt, nicht nur ueber die E-Mail der Vollmacht (V8).
+async function vmPersonIds(email) {
+  if (!email) return [];
+  const r = await pool.query('SELECT id FROM personen WHERE LOWER(email) = LOWER($1)', [email]);
+  return r.rows.map(x => x.id);
+}
+
+// Alles, was die Regeln in lib/vollmacht-app.js ueber das Konto wissen muessen.
+async function vmKontext(req) {
+  return {
+    groups: req.user.groups || [],
+    email: req.user.email || '',
+    perm: await vmPerm(req),
+    kontakte: await vmEigeneKontakte(req),
+    personIds: await vmPersonIds(req.user.email),
+    pat: !!req.pat,
+    kanal: String(req.headers['x-rosenweg-kanal'] || ''),
+  };
+}
+
+// Sichtbare Vollmachten mit Rechten je Zeile (L2), Versammlung (V3) und
+// Bevollmaechtigter-Erkennung (V8). id: nur diese eine (GET /:id).
+// Sicht: Technik/Praesident alles; Ausschuss und Verwaltung ihre STWEG(s) mit
+// Seitenrecht „vollmachten“ (B19, R2); jedes Konto die eigenen (Geber,
+// Bevollmaechtigter per E-Mail, Person oder Verwaltungsfirma).
+async function vmZeilen(ctx, { id = null } = {}) {
+  const groups = ctx.groups;
+  const sicht = vollmachtRechte.vmSicht(groups, ctx.perm);
+  const params = [];
+  let where;
+  if (sicht.alle) {
+    where = 'TRUE';
+  } else {
+    params.push(ctx.email);
+    const verwSt = [...verwaltungStwegs(groups)];
+    params.push(verwSt);
+    params.push(verwaltetAlleOhneStweg(groups));
+    const ownClause = `LOWER(v.vollmachtgeber_email) = LOWER($1) OR LOWER(v.bevollmaechtigter_email) = LOWER($1)
+               OR v.vollmachtgeber_person_id = ANY(ARRAY(SELECT id FROM personen WHERE LOWER(email) = LOWER($1)))
+               OR v.bevollmaechtigter_person_id = ANY(ARRAY(SELECT id FROM personen WHERE LOWER(email) = LOWER($1)))
+               OR (v.bevollmaechtigter_verwaltung_id IS NOT NULL AND (COALESCE(vw.stweg, v.stweg) = ANY($2::int[])
+                   OR (COALESCE(vw.stweg, v.stweg) IS NULL AND $3::boolean)))
+               OR EXISTS (SELECT 1 FROM vollmachten_vollmachtgeber vg
+                           WHERE vg.vollmacht_id = v.id AND LOWER(vg.email) = LOWER($1))`;
+    if (sicht.stwegs.length > 0 || sicht.ohneStweg) {
+      params.push(sicht.stwegs);
+      where = `(${ownClause}) OR v.stweg = ANY($${params.length}::int[])` + (sicht.ohneStweg ? ' OR v.stweg IS NULL' : '');
+    } else {
+      where = ownClause;
+    }
+  }
+  if (id !== null) { params.push(id); where = `(${where}) AND v.id = $${params.length}`; }
+  const r = await pool.query(
+    `SELECT v.*, w.bezeichnung AS wohnung_bezeichnung, vw.firma_name AS verwaltung_firma, vw.stweg AS verwaltung_stweg,
+            te.title AS termin_titel, te.start_date AS termin_start, te.location AS termin_ort,
+            (SELECT COALESCE(json_agg(vg.* ORDER BY vg.sort_order, vg.id), '[]'::json)
+               FROM vollmachten_vollmachtgeber vg WHERE vg.vollmacht_id = v.id) AS vollmachtgeber_liste,
+            (SELECT COUNT(*) FROM vollmachten_vollmachtgeber vg WHERE vg.vollmacht_id = v.id) AS vg_total,
+            (SELECT COUNT(*) FROM vollmachten_vollmachtgeber vg WHERE vg.vollmacht_id = v.id AND vg.signed_at IS NOT NULL) AS vg_signed
+       FROM vollmachten v
+       LEFT JOIN wohnungen w ON w.id = v.wohnung_id
+       LEFT JOIN verwaltungen vw ON vw.id = v.bevollmaechtigter_verwaltung_id
+       LEFT JOIN stweg_events te ON te.id = v.termin_id
+      WHERE ${where}
+      ORDER BY (CASE v.status WHEN 'aktiv' THEN 0 WHEN 'entwurf' THEN 1 WHEN 'abgelaufen' THEN 2 ELSE 3 END), v.created_at DESC
+      LIMIT 500`,
+    params,
+  );
+  for (const row of r.rows) {
+    // Knopf „Widerrufen“ nur, wo der Server es erlaubt (Ausschuss/Verwaltung sehen „Alle“, widerrufen aber nicht)
+    row.darf_widerrufen = vollmachtRechte.darfWiderrufen({ groups, email: ctx.email }, row);
+    // Knopf „Papier aktivieren“: gleiche Regel wie POST /:id/activate-paper
+    row.darf_papier_aktivieren = row.status === 'entwurf' && vollmachtRechte.vmDarfVerwalten(groups, ctx.perm, row.stweg);
+    // Knopf „KI-Prüfung“ (D3): nur Technik/Praesident und die Verwaltung der STWEG
+    row.darf_ki_pruefen = vollmachtRechte.vmDarfKiPruefen(groups, ctx.perm, row.stweg);
+    // Rechte je Zeile fuer die App (L2) und „ich bin Geber/Bevollmaechtigter“ (V8)
+    Object.assign(row, vollmachtApp.zeilenRechte(ctx, row));
+  }
+  return r.rows;
+}
+// Verwaltet das Konto alle STWEGs? (Verwaltungsfirma ohne STWEG: nur dann „mich betreffend“)
+function verwaltetAlleOhneStweg(groups) { return verwaltetAlleStwegs(groups); }
+
+// Oben auf der Liste: was das Konto darf (Knopf „Neue Vollmacht“, Vorlagen, …).
+async function vmKopfRechte(ctx) {
+  const groups = ctx.groups;
+  const sicht = vollmachtRechte.vmSicht(groups, ctx.perm);
+  const vorlagen = vollmachtRechte.vmVorlagenAnlegenStwegs(groups);
+  return {
+    // Knopf „Neue Vollmacht“ (D1): Eigentuemer/Wohnungs-Verwalter, Technik/Praesident,
+    // Verwaltung mit „vollmachten: schreiben“. Mieter sehen nur „Mich betreffend“.
+    darf_erteilen: vollmachtRechte.vmDarfFuerAndereIrgendwo(groups, ctx.perm)
+      || vollmachtRechte.vmDarfErteilenIrgendwo(ctx.kontakte, groups),
+    darf_erfassen_fuer_andere: vollmachtRechte.vmDarfFuerAndereIrgendwo(groups, ctx.perm),
+    darf_vorlagen: vorlagen === null || vorlagen.length > 0,
+    darf_versammlung_sehen: sicht.alle || sicht.stwegs.length > 0 || sicht.ohneStweg,
+    sicht: { alle: sicht.alle, stwegs: sicht.stwegs, ohne_stweg: sicht.ohneStweg },
+  };
+}
+
+// Die Vollmacht ohne Nachweis (D2). Die Weisung gehoert zum unterschriebenen
+// Text und steht auf dem PDF; wer die Vollmacht sehen darf, sieht sie.
+function vmAusgabe(row, ctx) {
+  return vollmachtRechte.vmOhneNachweis(row, ctx.groups);
+}
+
 app.get('/api/vollmachten', authMiddleware, async (req, res) => {
   try {
-    const groups = req.user.groups || [];
-    // Sicht (lib/vollmacht-rechte.js): Technik/Praesident alles, Ausschuss seine
-    // STWEG(s), Verwaltung ihre STWEG(s) nur mit Seitenrecht „vollmachten“ (B19).
-    const perm = await vmPerm(req);
-    const sicht = vollmachtRechte.vmSicht(groups, perm);
-    const isGlobalAdmin = sicht.alle;
-    const isAusschuss = sicht.stwegs.length > 0 || sicht.ohneStweg;
-    // Im UI: 'Alle (Admin)' Tab für alle die mindestens stweg-scoped sehen
-    const isAdmin = isGlobalAdmin || isAusschuss;
-    const email = req.user.email || '';
+    const ctx = await vmKontext(req);
     // Status-Auto-Update: abgelaufene aktiv → abgelaufen
     await pool.query(
       `UPDATE vollmachten SET status='abgelaufen', updated_at=NOW()
         WHERE status='aktiv' AND gueltig_bis IS NOT NULL AND gueltig_bis < CURRENT_DATE`,
     );
-    const params = [];
-    let where;
-    if (isGlobalAdmin) {
-      where = 'TRUE';
-    } else {
-      params.push(email);
-      const ownClause = `LOWER(v.vollmachtgeber_email) = LOWER($1) OR LOWER(v.bevollmaechtigter_email) = LOWER($1)
-               OR v.vollmachtgeber_person_id = (SELECT id FROM personen WHERE LOWER(email) = LOWER($1) LIMIT 1)
-               OR v.bevollmaechtigter_person_id = (SELECT id FROM personen WHERE LOWER(email) = LOWER($1) LIMIT 1)
-               OR EXISTS (SELECT 1 FROM vollmachten_vollmachtgeber vg
-                           WHERE vg.vollmacht_id = v.id AND LOWER(vg.email) = LOWER($1))`;
-      if (isAusschuss) {
-        params.push(sicht.stwegs);
-        where = `(${ownClause}) OR v.stweg = ANY($${params.length}::int[])` + (sicht.ohneStweg ? ' OR v.stweg IS NULL' : '');
-      } else {
-        where = ownClause;
-      }
-    }
-    const r = await pool.query(
-      `SELECT v.*, w.bezeichnung AS wohnung_bezeichnung, vw.firma_name AS verwaltung_firma,
-              (SELECT COALESCE(json_agg(vg.* ORDER BY vg.sort_order, vg.id), '[]'::json)
-                 FROM vollmachten_vollmachtgeber vg WHERE vg.vollmacht_id = v.id) AS vollmachtgeber_liste,
-              (SELECT COUNT(*) FROM vollmachten_vollmachtgeber vg WHERE vg.vollmacht_id = v.id) AS vg_total,
-              (SELECT COUNT(*) FROM vollmachten_vollmachtgeber vg WHERE vg.vollmacht_id = v.id AND vg.signed_at IS NOT NULL) AS vg_signed
-         FROM vollmachten v
-         LEFT JOIN wohnungen w ON w.id = v.wohnung_id
-         LEFT JOIN verwaltungen vw ON vw.id = v.bevollmaechtigter_verwaltung_id
-        WHERE ${where}
-        ORDER BY (CASE v.status WHEN 'aktiv' THEN 0 WHEN 'entwurf' THEN 1 WHEN 'abgelaufen' THEN 2 ELSE 3 END), v.created_at DESC
-        LIMIT 500`,
-      params,
-    );
-    // Knopf „Widerrufen“ nur, wo der Server es erlaubt (Ausschuss/Verwaltung sehen „Alle“, widerrufen aber nicht)
-    for (const row of r.rows) row.darf_widerrufen = vollmachtRechte.darfWiderrufen({ groups, email }, row);
-    // Knopf „Papier aktivieren“: gleiche Regel wie POST /:id/activate-paper
-    for (const row of r.rows) row.darf_papier_aktivieren = row.status === 'entwurf' && vollmachtRechte.vmDarfVerwalten(groups, perm, row.stweg);
-    // Knopf „KI-Prüfung“ (D3): nur Technik/Praesident und die Verwaltung der STWEG
-    for (const row of r.rows) row.darf_ki_pruefen = vollmachtRechte.vmDarfKiPruefen(groups, perm, row.stweg);
-    // Knopf „Neue Vollmacht“ (D1): Eigentuemer/Wohnungs-Verwalter, Technik/Praesident,
-    // Verwaltung mit „vollmachten: schreiben“. Mieter sehen nur „Mich betreffend“.
-    const darfErteilen = vollmachtRechte.vmDarfFuerAndereIrgendwo(groups, perm)
-      || vollmachtRechte.vmDarfErteilenIrgendwo(await vmEigeneKontakte(req), groups);
+    const rows = await vmZeilen(ctx);
+    const kopf = await vmKopfRechte(ctx);
+    // Im UI: 'Alle (Admin)' Tab fuer alle, die mindestens STWEG-weit sehen
+    const isAdmin = kopf.sicht.alle || kopf.sicht.stwegs.length > 0 || kopf.sicht.ohne_stweg;
     // D2: IP, User-Agent und Authentik-Kennung nur fuer Technik/Praesident
-    res.json({ vollmachten: r.rows.map(row => vollmachtRechte.vmOhneNachweis(row, groups)), is_admin: isAdmin, darf_erteilen: darfErteilen });
+    res.json({ vollmachten: rows.map(row => vmAusgabe(row, ctx)), is_admin: isAdmin, ...kopf });
   } catch (err) { console.error('[vollmachten] list:', err); res.status(500).json({ error: fehlerFuerClient(err) }); }
+});
+
+// Neuigkeiten fuer die App (V5, V6): klein, ohne Mail und Push-Dienst. Die App
+// (Basis HintergrundAbfrage, etwa alle 15 Minuten) vergleicht die IDs mit den
+// bekannten und meldet lokal: „bitte unterschreiben“, „Vollmacht ist aktiv/
+// widerrufen“, Verwaltung „neue aktive Vollmacht“, Ablauf in 30 Tagen und die
+// Erinnerung an bevorstehende Versammlungen (bis 14 Tage, mit/ohne Vollmacht).
+app.get('/api/vollmachten/neuigkeiten', authMiddleware, async (req, res) => {
+  try {
+    const ctx = await vmKontext(req);
+    const rows = await vmZeilen(ctx);
+    // Versammlungen der STWEGs, in denen das Konto Eigentuemer ist (Kontakt oder Gruppe)
+    const stwegs = new Set();
+    for (const k of ctx.kontakte) {
+      if (vollmachtRechte.GEBER_ROLLEN.includes(String(k.rolle || '').toLowerCase()) && k.stweg != null) stwegs.add(Number(k.stweg));
+    }
+    for (const n of [1, 2, 3, 4, 5, 6, 7, 8]) if (vollmachtRechte.vmGeberErlaubt({ stweg: n }, [], ctx.groups).ok) stwegs.add(n);
+    let termine = [];
+    if (stwegs.size) {
+      termine = (await pool.query(
+        `SELECT id, stweg, title, start_date FROM stweg_events
+          WHERE category = 'versammlung' AND stweg = ANY($1::int[])
+            AND start_date >= NOW() AND start_date <= NOW() + INTERVAL '${vollmachtApp.ERINNERUNG_TAGE + 1} days'
+          ORDER BY start_date`, [[...stwegs]])).rows;
+    }
+    res.json(vollmachtApp.neuigkeiten({ zeilen: rows, ctx, termine, jetzt: new Date() }));
+  } catch (err) { console.error('[vollmachten] neuigkeiten:', err); res.status(500).json({ error: fehlerFuerClient(err) }); }
+});
+
+// Bevorstehende Versammlungen fuer das Formular „Neue Vollmacht“ (V3): nur der
+// STWEG, fuer die erteilt wird, und nur fuer Konten, die dort Vollmachten
+// erteilen oder verwalten duerfen. ?stweg=<Nr>
+app.get('/api/vollmachten/lookup/versammlungen', authMiddleware, async (req, res) => {
+  try {
+    const stweg = parseInt(req.query.stweg, 10);
+    if (!stweg || stweg < 1 || stweg > 8) return res.status(400).json({ error: 'Bitte die STWEG angeben' });
+    const ctx = await vmKontext(req);
+    const darf = vollmachtRechte.vmGeberErlaubt({ stweg }, ctx.kontakte, ctx.groups).ok
+      || vollmachtRechte.vmDarfVerwalten(ctx.groups, ctx.perm, stweg);
+    if (!darf) return res.status(403).json({ error: 'Für diese STWEG sind keine Versammlungen sichtbar' });
+    const r = await pool.query(
+      `SELECT id, stweg, title, start_date, location FROM stweg_events
+        WHERE category = 'versammlung' AND stweg = $1 AND start_date >= NOW() - INTERVAL '1 day'
+        ORDER BY start_date LIMIT 20`, [stweg]);
+    res.json({ versammlungen: r.rows.map(e => ({ id: e.id, stweg: e.stweg, titel: e.title, start: e.start_date, ort: e.location || null })) });
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
+});
+
+// Wer vertritt wen an einer Versammlung (V3, V4) – mit Wertquote, ohne Weisung
+// und ohne Stimmenzaehlung. Nur wer die Vollmachten dieser STWEG sieht:
+// Technik/Praesident, Ausschuss und Verwaltung mit Seitenrecht „vollmachten“.
+app.get('/api/vollmachten/versammlung/:termin_id', authMiddleware, async (req, res) => {
+  try {
+    const terminId = parseInt(req.params.termin_id, 10);
+    const t = (await pool.query(
+      `SELECT id, stweg, title, start_date, location, category FROM stweg_events WHERE id = $1`, [terminId])).rows[0];
+    if (!t || t.category !== 'versammlung') return res.status(404).json({ error: 'Versammlung nicht gefunden' });
+    const ctx = await vmKontext(req);
+    if (!vollmachtRechte.vmSichtErlaubt(vollmachtRechte.vmSicht(ctx.groups, ctx.perm), t.stweg)) {
+      return res.status(403).json({ error: 'Die Vertretungen dieser Versammlung sehen nur Verwaltung, Ausschuss, Technik und Präsident (Recht „Vollmachten“)' });
+    }
+    const alle = (await pool.query(
+      `SELECT v.id, v.doc_hash, v.status, v.art, v.stweg, v.wohnung_id, v.termin_id, v.gueltig_ab, v.gueltig_bis,
+              v.bevollmaechtigter_name, v.bevollmaechtigter_typ,
+              (SELECT COALESCE(json_agg(json_build_object('name', vg.name, 'email', vg.email, 'signed_at', vg.signed_at) ORDER BY vg.sort_order, vg.id), '[]'::json)
+                 FROM vollmachten_vollmachtgeber vg WHERE vg.vollmacht_id = v.id) AS vollmachtgeber_liste,
+              w.bezeichnung AS wohnung_bezeichnung
+         FROM vollmachten v LEFT JOIN wohnungen w ON w.id = v.wohnung_id
+        WHERE v.stweg = $1 AND v.status IN ('aktiv', 'entwurf')
+          AND (v.termin_id = $2 OR v.termin_id IS NULL)
+        ORDER BY v.bevollmaechtigter_name, v.id`, [t.stweg, t.id])).rows;
+    const vertretungen = [];
+    const offen = [];
+    for (const v of alle) {
+      const zeilen = v.vollmachtgeber_liste || [];
+      if (v.status === 'entwurf') {
+        // nur Entwuerfe mit Bezug zu dieser Versammlung (allgemeine Entwuerfe sind keine Vertretung)
+        if (v.termin_id !== null) offen.push({ id: v.id, doc_hash: v.doc_hash, bevollmaechtigter_name: v.bevollmaechtigter_name,
+          vollmachtgeber: zeilen.map(g => g.name), unterschrieben: zeilen.filter(g => g.signed_at).length, von: zeilen.length });
+        continue;
+      }
+      if (!vollmachtApp.gilt(v, { id: t.id, stweg: t.stweg, start: t.start_date })) continue;
+      // Wohnungen/Wertquote: die der Vollmacht oder alle, deren Eigentuemer die Geber sind
+      const emails = zeilen.map(g => String(g.email || '').toLowerCase()).filter(Boolean);
+      const w = (await pool.query(
+        `SELECT w.id, w.bezeichnung, w.wertquote_zaehler, w.wertquote_nenner FROM wohnungen w
+          WHERE w.stweg = $1 AND (w.id = $2 OR ($2::int IS NULL AND EXISTS (
+                SELECT 1 FROM wohnungen_kontakte k WHERE k.wohnung_id = w.id AND k.archiviert_am IS NULL
+                   AND k.rolle = 'eigentuemer' AND LOWER(k.email) = ANY($3::text[]))))
+          ORDER BY w.bezeichnung`, [t.stweg, v.wohnung_id, emails])).rows;
+      vertretungen.push({
+        id: v.id, doc_hash: v.doc_hash, art: v.art,
+        bezug: v.termin_id !== null ? 'versammlung' : 'allgemein',
+        bevollmaechtigter_name: v.bevollmaechtigter_name, bevollmaechtigter_typ: v.bevollmaechtigter_typ,
+        vollmachtgeber: zeilen.map(g => g.name),
+        wohnungen: w.map(x => ({ bezeichnung: x.bezeichnung, wertquote_zaehler: x.wertquote_zaehler, wertquote_nenner: x.wertquote_nenner })),
+        wertquote_anteil: vollmachtApp.wertquoteAnteil(w),
+      });
+    }
+    res.json({
+      versammlung: { id: t.id, stweg: t.stweg, titel: t.title, start: t.start_date, ort: t.location || null },
+      vertretungen, offen,
+      summe_wertquote_anteil: Math.round(vertretungen.reduce((s, x) => s + x.wertquote_anteil, 0) * 1e6) / 1e6,
+    });
+  } catch (err) { console.error('[vollmachten] versammlung:', err); res.status(500).json({ error: fehlerFuerClient(err) }); }
+});
+
+// Eine Vollmacht (L1): dieselben Sichtregeln wie die Liste, fuer Deep-Links und
+// Benachrichtigungen.
+app.get('/api/vollmachten/:id(\\d+)', authMiddleware, async (req, res) => {
+  try {
+    const ctx = await vmKontext(req);
+    const rows = await vmZeilen(ctx, { id: parseInt(req.params.id, 10) });
+    if (!rows.length) return res.status(404).json({ error: 'Nicht gefunden' });
+    res.json(vmAusgabe(rows[0], ctx));
+  } catch (err) { console.error('[vollmachten] get:', err); res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // Seitenrecht „vollmachten“ des Kontos ('read' | 'write' | undefined).
@@ -28532,6 +28719,13 @@ app.post('/api/vollmachten', authMiddleware, async (req, res) => {
       b.stweg = o.stweg;
       await vmEigeneNamenAngleichen(req, b);
     }
+    // V3: Bezug zu einer Versammlung der STWEG und Weisung (Freitext)
+    let stwegEff = b.stweg;
+    if ((stwegEff === undefined || stwegEff === null || stwegEff === '') && b.wohnung_id) {
+      stwegEff = (await pool.query('SELECT stweg FROM wohnungen WHERE id = $1', [parseInt(b.wohnung_id, 10) || 0])).rows[0]?.stweg;
+    }
+    const tw = await vmTerminUndWeisung(b.termin_id, b.weisung, stwegEff);
+    if (tw.fehler) return res.status(400).json({ error: tw.fehler });
     // Standard-Berechtigung: jeder eingeloggte User darf Vollmachten erfassen
     // (in der Regel für sich selbst als Vollmachtgeber)
     const sql = h => `INSERT INTO vollmachten (
@@ -28540,8 +28734,8 @@ app.post('/api/vollmachten', authMiddleware, async (req, res) => {
          bevollmaechtigter_typ, bevollmaechtigter_person_id, bevollmaechtigter_verwaltung_id,
          bevollmaechtigter_name, bevollmaechtigter_email, bevollmaechtigter_adresse, bevollmaechtigter_telefon,
          art, geltungsbereich, wohnung_id, stweg, gueltig_ab, gueltig_bis,
-         status, created_by_user_email
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'entwurf',$19)
+         status, created_by_user_email, termin_id, weisung
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'entwurf',$19,$20,$21)
        RETURNING *`;
     const r = await vmInsertWithRetry(null, sql, [
       b.vollmachtgeber_person_id || null, b.vollmachtgeber_name, b.vollmachtgeber_email || null, b.vollmachtgeber_adresse || null,
@@ -28549,7 +28743,7 @@ app.post('/api/vollmachten', authMiddleware, async (req, res) => {
       b.bevollmaechtigter_name, b.bevollmaechtigter_email || null, b.bevollmaechtigter_adresse || null, b.bevollmaechtigter_telefon || null,
       b.art, b.geltungsbereich || null, b.wohnung_id || null, b.stweg || null,
       b.gueltig_ab || new Date().toISOString().slice(0, 10), b.gueltig_bis || null,
-      req.user.email || null,
+      req.user.email || null, tw.termin_id, tw.weisung,
     ]);
     const vollmacht = r.rows[0];
     // Vollmachtgeber-Liste: aus body.vollmachtgeber wenn vorhanden, sonst
@@ -28568,6 +28762,24 @@ app.post('/api/vollmachten', authMiddleware, async (req, res) => {
     res.json(vollmachtRechte.vmOhneNachweis(vollmacht, req.user.groups || []));
   } catch (err) { console.error('[vollmachten] create:', err); res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
+
+// V3: termin_id (Termin der Kategorie „versammlung“ derselben STWEG) und Weisung
+// aus dem Formular pruefen. Ohne Versammlung keine Weisung.
+// -> { termin_id, weisung } | { fehler }
+async function vmTerminUndWeisung(terminId, weisung, stweg) {
+  const w = vollmachtApp.weisungPruefen(weisung);
+  if (w.fehler) return { fehler: w.fehler };
+  const keinTermin = terminId === undefined || terminId === null || terminId === '';
+  if (keinTermin) {
+    if (w.wert) return { fehler: 'Eine Weisung gibt es nur zusammen mit einer Versammlung' };
+    return { termin_id: null, weisung: null };
+  }
+  const id = parseInt(terminId, 10);
+  const t = id ? (await pool.query('SELECT id, stweg, category FROM stweg_events WHERE id = $1', [id])).rows[0] : null;
+  const e = vollmachtApp.terminPruefen(t, stweg);
+  if (e.fehler) return { fehler: e.fehler };
+  return { termin_id: id, weisung: w.wert };
+}
 
 // R3-S5b: Eine mitgeschickte Vollmachtgeber-Liste darf nicht leer sein und
 // jede Zeile braucht einen Namen — ohne Geber-Zeilen galt die Vollmacht sonst
@@ -28630,6 +28842,20 @@ app.put('/api/vollmachten/:id', authMiddleware, async (req, res) => {
       'art','geltungsbereich','wohnung_id','stweg','gueltig_ab','gueltig_bis'];
     for (const k of allowed) {
       if (b[k] !== undefined) push(k, b[k] === '' ? null : b[k]);
+    }
+    // V3: Versammlung und Weisung (geaendert, oder die STWEG wechselt unter der Versammlung weg)
+    if (b.termin_id !== undefined || b.weisung !== undefined || b.stweg !== undefined || b.wohnung_id !== undefined) {
+      let stwegEff = b.stweg !== undefined ? (b.stweg === '' ? null : b.stweg) : v.stweg;
+      if ((stwegEff === null || stwegEff === undefined) && (b.wohnung_id || v.wohnung_id)) {
+        stwegEff = (await pool.query('SELECT stweg FROM wohnungen WHERE id = $1', [parseInt(b.wohnung_id !== undefined ? b.wohnung_id : v.wohnung_id, 10) || 0])).rows[0]?.stweg;
+      }
+      const tw = await vmTerminUndWeisung(
+        b.termin_id !== undefined ? b.termin_id : v.termin_id,
+        b.weisung !== undefined ? b.weisung : v.weisung,
+        stwegEff);
+      if (tw.fehler) return res.status(400).json({ error: tw.fehler });
+      push('termin_id', tw.termin_id);
+      push('weisung', tw.weisung);
     }
     if (updates.length === 0 && !Array.isArray(b.vollmachtgeber)) return res.status(400).json({ error: 'Keine Änderungen' });
     if (updates.length > 0) {
@@ -28720,11 +28946,15 @@ app.post('/api/vollmachten/:id/sign-digital', authMiddleware, async (req, res) =
     if (!signName) {
       return res.status(409).json({ error: 'Für dein Konto ist kein bestätigter Name hinterlegt — bitte die Verwaltung kontaktieren oder auf Papier unterschreiben' });
     }
+    // V1/L6: Art der Bestaetigung aus der Anmeldung dieser Anfrage (nie aus dem Body):
+    // Rosenweg-Konto, frisch angemeldet in der App bzw. im Portal – steht auf dem PDF.
+    const bestaetigung = vollmachtApp.bestaetigungText(req.auth);
     await pool.query(
       `UPDATE vollmachten_vollmachtgeber
-         SET signatur_typ='digital', signed_at=NOW(), signed_ip=$1, signed_user_agent=$2, signed_authentik_sub=$3, name=$5
+         SET signatur_typ='digital', signed_at=NOW(), signed_ip=$1, signed_user_agent=$2, signed_authentik_sub=$3, name=$5,
+             signed_bestaetigung=$6
         WHERE id=$4`,
-      [ip, ua, sub ? String(sub) : null, my.rows[0].id, signName],
+      [ip, ua, sub ? String(sub) : null, my.rows[0].id, signName, bestaetigung],
     );
     if (signName !== my.rows[0].name && (v.vollmachtgeber_email || '').toLowerCase() === userEmail) {
       await pool.query('UPDATE vollmachten SET vollmachtgeber_name = $1 WHERE id = $2', [signName, id]);
@@ -29047,10 +29277,14 @@ app.get('/api/vollmachten/:id/pdf', authMiddleware, async (req, res) => {
               w.zimmer AS wohnung_zimmer,
               w.flaeche_m2 AS wohnung_flaeche,
               w.typ AS wohnung_typ,
+              te.title AS termin_titel, te.start_date AS termin_start, te.all_day AS termin_ganztags,
+              vw.stweg AS verwaltung_stweg,
               (SELECT COALESCE(json_agg(vg.* ORDER BY vg.sort_order, vg.id), '[]'::json)
                  FROM vollmachten_vollmachtgeber vg WHERE vg.vollmacht_id = v.id) AS vollmachtgeber_liste
          FROM vollmachten v
          LEFT JOIN wohnungen w ON w.id = v.wohnung_id
+         LEFT JOIN verwaltungen vw ON vw.id = v.bevollmaechtigter_verwaltung_id
+         LEFT JOIN stweg_events te ON te.id = v.termin_id
         WHERE v.id = $1`,
       [id]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
@@ -29060,8 +29294,9 @@ app.get('/api/vollmachten/:id/pdf', authMiddleware, async (req, res) => {
     // „vollmachten“ (B19, R2 28.11.2026: auch der Ausschuss haengt am Seitenrecht)
     const isGlobalAdmin = vollmachtRechte.vmSichtErlaubt(vollmachtRechte.vmSicht(groups, await vmPerm(req)), v.stweg);
     const userEmail = (req.user.email || '').toLowerCase();
+    // V8: Bevollmaechtigter auch ueber Person und Verwaltungsfirma erkennen
     const involved = await vmIsUserVollmachtgeber(id, req.user.email, v.vollmachtgeber_email)
-                  || (v.bevollmaechtigter_email || '').toLowerCase() === userEmail;
+                  || vollmachtApp.istBevollmaechtigter({ groups, email: req.user.email, personIds: await vmPersonIds(req.user.email) }, v);
     if (!isGlobalAdmin && !involved) return res.status(403).json({ error: 'Kein Zugriff' });
     // S5-3-1: ?geber=<Zeilen-ID> liefert den Papier-Upload eines einzelnen
     // Gebers — fuer Admin/Ausschuss und den Geber selbst.
@@ -30486,6 +30721,14 @@ async function initDB() {
       );
       -- S5-3-1: Papier-Upload eines einzelnen Gebers gehoert zu seiner Zeile.
       ALTER TABLE vollmachten_vollmachtgeber ADD COLUMN IF NOT EXISTS papier_pdf_path TEXT;
+      -- App „Rosenweg Vollmachten“ (28.11.2026): Bezug zu einer Versammlung
+      -- (stweg_events.id, Kategorie 'versammlung'; ohne Fremdschluessel: ein
+      -- geloeschter Termin laesst die Vollmacht bestehen) und Weisung (Freitext);
+      -- je Geber die Art der Bestaetigung beim digitalen Signieren (Konto, frisch).
+      ALTER TABLE vollmachten ADD COLUMN IF NOT EXISTS termin_id INTEGER;
+      ALTER TABLE vollmachten ADD COLUMN IF NOT EXISTS weisung TEXT;
+      CREATE INDEX IF NOT EXISTS idx_vm_termin ON vollmachten(termin_id) WHERE termin_id IS NOT NULL;
+      ALTER TABLE vollmachten_vollmachtgeber ADD COLUMN IF NOT EXISTS signed_bestaetigung TEXT;
       CREATE INDEX IF NOT EXISTS idx_vmvg_vollmacht ON vollmachten_vollmachtgeber(vollmacht_id);
       CREATE INDEX IF NOT EXISTS idx_vmvg_email ON vollmachten_vollmachtgeber(LOWER(email));
 

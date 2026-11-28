@@ -166,6 +166,8 @@ hat dort keine Rechte, auch wenn er dort wohnt oder Eigentümer ist.
 | Projekt öffentlich schalten (mit Bestätigung), Anhang einzeln öffentlich markieren | — | — | — | ✅ 🅢 + Kooperation | (R `projekte` schreiben) 🅢 | ✅ | ✅ |
 | Vollmachten erteilen, signieren, eigene PDF hochladen | — | — (nur „Mich betreffend“) | ✅ als Eigentümer/Wohnungs-Verwalter der Wohnung bzw. STWEG | wie Eigentümer | wie Eigentümer | ✅ | ✅ |
 | Vollmachten digital signieren | — | — | ✅ nur frisch angemeldet (≤ 15 Min.), nicht per PAT/MCP/Karte | dito | dito | dito | dito |
+| Vollmachten: Versammlung und Weisung (Freitext) beim Erteilen; „Mich betreffend“ auch als Person oder Verwaltungsfirma | — | 👁 mich betreffend | ✅ | dito | dito | ✅ | ✅ |
+| Vollmachten: „Wer vertritt wen“ je Versammlung (mit Wertquote, ohne Stimmenzählung) | — | — | — | (R `vollmachten` lesen) 🅢 | (R `vollmachten` lesen) 🅢 | 👁 alle | 👁 alle |
 | Vollmachten der STWEG sehen | — | — | — | (R `vollmachten` lesen, Vorgabe) 🅢 | (R `vollmachten` lesen) 🅢 | 👁 alle | 👁 alle |
 | Vollmachten: IP, User-Agent, Authentik-Kennung der Geber | — | — | — | — | — | 👁 | 👁 |
 | Vollmachten: KI-Prüfung (PDF geht an OpenRouter/Anthropic, nur auf Knopfdruck) | — | — | — | — | (R `vollmachten` lesen) 🅢 | ✅ | ✅ |
