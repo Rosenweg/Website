@@ -224,14 +224,18 @@ vollmachten_templates
   stweg (NULL = global fuer alle STWEGs; sonst nur diese STWEG, seit 28.11.2026)
 
 vollmachten
-  id (PK), status ('entwurf' | 'aktiv' | …), signatur_typ, papier_pdf_path, …
+  id (PK), status ('entwurf' | 'aktiv' | …), signatur_typ, papier_pdf_path, …,
+  termin_id (stweg_events.id, Kategorie 'versammlung', ohne Fremdschluessel),
+  weisung (Freitext)   ← NEU 28.11.2026 (App Rosenweg Vollmachten)
 
 vollmachten_vollmachtgeber (FK vollmacht_id → vollmachten.id ON DELETE CASCADE,
                             person_id → personen.id ON DELETE SET NULL)
   id (PK), vollmacht_id, person_id, name, email, adresse, sort_order,
   signatur_typ ('digital' | 'papier' | NULL), signed_at, signed_ip,
   signed_user_agent, signed_authentik_sub, created_at,
-  papier_pdf_path (TEXT)   ← NEU 17.11.2026
+  papier_pdf_path (TEXT),  ← NEU 17.11.2026
+  signed_bestaetigung (TEXT: „Rosenweg-Konto, frisch angemeldet in der App am …“,
+                       serverseitig aus der Anmeldung, steht auf dem PDF) ← NEU 28.11.2026
 ```
 
 - Lädt **ein einzelner Vollmachtgeber** seine unterschriebene PDF hoch
@@ -244,6 +248,16 @@ vollmachten_vollmachtgeber (FK vollmacht_id → vollmachten.id ON DELETE CASCADE
   zeichnet alle offenen Geber).
 - Pfade kommen nie aus dem Request-Body; beim Lesen gelten nur Dateien unter
   `<DOCS_PATH>/Vollmachten/` (`vollmachtPdfPfad`), sonst `NULL`.
+- App „Rosenweg Vollmachten“ (`api/lib/vollmacht-app.js`): `GET /api/vollmachten`
+  und `GET /api/vollmachten/:id` liefern je Zeile die Rechte (`darf_bearbeiten`,
+  `darf_signieren`, `darf_hochladen`, `darf_loeschen`, `darf_ki`) und `ich_geber` /
+  `ich_bevollmaechtigter` (E-Mail, Person oder Verwaltungsfirma); oben
+  `darf_erteilen`, `darf_erfassen_fuer_andere`, `darf_vorlagen`,
+  `darf_versammlung_sehen`. `GET /api/vollmachten/versammlung/:termin_id`: wer
+  vertritt wen mit Wertquote (nur mit Sicht auf die STWEG, ohne Weisung, ohne
+  Stimmenzählung). `GET /api/vollmachten/neuigkeiten`: Meldungen und
+  Versammlungs-Erinnerungen (14 und 3 Tage; die App meldet lokal, keine Mail).
+  `GET /api/vollmachten/lookup/versammlungen?stweg=` für das Formular.
 
 ### Projekte (Verwaltungssuche, allgemeine Themen)
 

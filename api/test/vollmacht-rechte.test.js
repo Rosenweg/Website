@@ -141,7 +141,8 @@ test('server.js, MCP und Seite: Regeln eingebaut', () => {
   const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   const i = server.indexOf("app.post('/api/vollmachten/:id/sign-digital'");
   assert.match(server.slice(i, i + 500), /signierenErlaubt\(req\.auth, \{ pat: !!req\.pat/);
-  assert.match(server, /vollmachten: r\.rows\.map\(row => vollmachtRechte\.vmOhneNachweis\(row, groups\)\)/);
+  assert.match(server, /vollmachten: rows\.map\(row => vmAusgabe\(row, ctx\)\)/);
+  assert.match(server, /function vmAusgabe\(row, ctx\) \{\n  return vollmachtRechte\.vmOhneNachweis\(row, ctx\.groups\);/);
   assert.match(server, /req\.body\?\.bestaetigt_extern !== true/);
   assert.match(server, /vollmachtRechte\.vmDarfKiPruefen\(groups, await vmPerm\(req\), v\.stweg\)/);
   assert.match(server, /vollmachtRechte\.vmSucheStwegs\(groups, perm\)/);

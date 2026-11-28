@@ -104,12 +104,11 @@ Erklär in drei Schritten: WireGuard-App installieren, QR-Code scannen, Tunnel e
   {
     name: 'vollmacht_versammlung',
     titel: 'Vollmacht für die Versammlung',
-    beschreibung: 'Legt eine Vollmacht als Entwurf an und erklärt Unterschrift und Abgabe.',
+    beschreibung: 'Bereitet eine Vollmacht für eine Versammlung vor und erklärt, wie sie in der App oder im Portal erteilt, signiert und abgegeben wird.',
     args: { bevollmaechtigte: z.string().optional().describe('Wer soll vertreten?') },
     text: (a) => `Ich kann nicht an die Versammlung und möchte eine Vollmacht erteilen${a.bevollmaechtigte ? ` an ${a.bevollmaechtigte}` : ''}.
-Frag mich: für welche Versammlung (STWEG, Datum), wen ich bevollmächtige, und ob es eine Weisung gibt (wie abzustimmen ist).
-Leg den Entwurf mit vollmacht_erstellen an, falls du das Werkzeug hast — sonst verweise auf Portal → Vollmachten.
-Erklär den Rest: Signieren kann ich nur selbst, frisch angemeldet im Portal oder in der App (du kannst nicht für mich signieren): digital signieren oder ausdrucken, unterschreiben und hochladen. Vollmachten für eine Wohnung erteilen nur ihre Eigentümer oder Wohnungs-Verwalter; die Verwaltung prüft die Echtheit.`,
+Der Portal-MCP kann keine Vollmachten anlegen und nicht signieren. Frag mich, was ich für den Entwurf brauche: für welche Versammlung (STWEG, Datum — das Portal zeigt sie unter Termine), wen ich bevollmächtige und ob es eine Weisung gibt (wie abzustimmen ist). Fass das kurz zusammen, damit ich es in die App oder ins Portal übernehmen kann.
+Erklär den Rest: Die Vollmacht erteile ich selbst in der App „Rosenweg Vollmachten“ oder im Portal unter Vollmachten (Neue Vollmacht, Versammlung und Weisung wählen). Signieren kann ich nur selbst, frisch mit dem Rosenweg-Konto angemeldet (du kannst nicht für mich signieren): digital signieren, oder ausdrucken, unterschreiben und als Foto/PDF hochladen. Vollmachten für eine Wohnung erteilen nur ihre Eigentümer oder Wohnungs-Verwalter; die Verwaltung prüft die Echtheit.`,
   },
 ];
 
