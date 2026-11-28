@@ -106,7 +106,7 @@ function kontext(req) {
     name: req.user?.name || '',
     art: req.auth?.art || 'karte',
     sitzung: k.id || (req.anlage ? 'anlage:' + req.anlage.ext : ''),
-    karte: k.karte || '',
+    karte: k.karte || req.anlage?.karte || '',
     app: req.rosenwegApp?.text || k.app_name || k.app || req.anlage?.paket || '',
     geraet: k.geraet || (req.anlage ? 'geteiltes Telefon ' + req.anlage.ext : ''),
     ip: req.absenderIp || req.ip || '',
@@ -118,6 +118,17 @@ function kontext(req) {
 
 const herkunftText = (k) => [k.app && `App ${k.app}`, k.geraet && `Gerät ${k.geraet}`, k.ip && `IP ${k.ip}`]
   .filter(Boolean).join(', ');
+
+/**
+ * Karten- bzw. Geräte-Vermerk für das admin_protokoll (Entscheid Stefan 28.11.2026):
+ * womit angemeldet (Art, Karte, Sitzung) und woher (App, Gerät, IP). Ohne Karte: ''.
+ */
+function herkunftVermerk(req) {
+  if (!istKartenSitzung(req)) return '';
+  const k = kontext(req);
+  return [`mit ${k.art}`, k.karte && `Karte ${k.karte}`, k.sitzung && `Sitzung ${k.sitzung}`, herkunftText(k)]
+    .filter(Boolean).join(' · ');
+}
 
 // ─── 1 + 2: Protokoll und gebündelte Quittung ───────────────────────────────
 /** Bündelt Einträge je Person: erste Mail nach ersteMs, weitere frühestens fensterMs nach der letzten. */
@@ -507,7 +518,7 @@ function loopbackAusfuehren(port) {
 }
 
 const modul = {
-  einrichten, vermerken, fremdVermerken, mitKarteProtokollieren, bestaetigungVerlangen, routen, sqlSpeicher, loopbackAusfuehren,
+  einrichten, vermerken, fremdVermerken, herkunftVermerk, mitKarteProtokollieren, bestaetigungVerlangen, routen, sqlSpeicher, loopbackAusfuehren,
   ausweisEinloesen, ausweisErzeugen, bestaetigen, ablehnen, alleAbmelden, aktionText, pfadNormal, neuerBuendler,
   quittungMail, bestaetigungsMail, AUSWEIS_PRAEFIX, BESTAETIGUNG_MIN,
   _quittung: () => quittung,

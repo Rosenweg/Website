@@ -81,7 +81,8 @@ class PortalUnterlagenTest(unittest.TestCase):
                      ("GET", "/api/salz/stand"), ("GET", "/api/auth/me"), ("POST", "/api/projects/dach/timeline")]:
             self.assertTrue(pbx._portal_erlaubt(r, PAKET, m, p), (m, p))
         for m, p in [("POST", "/api/change-password"), ("GET", "/api/me/tokens"), ("POST", "/api/me/tokens"),
-                     ("DELETE", "/api/me/tokens/3"), ("POST", "/api/me/passkeys"), ("PUT", "/api/auth/profile"),
+                     # PUT auth/profile ist seit 28.11.2026 frei (PORTAL_AUSNAHMEN), POST bleibt zu
+                     ("DELETE", "/api/me/tokens/3"), ("POST", "/api/me/passkeys"), ("POST", "/api/auth/profile"),
                      ("POST", "/api/auth/login"), ("GET", "/api/Change-Password/"), ("POST", "/api//me//tokens"),
                      ("POST", "/api/%63hange-password"), ("POST", "/api/mqtt/my-app-passwords"),
                      ("POST", "/api/mqtt/user-app-passwords/3")]:

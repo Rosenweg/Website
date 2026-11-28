@@ -146,7 +146,10 @@ test('V1: Signieren bleibt an der frischen Anmeldung; die Art der Bestätigung s
   const sign = route("app.post('/api/vollmachten/:id/sign-digital'");
   assert.match(sign, /vollmachtApp\.bestaetigungText\(req\.auth\)/);
   assert.match(sign, /signed_bestaetigung=\$6/);
-  assert.doesNotMatch(sign, /req\.body\.bestaetigung|b\.bestaetigung/); // nie vom Client
+  // Der Text auf dem PDF kommt nie vom Client: aus der Anmeldung oder aus der
+  // eingeloesten Karten-/QR-Bestaetigung (Server-Zeile, lib/signaturbestaetigung.js)
+  assert.doesNotMatch(sign, /bestaetigung = req\.body|bestaetigungText\(req\.body/);
+  assert.match(sign, /bestaetigung = b\.text;/);
   assert.match(SRC, /g\.signed_bestaetigung \? `<tr><td class="lbl">Bestätigung/);
 });
 

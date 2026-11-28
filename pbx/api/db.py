@@ -555,6 +555,10 @@ def init_db():
         for tab in ("telefon_ausweise", "telefon_sitzungen"):
             if "gruppen" not in [r[1] for r in conn.execute(f"PRAGMA table_info({tab})")]:
                 conn.execute(f"ALTER TABLE {tab} ADD COLUMN gruppen TEXT NOT NULL DEFAULT '[]'")
+        # Anzeige-ID der Karte, mit der sich die Person am Telefon angemeldet hat (28.11.2026):
+        # geht im Anlage-Token an die Haupt-API (Herkunft eines App-QR; Karte entzogen -> abmelden)
+        if "karte" not in [r[1] for r in conn.execute("PRAGMA table_info(telefon_sitzungen)")]:
+            conn.execute("ALTER TABLE telefon_sitzungen ADD COLUMN karte TEXT")
         # Der erste Anmeldeweg (Code am Geraet, 23.11.2026) wurde noch am selben
         # Abend durch den Anmelde-QR ersetzt.
         conn.execute("DROP TABLE IF EXISTS telefon_codes")
