@@ -17,6 +17,7 @@ auf dem Knoten, der den Container gerade hat (`ha-manager status`).
 | `rw-ssh-aufnehmen.sh` | PVE-Knoten | **erzeugt** – Knoten und Container in einem Lauf aufnehmen | dito |
 | `rw-ssh-aufnehmen-bauen.py` | Arbeitsplatz | baut `rw-ssh-aufnehmen.sh` aus den vier Dateien oben neu | dito |
 | `rw-dienstwacht.sh` + `.service`/`.timer` | PVE-Knoten, alle 15 Min | meldet fehlgeschlagene/hängende Units in Knoten und Containern an `/api/ssh/dienste` | Kopfkommentar, `docs/website.md` („Wenn die Dienstwacht viel meldet“) |
+| `rw-runner-waechter.sh` + `.service`/`.timer` | pve2, jede Minute | GitHub-Runner 1–4 als Kaskade nach Warteschlange zu-/abschalten | [`docs/runner-waechter.md`](../docs/runner-waechter.md) |
 | `rw-platz-machen.sh` | in einem Container | Platz schaffen ohne Datenverlust (apt-Cache, Journal deckeln, Logs komprimieren, logrotate-Regeln) | Kopfkommentar |
 | `rw-web-ausrollen.sh` | Arbeitsplatz | einzelne Web-Dateien auf alle passenden `fe-*`-Container | [`docs/website.md`](../docs/website.md#deployment) |
 | `doc-github-backup.sh` | CT 106 `fileserver`, `/usr/local/bin/`, Cron `/etc/cron.d/rosenweg-documents` | Dokumentenablage ↔ Repo `Rosenweg/documents` | unten |
