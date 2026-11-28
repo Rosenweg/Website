@@ -28,7 +28,7 @@ Eine Person kann mehrere Rollen haben; es gilt jeweils die weitestgehende.
 | Rolle | Authentik-Gruppe(n) | Bemerkung |
 |---|---|---|
 | **Technik** | `technik` | volle Rechte |
-| **Präsident** | `Präsident` (auch `praesident` wird erkannt) | volle Rechte wie Technik (Ausnahme siehe 5.3) |
+| **Präsident** | `Präsident` (auch `praesident` wird erkannt) | volle Rechte wie Technik |
 | **Verwaltung** | `stweg1-verwaltung` … `stweg7-verwaltung`, `meg-verwaltung` (= STWEG 8) | Hausverwaltung mit Web-Login, gebunden an **diese** STWEG (wie der Ausschuss); keine Bewohnergruppe nötig. Verwaltet eine Firma alle STWEGs, steht ihr Konto in allen acht Gruppen. **Übergang:** die alte Gruppe `verwaltung` gilt bis zum Umhängen als Verwaltung aller STWEGs (`api/lib/groups.js`, Suche „ÜBERGANG“) |
 | **Ausschuss** | `stweg1-ausschuss` … `stweg7-ausschuss`, `meg-ausschuss` (= STWEG 8) | gebunden an **diese** STWEG |
 | **Eigentümer** | `stweg1-eigentuemer`, `stweg2-…`, `r9-eigentuemer` (STWEG 3), `stweg4-…`, `stweg5-…`, `r1-eigentuemer` (STWEG 6), `stweg7-…`, `meg-eigentuemer`; Eltern-Gruppe `eigentuemer` | Verwalter einer Wohnung (`wohnungen_kontakte.rolle='verwalter'`) werden wie Eigentümer in diese Gruppen gelegt. **Nicht verwechseln:** Das ist eine vom Eigentümer betraute Person, die ihn für diese Wohnung vertritt, **nicht** die Hausverwaltung (`stwegN-verwaltung`). Ein Konto in einer Verwaltungsgruppe legt der Abgleich nie in Eigentümer-/Bewohnergruppen |
@@ -211,14 +211,37 @@ Schalten werden bisherige Anhänge nicht öffentlich.
 
 | Bereich | Anonym | Bewohner/Mieter | Eigentümer | Ausschuss | Verwaltung | Technik | Präsident |
 |---|---|---|---|---|---|---|---|
-| Überschuss, LaMetric, Shelly, Solar live, Tarife | 👁 | 👁 | 👁 | 👁 | 👁 | 👁 | 👁 |
-| Eigene Zähler (persönlich oder über Gruppe zugeordnet), Verlauf, Export | — | 👁 eigene | 👁 eigene | 👁 eigene | 👁 eigene | 👁 alle | 👁 alle |
+| Überschuss, LaMetric, Shelly, Solar live, Tarife, Strompreis je Haus (`/tarif`), Anlagen (`/anlagen`) | 👁 | 👁 | 👁 | 👁 | 👁 | 👁 | 👁 |
+| Eigene Zähler (persönlich oder über Gruppe zugeordnet), Verlauf, Export, Warnungen | — | 👁 eigene | 👁 eigene | 👁 eigene | 👁 eigene | 👁 alle | 👁 alle |
+| Alle Zähler der eigenen STWEG(s) ohne Technikfelder (STWEG-Sicht, Schlüssel `energie-stweg`) | — | — | — | (R) mit `energie-monitor` | (R) mit `energie-monitor` (Seed: ja) | — (sieht alles) | — (sieht alles) |
+| MQTT live `energy/<haus>/<bereich>`, `energy/alerts/<zähler>` | — | 👁 eigene | 👁 eigene | 👁 eigene + STWEG-Sicht | 👁 eigene + STWEG-Sicht | 👁 alle | 👁 alle |
+| MQTT `energy/<anlage>/solar/*`, `energy/collector/status` | — | 👁 | 👁 | 👁 | 👁 | 👁 | 👁 |
 | Alle Zähler, Zuordnungen, Technikfelder (`energie-config` read) | — | — | — | (R) | (R) | 👁 | 👁 |
 | Zähler, Tarife, Zuordnungen ändern (`energie-config` write) | — | — | — | (R) | (R) | ✅ | ✅ |
-| Technische Zählerübersicht `/api/zaehler-technik` | — | — | eingeschränkt, nur `r9-eigentuemer` | — | eingeschränkt | 👁 voll | siehe 5.3 |
+| Technische Zählerübersicht `/api/zaehler-technik` (Schlüssel `zaehler-technik`) | — | — | eingeschränkt, nur `r9-eigentuemer` | — | eingeschränkt, nur STWEG 3 | 👁 voll | 👁 voll |
 | Seite `energie-monitor.html` (Menü) | — | (R) | (R) | (R) | (R) | ✅ | ✅ |
 
-Details: [`docs/energie-api.md`](../docs/energie-api.md).
+**Abgeleitete Schlüssel für Apps** (`GET /api/auth/me`, `user.permissions` und
+`user.energie`; nicht in der Rechteverwaltung einstellbar, sie folgen aus den Regeln
+oben – dieselben Prüfungen wie die Routen):
+
+- `energie-monitor: read` – automatisch, wenn der Person Zähler zugeordnet sind (wie bisher).
+- `energie-stweg: read` – die STWEG-Sicht greift: Ausschuss oder Verwaltung einer STWEG
+  **und** `energie-monitor` in der Rechteverwaltung vergeben. Das automatische
+  `energie-monitor` der Zähler-Inhaber zählt dafür nicht. `energie.stweg_sicht` nennt die STWEGs.
+- `zaehler-technik: read` – `/api/zaehler-technik` ist offen (Technik, Präsident,
+  Verwaltung STWEG 3, `r9-eigentuemer`; `api/lib/zaehler-technik.js`).
+  `energie.technik` ist `voll` (Technik, Präsident, `energie-config` read) oder `eingeschraenkt`.
+- `energie.verwalten` – `energie-config` (`read`/`write`).
+
+**MQTT-Regeln** (`/api/mqtt/aclcheck`): Menschen lesen nur, schreiben nie (ausser über
+Topic-Regeln oder Service-User). Technik/Präsident sind Superuser. Sonst gilt dieselbe
+Sicht wie per HTTP (eigene, Gemeinschaft, STWEG-Sicht; `energie-config` read: alles unter
+`energy/`); Solarwerte jeder Anlage lesen alle Angemeldeten; `energy/<haus>/ueberschuss/<wohnung>`
+nur, wer den Wohnungszähler sieht. Der MQTT-Zugang gilt 12 h, mit Karte/geteiltem
+Telefon 30 min, und `DELETE /api/mqtt/token` widerruft ihn beim Abmelden.
+
+Details: [`docs/energie-api.md`](../docs/energie-api.md) Abschnitt 8.
 
 ### 2.6 Technik und Betrieb
 
@@ -308,12 +331,11 @@ Die Verwaltungs-Firmen (`verwaltungen`) und ihre Sachbearbeiter
 Web-Login braucht, bekommt ein Konto in der Gruppe `verwaltung` **und** eine Gruppe
 der betreuten STWEG; sonst greifen die STWEG-gebundenen Schreibrechte nicht.
 
-### 5.3 Präsident ohne Zugang zu `/api/zaehler-technik`
+### 5.3 Präsident und `/api/zaehler-technik` (erledigt)
 
-`requireZaehlerTechnik` lässt nur `technik`, `verwaltung` und `stweg3-eigentuemer`
-durch. Ein Präsident ohne eine dieser Gruppen bekommt dort 403, obwohl er die volle
-Sicht hätte, wenn er durchkäme. Alle anderen Energie-Routen behandeln Präsident wie
-Technik.
+Früher liess `requireZaehlerTechnik` den Präsidenten nicht durch. Seit Befund W19
+kommt er hinein und hat dort die volle Sicht wie die Technik. Die Regel steht in
+`api/lib/zaehler-technik.js` (Technik, Präsident, Verwaltung STWEG 3, `r9-eigentuemer`).
 
 ### 5.4 Benutzer anlegen durch die Verwaltung
 

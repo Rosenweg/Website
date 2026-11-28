@@ -1,6 +1,6 @@
 # Energie-Monitoring – Zähler, Seiten und wer was sieht
 
-Stand: 17.11.2026. Dieses Dokument erklärt, wie die Stromzähler der Siedlung erfasst
+Stand: 28.11.2026 (App „Rosenweg Energie“, Abschnitte 2a und 7). Dieses Dokument erklärt, wie die Stromzähler der Siedlung erfasst
 und angezeigt werden und wer welche Daten sehen darf. Es ist bewusst ohne interne
 Adressen geschrieben (es steht jeder angemeldeten Person auch über den
 Portal-Agenten zur Verfügung). Die technische Beschreibung aller Routen, Fehlercodes
@@ -24,8 +24,13 @@ Portal-API (prüft Anmeldung und Zuordnung) ──► Webseiten, Apps, Agent
 - Jeder Zähler kann einer **Person** (über ihre E-Mail-Adresse) und/oder einer
   **Gruppe** (z. B. alle Eigentümer einer STWEG) zugeordnet werden. Diese Zuordnung
   bestimmt, wer die Verbrauchsdaten sehen darf.
-- **Tarife** (Netzstrom, Solarstrom) haben ein Gültigkeitsdatum; die Seiten rechnen
-  Kosten immer mit dem am jeweiligen Tag gültigen Tarif.
+- **Tarife** (Netzstrom, Solarstrom, Rücklieferung) haben ein Gültigkeitsdatum und
+  gelten für ein bestimmtes Haus oder für alle Häuser mit ZEV. Die Kosten sind
+  **geschätzt** – verbindlich ist die ZEV-Rechnung. Häuser ohne ZEV rechnen mit dem
+  Strompreis des Netzbetreibers aus der ElCom (Kaiseraugst, Haushalt H4).
+- Ein **Warndienst** prüft jede Minute, ob ein Zähler seit über 10 Minuten keine Werte
+  liefert (offline) oder ein Wohnungszähler deutlich mehr braucht als sonst (mehr als
+  das Dreifache des Durchschnitts der letzten 7 Tage, mindestens 5 Minuten lang).
 
 ## 2. Was offen ist und was eine Anmeldung braucht
 
@@ -38,6 +43,16 @@ Seit dem 17.11.2026 gilt:
 | Verbrauch einzelner Wohnungen (live und Verlauf) | **nur angemeldet**, nur die eigenen bzw. über die eigene Gruppe zugeordneten Zähler |
 | Liste aller Zähler, Zuordnungen, Netzadressen und Seriennummern der Zähler | nur Technik, Präsident und wer das Recht „Energie-Konfiguration“ (lesen) hat |
 | Zähler, Tarife und Zuordnungen ändern | nur mit dem Recht „Energie-Konfiguration“ (schreiben); Technik und Präsident haben es immer |
+| Alle Zähler der eigenen STWEG (ohne Netzadressen) | Ausschuss und Verwaltung dieser STWEG, wenn ihnen das Recht „Energie-Monitor“ vergeben ist |
+| Strompreis je Haus, Liste der Solaranlagen | alle, ohne Anmeldung |
+
+### 2a. Live-Werte per MQTT (App)
+
+Die App „Rosenweg Energie“ bekommt Live-Werte über den MQTT-Broker. Es gilt dieselbe
+Regel wie oben: jede Person liest nur die Zähler, die sie auch auf den Seiten sieht;
+die zusammengefassten Werte der Solaranlage (Produktion, Netz, Überschuss) lesen alle
+Angemeldeten. Der MQTT-Zugang gilt 12 Stunden, auf geteilten Telefonen und mit der
+Karte 30 Minuten, und endet beim Abmelden aus der App.
 
 Früher lieferten die offenen Abfragen auch die Live-Leistung jeder einzelnen Wohnung
 (Feld `consumers`). Daraus liess sich ablesen, wer zu Hause ist. Das Feld ist
@@ -54,7 +69,8 @@ entfernt; Geräte, die nur den Überschuss brauchen, merken davon nichts.
 | `energie-config.html` | Recht „Energie-Konfiguration“ | Zähler anlegen/ändern/testen, Tarife, Zuordnungen zu Personen und Gruppen |
 | `zaehler.html` | Recht „Zähler & Verbrauch“ | Zähler- und Verbrauchsdaten der STWEG |
 | `pwa/technik/` und Werkzeug `zaehler_technik` | Technik; eingeschränkt Verwaltung und Eigentümer Rosenweg 9 | Status aller Zähler (online/offline). Ohne Konfigurationsrecht keine Netzadressen und Live-Werte nur von Netz, Produktion und eigenen Zählern. |
-| `stweg3/pages/solaranlage-live.html`, `pwa/solar/` | alle | Solaranlage Rosenweg 9 live |
+| `stweg3/pages/solaranlage-live.html`, `pwa/solar/` | alle | Solaranlage Rosenweg 9 live; Franken mit dem Solar- und Rücklieferungstarif aus der Tariftabelle |
+| App „Rosenweg Energie“ | alle (Solaranlage ohne Anmeldung); sonst wie die Seiten oben | Startschirm mit allen sichtbaren Zählern, Live-Werte, Verlauf, Kosten, Warnungen als Benachrichtigung; Zähler-Technik und Zählerverwaltung nur mit Recht |
 | `energie-info.html` | alle | Information zu ZEV und E-Ladeinfrastruktur |
 | `shelly-emulator-howto.html` | alle | Bauanleitung virtuelles Shelly |
 
@@ -86,7 +102,15 @@ Für Geräte gibt es offene Abfragen ohne Anmeldung. Anleitungen:
 - Virtuelles Shelly Pro 3EM (Variante B): [`wiki/shelly-virtual-pv-emulator.md`](../wiki/shelly-virtual-pv-emulator.md)
 - LaMetric „My Data DIY“ und alle Parameter: [`energie-api.md`](energie-api.md) Abschnitt 2
 
-## 6. ZEV-Rechnungen
+## 6. Warnungen in der App
+
+Die App fragt im Hintergrund nach Warnungen und zeigt sie als Benachrichtigung:
+„Dein Zähler „…“ ist offline“ und „Hoher Verbrauch: … W (sonst Ø … W)“ für die eigenen
+Zähler (auch Gemeinschaftszähler). Technik und wer die Energie-Konfiguration lesen darf,
+bekommen zusätzlich „offline“ aller Zähler. Es gibt keinen Push-Dienst; die
+Telegram-Wächter bleiben, wie sie sind.
+
+## 7. ZEV-Rechnungen
 
 Die Stromrechnungen aus dem Zusammenschluss zum Eigenverbrauch (ZEV) sieht jede
 Person im Portal unter ihren eigenen Rechnungen (`/api/zev/meine-rechnungen`, PDF

@@ -346,7 +346,7 @@ Kurzfassung (Details [`energie-api.md`](energie-api.md)):
 | PBX | `/api/pbx/ring-members`, `config`, `calls`, `trunk-status`, `test-call` | T/P |
 | WhatsApp | `/api/whatsapp/admin/*`, `qr.png`, `qr-status` | T/P |
 | MQTT, Anzeigen | `/api/mqtt/meters…`, `service-users`, `topic-rules`, `publish`, `user-*`; `/api/display/state`, `pdf`, `ankuendigungen`, `announce` | T/P (`requireMqttTechnik`) |
-| MQTT eigen | `POST /api/mqtt/token`, `GET /api/mqtt/my-access`, `/api/mqtt/my-app-passwords` | angemeldet (App-Passwörter nur Browser) |
+| MQTT eigen | `POST /api/mqtt/token` (12 h, mit Karte 30 min), `DELETE /api/mqtt/token` (widerrufen), `GET /api/mqtt/my-access`, `/api/mqtt/my-app-passwords` | angemeldet (App-Passwörter nur Browser) |
 | SSH | `/api/ssh/me*` (Browser), `/api/ssh/sitzungen`, `hosts`, `matrix`, `dienste` (GET) | eigene Schlüssel angemeldet; Verwaltung T/P |
 | Stationen | `/api/stations/admin/*` (darin `POST admin/windows`: Windows-Rechner von Hand eintragen; `POST admin/ad-abgleich`: Windows-Rechner jetzt aus dem AD lesen; `POST admin/:id/anschluss-uebernehmen`: Anschluss-Wächter — neuen Switch-Port/AP übernehmen und, falls der Wächter gesperrt hat, freigeben; `POST admin/:id/anschluss-vergessen`: nächsten Anschluss ohne Sperre lernen; `DELETE admin/:id/doppelt`: Meldung „doppelte Station“ erledigt) | T/P |
 | Scanner | `GET /api/scanner` (Geräte, wann zuletzt gesetzt, Protokoll), `POST /api/scanner/:id/passwort-drucken` (neues Passwort: Zettel auf DruckerR9, dann im AD; Passwort nie in Antwort, DB oder Log); Seite `scanner.html`, siehe `fileserver-lxc/scans/README.md` | T/P |

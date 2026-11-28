@@ -11,7 +11,7 @@
  *  (Kein Web-Push noetig.)
  */
 
-const CACHE = 'rosenweg-solar-v11';
+const CACHE = 'rosenweg-solar-v12';
 
 // App-Shell — alles was fuer den Offline-Start noetig ist.
 const SHELL = [
