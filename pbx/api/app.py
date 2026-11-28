@@ -4121,6 +4121,16 @@ PORTAL_KOERPER_MAX = 256 * 1024
 # Binder: die Antwort geht als Bundle an die App (Transaktionen bis ~1 MB)
 PORTAL_ANTWORT_MAX = 512 * 1024
 PORTAL_METHODEN = ("GET", "POST", "PUT", "DELETE")
+# Dateien (PDF, Bilder) stueckweise: die App haengt "portal_bereich=<von>-<bis>"
+# an den Pfad. Die Anlage nimmt ihn weg, fragt die Haupt-API mit "Range:
+# bytes=<von>-<bis>" und gibt das Stueck als JSON zurueck:
+#   {"binaer": {"typ", "daten" (base64), "von", "bis", "gesamt", "etag"}}
+# So bleibt der Weg ueber Rosenweg Geraet reiner JSON-Text (Binder ~1 MB).
+# Ein Stueck hoechstens 320 KB (base64 ~430 KB < PORTAL_ANTWORT_MAX), eine
+# Datei hoechstens 20 MB (64 Stuecke; Geraet erlaubt 120 Anfragen je Minute).
+PORTAL_BINAER_TEIL = 320 * 1024
+PORTAL_BINAER_MAX = 20 * 1024 * 1024
+_PORTAL_BEREICH = re.compile(r"(^|&)portal_bereich=(\d{1,9})-(\d{1,9})(?=&|$)")
 PORTAL_PFADE_STANDARD = {
     "*": ["GET /api/auth/me", "GET /api/me"],
     "ch.rosenweg4303.salz": ["/api/salz/"],
@@ -4145,6 +4155,14 @@ PORTAL_PFADE_STANDARD = {
     # Rosenweg Wetter: nur der oeffentliche Verlauf der Wetterstation (live kommt per MQTT
     # mit dem oeffentlichen Lese-Benutzer, nicht ueber das Portal)
     "ch.rosenweg4303.wetter": ["GET /api/wetter/"],
+    # Rosenweg Unterlagen: auf geteilten Telefonen nur lesen und Vorschau (Entscheid E10
+    # 28.11.2026) – kein Hochladen, Loeschen, Verschieben. Dateien stueckweise (portal_bereich).
+    # Die Haupt-API prueft je Pfad, was die Person lesen darf.
+    "ch.rosenweg4303.unterlagen": ["GET /api/documents", "GET /api/documents/", "GET /api/documents-ordner",
+                                   "GET /api/documents-suche", "GET /api/documents-neu", "GET /api/documents-rechte",
+                                   "GET /api/documents-kennung/", "GET /api/documents-fassungen",
+                                   "GET /api/documents-fassungen/", "GET /api/documents-preview",
+                                   "POST /api/documents-preview"],
 }
 _PORTAL_PFAD = re.compile(r"/api/[A-Za-z0-9._~!$&'()*+,;=:@%/-]{1,1000}(\?[A-Za-z0-9._~!$&'()*+,;=:@%/?-]{0,1000})?")
 _PORTAL_KODIERT_VERBOTEN = re.compile(r"%(2e|2f|5c|00)", re.I)
@@ -4183,6 +4201,23 @@ def _portal_erlaubt(regeln, paket, methode, pfad):
         if (muster.endswith("/") and weg.startswith(muster)) or weg == muster:
             return True
     return False
+
+
+def _portal_bereich(pfad):
+    """portal_bereich=<von>-<bis> aus dem Pfad: (pfad ohne ihn, (von, bis)) oder (pfad, None).
+    Ungueltig (bis < von, zu gross) -> (pfad, False)."""
+    if "?" not in pfad:
+        return pfad, None
+    weg, frage = pfad.split("?", 1)
+    m = _PORTAL_BEREICH.search(frage)
+    if not m:
+        return pfad, None
+    von, bis = int(m.group(2)), int(m.group(3))
+    if bis < von or bis - von + 1 > PORTAL_BINAER_TEIL or bis >= PORTAL_BINAER_MAX:
+        return pfad, False
+    rest = (frage[:m.start()] + frage[m.end():]).strip("&")
+    rest = re.sub(r"&{2,}", "&", rest)
+    return (f"{weg}?{rest}" if rest else weg), (von, bis)
 
 
 def _portal_pfad_normal(pfad):
@@ -4232,6 +4267,10 @@ def telefon_portal():
         return jsonify({"error": "paket ungueltig"}), 400
     if koerper is not None and (not isinstance(koerper, str) or len(koerper.encode()) > PORTAL_KOERPER_MAX):
         return jsonify({"error": "Anfrage zu gross"}), 413
+    pfad, bereich = _portal_bereich(pfad)
+    if bereich is False:
+        return jsonify({"error": f"Bereich ungueltig (je Stueck hoechstens {PORTAL_BINAER_TEIL // 1024} KB, "
+                                 f"je Datei hoechstens {PORTAL_BINAER_MAX // (1024 * 1024)} MB)"}), 413
     conn = db.connect()
     try:
         s = conn.execute("SELECT user_id, email, name, seit FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
@@ -4247,17 +4286,40 @@ def telefon_portal():
             "Accept": "application/json", "X-Rosenweg-Telefon": ext}
     if koerper is not None:
         kopf["Content-Type"] = "application/json"
+    if bereich:
+        kopf["Range"] = f"bytes={bereich[0]}-{bereich[1]}"
+        kopf["Accept"] = "*/*"
+    grenze = PORTAL_BINAER_TEIL if bereich else PORTAL_ANTWORT_MAX
     try:
         r = requests.request(methode, f"{MAIN_API_BASE}{pfad}", headers=kopf,
                              data=koerper.encode() if koerper is not None else None,
-                             timeout=20, allow_redirects=False, stream=True)
+                             timeout=60 if bereich else 20, allow_redirects=False, stream=True)
         try:
-            roh = r.raw.read(PORTAL_ANTWORT_MAX + 1, decode_content=True)
+            roh = r.raw.read(grenze + 1, decode_content=True)
         finally:
             r.close()
     except requests.RequestException as e:
         app.logger.warning("portal %s: Haupt-API nicht erreichbar (%s)", ext, type(e).__name__)
         return jsonify({"error": "Keine Verbindung zum Portal"}), 502
+    if bereich and r.status_code in (200, 206) and "json" not in (r.headers.get("Content-Type") or ""):
+        # Stueck einer Datei: 206 mit Content-Range; 200 = der Server kennt Range nicht
+        # (dann muss die ganze Datei in ein Stueck passen)
+        if len(roh) > grenze:
+            return jsonify({"error": "Antwort zu gross fuer das Telefon", "zu_gross": True}), 502
+        gesamt = len(roh)
+        m = re.match(r"bytes (\d+)-(\d+)/(\d+)", r.headers.get("Content-Range") or "")
+        if r.status_code == 206 and m:
+            gesamt = int(m.group(3))
+        if gesamt > PORTAL_BINAER_MAX:
+            return jsonify({"error": f"Datei zu gross fuer das Telefon (hoechstens {PORTAL_BINAER_MAX // (1024 * 1024)} MB)",
+                            "zu_gross": True}), 413
+        von = int(m.group(1)) if (r.status_code == 206 and m) else 0
+        teil = {"typ": (r.headers.get("Content-Type") or "application/octet-stream").split(";")[0].strip(),
+                "daten": base64.b64encode(roh).decode(), "von": von, "bis": von + len(roh) - 1,
+                "gesamt": gesamt, "etag": r.headers.get("ETag") or "",
+                "name": r.headers.get("Content-Disposition") or ""}
+        return jsonify({"status": r.status_code, "json": json.dumps({"binaer": teil}, separators=(",", ":")),
+                        "sitzung": _portal_sitzung_marke(ext, s)})
     if len(roh) > PORTAL_ANTWORT_MAX:
         return jsonify({"error": "Antwort zu gross fuer das Telefon"}), 502
     if methode != "GET" or r.status_code >= 400:

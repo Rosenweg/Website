@@ -5,7 +5,7 @@
 //
 //   Löschen       Datei wandert nach <oberster Ordner>/.papierkorb/<id>-<name>
 //                 (gleicher Ordner der obersten Ebene = gleiche Fileserver-
-//                 Rechte wie vorher; walkDocs zeigt Punkt-Ordner nicht an,
+//                 Rechte wie vorher; das Verzeichnis (lib/unterlagen.js) zeigt Punkt-Ordner nicht an,
 //                 safeDocPath sperrt .papierkorb für die normalen Routen)
 //   Ersetzen      die überschriebene Fassung landet ebenso im Papierkorb
 //   Wiederherst.  zurück an den alten Ort; gibt es dort inzwischen eine Datei,
@@ -141,4 +141,25 @@ async function aufraeumen({ pool, fs, root }, tage = TAGE) {
   return weg;
 }
 
-module.exports = { ORDNER, TAGE, imPapierkorb, ablageFuer, ersatzName, hineinlegen, liste, wiederherstellen, aufraeumen, bereit };
+/**
+ * Fruehere Fassungen einer Datei (E14): beim Ersetzen in den Papierkorb
+ * gelegt, 30 Tage. Neueste zuerst.
+ */
+async function fassungen({ pool }, pfad, tage = TAGE) {
+  await bereit(pool);
+  const { rows } = await pool.query(
+    `SELECT id, pfad, grund, groesse, geloescht_von, geloescht_name, geloescht_am,
+            geloescht_am + make_interval(days => $2::int) AS endgueltig_am
+       FROM dokumente_papierkorb WHERE pfad = $1 AND grund = 'ersetzt' AND ablage <> ''
+      ORDER BY geloescht_am DESC, id DESC LIMIT 100`, [pfad, tage]);
+  return rows;
+}
+
+/** Ein Eintrag (mit Ablageort) oder null. */
+async function eintrag({ pool }, id) {
+  await bereit(pool);
+  const { rows } = await pool.query("SELECT * FROM dokumente_papierkorb WHERE id = $1 AND ablage <> ''", [id]);
+  return rows[0] || null;
+}
+
+module.exports = { ORDNER, TAGE, imPapierkorb, ablageFuer, ersatzName, hineinlegen, liste, wiederherstellen, aufraeumen, bereit, fassungen, eintrag };

@@ -322,6 +322,7 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `/api/email-archive*` | Ausschuss (jede STWEG) oder T/P; Löschen nach 4-Augen-Prinzip, höchstens ein offener Antrag je Mail |
 | `GET /api/documents`, `GET /api/documents/:path` | angemeldet; `allgemein`, `scans`, eigene STWEG, `projekte` für Eigentümer; gesperrte Unterordner nur T/P |
 | `POST/PUT/DELETE /api/documents…`, `POST /api/documents/move` | Ausschuss (eigene STWEG, `allgemein`, `projekte`) oder T/P |
+| `GET /api/documents-ordner?path=`, `-suche?q=`, `-neu?seit=&ordner=`, `-rechte`, `-kennung/:id`, `-fassungen?path=`, `-fassungen/:id/datei` | angemeldet, Rechte wie `GET /api/documents` (Pfad für Pfad); nur lesend. Für die App Rosenweg Unterlagen: eine Ordnerebene mit Datum, Typ, ETag, Kennung und `schreiben` je Eintrag; Suche nach Name und Pfad; neue Dateien seit einer Zeit (per mtime, also auch Samba/Nextcloud); wo man schreiben darf; stabile Kennung → Datei; frühere Fassungen (beim Ersetzen, 30 Tage). `alles=1` (auch Druckertreiber, `.DS_Store`, `desktop.ini`) nur T/P. Code: `api/lib/unterlagen.js` |
 | `GET /api/briefe`, `POST /api/briefe/upload` | Ausschuss oder T/P |
 
 ### 4.8 Energie

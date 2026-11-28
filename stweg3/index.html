@@ -721,7 +721,7 @@
                         });
                         if (!prot.length) { box.innerHTML = ''; return; }
                         const dated = prot.filter(f => dateOf(f)).sort((a, b) => dateOf(b) - dateOf(a));
-                        const f = dated[0] || prot.sort((a, b) => (b.modified || 0) - (a.modified || 0))[0];
+                        const f = dated[0] || prot.sort((a, b) => String(b.geaendert || '').localeCompare(String(a.geaendert || '')))[0];
                         const d = dateOf(f);
                         const dateStr = d ? new Date(d).toLocaleDateString('de-CH', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
                         const title = dateStr ? 'Sitzung vom ' + esc(dateStr) : esc(f.path.split('/').pop());
@@ -759,12 +759,13 @@
             png: '&#128247;', jpg: '&#128247;', jpeg: '&#128247;', txt: '&#128196;',
         };
 
-        fetch('/api/documents', { headers: { Authorization: 'Bearer ' + token } })
+        // Die API liefert das Aenderungsdatum als geaendert (ISO); ?path= laedt nur stweg3
+        fetch('/api/documents?path=stweg3', { headers: { Authorization: 'Bearer ' + token } })
             .then(r => r.json())
             .then(files => {
                 const stweg3 = (files || [])
-                    .filter(f => f.path.startsWith('stweg3/') && !f.path.includes('/.') && !f.path.endsWith('/'))
-                    .sort((a, b) => (b.modified || 0) - (a.modified || 0))
+                    .filter(f => f.path.startsWith('stweg3/') && !f.path.includes('/.') && !f.path.endsWith('/') && !f.ordner)
+                    .sort((a, b) => String(b.geaendert || '').localeCompare(String(a.geaendert || '')))
                     .slice(0, 8);
 
                 const el = document.getElementById('docs-widget');

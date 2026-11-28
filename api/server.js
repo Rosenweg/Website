@@ -34,6 +34,7 @@ const adminProtokoll = require('./lib/admin-protokoll');
 const ispZugang = require('./lib/isp-zugang');
 const { taeglichUm } = require('./lib/tageszeit');
 const papierkorb = require('./lib/papierkorb');
+const unterlagen = require('./lib/unterlagen');
 const verteilerVerwaltung = require('./lib/verteiler-verwaltung');
 
 const app = express();
@@ -762,6 +763,20 @@ function canWriteDocPath(filePath, groups, ctx = {}) {
   return nr !== null && stwegs.has(nr);
 }
 
+// Darf das Konto irgendwo in der Ablage schreiben? (Entscheid E2 28.11.2026:
+// Farbe der App „Rosenweg Unterlagen“ blau nur dann.) Gleiche Regel wie
+// canWriteDocPath: Technik/Praesident ueberall, Ausschuss in allgemein und
+// seiner STWEG. Die Verwaltung bleibt in Unterlagen rot (Entscheid Stefan
+// 28.11.2026): ihr Schreibrecht in Projektordnern ueber „projekte“ zaehlt hier
+// nicht (projektePermWert bleibt fuer den Aufruf in /api/auth/me).
+// /api/auth/me liefert daraus den abgeleiteten Schluessel dokumente: 'write'
+// (sonst fehlt er; Lesen haengt am Pfad, nicht an einem Seitenrecht – L6).
+function docSchreibtIrgendwo(groups, projektePermWert) {
+  const g = groups || [];
+  if (isTechnik(g) || isPraesident(g)) return true;
+  return g.some(x => String(x).toLowerCase().endsWith('-ausschuss'));
+}
+
 // getAusschussStwegs, isAusschussForAny -> lib/groups.js
 
 /** Middleware: require user to have access to the :stweg param (Technik=all, Ausschuss/Bewohner=own STWEG, Verwaltung=verwaltete STWEG) */
@@ -998,6 +1013,15 @@ app.post('/api/ki-search', authMiddleware, async (req, res) => {
     for (const v of verwaltungen) hits.push({ typ: 'Verwaltung', titel: v.firma_name, sub: (v.stweg ? 'STWEG ' + v.stweg : 'allgemein') + (v.email ? ' · ' + v.email : ''), url: '/verwaltung-admin.html', meta: v });
     for (const w of wohnungen) hits.push({ typ: 'Wohnung', titel: w.bezeichnung + ' (STWEG ' + w.stweg + ')', sub: [w.eigentuemer_name && 'Eig: ' + w.eigentuemer_name, w.mieter_name && 'Mt: ' + w.mieter_name].filter(Boolean).join(' · '), url: '/objektverwaltung.html', meta: w });
     for (const p of projekte) hits.push({ typ: 'Projekt', titel: p.titel, sub: p.status, url: '/projekte.html?slug=' + encodeURIComponent(p.slug), meta: p });
+    // Dokumente der Ablage nach Name und Pfad (L13; dieselbe Suche wie
+    // /api/documents-suche und die App Rosenweg Unterlagen, kein Volltext),
+    // nur was die Person lesen darf
+    try {
+      const dr = unterlagen.suchen(await docVerzeichnis.holen(), q, await docDarf(req), { grenze: 5 });
+      for (const t of dr.treffer) {
+        hits.push({ typ: t.art === 'ordner' ? 'Ordner' : 'Dokument', titel: t.name, sub: t.ordner || 'Ablage', url: '/#dokumente', meta: { pfad: t.pfad, geaendert: t.geaendert } });
+      }
+    } catch (e) { console.warn('[ki-search] Dokumente:', e.message); }
 
     // Ohne Treffer: direkt zurück
     if (hits.length === 0) return res.json({ q, hits: [], answer: 'Keine Treffer für „' + q + '".' });
@@ -1145,6 +1169,9 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
   if (meters.length > 0 && !permissions['energie-monitor']) {
     permissions['energie-monitor'] = 'read';
   }
+  // Abgeleitet (L6): dokumente = write, wenn das Konto irgendwo in der Ablage
+  // schreiben darf (docSchreibtIrgendwo). Kein Seitenrecht in MANAGED_PAGES.
+  if (docSchreibtIrgendwo(groups, permissions['projekte'])) permissions['dokumente'] = 'write';
 
   // Rechte fuer die Energie-App (L4): dieselben Pruefungen wie die Routen
   // (routes/energie-lesen.js energieRechte). Abgeleitete Schluessel, nicht in der
@@ -11990,7 +12017,6 @@ app.get('/api/benutzer/:login/einstellungen', stationsRouter.stationAuth, async 
 // ═══════════════════════════════════════════════════════════════════
 
 const DOCS_PATH = process.env.DOCS_PATH || '/documents';
-const IGNORED_FILES = new Set(['README.md', 'LICENSE', '.gitignore', '.gitkeep', '.gitattributes']);
 
 /** Resolve user path safely within DOCS_PATH, returns null if path escapes */
 function safeDocPath(userPath) {
@@ -12001,42 +12027,53 @@ function safeDocPath(userPath) {
   return resolved;
 }
 
-/** Recursively walk directory and collect files.
- *  For empty subdirectories, emit a .gitkeep entry so the frontend can register them. */
-async function walkDocs(dir, prefix = '') {
-  const results = [];
-  let entries;
-  try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return results; }
-  for (const entry of entries) {
-    if (entry.name.startsWith('.')) continue; // skip .recycle, .git-backup, etc.
-    const relPath = prefix ? `${prefix}/${entry.name}` : entry.name;
-    const fullPath = pathModule.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      const subResults = await walkDocs(fullPath, relPath);
-      if (subResults.length === 0) {
-        // Empty directory: emit a .gitkeep so frontend registers the subfolder
-        results.push({ path: `${relPath}/.gitkeep`, size: 0, url: `/api/documents/${relPath}/.gitkeep` });
-      } else {
-        results.push(...subResults);
-      }
-    } else {
-      if (IGNORED_FILES.has(entry.name)) continue;
-      try {
-        const stat = await fs.stat(fullPath);
-        results.push({ path: relPath, size: stat.size, url: `/api/documents/${relPath}` });
-      } catch { /* skip unreadable files */ }
-    }
-  }
-  return results;
+// Verzeichnis der Ablage (lib/unterlagen.js): hoechstens alle 30 s neu
+// gelesen; jede Schreib-Route leert es (docVerzeichnis.leeren()).
+const docVerzeichnis = unterlagen.verzeichnisSpeicher(fs, DOCS_PATH);
+
+// Rechte einer Anfrage als Funktionen fuer lib/unterlagen.js
+async function docDarf(req) {
+  const groups = req.user?.groups || [];
+  const ctx = await docRechteKontext(req);
+  return {
+    lesen: (p) => isDocPathAllowed(p, groups, ctx),
+    schreiben: (p) => canWriteDocPath(p, groups, ctx),
+    technik: isTechnik(groups) || isPraesident(groups),
+  };
+}
+function docPfadOk(p) {
+  return typeof p === 'string' && !p.includes('..') && !p.startsWith('/') && !/[%\\]/.test(p) && !/\0/.test(p);
+}
+function docPfadAusAnfrage(wert) {
+  return String(wert || '').replace(/^\/+|\/+$/g, '');
 }
 
 // GET /api/documents - List available documents (filtered by user's STWEGs)
+// Flach wie bisher (Web, MCP): {path, size, url} und neu geaendert (ISO),
+// typ; leere Ordner als <ordner>/.gitkeep. ?path=<ordner> nur darunter (L2).
 app.get('/api/documents', authMiddleware, async (req, res) => {
   try {
-    const allDocs = await walkDocs(DOCS_PATH);
+    const verz = await docVerzeichnis.holen();
     const ctx = await docRechteKontext(req);
     const groups = req.user?.groups || [];
-    const docs = allDocs.filter(f => isDocPathAllowed(f.path, groups, ctx));
+    const unter = docPfadAusAnfrage(req.query.path);
+    if (unter && !docPfadOk(unter)) return res.status(400).json({ error: 'Ungültiger Pfad' });
+    const vorne = unter ? unter + '/' : '';
+    const docs = [];
+    for (const d of verz.dateien) {
+      if (vorne && !d.pfad.startsWith(vorne)) continue;
+      if (!isDocPathAllowed(d.pfad, groups, ctx)) continue;
+      docs.push({ path: d.pfad, size: d.groesse, url: `/api/documents/${d.pfad}`, geaendert: new Date(d.geaendert).toISOString(), typ: unterlagen.dateiTyp(d.pfad) });
+    }
+    // leere Ordner (ohne Dateien und ohne Unterordner) wie bisher als <ordner>/.gitkeep
+    const belegt = new Set();
+    for (const d of verz.dateien) { let p = d.pfad; while (p.includes('/')) { p = p.slice(0, p.lastIndexOf('/')); belegt.add(p); } }
+    for (const o of verz.ordner.keys()) { if (o.includes('/')) belegt.add(o.slice(0, o.lastIndexOf('/'))); }
+    for (const o of verz.ordner.keys()) {
+      if (belegt.has(o) || (vorne && !o.startsWith(vorne))) continue;
+      const pfad = `${o}/.gitkeep`;
+      if (isDocPathAllowed(pfad, groups, ctx)) docs.push({ path: pfad, size: 0, url: `/api/documents/${pfad}`, ordner: true });
+    }
     res.json(docs);
   } catch (err) {
     console.error('Documents list error:', err.message);
@@ -12044,15 +12081,245 @@ app.get('/api/documents', authMiddleware, async (req, res) => {
   }
 });
 
+// ─── Unterlagen (App „Rosenweg Unterlagen“, lib/unterlagen.js) ───────
+// Alle nur lesend; Rechte wie GET /api/documents. alles=1 (auch
+// Druckertreiber, .DS_Store, desktop.ini) gilt nur fuer Technik/Praesident.
+
+// GET /api/documents-ordner?path=<ordner> — eine Ebene (L1, L2, L3, L5)
+app.get('/api/documents-ordner', authMiddleware, async (req, res) => {
+  try {
+    const pfad = docPfadAusAnfrage(req.query.path);
+    if (pfad && !docPfadOk(pfad)) return res.status(400).json({ error: 'Ungültiger Pfad' });
+    const darf = await docDarf(req);
+    const alles = darf.technik && req.query.alles === '1';
+    const verz = await docVerzeichnis.holen();
+    const inhalt = unterlagen.ordnerInhalt(verz, pfad, darf, { alles });
+    // Leer und (nicht vorhanden oder nicht lesbar): immer 404, damit sich
+    // fremde Ordnernamen nicht erraten lassen
+    if (pfad && !inhalt.ordner.length && !inhalt.dateien.length && (!verz.ordner.has(pfad) || !darf.lesen(`${pfad}/x`))) {
+      return res.status(404).json({ error: 'Ordner nicht gefunden' });
+    }
+    let ids = new Map();
+    try { ids = await unterlagen.kennungenFuer(pool, inhalt.dateien.map(d => d.pfad)); } catch (e) { console.warn('[DOCS] Kennungen:', e.message); }
+    const nc = process.env.NEXTCLOUD_URL_PUBLIC || unterlagen.NEXTCLOUD_STANDARD;
+    const projekt = (p) => { const t = p.split('/'); return t[0] === 'projekte' && t[1] ? t[1] : null; };
+    for (const o of inhalt.ordner) {
+      if (!pfad && unterlagen.BEREICHE[o.name]) o.titel = unterlagen.BEREICHE[o.name];
+      if (o.schreiben) o.nextcloud = unterlagen.nextcloudLink(o.pfad, nc, { ordner: true });
+      o.projekt = projekt(o.pfad);
+    }
+    for (const d of inhalt.dateien) {
+      d.id = ids.get(d.pfad) || null;
+      d.schreiben = darf.schreiben(d.pfad);
+      if (d.schreiben) d.nextcloud = unterlagen.nextcloudLink(d.pfad, nc);
+      d.projekt = projekt(d.pfad);
+    }
+    inhalt.projekt = pfad ? projekt(pfad + '/x') : null;
+    if (inhalt.darf.schreiben) inhalt.nextcloud = unterlagen.nextcloudLink(pfad, nc, { ordner: true });
+    if (inhalt.darf.schreiben && /^(stweg[1-8]|meg)$/.test(pfad)) inhalt.vorlage = unterlagen.NUMMERN_VORLAGE;
+    inhalt.stand = new Date(verz.stand).toISOString();
+    res.json(inhalt);
+  } catch (err) {
+    console.error('[DOCS] Ordner:', err.message);
+    res.status(500).json({ error: 'Ordner konnte nicht geladen werden' });
+  }
+});
+
+// GET /api/documents-suche?q=…[&path=<ordner>] — Name und Pfad (L4, E11)
+app.get('/api/documents-suche', authMiddleware, async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim().slice(0, 200);
+    const pfad = docPfadAusAnfrage(req.query.path);
+    if (pfad && !docPfadOk(pfad)) return res.status(400).json({ error: 'Ungültiger Pfad' });
+    const darf = await docDarf(req);
+    const verz = await docVerzeichnis.holen();
+    const r = unterlagen.suchen(verz, q, darf, { pfad, alles: darf.technik && req.query.alles === '1' });
+    let ids = new Map();
+    try { ids = await unterlagen.kennungenFuer(pool, r.treffer.filter(t => t.art === 'datei').map(t => t.pfad)); } catch (e) { console.warn('[DOCS] Kennungen:', e.message); }
+    for (const t of r.treffer) if (t.art === 'datei') t.id = ids.get(t.pfad) || null;
+    res.json({ q, ...r, art: 'name' });
+  } catch (err) {
+    console.error('[DOCS] Suche:', err.message);
+    res.status(500).json({ error: 'Suche fehlgeschlagen' });
+  }
+});
+
+// GET /api/documents-neu?seit=<ISO|ms>[&ordner=a&ordner=b | ordner=a,b] — neue
+// und geaenderte Dateien (L1, L11). Faengt per mtime auch Samba/Nextcloud.
+// Ohne seit: nur der Stand (fuer den ersten, stillen Abgleich).
+app.get('/api/documents-neu', authMiddleware, async (req, res) => {
+  try {
+    const seit = unterlagen.seitLesen(req.query.seit);
+    const roh = [].concat(req.query.ordner || []).flatMap(o => String(o).split(','));
+    const ordner = roh.map(docPfadAusAnfrage).filter(Boolean).slice(0, 50);
+    if (ordner.some(o => !docPfadOk(o))) return res.status(400).json({ error: 'Ungültiger Pfad' });
+    const verz = await docVerzeichnis.holen();
+    if (seit === null) return res.json({ dateien: [], mehr: false, stand: new Date(verz.stand).toISOString() });
+    const darf = await docDarf(req);
+    const r = unterlagen.neuSeit(verz, seit, darf, { ordner });
+    let ids = new Map();
+    try { ids = await unterlagen.kennungenFuer(pool, r.dateien.map(d => d.pfad)); } catch (e) { console.warn('[DOCS] Kennungen:', e.message); }
+    for (const d of r.dateien) d.id = ids.get(d.pfad) || null;
+    res.json(r);
+  } catch (err) {
+    console.error('[DOCS] Neu:', err.message);
+    res.status(500).json({ error: 'Neue Dokumente konnten nicht geladen werden' });
+  }
+});
+
+// GET /api/documents-rechte — wo darf ich schreiben (L3)? Fuer Menues und
+// Ziel-Auswahl; die Schreib-Routen pruefen trotzdem jeden Pfad selbst.
+app.get('/api/documents-rechte', authMiddleware, async (req, res) => {
+  try {
+    const groups = req.user?.groups || [];
+    const ctx = await docRechteKontext(req);
+    const technik = isTechnik(groups) || isPraesident(groups);
+    const ziele = [];
+    if (technik) {
+      ziele.push('');
+    } else {
+      if (canWriteDocPath('allgemein/x', groups, ctx)) ziele.push('allgemein');
+      for (let n = 1; n <= 8; n++) {
+        const f = stwegFolderName(n);
+        if (canWriteDocPath(`${f}/x`, groups, ctx)) ziele.push(f);
+      }
+      for (const slug of (ctx.projekte ? ctx.projekte.keys() : [])) {
+        if (canWriteDocPath(`projekte/${slug}/x`, groups, ctx)) ziele.push(`projekte/${slug}`);
+      }
+    }
+    res.json({
+      schreiben: technik || ziele.length > 0,
+      ziele,                       // '' = ueberall (Technik/Praesident)
+      technik,
+      papierkorb_tage: papierkorb.TAGE,
+      namensschema: unterlagen.NAMENSSCHEMA,
+      vorlage: unterlagen.NUMMERN_VORLAGE,
+      ausgeblendet: unterlagen.AUSGEBLENDET_ORDNER,
+      endungen: [...DOC_UPLOAD_EXTS],
+    });
+  } catch (err) {
+    console.error('[DOCS] Rechte:', err.message);
+    res.status(500).json({ error: 'Rechte konnten nicht geladen werden' });
+  }
+});
+
+// GET /api/documents-kennung/:id — stabile Kennung -> Datei (L5, E9).
+// 404, wenn unbekannt, weg oder nicht lesbar (verraet keinen Pfad).
+app.get('/api/documents-kennung/:id', authMiddleware, async (req, res) => {
+  try {
+    const pfad = await unterlagen.pfadZuKennung(pool, req.params.id);
+    const darf = pfad ? await docDarf(req) : null;
+    if (!pfad || !darf.lesen(pfad)) return res.status(404).json({ error: 'Dokument nicht gefunden' });
+    const voll = safeDocPath(pfad);
+    const st = voll ? await fs.stat(voll).catch(() => null) : null;
+    if (!st || !st.isFile()) return res.status(404).json({ error: 'Dokument nicht gefunden', weg: true });
+    res.json({ id: req.params.id, ...unterlagen.dateiEintrag({ pfad, groesse: st.size, geaendert: st.mtimeMs }), schreiben: darf.schreiben(pfad) });
+  } catch (err) {
+    console.error('[DOCS] Kennung:', err.message);
+    res.status(500).json({ error: 'Dokument konnte nicht gefunden werden' });
+  }
+});
+
+// GET /api/documents-fassungen?path=<datei> — fruehere Fassungen (E14): beim
+// Ersetzen in den Papierkorb gelegt, 30 Tage. Sehen darf sie, wer die Datei
+// lesen darf; zurueckholen (documents-papierkorb/:id/wiederherstellen) nur,
+// wer dort schreiben darf.
+app.get('/api/documents-fassungen', authMiddleware, async (req, res) => {
+  try {
+    const pfad = docPfadAusAnfrage(req.query.path);
+    if (!pfad || !docPfadOk(pfad)) return res.status(400).json({ error: 'Ungültiger Pfad' });
+    const darf = await docDarf(req);
+    if (!darf.lesen(pfad)) return res.status(403).json({ error: 'Kein Zugriff auf dieses Dokument' });
+    const liste = await papierkorb.fassungen(papierkorbDeps(), pfad);
+    res.json({
+      fassungen: liste.map(e => ({ id: e.id, groesse: e.groesse, ersetzt_am: e.geloescht_am, ersetzt_von: e.geloescht_name || null, endgueltig_am: e.endgueltig_am })),
+      wiederherstellen: darf.schreiben(pfad),
+      tage: papierkorb.TAGE,
+    });
+  } catch (err) {
+    console.error('[DOCS] Fassungen:', err.message);
+    res.status(500).json({ error: 'Frühere Fassungen konnten nicht geladen werden' });
+  }
+});
+
+// GET /api/documents-fassungen/:id/datei — eine fruehere Fassung herunterladen
+app.get('/api/documents-fassungen/:id/datei', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige ID' });
+    const e = await papierkorb.eintrag(papierkorbDeps(), id);
+    const darf = e ? await docDarf(req) : null;
+    if (!e || e.grund !== 'ersetzt' || !darf.lesen(e.pfad)) return res.status(404).json({ error: 'Fassung nicht gefunden' });
+    const voll = pathModule.join(DOCS_PATH, e.ablage);
+    const st = await fs.stat(voll);
+    const name = e.pfad.split('/').pop().replace(/["\r\n\\]/g, '_');
+    res.setHeader('Content-Type', DOC_INHALTSTYPEN[unterlagen.endung(name)] || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${name.replace(/[^\x20-\x7E]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(name)}`);
+    res.setHeader('Content-Length', st.size);
+    const strom = fsSync.createReadStream(voll);
+    strom.on('error', (er) => { if (!res.headersSent) res.status(500).json({ error: 'Fassung konnte nicht geladen werden' }); else res.destroy(); console.error('[DOCS] Fassung:', er.message); });
+    strom.pipe(res);
+  } catch (err) {
+    if (err.code === 'ENOENT') return res.status(404).json({ error: 'Fassung nicht gefunden' });
+    console.error('[DOCS] Fassung:', err.message);
+    res.status(500).json({ error: 'Fassung konnte nicht geladen werden' });
+  }
+});
+
+// Content-Type je Endung (Download, fruehere Fassungen)
+const DOC_INHALTSTYPEN = {
+  pdf: 'application/pdf',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  xls: 'application/vnd.ms-excel',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  doc: 'application/msword',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  svg: 'image/svg+xml',
+  txt: 'text/plain',
+  csv: 'text/csv',
+  eml: 'message/rfc822',
+  webp: 'image/webp',
+  odt: 'application/vnd.oasis.opendocument.text',
+  ods: 'application/vnd.oasis.opendocument.spreadsheet',
+  zip: 'application/zip',
+};
+
+// Erlaubte Endungen beim Hochladen und Umbenennen
+const DOC_UPLOAD_EXTS = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'txt', 'csv', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp', 'dotx', 'zip', 'tiff', 'tif', 'bmp']);
+
 // POST /api/documents-preview - Convert Office document to PDF for viewing
 const DOC_CONVERTER_URL = process.env.DOC_CONVERTER_URL || 'http://doc-converter:3000';
 const OFFICE_EXTS = new Set(['docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp', 'dotx']);
 const previewCache = new Map(); // path → { pdf: Buffer, expires: number }
 const PREVIEW_CACHE_TTL = 30 * 60 * 1000; // 30 min
 
-app.post('/api/documents-preview', authMiddleware, async (req, res) => {
+// Vorschau-PDF senden, auf Wunsch nur einen Bereich (Range): die geteilten
+// Telefone holen es ueber die Anlage stueckweise (portal_bereich).
+function vorschauSenden(req, res, pdf) {
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'inline; filename="preview.pdf"');
+  res.setHeader('Accept-Ranges', 'bytes');
+  const b = unterlagen.bereichLesen(req.headers.range, pdf.length);
+  if (b === 'ungueltig') {
+    res.setHeader('Content-Range', `bytes */${pdf.length}`);
+    return res.status(416).json({ error: 'Bereich ungültig' });
+  }
+  if (!b) return res.send(pdf);
+  res.status(206).setHeader('Content-Range', `bytes ${b.von}-${b.bis}/${pdf.length}`);
+  return res.send(pdf.subarray(b.von, b.bis + 1));
+}
+
+// POST mit {path} (Web) oder GET ?path= (App: Herunterladen mit Fortschritt,
+// stueckweise ueber den Portal-Weg der geteilten Telefone)
+app.post('/api/documents-preview', authMiddleware, (req, res) => dokumentVorschau(req, res, req.body?.path));
+app.get('/api/documents-preview', authMiddleware, (req, res) => dokumentVorschau(req, res, typeof req.query.path === 'string' ? req.query.path : ''));
+
+async function dokumentVorschau(req, res, filePath) {
   try {
-    const filePath = req.body?.path;
     if (!filePath || filePath.includes('..') || filePath.startsWith('/') || /[%\\]/.test(filePath) || /\0/.test(filePath)) {
       return res.status(400).json({ error: 'Ungültiger Pfad' });
     }
@@ -12067,19 +12334,19 @@ app.post('/api/documents-preview', authMiddleware, async (req, res) => {
       return res.status(403).json({ error: 'Kein Zugriff auf dieses Dokument' });
     }
 
-    // Check cache
+    // Zwischenspeicher je Fassung (L12): Pfad + Groesse + Aenderungszeit, damit
+    // ein Ersetzen ueber Samba/Nextcloud nicht 30 min die alte Vorschau zeigt
     const now = Date.now();
-    const cached = previewCache.get(filePath);
+    const vollVorschau = safeDocPath(filePath);
+    if (!vollVorschau) return res.status(400).json({ error: 'Ungültiger Pfad' });
+    const stVorschau = await fs.stat(vollVorschau);
+    const cacheKey = `${filePath}|${stVorschau.size}|${Math.floor(stVorschau.mtimeMs)}`;
+    const cached = previewCache.get(cacheKey);
     if (cached && cached.expires > now) {
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `inline; filename="preview.pdf"`);
-      return res.send(cached.pdf);
+      return vorschauSenden(req, res, cached.pdf);
     }
 
-    // Read from local filesystem
-    const fullPath = safeDocPath(filePath);
-    if (!fullPath) return res.status(400).json({ error: 'Ungültiger Pfad' });
-    const docBuffer = await fs.readFile(fullPath);
+    const docBuffer = await fs.readFile(vollVorschau);
 
     // Send to Gotenberg for conversion
     const fileName = filePath.split('/').pop();
@@ -12102,10 +12369,9 @@ app.post('/api/documents-preview', authMiddleware, async (req, res) => {
     // Cache the result (skip if too large — prevent OOM)
     if (pdfBuffer.length > 10 * 1024 * 1024) {
       // Don't cache files > 10MB, just serve directly
-      res.setHeader('Content-Type', 'application/pdf');
-      return res.send(pdfBuffer);
+      return vorschauSenden(req, res, pdfBuffer);
     }
-    previewCache.set(filePath, { pdf: pdfBuffer, expires: now + PREVIEW_CACHE_TTL });
+    previewCache.set(cacheKey, { pdf: pdfBuffer, expires: now + PREVIEW_CACHE_TTL });
     if (previewCache.size > 50) {
       for (const [k, v] of previewCache) {
         if (v.expires < now) previewCache.delete(k);
@@ -12119,15 +12385,13 @@ app.post('/api/documents-preview', authMiddleware, async (req, res) => {
       }
     }
 
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="preview.pdf"`);
-    res.send(pdfBuffer);
+    vorschauSenden(req, res, pdfBuffer);
   } catch (err) {
     if (err.code === 'ENOENT') return res.status(404).json({ error: 'Dokument nicht gefunden' });
     console.error('Document preview error:', err.message);
     res.status(500).json({ error: 'Vorschau konnte nicht erstellt werden' });
   }
-});
+}
 
 // GET /api/documents/:path(*) - Download a document
 app.get('/api/documents/:path(*)', authMiddleware, async (req, res) => {
@@ -12150,31 +12414,32 @@ app.get('/api/documents/:path(*)', authMiddleware, async (req, res) => {
     // wuerde asynchron mit EISDIR scheitern und ohne Handler den Prozess beenden.
     if (!stat.isFile()) return res.status(404).json({ error: 'Dokument nicht gefunden' });
     const ext = filePath.split('.').pop().toLowerCase();
-    const contentTypes = {
-      pdf: 'application/pdf',
-      xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      xls: 'application/vnd.ms-excel',
-      docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      doc: 'application/msword',
-      pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      png: 'image/png',
-      jpg: 'image/jpeg',
-      jpeg: 'image/jpeg',
-      gif: 'image/gif',
-      svg: 'image/svg+xml',
-      txt: 'text/plain',
-      csv: 'text/csv',
-      zip: 'application/zip',
-    };
     const fileName = filePath.split('/').pop();
 
     const safeFileName = fileName.replace(/["\r\n\\]/g, '_');
     const safeAscii = safeFileName.replace(/[^\x20-\x7E]/g, '_');
-    res.setHeader('Content-Type', contentTypes[ext] || 'application/octet-stream');
+    res.setHeader('Content-Type', DOC_INHALTSTYPEN[ext] || 'application/octet-stream');
     res.setHeader('Content-Disposition', `inline; filename="${safeAscii}"; filename*=UTF-8''${encodeURIComponent(safeFileName)}`);
-    res.setHeader('Content-Length', stat.size);
+    // ETag (L9) und Bereiche (Range): grosse PDFs und die geteilten Telefone
+    // (Portal-Weg der Anlage, stueckweise) holen Teile.
+    const etag = unterlagen.etagVon(stat.size, stat.mtimeMs);
+    res.setHeader('ETag', etag);
+    res.setHeader('Accept-Ranges', 'bytes');
+    const bereich = unterlagen.bereichLesen(req.headers.range, stat.size);
+    if (bereich === 'ungueltig') {
+      res.setHeader('Content-Range', `bytes */${stat.size}`);
+      return res.status(416).json({ error: 'Bereich ungültig' });
+    }
+    if (bereich && req.headers['if-range'] && req.headers['if-range'] !== etag) {
+      // Datei hat sich geaendert: ganz statt Teil
+    } else if (bereich) {
+      res.status(206);
+      res.setHeader('Content-Range', `bytes ${bereich.von}-${bereich.bis}/${stat.size}`);
+    }
+    const teil = bereich && res.statusCode === 206 ? bereich : null;
+    res.setHeader('Content-Length', teil ? teil.bis - teil.von + 1 : stat.size);
 
-    const strom = fsSync.createReadStream(fullPath);
+    const strom = fsSync.createReadStream(fullPath, teil ? { start: teil.von, end: teil.bis } : undefined);
     strom.on('error', (e) => {
       console.error('Document stream error:', e.message);
       if (!res.headersSent) res.status(500).json({ error: 'Dokument konnte nicht geladen werden' });
@@ -12224,6 +12489,7 @@ app.post('/api/scan-upload', async (req, res) => {
 
     await fs.mkdir(pathModule.dirname(fullPath), { recursive: true });
     await fs.writeFile(fullPath, req.body);
+    docVerzeichnis.leeren();
 
     console.log(`[SCAN] Uploaded: ${filePath}`);
     res.json({ success: true, path: filePath });
@@ -12241,12 +12507,8 @@ app.post('/api/documents/folder', authMiddleware, canManageDocs, async (req, res
     if (parent.includes('..') || /[%\\]/.test(parent) || /\0/.test(parent)) {
       return res.status(400).json({ error: 'Ungültiger Pfad' });
     }
-    const safeName = name
-      .replace(/ä/gi, 'ae').replace(/ö/gi, 'oe').replace(/ü/gi, 'ue').replace(/ß/g, 'ss')
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-zA-Z0-9._-]/g, '-')
-      .replace(/-+/g, '-').replace(/^-|-$/g, '')
-      .toLowerCase();
+    // Umlaute und Leerzeichen erlaubt (E15); nie ein Punkt-Ordner (.papierkorb)
+    const safeName = unterlagen.ordnernameBereinigen(name);
     if (!safeName) return res.status(400).json({ error: 'Ungültiger Ordnername' });
 
     const folderPath = `${parent}/${safeName}`;
@@ -12259,6 +12521,7 @@ app.post('/api/documents/folder', authMiddleware, canManageDocs, async (req, res
     if (!fullPath) return res.status(400).json({ error: 'Ungültiger Pfad' });
 
     await fs.mkdir(fullPath, { recursive: true });
+    docVerzeichnis.leeren();
     res.json({ success: true, path: folderPath });
   } catch (err) {
     console.error('[DOCS] Create folder error:', err.message);
@@ -12274,16 +12537,12 @@ app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, re
       return res.status(400).json({ error: 'Ungültiger Pfad' });
     }
     const parts = rawPath.split('/');
-    const fileName = parts.pop()
-      .replace(/ä/gi, 'ae').replace(/ö/gi, 'oe').replace(/ü/gi, 'ue').replace(/ß/g, 'ss')
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-zA-Z0-9._-]/g, '-')
-      .replace(/-+/g, '-').replace(/^-|-$/g, '')
-      .toLowerCase();
+    // Lesbare Namen mit Umlauten und Leerzeichen (E15, lib/unterlagen.js);
+    // nur gefaehrliche Zeichen werden ersetzt, die Endung klein.
+    const fileName = unterlagen.dateinameBereinigen(parts.pop()) || '';
 
-    const ALLOWED_UPLOAD_EXTS = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'txt', 'csv', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp', 'dotx', 'zip', 'tiff', 'tif', 'bmp']);
-    const uploadExt = fileName.split('.').pop();
-    if (!uploadExt || !ALLOWED_UPLOAD_EXTS.has(uploadExt)) {
+    const uploadExt = unterlagen.endung(fileName);
+    if (!uploadExt || !DOC_UPLOAD_EXTS.has(uploadExt)) {
       return res.status(400).json({ error: `Dateityp .${uploadExt} nicht erlaubt` });
     }
 
@@ -12304,6 +12563,15 @@ app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, re
       const da = await fs.stat(fullPath).then(() => true, () => false);
       if (da) return res.status(412).json({ error: 'Datei mit diesem Namen gibt es schon', path: filePath, vorhanden: true });
     }
+    // L9: „If-Match: <etag>“ beim Ersetzen – hat inzwischen jemand anders die
+    // Datei geaendert (auch ueber Samba/Nextcloud), 412 statt still ueberschreiben.
+    const wennGleich = String(req.headers['if-match'] || '').trim();
+    if (wennGleich && wennGleich !== '*') {
+      const st = await fs.stat(fullPath).catch(() => null);
+      if (!st || unterlagen.etagVon(st.size, st.mtimeMs) !== wennGleich) {
+        return res.status(412).json({ error: 'Die Datei wurde inzwischen geändert. Bitte neu laden und nochmals versuchen.', path: filePath, geaendert: true });
+      }
+    }
 
     // Überschreiben: die bisherige Fassung kommt in den Papierkorb (30 Tage zurückholbar)
     let ersetzt = null;
@@ -12318,7 +12586,10 @@ app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, re
     await fs.writeFile(fullPath, req.body);
 
     previewCache.delete(filePath);
-    res.json({ success: true, path: filePath, ersetzt: !!ersetzt });
+    docVerzeichnis.leeren();
+    let kennung = null;
+    try { kennung = (await unterlagen.kennungenFuer(pool, [filePath])).get(filePath) || null; } catch (e) { console.warn('[DOCS] Kennung:', e.message); }
+    res.json({ success: true, path: filePath, ersetzt: !!ersetzt, id: kennung, name: fileName });
   } catch (err) {
     console.error('Document upload error:', err.message);
     res.status(500).json({ error: 'Dokument konnte nicht hochgeladen werden' });
@@ -12346,6 +12617,7 @@ app.delete('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req,
     await adminProtokoll.eintragen(pool, null, req, { bereich: 'dokumente', aktion: 'geloescht', ziel: filePath, detail: `Papierkorb #${e.id}` })
       .catch(er => console.warn('[DOCS] Protokoll:', er.message));
     previewCache.delete(filePath);
+    docVerzeichnis.leeren();
     res.json({ success: true, papierkorb: true, id: e.id, tage: papierkorb.TAGE });
   } catch (err) {
     if (err.code === 'ENOENT') return res.status(404).json({ error: 'Dokument nicht gefunden' });
@@ -12382,6 +12654,7 @@ app.post('/api/documents-papierkorb/:id/wiederherstellen', authMiddleware, canMa
     await adminProtokoll.eintragen(pool, null, req, { bereich: 'dokumente', aktion: 'wiederhergestellt', ziel: r.pfad, detail: r.umbenannt ? `ursprünglich ${r.eintrag.pfad}` : null })
       .catch(e => console.warn('[DOCS] Protokoll:', e.message));
     previewCache.delete(r.pfad);
+    docVerzeichnis.leeren();
     res.json({ success: true, path: r.pfad, umbenannt: r.umbenannt });
   } catch (err) {
     if (err.code === 'ENOENT') return res.status(404).json({ error: 'Die Datei im Papierkorb fehlt' });
@@ -12419,7 +12692,7 @@ app.post('/api/documents/move', authMiddleware, canManageDocs, async (req, res) 
     // Upload-Liste oder unveraendert, kein Ueberschreiben bestehender Dateien.
     const quelle = await fs.lstat(fromPath);
     if (!quelle.isFile()) return res.status(400).json({ error: 'Nur Dateien können verschoben werden' });
-    const MOVE_EXTS = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'txt', 'csv', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp', 'dotx', 'zip', 'tiff', 'tif', 'bmp']);
+    const MOVE_EXTS = DOC_UPLOAD_EXTS;
     const extVon = (p) => { const n = String(p).split('/').pop(); return n.includes('.') ? n.split('.').pop().toLowerCase() : ''; };
     const zielExt = extVon(to);
     // Gleiche Endung (auch gleiche leere Endung) bleibt erlaubt, sonst liessen
@@ -12433,6 +12706,9 @@ app.post('/api/documents/move', authMiddleware, canManageDocs, async (req, res) 
     await fs.rename(fromPath, toPath);
 
     previewCache.delete(from);
+    docVerzeichnis.leeren();
+    // Kennung und Projekt-Verknuepfungen ziehen mit (L5)
+    await unterlagen.verschoben(pool, from, to).catch(e => console.warn('[DOCS] Kennung nachfuehren:', e.message));
     res.json({ success: true, from, to });
   } catch (err) {
     if (err.code === 'ENOENT') return res.status(404).json({ error: 'Quelldatei nicht gefunden' });
