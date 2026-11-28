@@ -424,7 +424,7 @@ App ──ContentResolver.call("portal_anfrage")──▶ Rosenweg Gerät (Anlag
 Gerät ──POST /api/telefon/portal (Gerätezugang)──▶ PBX-API (CT 220)
      prüft: Sitzung am Telefon, Freigabe paket→Pfad (Config portal_pfade)
 PBX-API ──Bearer <Anlage-Token für genau diese Anfrage>──▶ Haupt-API (CT 128)
-     prüft: Signatur, 60 s, einmal, Methode+Pfad, PAT_GESPERRT, Konto aktiv
+     prüft: Signatur, 60 s, einmal, Methode+Pfad, Sperrliste (api/lib/sperrliste.js), Konto aktiv
 ```
 
 Kein Token verlässt CT 220. Antwort an die App: `{status, json, sitzung}`;

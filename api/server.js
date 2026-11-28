@@ -23,6 +23,7 @@ const { zevAliasAddress, zevGotoTargets, zevDarfRechnungSehen, zevStwegFuerEmpfa
 const reklMelder = require('./lib/reklamation-melder');
 const vollmachtRechte = require('./lib/vollmacht-rechte');
 const vollmachtApp = require('./lib/vollmacht-app');
+const signaturBestaetigung = require('./lib/signaturbestaetigung');
 const vollmachtMail = require('./lib/vollmacht-mail');
 const projekteRechte = require('./lib/projekte-rechte');
 const hwRechteLib = require('./lib/handwerker-rechte');
@@ -1741,6 +1742,35 @@ app.post('/api/change-password', authMiddleware, async (req, res) => {
   res.json({ status: 'ok', message: 'Passwort wurde geändert' });
 });
 
+// Profil-Angaben und Profilbild mit Karte, QR, Handy oder am geteilten Telefon
+// (Entscheid Stefan 28.11.2026, lib/sperrliste.js KARTE_FREI): erlaubt, aber jede
+// Aenderung steht im admin_protokoll (Bereich 'profil') mit Karten- bzw.
+// Geraete-Vermerk. Mit dem Rosenweg-Konto wie bisher ohne Eintrag. Ein Fehler beim
+// Schreiben haelt die Antwort nicht auf. Werte selbst stehen nicht im Protokoll
+// (nur die Feldnamen) — es ist kein Datenarchiv.
+async function profilKartenProtokoll(req, aktion, felder) {
+  const vermerk = kartenAdmin.herkunftVermerk(req);
+  if (!vermerk) return;
+  try {
+    await adminProtokoll.eintragen(pool, null, req, {
+      bereich: 'profil', aktion, ziel: String(req.user?.email || '').toLowerCase(),
+      detail: [felder && `Felder: ${felder}`, vermerk].filter(Boolean).join(' · '),
+    });
+  } catch (e) { console.error('[profil-protokoll]', e.message); }
+}
+
+// Lesen fuer Technik/Praesident: Eintraege mit Karte (Profil, App-QR, Signatur-Bestaetigung).
+const KARTEN_PROTOKOLL_BEREICHE = new Set(['profil', 'apps', 'vollmachten-signatur']);
+app.get('/api/admin-protokoll/:bereich', authMiddleware, async (req, res) => {
+  const bereich = String(req.params.bereich || '');
+  if (!KARTEN_PROTOKOLL_BEREICHE.has(bereich)) return res.status(404).json({ error: 'Unbekannter Bereich' });
+  const g = req.user?.groups || [];
+  if (!isTechnik(g) && !isPraesident(g)) return res.status(403).json({ error: 'Nur Technik/Präsident' });
+  try {
+    res.json({ bereich, eintraege: await adminProtokoll.lesen(pool, bereich, req.query.limit) });
+  } catch (err) { res.status(500).json({ error: 'Protokoll konnte nicht geladen werden' }); }
+});
+
 // Update own profile
 app.put('/api/auth/profile', authMiddleware, async (req, res) => {
   const userId = req.user.user_id || req.user.id;
@@ -1773,6 +1803,8 @@ app.put('/api/auth/profile', authMiddleware, async (req, res) => {
        RETURNING id, email, name, wohnung, stweg, role, phone, strasse, plz, ort`,
       [name, wohnung || null, stweg || null, phone || null, strasse || null, plz || null, ort || null, userId]
     );
+    await profilKartenProtokoll(req, 'angaben-geaendert',
+      Object.keys(req.body || {}).filter(f => ['name', 'wohnung', 'stweg', 'phone', 'strasse', 'plz', 'ort'].includes(f)).join(', '));
     res.json({ user: result.rows[0] });
   } catch (err) {
     console.error('Profile update error:', err);
@@ -2690,6 +2722,7 @@ app.put('/api/auth/avatar', authMiddleware, async (req, res) => {
       }
     }
 
+    await profilKartenProtokoll(req, 'profilbild-geaendert', `${avatarTreffer[1]}, ${Math.round(avatar.length / 1024)} KB`);
     res.json({ success: true, avatar_url: avatar });
   } catch (err) {
     console.error('Avatar upload error:', err);
@@ -30323,37 +30356,124 @@ function vmSignaturIp(req) {
   }
   return (req.socket?.remoteAddress || req.ip || '').replace(/^::ffff:/i, '') || null;
 }
-// R1 (Entscheid Stefan 28.11.2026): Signieren nur mit frischer Anmeldung
-// (lib/stufen.js signierenErlaubt) — nie per persoenlichem Zugangstoken (PAT)
-// bzw. MCP, nie mit Karte/QR/Anlage. D1: nur Eigentuemer/Wohnungs-Verwalter
-// der Wohnung bzw. STWEG der Vollmacht.
+// Gemeinsame Vorpruefung fuer sign-bestaetigung und sign-digital: Entwurf, eigene
+// Geber-Zeile noch offen, Objekt passt (D1). -> { v, my } | { status, body }
+async function vmSignVorpruefen(req, id) {
+  const existing = await pool.query('SELECT * FROM vollmachten WHERE id = $1', [id]);
+  if (existing.rows.length === 0) return { status: 404, body: { error: 'Nicht gefunden' } };
+  const v = existing.rows[0];
+  if (v.status !== 'entwurf') return { status: 400, body: { error: 'Nur Entwuerfe können signiert werden (Status: ' + v.status + ')' } };
+  const userEmail = (req.user.email || '').toLowerCase();
+  const my = await pool.query(
+    'SELECT * FROM vollmachten_vollmachtgeber WHERE vollmacht_id = $1 AND LOWER(email) = $2',
+    [id, userEmail],
+  );
+  if (my.rows.length === 0) return { status: 403, body: { error: 'Du bist nicht als Vollmachtgeber dieser Vollmacht eingetragen' } };
+  if (my.rows[0].signed_at) return { status: 400, body: { error: 'Du hast bereits signiert' } };
+  const obj = await vmObjektPruefen(req, v.wohnung_id, v.stweg);
+  if (obj.fehler) return { status: 403, body: { error: obj.fehler } };
+  return { v, my: my.rows[0] };
+}
+
+// Signatur-Bestaetigung mit Karte oder Anmelde-QR (lib/signaturbestaetigung.js,
+// Entscheid Stefan 28.11.2026): nur fuer Karten-, QR-, Handy-Sitzungen und geteilte
+// Telefone. Gibt einen Einmal-Nachweis fuer GENAU diese Vollmacht aus, der
+// signaturBestaetigung.TTL_S Sekunden gilt. Fehlversuche je Person gebremst.
+app.post('/api/vollmachten/:id/sign-bestaetigung', authMiddleware, async (req, res) => {
+  const sb = signaturBestaetigung;
+  try {
+    if (!sb.darfMitKarteBestaetigen(req)) {
+      return res.status(400).json({
+        error: req.pat || String(req.headers['x-rosenweg-kanal'] || '').toLowerCase() === 'mcp'
+          ? 'Mit einem Zugangstoken oder über MCP ist Signieren nicht möglich.'
+          : 'Mit dem Rosenweg-Konto bestätigst du durch eine frische Anmeldung, nicht mit der Karte.',
+      });
+    }
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'Ungültige Vollmacht' });
+    const p = sb.anfragePruefen(req.body);
+    if (!p.ok) return res.status(400).json({ error: p.fehler });
+    const email = String(req.user.email || '').toLowerCase();
+    if (await sb.fehlversuche(pool, email) >= sb.FEHL_GRENZE) {
+      return res.status(429).json({ error: `Zu viele Fehlversuche – bitte in ${sb.FEHL_FENSTER_MIN} Minuten nochmals.` });
+    }
+    const vor = await vmSignVorpruefen(req, id);
+    if (vor.status) return res.status(vor.status).json(vor.body);
+    const k = req.appKarte || {};
+    const geraet = k.geraet || (req.anlage ? 'geteiltes Telefon ' + req.anlage.ext : '');
+    const basis = {
+      vollmachtId: id, email, userId: req.user.id || req.user.user_id, methode: p.methode,
+      art: req.auth?.art, sitzung: k.id || (req.anlage ? 'anlage:' + req.anlage.ext : ''),
+      app: req.rosenwegApp?.text || k.app_name || req.anlage?.paket || '', geraet, ip: vmSignaturIp(req),
+    };
+    const vermerk = kartenAdmin.herkunftVermerk(req);
+    const fehlschlag = async (grund, text, status = 403) => {
+      await sb.eintragen(pool, { ...basis, erfolg: false, grund });
+      await adminProtokoll.eintragen(pool, null, req, { bereich: 'vollmachten-signatur', aktion: 'bestaetigung-abgelehnt',
+        ziel: `Vollmacht #${id}`, detail: `${p.methode}: ${grund} · ${vermerk}` }).catch(e => console.error('[vm-sign]', e.message));
+      return res.status(status).json({ error: text, grund });
+    };
+    let karte = null, qrId = null;
+    if (p.methode === 'karte') {
+      let n;
+      try { n = await karteNachschlagen(p.uid); } catch (e) {
+        return res.status(502).json({ error: 'Die Kartenprüfung ist gerade nicht erreichbar.', grund: 'verbindung' });
+      }
+      if (!sb.karteGehoertPerson(n, email)) {
+        // Kein Orakel: fremd, unbekannt und gesperrt gleich beantworten
+        return fehlschlag(!n?.found ? 'karte-unbekannt' : !n.assigned ? 'karte-gesperrt' : 'karte-fremd',
+          'Diese Karte gehört nicht zu deinem Konto oder ist gesperrt.');
+      }
+      karte = n.display_id || p.uid.slice(-6);
+      kartenProtokollieren('signatur-bestaetigung', { displayId: karte, email, name: req.user.name,
+        durch: `${basis.art}:${basis.sitzung}`, erfolg: true, detail: `Vollmacht #${id}` }).catch?.(() => {});
+    } else {
+      const q = await sb.qrVerbrauchen(pool, { token: p.token, email, vollmachtId: id, geraet, ip: basis.ip });
+      if (!q) {
+        return fehlschlag('qr-ungueltig', 'Der QR ist abgelaufen, schon benutzt oder nicht aus deinem Rosenweg-Konto. '
+          + 'Bitte im Portal (mit dem Rosenweg-Konto angemeldet) unter /smartphones einen neuen Anmelde-QR öffnen.');
+      }
+      qrId = q.id;
+    }
+    const zeitMs = Date.now();
+    const text = sb.bestaetigungText({ methode: p.methode, karte, art: basis.art, geraet, zeitMs });
+    const e = await sb.eintragen(pool, { ...basis, karte, qrId, text, erfolg: true });
+    await adminProtokoll.eintragen(pool, null, req, { bereich: 'vollmachten-signatur', aktion: `bestaetigt-${p.methode}`,
+      ziel: `Vollmacht #${id}`, detail: `${e.id} · ${text} · ${vermerk}` }).catch(err => console.error('[vm-sign]', err.message));
+    res.set('Cache-Control', 'no-store');
+    res.json({ bestaetigung: e.token, id: e.id, methode: p.methode, karte, gueltig_s: sb.TTL_S, ablauf: e.ablauf.toISOString(), text });
+  } catch (err) { console.error('[vollmachten] sign-bestaetigung:', err); res.status(500).json({ error: fehlerFuerClient(err) }); }
+});
+
+// R1 (Entscheid Stefan 28.11.2026): Signieren mit dem Rosenweg-Konto nur mit frischer
+// Anmeldung (lib/stufen.js signierenErlaubt) — nie per persoenlichem Zugangstoken
+// (PAT) bzw. MCP. Mit Karte, QR, Handy oder am geteilten Telefon (Entscheid Stefan
+// 28.11.2026, "Beide freigeben"): nur mit einer frischen Bestaetigung aus
+// POST /:id/sign-bestaetigung (Karte erneut vorgelegt oder Anmelde-QR aus dem
+// Konto gescannt; { bestaetigung } im Body, einmal, nur diese Vollmacht).
+// D1: nur Eigentuemer/Wohnungs-Verwalter der Wohnung bzw. STWEG der Vollmacht.
 app.post('/api/vollmachten/:id/sign-digital', authMiddleware, async (req, res) => {
   try {
-    if (!signierenErlaubt(req.auth, { pat: !!req.pat, kanal: req.headers['x-rosenweg-kanal'] })) {
+    const mitKonto = signierenErlaubt(req.auth, { pat: !!req.pat, kanal: req.headers['x-rosenweg-kanal'] });
+    const mitKarte = !mitKonto && signaturBestaetigung.darfMitKarteBestaetigen(req);
+    const kartenHinweis = {
+      error: 'Bitte vor dem Signieren deine Rosenweg-Karte erneut ans Telefon halten oder einen Anmelde-QR aus deinem Rosenweg-Konto scannen.',
+      reauth: !req.pat && !req.anlage, fehler: 'karte_bestaetigen', karte_bestaetigung: true, methoden: ['karte', 'qr'],
+      gueltig_s: signaturBestaetigung.TTL_S,
+    };
+    if (!mitKonto && !mitKarte) {
       return res.status(403).json({
         error: `Digital signieren nur mit frischer Anmeldung: bitte zur Bestätigung neu anmelden und danach innert ${STUFE_FRISCH_MIN} Minuten signieren. Mit einem Zugangstoken oder über MCP ist Signieren nicht möglich.`,
         reauth: !req.pat, fehler: 'frisch',
       });
     }
+    if (mitKarte && !req.body?.bestaetigung) return res.status(403).json(kartenHinweis);
     const id = parseInt(req.params.id, 10);
-    const existing = await pool.query('SELECT * FROM vollmachten WHERE id = $1', [id]);
-    if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
-    const v = existing.rows[0];
-    if (v.status !== 'entwurf') return res.status(400).json({ error: 'Nur Entwuerfe können signiert werden (Status: ' + v.status + ')' });
+    const vor = await vmSignVorpruefen(req, id);
+    if (vor.status) return res.status(vor.status).json(vor.body);
+    const v = vor.v;
+    const my = { rows: [vor.my] };
     const userEmail = (req.user.email || '').toLowerCase();
-    // Eigene Vollmachtgeber-Zeile finden
-    const my = await pool.query(
-      'SELECT * FROM vollmachten_vollmachtgeber WHERE vollmacht_id = $1 AND LOWER(email) = $2',
-      [id, userEmail],
-    );
-    if (my.rows.length === 0) {
-      return res.status(403).json({ error: 'Du bist nicht als Vollmachtgeber dieser Vollmacht eingetragen' });
-    }
-    if (my.rows[0].signed_at) {
-      return res.status(400).json({ error: 'Du hast bereits signiert' });
-    }
-    const obj = await vmObjektPruefen(req, v.wohnung_id, v.stweg);
-    if (obj.fehler) return res.status(403).json({ error: obj.fehler });
     const ip = vmSignaturIp(req);
     const ua = req.headers['user-agent'] || null;
     const sub = req.user.sub || req.user.id || null;
@@ -30363,16 +30483,31 @@ app.post('/api/vollmachten/:id/sign-digital', authMiddleware, async (req, res) =
     if (!signName) {
       return res.status(409).json({ error: 'Für dein Konto ist kein bestätigter Name hinterlegt — bitte die Verwaltung kontaktieren oder auf Papier unterschreiben' });
     }
-    // V1/L6: Art der Bestaetigung aus der Anmeldung dieser Anfrage (nie aus dem Body):
-    // Rosenweg-Konto, frisch angemeldet in der App bzw. im Portal – steht auf dem PDF.
-    const bestaetigung = vollmachtApp.bestaetigungText(req.auth);
-    await pool.query(
+    // V1/L6: Art der Bestaetigung aus der Anmeldung dieser Anfrage bzw. aus der
+    // eingeloesten Karten-/QR-Bestaetigung (nie aus dem Body) – steht auf dem PDF.
+    let bestaetigung = vollmachtApp.bestaetigungText(req.auth);
+    let bestArt = 'konto', bestRef = null;
+    if (mitKarte) {
+      // Erst jetzt verbrauchen (atomar): alle anderen Pruefungen sind durch
+      const b = await signaturBestaetigung.einloesen(pool, { token: req.body.bestaetigung, vollmachtId: id, email: userEmail });
+      if (!b) return res.status(403).json({ ...kartenHinweis, error: 'Die Bestätigung ist abgelaufen, schon benutzt oder gilt für eine andere Vollmacht. Bitte nochmals mit Karte oder QR bestätigen.' });
+      bestaetigung = b.text;
+      bestArt = b.methode;
+      bestRef = b.id;
+    }
+    const gesetzt = await pool.query(
       `UPDATE vollmachten_vollmachtgeber
          SET signatur_typ='digital', signed_at=NOW(), signed_ip=$1, signed_user_agent=$2, signed_authentik_sub=$3, name=$5,
-             signed_bestaetigung=$6
-        WHERE id=$4`,
-      [ip, ua, sub ? String(sub) : null, my.rows[0].id, signName, bestaetigung],
+             signed_bestaetigung=$6, signed_bestaetigung_art=$7, signed_bestaetigung_ref=$8
+        WHERE id=$4 AND signed_at IS NULL`,
+      [ip, ua, sub ? String(sub) : null, my.rows[0].id, signName, bestaetigung, bestArt, bestRef],
     );
+    if (!gesetzt.rowCount) return res.status(400).json({ error: 'Du hast bereits signiert' });
+    if (mitKarte) {
+      await adminProtokoll.eintragen(pool, null, req, { bereich: 'vollmachten-signatur', aktion: 'signiert',
+        ziel: `Vollmacht #${id}`, detail: `${bestRef} · ${bestaetigung} · ${kartenAdmin.herkunftVermerk(req)}` })
+        .catch(e => console.error('[vm-sign]', e.message));
+    }
     if (signName !== my.rows[0].name && (v.vollmachtgeber_email || '').toLowerCase() === userEmail) {
       await pool.query('UPDATE vollmachten SET vollmachtgeber_name = $1 WHERE id = $2', [signName, id]);
     }
@@ -32180,6 +32315,10 @@ async function initDB() {
       ALTER TABLE vollmachten ADD COLUMN IF NOT EXISTS weisung TEXT;
       CREATE INDEX IF NOT EXISTS idx_vm_termin ON vollmachten(termin_id) WHERE termin_id IS NOT NULL;
       ALTER TABLE vollmachten_vollmachtgeber ADD COLUMN IF NOT EXISTS signed_bestaetigung TEXT;
+      -- Signieren mit Karte oder QR (lib/signaturbestaetigung.js, 28.11.2026): Methode
+      -- (konto | karte | qr) und Verweis auf vollmacht_sign_bestaetigungen.id
+      ALTER TABLE vollmachten_vollmachtgeber ADD COLUMN IF NOT EXISTS signed_bestaetigung_art TEXT;
+      ALTER TABLE vollmachten_vollmachtgeber ADD COLUMN IF NOT EXISTS signed_bestaetigung_ref TEXT;
       CREATE INDEX IF NOT EXISTS idx_vmvg_vollmacht ON vollmachten_vollmachtgeber(vollmacht_id);
       CREATE INDEX IF NOT EXISTS idx_vmvg_email ON vollmachten_vollmachtgeber(LOWER(email));
       -- Mails zu Vollmachten (lib/vollmacht-mail.js): aktiv_mail_am = die Mails

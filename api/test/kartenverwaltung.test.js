@@ -155,8 +155,10 @@ test('Anmeldungen der Apps: mit Karte ansehen und abmelden (protokolliert), Zuga
   assert.match(src, /const kontoOderKarte = \(req, res, next\) => \{\s*if \(req\.pat\) return res\.status\(403\)/);
   assert.match(src, /kartenAdmin\.vermerken\(req, res\)/);
   assert.match(src, /ansehenVermerken\(req, alle\)/);
-  // QR-Ausweis und Handy-Code bestätigen bleiben beim Konto
-  assert.ok(src.includes("app.post('/api/apps/qr-ausweis', authMiddleware, requireUserLogin,"));
+  // QR-Ausweis seit 28.11.2026 auch mit der Karte (nie PAT, schluessel-freigaben.test.js);
+  // Handy-Code bestätigen bleibt beim Konto
+  assert.ok(src.includes("app.post('/api/apps/qr-ausweis', authMiddleware, qrAusstellen,"));
+  assert.ok(src.includes("app.post('/api/apps/handy-code/:code/:wahl(bestaetigen|ablehnen)', authMiddleware, requireUserLogin,"));
 });
 
 test('Quittung nennt Kartenaktionen verständlich', () => {

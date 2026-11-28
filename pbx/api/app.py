@@ -4180,7 +4180,7 @@ def telefon_messenger():
 #   "/api/auth/me"        genau dieser Pfad, alle Methoden
 #   "GET /api/me"         nur mit diesen Methoden (mehrere: "GET,PUT /api/me")
 # Fehlt die Config, gilt PORTAL_PFADE_STANDARD. Die Haupt-API sperrt zusaetzlich
-# alles, was einen Ausweis aendert (PAT_GESPERRT in api/middleware/auth.js).
+# alles, was einen Ausweis aendert (api/lib/sperrliste.js, ausser KARTE_FREI).
 PORTAL_ANLAGE_SECRET = os.environ.get("PORTAL_ANLAGE_SECRET", "")
 PORTAL_TOKEN_S = 60
 PORTAL_KOERPER_MAX = 256 * 1024
@@ -4208,9 +4208,23 @@ PORTAL_PFADE_STANDARD = {
     "ch.rosenweg4303.zutritt": ["/api/karten/", "/api/access/", "GET /api/apps/sitzungen", "/api/apps/sitzungen/",
                                 "GET /api/me/bestaetigungen"],
     # Rosenweg Mein Telefon: die eigene Nummer ueber die Haupt-API (api/routes/telefonanlage.js reicht
-    # hierher zurueck, nur fuer die Person am Telefon), eigene Handys abmelden
+    # hierher zurueck, nur fuer die Person am Telefon), eigene Handys abmelden; Anmelde-QR fuer eine
+    # App auf dem eigenen Handy (RWAPP1) fuer die Person am Telefon (Entscheid Stefan 28.11.2026,
+    # die Haupt-API protokolliert jede Ausgabe mit Geraete-Vermerk und meldet das Einloesen per Mail)
     "ch.rosenweg4303.meintelefon": ["/api/telefonanlage/", "GET /api/messenger/zugaenge", "DELETE /api/messenger/zugaenge/",
-                                    "GET /api/apps/sitzungen", "DELETE /api/apps/sitzungen/"],
+                                    "GET /api/apps/sitzungen", "DELETE /api/apps/sitzungen/",
+                                    "POST /api/apps/qr-ausweis", "GET /api/apps/qr-ausweis/"],
+    # Rosenweg Profil: eigene Angaben lesen, Profil-Angaben und Profilbild aendern (Entscheid Stefan
+    # 28.11.2026, Karte wie Schluessel; die Haupt-API protokolliert jede Aenderung, lib/sperrliste.js).
+    # Passwort, SSH-Schluessel, API-Tokens, E-Mail-Aliase und Zusatznummern bleiben draussen.
+    "ch.rosenweg4303.profil": ["GET /api/me/wohnungen", "GET /api/energie/meine-zaehler", "GET /api/me/person-data",
+                               "GET /api/me/einstellungen", "PUT /api/auth/profile", "PUT /api/auth/avatar"],
+    # Rosenweg Vollmachten: lesen, erteilen, digital signieren (Entscheid Stefan 28.11.2026): signiert
+    # wird nur mit einer frischen Bestaetigung (Karte erneut vorlegen oder Anmelde-QR aus dem Konto,
+    # POST /api/vollmachten/<id>/sign-bestaetigung; api/lib/signaturbestaetigung.js). Die Haupt-API
+    # prueft je Vollmacht Rechte und Objekt.
+    "ch.rosenweg4303.vollmachten": ["GET /api/vollmachten", "GET,POST,PUT,DELETE /api/vollmachten/",
+                                    "POST /api/vollmachten"],
     # Rosenweg Waschkueche (Bewohner der STWEG mit Waschkueche, Verwalten mit "waschküche-admin";
     # die Haupt-API prueft Raeume/STWEG und Rechte selbst)
     "ch.rosenweg4303.waschkueche": ["/api/wasch/"],

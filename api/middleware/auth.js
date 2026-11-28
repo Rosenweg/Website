@@ -13,16 +13,9 @@ const appKennungLib = require('../lib/appkennung');
 const { anmeldung, jwtClaims, authTimeAus } = require('../lib/stufen');
 const kartenAdmin = require('../lib/kartenadmin');
 
-// Pfade, die einen Ausweis erzeugen oder ändern — für Zugangstoken tabu.
-// Relativ zu /api/, Präfix-Vergleich auf Segmentgrenze.
-const PAT_GESPERRT = [
-  'change-password',      // Passwort — das eigentliche Loch, siehe unten
-  'me/tokens',            // weitere Token
-  'me/passkeys',          // Passkeys
-  'auth',                 // OAuth-Fluss, Profil-Login
-  'mqtt/my-app-passwords',// MQTT-Zugangsdaten
-  'mqtt/user-app-passwords',// MQTT-Zugangsdaten anderer (Technik)
-];
+// Pfade, die einen Ausweis erzeugen oder ändern — für Zugangstoken, Karte und
+// geteilte Telefone tabu (lib/sperrliste.js, dort auch die Ausnahmen der Karte).
+const { patGesperrt, karteGesperrt } = require('../lib/sperrliste');
 
 // Scope-Grammatik. Ein Token ohne Scopes hat alle Rechte der Person.
 // pfad ist relativ zu /api/ ("wasch/reservations"); GET zählt als read,
@@ -122,7 +115,7 @@ async function authMiddleware(req, res, next) {
       // der Route daran denkt. SSH-Schlüssel bewusst nicht: requireUserLogin
       // sperrt sie ohnehin, und ein Agent, der sich seinen Shell-Zugang selbst
       // einrichtet, wäre ein gewollter Anwendungsfall (Entscheid 5.9.2026).
-      if (PAT_GESPERRT.some(pfx => vollerPfad === pfx || vollerPfad.startsWith(pfx + '/'))) {
+      if (patGesperrt(vollerPfad)) {
         return res.status(403).json({ error: 'Mit einem Zugangstoken nicht erlaubt — nur angemeldet im Profil' });
       }
       // Scope-Check: wenn token.scopes gesetzt, prüfen ob aktueller Endpoint erlaubt.
@@ -145,8 +138,8 @@ async function authMiddleware(req, res, next) {
     // 0b. Anlage-Portal-Token: App auf einem geteilten Telefon, ueber Rosenweg
     //     Geraet und die PBX-API (lib/anlagetoken.js). Gilt fuer genau eine
     //     Anfrage (Methode + Pfad), einmal, hoechstens 120 s. Wie ein PAT darf
-    //     es nichts aendern, womit man sich anmeldet (PAT_GESPERRT) — nur das
-    //     Lesen der eigenen Angaben (GET /api/auth/me) ist frei.
+    //     es nichts aendern, womit man sich anmeldet (lib/sperrliste.js) — frei sind
+    //     GET /api/auth/me und die eigenen Profil-Angaben samt Bild (KARTE_FREI).
     if (istAnlageToken(token)) {
       // Zweiter authMiddleware in derselben Anfrage (App- und Routen-Ebene): schon geprueft
       if (req.anlage && req.anlage.token === token) return next();
@@ -157,8 +150,8 @@ async function authMiddleware(req, res, next) {
       if (p.methode !== req.method || p.pfad !== vollerPfad) {
         return res.status(403).json({ error: 'Anlage-Token gilt fuer eine andere Anfrage' });
       }
-      const nurLesen = req.method === 'GET' && vollerPfad === 'auth/me';
-      if (!nurLesen && PAT_GESPERRT.some(pfx => vollerPfad === pfx || vollerPfad.startsWith(pfx + '/'))) {
+      // Frei: GET auth/me, PUT auth/profile, PUT auth/avatar (lib/sperrliste.js KARTE_FREI)
+      if (karteGesperrt(req.method, vollerPfad)) {
         return res.status(403).json({ error: 'Auf einem geteilten Telefon nicht erlaubt — bitte im Portal' });
       }
       const u = await pool.query(
@@ -192,8 +185,9 @@ async function authMiddleware(req, res, next) {
       // auth/me (nur lesen: wer bin ich) braucht die Telefonanlage, um den Zugang
       // einer App zu pruefen (pbx current_user -> /api/auth/me), z.B. beim
       // Nextcloud-Zugang der App auf dem eigenen Handy. Der Rest von auth/ bleibt zu.
-      const nurWerBinIch = vollerPfad === 'auth/me' && req.method === 'GET';
-      if (!nurWerBinIch && PAT_GESPERRT.some(pfx => vollerPfad === pfx || vollerPfad.startsWith(pfx + '/'))) {
+      // Profil-Angaben und Profilbild (PUT auth/profile, auth/avatar) sind seit 28.11.2026
+      // frei (Karte wie Schluessel, mit Protokoll); der Rest von auth/ bleibt zu.
+      if (karteGesperrt(req.method, vollerPfad)) {
         return res.status(403).json({ error: 'Mit der Karten-Anmeldung nicht erlaubt — bitte im Portal mit dem Rosenweg-Konto anmelden' });
       }
       req.user = k.user;

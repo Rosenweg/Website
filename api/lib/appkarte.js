@@ -166,6 +166,31 @@ function handyCodePruefen(body) {
   return appGeraetPruefen(body && typeof body === 'object' ? body : {});
 }
 
+// Wer darf einen Anmelde-QR für Apps (RWAPP1) ausstellen? Seit 28.11.2026 (Entscheid
+// Stefan, "Karte wie Schlüssel") auch Karten-, QR- und Handy-Sitzungen und geteilte
+// Telefone (Anlage-Token) — für das EIGENE Konto, protokolliert. Nie ein
+// persönliches Zugangstoken (PAT: Skripte und Agents sollen keine Anmeldungen
+// ausstellen) und nie ein per E-Mail bestätigter Einmal-Ausweis (rw_best_).
+// req: { pat, kartenBestaetigung, user, auth } -> { ok:true } | { ok:false, status, fehler }
+function qrAusstellenErlaubt(req) {
+  if (req?.pat) return { ok: false, status: 403, fehler: 'Mit einem Zugangstoken nicht möglich — bitte mit dem Rosenweg-Konto oder der Karte anmelden' };
+  if (req?.kartenBestaetigung || req?.auth?.art === 'bestaetigt') return { ok: false, status: 403, fehler: 'Nicht mit einer E-Mail-Bestätigung' };
+  const email = String(req?.user?.email || '');
+  const id = parseInt(req?.user?.id ?? req?.user?.user_id, 10);
+  if (!email || !Number.isInteger(id)) return { ok: false, status: 403, fehler: 'Kein Rosenweg-Konto' };
+  return { ok: true };
+}
+
+// Anmeldearten, die als Rosenweg-Konto gelten (lib/stufen.js GRUNDSTUFE konto, ohne
+// PAT und E-Mail-Bestätigung). Nur ein QR, den eine solche Anmeldung ausgestellt hat,
+// bestätigt eine digitale Signatur (lib/signaturbestaetigung.js): sonst könnte, wer
+// an einem fremd angemeldeten geteilten Telefon steht, sich in Mein Telefon selbst
+// einen QR holen und damit "bestätigen".
+const KONTO_ARTEN = new Set(['website', 'otp', 'app', 'authentik']);
+function qrVomKonto(ausgestelltArt) {
+  return KONTO_ARTEN.has(String(ausgestelltArt || ''));
+}
+
 /** Ohne Karte angemeldet (QR oder Handy): beim Erneuern Konto statt Karte prüfen. */
 function ohneKarte(art) {
   return art === 'qr' || art === 'handy';
@@ -216,5 +241,5 @@ module.exports = {
   neueSitzungsId, neuesZugangsToken, neuesQrToken, zufall, hash, kartenUid, qrToken,
   oeffentlicherSchluessel, erneuernText, unterschriftGueltig, anzeigeText,
   anmeldungPruefen, qrAnmeldungPruefen, gebremst, abzuloesen, istTechnikOderPraesident,
-  neuerBenutzerCode, benutzerCode, handyCodePruefen, ohneKarte,
+  neuerBenutzerCode, benutzerCode, handyCodePruefen, ohneKarte, qrAusstellenErlaubt, qrVomKonto, KONTO_ARTEN,
 };

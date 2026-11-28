@@ -132,7 +132,7 @@ function vmDarfErteilenIrgendwo(kontakte, groups) {
 // IP-Adresse, User-Agent und Authentik-Kennung der Vollmachtgeber sehen nur
 // Technik und Praesident — in der Liste, in Antworten und auf dem PDF.
 // Alle anderen bekommen diese Felder nicht (signed_at und signatur_typ bleiben).
-const NACHWEIS_FELDER_GEBER = ['signed_ip', 'signed_user_agent', 'signed_authentik_sub'];
+const NACHWEIS_FELDER_GEBER = ['signed_ip', 'signed_user_agent', 'signed_authentik_sub', 'signed_bestaetigung_ref'];
 const NACHWEIS_FELDER_VM = ['digital_signed_ip', 'digital_signed_user_agent', 'digital_signed_authentik_sub'];
 function vmNachweisSehen(groups) { return widerrufAdmin(groups || []); }
 function vmOhneNachweis(v, groups) {
