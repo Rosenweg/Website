@@ -4,7 +4,10 @@
 #   anwenden.sh --tabelle tabelle.txt --wurzel /mnt/cephfs-stage [--trocken]
 #               [--nur stweg1,stweg2,/]
 #
-# --nur: nur diese Ordner der obersten Ebene (samt ihren ~-Zeilen), "/" =
+# Zeilen der Tabelle: "/" (Wurzel), "name" (oberste Ebene), "a/b" (Unterpfad,
+# setzt den Durchgang auf die Elternordner) und "~name" (gewinnt zuletzt).
+#
+# --nur: nur diese Ordner der obersten Ebene (samt ihren Unterpfad- und ~-Zeilen), "/" =
 # die Wurzel selbst. Fuer das schrittweise Ausrollen.
 # --trocken zeigt nur, was gesetzt wuerde, und aendert nichts.
 # Vorher immer sichern.sh laufen lassen; zurueck.sh ist der Rueckweg.
@@ -153,6 +156,44 @@ for i in "${!P_PFAD[@]}"; do
   p="${P_PFAD[$i]}"
   case "$p" in /|~*) continue ;; esac
   [ -d "$WURZEL/$p" ] || echo "Hinweis: $p steht in der Tabelle, gibt es aber nicht - uebersprungen"
+done
+
+# 2b. Unterpfad-Zeilen (z. B. stweg3/bewohner): der Ordner mit allem darunter
+# bekommt die Rechte der Zeile. Wer dort lesen oder schreiben darf, braucht auf
+# jedem Elternordner bis zur obersten Ebene den Durchgang (r-x, damit man auch
+# hinklicken kann). Der Durchgang steht nur in der Zugriffs-ACL des Ordners
+# selbst, nicht in der Default-ACL und nicht auf den Dateien darin: neue Dateien
+# und Ordner daneben bleiben bei den Rechten des Elternordners, und mit
+# "hide unreadable" sieht man im Elternordner nur, was man lesen darf.
+# Eintraege, die der Elternordner schon hat, bleiben wie sie sind (kein
+# Herabstufen von rwx auf r-x).
+durchgang() {   # $1 Ordner, $2 Leser, $3 Schreiber
+  local ordner="$1" e ids vorhanden neu=""
+  vorhanden=$(getfacl -p -n --omit-header --access "$ordner" 2>/dev/null | sed -n 's/^\(user\|group\):\([0-9][0-9]*\):.*/\1:\2/p' | sed 's/^user:/u:/;s/^group:/g:/')
+  for e in ${2//,/ } ${3//,/ }; do
+    [ "$e" = "-" ] && continue
+    ids="${ID[$e]:-}"; [ -z "$ids" ] && continue
+    grep -qx "$ids" <<<"$vorhanden" && continue
+    [[ ",$neu," == *",$ids:r-x,"* ]] && continue
+    neu+="${neu:+,}$ids:r-x"
+  done
+  [ -z "$neu" ] && return 0
+  printf '    Durchgang %s: setfacl -P -m %s\n' "${ordner#"$WURZEL"/}" "$neu"
+  [ "$TROCKEN" = 1 ] && return 0
+  setfacl -P -m "$neu" "$ordner"
+}
+for i in "${!P_PFAD[@]}"; do
+  p="${P_PFAD[$i]}"
+  case "$p" in /|~*) continue ;; */*) ;; *) continue ;; esac
+  gewaehlt "${p%%/*}" || continue
+  [ -d "$WURZEL/$p" ] || continue
+  setzen "$WURZEL/$p" "${P_LES[$i]}" "${P_SCHR[$i]}" 1 "$p (Unterpfad)"
+  eltern="${p%/*}"
+  while :; do
+    durchgang "$WURZEL/$eltern" "${P_LES[$i]}" "${P_SCHR[$i]}"
+    [[ "$eltern" == */* ]] || break
+    eltern="${eltern%/*}"
+  done
 done
 
 # 3. ~name-Zeilen: Ebene 1 und 2, gewinnen
