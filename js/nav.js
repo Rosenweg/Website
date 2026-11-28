@@ -111,6 +111,10 @@ const SERVICES_GROUPS = [
       { label: 'Proxmox', href: 'proxmox-verwaltung.html', activeKey: 'proxmox', perm: 'proxmox-verwaltung' },
       // PBX-Admin (Asterisk, eigene Web-UI in CT 220): Seitenrecht pbx-admin = Technik + Präsident
       { label: 'PBX-Admin (Telefonanlage)', href: 'https://pbx.rosenweg4303.ch/', activeKey: 'pbx-admin', perm: 'pbx-admin' },
+      // Zutrittsverwaltung (UniFi Access, eigener Host; die Seite verlangt
+      // requireAdmin). Kennung auf den Stationen: rosenweg-access — dort ersetzt
+      // sie die App Rosenweg Zutritt (os-stationen, pakete/rosenweg-zutritt).
+      { label: 'Zutritt', href: 'https://access.rosenweg4303.ch/', activeKey: 'access', permAny: 'technik,praesident' },
       { label: 'Stationen', href: 'stationen.html', activeKey: 'stationen', permAny: 'technik,praesident' },
       { label: 'Sicherungen', href: 'sicherungen.html', activeKey: 'sicherungen', permAny: 'technik,praesident' },
       { label: 'Scanner', href: 'scanner.html', activeKey: 'scanner', permAny: 'technik,praesident' },
