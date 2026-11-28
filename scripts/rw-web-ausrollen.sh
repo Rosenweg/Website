@@ -24,6 +24,10 @@
 #              Releases, nur relative Pfade, index.html mit <base href=
 #              "/app/KURZNAME/">, flutter_bootstrap.js und main.dart.js.
 #              Die vorige Fassung bleibt fuer den Rueckweg liegen.
+#              CanvasKit (Zeichenmotor, ~16 MB) liegt NICHT je App, sondern einmal
+#              unter /var/www/rosenweg/app/canvaskit/<flutter-version>/ (die App
+#              nennt den Pfad in flutter_bootstrap.js, canvasKitBaseUrl). Das Skript
+#              nimmt es aus dem Archiv heraus und legt es nur an, wo es fehlt.
 #   --zurueck  die vorige Fassung von /app/KURZNAME/ wiederherstellen
 #              (tauscht aktuelle und vorige; ein zweites --zurueck macht es
 #              wieder rueckgaengig).
@@ -198,6 +202,19 @@ if t:
     || { echo "index.html hat nicht <base href=\"/app/$APP/\"> — mit --base-href /app/$APP/ gebaut? abgebrochen" >&2; exit 1; }
   grep -q 'authentik-auth.js' "$ARBEIT/x/index.html" \
     || { echo "index.html laedt /js/authentik-auth.js nicht — keine gemeinsame Anmeldung, abgebrochen" >&2; exit 1; }
+  # CanvasKit gemeinsam: Version aus der App, nur wenn die App darauf zeigt
+  CK_VERSION=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("flutter",""))' "$ARBEIT/x/rosenweg-web.json" 2>/dev/null || true)
+  CK_TAR=""
+  if [ -n "$CK_VERSION" ] && [[ "$CK_VERSION" =~ ^[0-9][0-9.]*$ ]] && [ -d "$ARBEIT/x/canvaskit" ] \
+     && grep -q "canvasKitBaseUrl: \"/app/canvaskit/$CK_VERSION/\"" "$ARBEIT/x/flutter_bootstrap.js"; then
+    [ -f "$ARBEIT/x/canvaskit/canvaskit.wasm" ] || { echo "canvaskit/ ohne canvaskit.wasm — abgebrochen" >&2; exit 1; }
+    mv "$ARBEIT/x/canvaskit" "$ARBEIT/ck"
+    tar -czf "$ARBEIT/canvaskit.tar.gz" --no-xattrs -C "$ARBEIT/ck" . 2>/dev/null || tar -czf "$ARBEIT/canvaskit.tar.gz" -C "$ARBEIT/ck" .
+    tar -czf "$ARBEIT/app.tar.gz" --no-xattrs -C "$ARBEIT/x" . 2>/dev/null || tar -czf "$ARBEIT/app.tar.gz" -C "$ARBEIT/x" .
+    CK_TAR="$ARBEIT/canvaskit.tar.gz"
+    CK_MD5=$(md5lokal "$ARBEIT/ck/canvaskit.wasm")
+    echo "CanvasKit gemeinsam: /app/canvaskit/$CK_VERSION/ (wird nur angelegt, wo es fehlt)"
+  fi
   neu_version=$(cat "$ARBEIT/x/rosenweg-web.json" 2>/dev/null | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("version","?")+" (Lauf "+str(d.get("lauf","?"))+")")' 2>/dev/null || echo "?")
   echo "Archiv geprueft: App $APP, Version $neu_version, $(wc -l < "$ARBEIT/liste" | tr -d ' ') Dateien"
 
@@ -205,7 +222,31 @@ if t:
   FEHLER=0
   while read -r id name knoten ip; do
     vor=$(fern_version "$ip" "$id"); [ -n "$vor" ] || vor="(nichts)"
-    if [ "$PRUEFEN" = 1 ]; then printf '%-10s %-12s %-22s %s\n' "$APP" "$name" "$vor" "$neu_version (Pruefmodus)"; continue; fi
+    ck_da=""
+    if [ -n "$CK_TAR" ]; then
+      ck_da=$(sshj "root@$ip" "pct exec $id -- sh -c 'md5sum $WEBROOT/app/canvaskit/$CK_VERSION/canvaskit.wasm 2>/dev/null | cut -d\" \" -f1'" | tr -d '[:space:]')
+    fi
+    if [ "$PRUEFEN" = 1 ]; then
+      ck_txt=""; [ -z "$CK_TAR" ] || { [ "$ck_da" = "$CK_MD5" ] && ck_txt=", CanvasKit $CK_VERSION schon da" || ck_txt=", CanvasKit $CK_VERSION kaeme dazu"; }
+      printf '%-10s %-12s %-22s %s\n' "$APP" "$name" "$vor" "$neu_version (Pruefmodus$ck_txt)"; continue
+    fi
+    # Gemeinsames CanvasKit zuerst (die App verweist darauf); nur wenn es fehlt
+    if [ -n "$CK_TAR" ] && [ "$ck_da" != "$CK_MD5" ]; then
+      ctmp=$(sshj "root@$ip" 'mktemp /tmp/rw-ck.XXXXXXXX' | tr -d '[:space:]')
+      scp -q -o BatchMode=yes ${JOPT[@]+"${JOPT[@]}"} "$CK_TAR" "root@$ip:$ctmp" </dev/null || { printf '%-10s %-12s %-22s %s\n' "$APP" "$name" "$vor" "FEHLER: CanvasKit kopieren"; FEHLER=1; continue; }
+      cres=$(sshj "root@$ip" "
+        pct push $id $ctmp /tmp/rw-ck.tgz >/dev/null && rm -f $ctmp
+        pct exec $id -- sh -c 'set -e
+          W=$WEBROOT/app; N=/var/www/.rw-app/canvaskit-neu
+          mkdir -p \$W/canvaskit /var/www/.rw-app; rm -rf \$N; mkdir \$N
+          tar -xzf /tmp/rw-ck.tgz -C \$N --no-same-owner; rm -f /tmp/rw-ck.tgz
+          [ -f \$N/canvaskit.wasm ]
+          chown -R www-data:www-data \$N; chmod -R u=rwX,go=rX \$N
+          rm -rf \$W/canvaskit/$CK_VERSION; mv \$N \$W/canvaskit/$CK_VERSION
+          chown www-data:www-data \$W/canvaskit
+          echo OK' 2>&1 | tail -1" | tr -d '[:space:]')
+      [ "$cres" = OK ] || { printf '%-10s %-12s %-22s %s\n' "$APP" "$name" "$vor" "FEHLER: CanvasKit ($cres)"; FEHLER=1; continue; }
+    fi
     tmp=$(sshj "root@$ip" 'mktemp /tmp/rw-app.XXXXXXXX' | tr -d '[:space:]')
     [ -n "$tmp" ] || { printf '%-10s %-12s %-22s %s\n' "$APP" "$name" "$vor" "FEHLER: mktemp"; FEHLER=1; continue; }
     scp -q -o BatchMode=yes ${JOPT[@]+"${JOPT[@]}"} "$ARBEIT/app.tar.gz" "root@$ip:$tmp" </dev/null || { printf '%-10s %-12s %-22s %s\n' "$APP" "$name" "$vor" "FEHLER beim Kopieren"; FEHLER=1; continue; }

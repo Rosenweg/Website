@@ -208,6 +208,12 @@ liefert `/app/` mit `no-cache` (ETag-Prüfung bei jedem Aufruf). `deploy.sh` lä
 `/app/` beim Spiegeln stehen. Erst `deploy.sh` (nginx-Regel `location ^~ /app/`),
 dann das Archiv.
 
+CanvasKit (der Zeichenmotor, rund 16 MB) liegt nicht in jeder App, sondern einmal
+unter `/app/canvaskit/<flutter-version>/` (nginx: ein Jahr, `immutable`; der Pfad
+trägt die Version). Die App sagt es in `flutter_bootstrap.js` (`canvasKitBaseUrl`),
+sonst holte der Browser es bei `www.gstatic.com`. `--app` legt es nur an, wo es
+dieser Flutter-Version noch fehlt.
+
 
 Dahinter stehen zwei Vorfälle vom 5. September 2026:
 
