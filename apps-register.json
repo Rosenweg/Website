@@ -142,6 +142,16 @@
       "text": "Strom live, Verbrauch, Kosten und die Solaranlage – für dein Haus am Rosenweg.",
       "fuer": "Für alle Bewohner und Eigentümer mit Zähler; die Solaranlage auch ohne Anmeldung. Ausschuss und Verwaltung sehen die Zähler ihrer STWEG, die Technik verwaltet die Zähler.",
       "_notiz": "Flutter, alle Plattformen. Bündelt Energie-Monitor, Mein Zähler, Solaranlage live, Zähler-Technik und Zählerverwaltung. Live über MQTT (Rückfall HTTP), Widget „Solar jetzt“ (Android, iOS). Rechnungen bleiben in Rosenweg ZEV. Web-Seiten bleiben vorerst."
+    },
+    "unterlagen": {
+      "name": "Rosenweg Unterlagen",
+      "repo": "Rosenweg/rosenweg-unterlagen",
+      "paket": "ch.rosenweg4303.unterlagen",
+      "logo": "/img/apps/rosenweg-unterlagen.png?v=20261128",
+      "reihenfolge": 110,
+      "text": "Die Unterlagen der Gemeinschaft: Ordner von Allgemein und deiner STWEG ansehen, suchen und sehen, was neu ist; PDF, Bilder und Office-Dateien direkt in der App. Einzelne Dateien für unterwegs merken.",
+      "fuer": "Für alle Bewohner und Eigentümer (Mieter sehen in ihrer STWEG den Ordner „bewohner“). Ablegen, ordnen, Kamera-Scan als PDF und Papierkorb: Ausschuss für Allgemein und seine STWEG, Technik und Präsident überall.",
+      "_notiz": "Flutter, alle Plattformen. Löst index.html#dokumente nicht ab (die Seite bleibt). Entscheide Stefan 28.11.2026: offizielle Ablage, Bearbeiten über Nextcloud, Projektordner pflegt Rosenweg Projekte."
     }
   },
   "katalog": {
