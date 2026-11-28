@@ -272,9 +272,10 @@ test('Zeitachse als Termin: STWEG, Kooperation = MEG, ganztägig ohne Uhrzeit (P
   assert.equal(k.start_date, '2026-12-03 00:00:00');
 });
 
-test('server.js: Anlage-Token (geteilte Telefone) ändern nichts, löschen nur T/P mit Protokoll', () => {
+test('server.js: Anlage-Token (geteilte Telefone) wie am eigenen Gerät, löschen nur T/P mit Protokoll', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
-  assert.match(src, /if \(req\.anlage\) return res\.status\(403\)\.json\(\{ error: 'Auf einem geteilten Telefon kannst du Projekte nur lesen und kommentieren/);
+  assert.ok(!/Auf einem geteilten Telefon kannst du Projekte nur lesen/.test(src));
+  assert.ok(!/req\.anlage\) return res\.status\(403\)/.test(src.slice(src.indexOf('async function requireProjektBearbeiten'), src.indexOf('async function requireProjektBearbeiten') + 900)));
   assert.ok(src.includes("app.delete('/api/projects/:slug', authMiddleware,"));
   assert.ok(src.includes("bereich: 'projekte', aktion: 'geloescht'"));
   assert.ok(src.includes("permissions['projekte-bearbeiten'] = 'write'"));

@@ -13401,8 +13401,7 @@ async function requireProjektBearbeiten(req, res, next) {
     const { rows: [p] } = await pool.query('SELECT id, stweg, status FROM projects WHERE slug = $1', [req.params.slug]);
     if (!p) return res.status(404).json({ error: 'Projekt nicht gefunden' });
     const groups = req.user?.groups || [];
-    // P11: auf geteilten Telefonen (Anlage-Token) nur lesen und kommentieren, nichts aendern
-    if (req.anlage) return res.status(403).json({ error: 'Auf einem geteilten Telefon kannst du Projekte nur lesen und kommentieren' });
+    // Geteiltes Telefon (Anlage-Token): dieselben Rechte wie am eigenen Geraet, nur die Rechtepruefung der Person
     if (!projekteRechte.projektBearbeiten(groups, await projektePerm(req), p.stweg)) {
       return res.status(403).json({ error: p.stweg ? 'Nur Ausschuss oder Verwaltung dieser STWEG' : 'Nur Ausschuss, Technik oder Präsident' });
     }
@@ -13873,7 +13872,6 @@ app.delete('/api/projects/:slug', authMiddleware, async (req, res) => {
     if (!projekteRechte.projektLoeschen(req.user?.groups || [])) {
       return res.status(403).json({ error: 'Projekte löschen nur Technik oder Präsident (sonst archivieren)' });
     }
-    if (req.anlage) return res.status(403).json({ error: 'Auf einem geteilten Telefon nicht möglich' });
     if (req.body?.bestaetigt !== true && req.query.bestaetigt !== '1') {
       return res.status(400).json({ error: 'Löschen bitte bestätigen (bestaetigt: true)', bestaetigung_noetig: true });
     }
@@ -14086,7 +14084,7 @@ app.delete('/api/projects/:slug/comments/:id', authMiddleware, requireProjekteLe
     const id = parseInt(req.params.id, 10) || 0;
     const { rows: [k] } = await pool.query('SELECT * FROM project_comments WHERE id = $1 AND project_id = $2', [id, req.projekt.id]);
     if (!k) return res.status(404).json({ error: 'Kommentar nicht gefunden' });
-    const bearbeiter = !req.anlage && projekteRechte.projektBearbeiten(groups, req.projektePerm, req.projekt.stweg);
+    const bearbeiter = projekteRechte.projektBearbeiten(groups, req.projektePerm, req.projekt.stweg);
     if (!bearbeiter && !projekteRechte.kommentarEigenAenderbar(k, req.user?.email)) {
       return res.status(403).json({ error: `Eigene Kommentare lassen sich ${projekteRechte.KOMMENTAR_FRIST_MIN} Minuten lang löschen` });
     }
