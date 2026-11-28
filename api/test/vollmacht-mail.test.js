@@ -108,7 +108,7 @@ test('Gateway vollmachten@: eigene Regel, Rückfall auf noreply@ ohne Postfach',
 
 test('server.js: Vorlagen im Editor, Mails an allen drei Aktivierungen, Ablauf-Zeitplan, Abmelden per POST', () => {
   assert.match(SRC, /\.\.\.vollmachtMail\.VORLAGEN/);
-  assert.equal((SRC.match(/vmAktivMails\(id\)/g) || []).length, 3);
+  assert.equal((SRC.match(/vmAktivMails\(id\);/g) || []).length, 3);
   assert.match(SRC, /setInterval\(vmAblaufMails/);
   assert.match(SRC, /app\.post\('\/api\/vollmachten\/mail-abmelden'/);
   // der GET aendert nichts (Mail-Scanner rufen Links ab)
