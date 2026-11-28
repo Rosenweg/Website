@@ -71,6 +71,25 @@ def run(cmd, **kw):
 # ── GitHub-App-Token (JWT per openssl, kein Schluessel in Argumenten) ──
 def b64(b): return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
 def app_token():
+    """Installationstoken, bis kurz vor Ablauf wiederverwendet: ETags gelten je
+    Zugangsdaten (Vary: Authorization), mit jedem neuen Token waere der Cache leer."""
+    ablage = os.path.join(os.path.dirname(E["STATE"]), "token.json")
+    try:
+        c = json.load(open(ablage))
+        if c["ablauf"] > time.time() + 300: return c["token"]
+    except Exception:
+        pass
+    token, ablauf = app_token_neu()
+    try:
+        ende = calendar.timegm(time.strptime(ablauf[:19], "%Y-%m-%dT%H:%M:%S")) if ablauf else time.time() + 1800
+        fd = os.open(ablage + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f: json.dump({"token": token, "ablauf": ende}, f)
+        os.replace(ablage + ".tmp", ablage)
+    except Exception:
+        pass
+    return token
+
+def app_token_neu():
     kopf = b64(json.dumps({"alg": "RS256", "typ": "JWT"}).encode())
     nutz = b64(json.dumps({"iat": now - 60, "exp": now + 540, "iss": E["APP_ID"]}).encode())
     sig = subprocess.run(["openssl", "dgst", "-sha256", "-sign", E["APP_KEY"]],
@@ -79,7 +98,7 @@ def app_token():
     jwt = kopf + "." + nutz + "." + b64(sig.stdout)
     inst = api("/orgs/%s/installation" % ORG, jwt)
     tok = api("/app/installations/%d/access_tokens" % inst["id"], jwt, post=True)
-    return tok["token"]
+    return tok["token"], tok.get("expires_at", "")
 
 etags = {}   # pfad -> (etag, daten); ueberlebt nur diesen Lauf plus Zustandsdatei
 def api(pfad, token, post=False, etag=False):
