@@ -65,7 +65,13 @@
                   transition: box-shadow .15s, transform .15s; }
         .kachel:hover { box-shadow: 0 8px 24px rgba(15, 23, 42, .08); }
         .kachel .oben { display: flex; gap: 14px; align-items: flex-start; }
+        .kachel .logos { display: flex; gap: 8px; flex: none; }
         .kachel .oben img { width: 56px; height: 56px; border-radius: 14px; flex: none; background: var(--grund); }
+        .kachel .oben.mehrfarbig { flex-direction: column; gap: 10px; }
+        @media (max-width: 480px) {
+            .kachel .oben { flex-direction: column; gap: 10px; }
+            .kachel .logos.mehrere img { width: 48px; height: 48px; }
+        }
         .kachel h3 { font-size: 1.05rem; font-weight: 600; line-height: 1.3; }
         .kachel .satz { margin-top: 2px; }
         .kachel .fuer { font-size: .85rem; color: var(--leise); }
@@ -210,6 +216,6 @@
 
     <p class="leise klein" style="margin-top:32px">Fragen und Probleme: Ressort Technik, <a href="/hilfe.html">Hilfe &amp; Anleitungen</a>.</p>
 </main>
-<script src="/js/apps-seite.js?v=3"></script>
+<script src="/js/apps-seite.js?v=4"></script>
 </body>
 </html>
