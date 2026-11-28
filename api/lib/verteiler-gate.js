@@ -27,8 +27,10 @@
 //   - STWEG-uebergreifende Verteiler (stweg 0/NULL):
 //       * ohne allowed_sender_groups: alle bekannten Personen und alle aktiven
 //         Verwaltungen (wie bisher; z. B. praesident@ als Kontaktadresse);
-//       * mit allowed_sender_groups: nur diese Gruppen und Verwaltungen mit
-//         Vertrag fuer alle STWEGs.
+//       * mit allowed_sender_groups: nur diese Gruppen und die Verwaltung aller
+//         STWEGs (Vertrag ohne STWEG, Übergangsgruppe oder in jeder
+//         stwegN-verwaltung). eigentuemer@/eigentuemer-direkt@: Ausschuss +
+//         Verwaltung (Entscheid Stefan 28.11.2026, Migration in server.js).
 // Freemail- und eigene Domains werden nie als ganze Domain freigegeben, nur als
 // einzelne Adresse (sonst duerfte jede gmail.com-Adresse senden).
 
@@ -100,7 +102,10 @@ function gateEintraege(d) {
       for (const k of Object.keys(VERWALTUNG_GROUPS)) verwaltungsGruppe(Number(k)).forEach(e => emails.add(e));
       for (const w of d.verwaltungen || []) verwAdressen.push(...w.adressen);
     } else {
+      // Verwaltung fuer alle STWEGs: Übergangsgruppe oder in jeder stwegN-verwaltung
       gruppe(VERWALTUNG_UEBERGANG_GLOBAL).forEach(e => emails.add(e));
+      const jeStweg = Object.values(VERWALTUNG_GROUPS).map(g => new Set(gruppe(g)));
+      [...jeStweg[0]].filter(e => jeStweg.every(m => m.has(e))).forEach(e => emails.add(e));
       for (const w of d.verwaltungen || []) if (w.stweg == null) verwAdressen.push(...w.adressen);
     }
 

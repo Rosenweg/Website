@@ -32098,6 +32098,17 @@ async function initDB() {
       -- damit Freigeber != Ersteller sicher verglichen wird (lib/vier-augen.js).
       ALTER TABLE verwaltung_mail_queue ADD COLUMN IF NOT EXISTS created_by_id INTEGER;
       ALTER TABLE verwaltung_mail_queue ADD COLUMN IF NOT EXISTS edited_by_id INTEGER;
+      -- F1 (Entscheid Stefan 28.11.2026): an eigentuemer@ und eigentuemer-direkt@
+      -- schreiben nur Ausschuss und Verwaltung (dazu immer Technik/Präsident, siehe
+      -- lib/verteiler-gate.js). Einmalig; spaetere Aenderungen in der Verwaltung bleiben.
+      CREATE TABLE IF NOT EXISTS verteiler_migrationen (name VARCHAR(100) PRIMARY KEY, am TIMESTAMPTZ DEFAULT NOW());
+      WITH neu AS (
+        INSERT INTO verteiler_migrationen (name) VALUES ('2026-11-eigentuemer-absender')
+        ON CONFLICT (name) DO NOTHING RETURNING name
+      )
+      UPDATE email_verteiler SET allowed_sender_groups = '["ausschuss", "Verwaltung"]'::jsonb
+       WHERE EXISTS (SELECT 1 FROM neu)
+         AND (LOWER(email_address) LIKE 'eigentuemer@%' OR LOWER(email_address) LIKE 'eigentuemer-direkt@%');
       -- L11: Idempotenz fuer POST /api/verteiler/send (Schluessel je Konto, 24 h).
       CREATE TABLE IF NOT EXISTS verteiler_send_idempotenz (
         konto VARCHAR(255) NOT NULL,

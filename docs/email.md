@@ -191,7 +191,7 @@ Rückfall ohne nativen Fanout in der API:
 | einer STWEG N, mit Absender-Gruppen | nur Mitglieder dieser Gruppen |
 | einer STWEG N, immer | Verwaltung von N: Gruppe `stwegN-verwaltung` (Übergang „Verwaltung“), Adressen und Domains der Verwaltungen mit Vertrag für N oder für alle STWEGs |
 | STWEG-übergreifend (`stweg` 0), ohne Absender-Gruppen | alle bekannten Personen und alle aktiven Verwaltungen |
-| STWEG-übergreifend, mit Absender-Gruppen | nur diese Gruppen und Verwaltungen mit Vertrag für alle STWEGs |
+| STWEG-übergreifend, mit Absender-Gruppen | nur diese Gruppen und die Verwaltung aller STWEGs (Vertrag ohne STWEG, Übergangsgruppe oder in jeder `stwegN-verwaltung`); `eigentuemer@` und `eigentuemer-direkt@`: `ausschuss` + `Verwaltung` (einmalige Migration, Entscheid 28.11.2026) |
 
 Ganze Domains gibt das Gate nur für Verwaltungen frei, nie Freemail-Domains
 (gmail.com …) und nie die eigenen Mailcow-Domains. Die Regel greift auch für

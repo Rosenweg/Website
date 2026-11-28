@@ -136,6 +136,23 @@ print(json.dumps({"maps": maps, "mm": mm, "co": co, "co2": co2}))
   assert.match(r.mm, /ROSENWEG_AUTHED/);
 });
 
+test('F1: eigentuemer@ nur Ausschuss + Verwaltung (einmalige Migration), technik@/praesident@ offen', () => {
+  assert.match(src, /INSERT INTO verteiler_migrationen \(name\) VALUES \('2026-11-eigentuemer-absender'\)/);
+  assert.match(src, /SET allowed_sender_groups = '\["ausschuss", "Verwaltung"\]'::jsonb\n\s+WHERE EXISTS \(SELECT 1 FROM neu\)/);
+  const g2 = { ...gruppen, verwaltung: ['uebergang@example.org'] };
+  for (const k of ['stweg1-verwaltung', 'stweg2-verwaltung', 'stweg3-verwaltung', 'stweg4-verwaltung', 'stweg5-verwaltung', 'stweg6-verwaltung', 'stweg7-verwaltung', 'meg-verwaltung']) {
+    g2[k] = [...(gruppen[k] || []), 'verwalle@example.org'];
+  }
+  const d = { ...daten([{ ...V.alle, allowed_sender_groups: ['ausschuss', 'Verwaltung'] }]), gruppe: (n) => g2[String(n).toLowerCase()] || [] };
+  const [e] = gate.gateEintraege(d);
+  for (const ok of ['aus3@example.org', 'uebergang@example.org', 'verwalle@example.org', 'tech@example.org', 'praes@example.org', 'wer@verwalle.example']) {
+    assert.equal(gate.absenderErlaubt(e, ok), true, ok);
+  }
+  for (const nein of ['mieter3@example.org', 'verwgruppe3@example.org', 'wer@verw3.example']) {
+    assert.equal(gate.absenderErlaubt(e, nein), false, nein);
+  }
+});
+
 // ── F2 ─────────────────────────────────────────────────────────────
 test('F2: Ersteller und letzter Bearbeiter geben nicht selbst frei (Konto-ID)', () => {
   const ich = { id: 7, email: 'erika@example.ch' };
