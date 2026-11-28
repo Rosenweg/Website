@@ -2776,6 +2776,16 @@ def _apps_einspielen(schluessel, plattform, quelle, version_soll=None):
             if plattform == "android":
                 katalog = conn.execute("SELECT apk_datei FROM telefon_apps WHERE paket = ? AND art = 'apk'",
                                        (paket_soll,)).fetchone()
+                if not katalog and register and not conn.execute(
+                        "SELECT 1 FROM telefon_apps WHERE paket = ?", (paket_soll,)).fetchone():
+                    # Jede Rosenweg-App gehoert auch auf die geteilten Telefone (Stefan 28.11.2026):
+                    # beim ersten Android-Release selbst in den Katalog aufnehmen, fuer alle sichtbar.
+                    # Die App prueft ihre Rechte selbst; Freigabe/Gruppen aendert die Technik auf /smartphones.
+                    reihe = (conn.execute("SELECT COALESCE(MAX(reihenfolge), 0) FROM telefon_apps").fetchone()[0] or 0) + 10
+                    conn.execute("INSERT INTO telefon_apps (paket, name, art, gruppen, reihenfolge, aktiv) "
+                                 "VALUES (?, ?, 'apk', '', ?, 1)",
+                                 (paket_soll, register.get("name") or paket_soll, reihe))
+                    katalog = {"apk_datei": None}
                 if katalog:
                     # dieselbe Fassung in den Katalog der geteilten Telefone (Freigabe bleibt, wie sie ist)
                     kdatei = f"{paket_soll}-{sha[:12]}.apk"
