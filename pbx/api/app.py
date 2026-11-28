@@ -26,7 +26,9 @@ import os
 import re
 import secrets as pysecrets
 import shutil
+import tempfile
 import threading
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 from xml.sax.saxutils import escape as xesc
 from zoneinfo import ZoneInfo
@@ -4174,13 +4176,19 @@ def telefon_messenger():
 # (HS256, PORTAL_ANLAGE_SECRET, 60 s, einmal; Haupt-API: api/lib/anlagetoken.js).
 # Kein Token verlaesst CT 220: weder Geraet noch die App bekommt eines.
 #
-# Welche Pfade eine App so erreichen darf, steht in der Config "portal_pfade"
-# (JSON {paket: [eintrag, ...], "*": [...]} — "*" gilt fuer alle Apps). Eintrag:
+# Welche Pfade eine App so erreichen darf: auf geteilten Telefonen gelten dieselben
+# Funktionen wie am eigenen Geraet (Karte, QR und Handy sind wie ein Schluessel,
+# Entscheid Stefan 28.11.2026). Jede Rosenweg-App (gleiche Signatur, Paket
+# ch.rosenweg4303.*) erreicht darum alles unter /api/; was die Person darf, sagt die
+# Haupt-API wie sonst. Gesperrt bleibt nur, was einen Ausweis aendert oder erzeugt
+# (PORTAL_GESPERRT, gleich wie PAT_GESPERRT in api/middleware/auth.js: Passwort,
+# Passkeys, Zugangstoken, MQTT-Zugang, OAuth/Profil-Login) — mit den Ausnahmen in
+# PORTAL_AUSNAHMEN. Die Config "portal_pfade" (JSON {paket: [eintrag, ...], "*": [...]})
+# kann die Standardliste ersetzen; PORTAL_GESPERRT gilt immer. Eintrag:
 #   "/api/salz/"          alles darunter, alle Methoden
 #   "/api/auth/me"        genau dieser Pfad, alle Methoden
 #   "GET /api/me"         nur mit diesen Methoden (mehrere: "GET,PUT /api/me")
-# Fehlt die Config, gilt PORTAL_PFADE_STANDARD. Die Haupt-API sperrt zusaetzlich
-# alles, was einen Ausweis aendert (PAT_GESPERRT in api/middleware/auth.js).
+# Jede Anfrage der Haupt-API traegt Telefon und Person (Anlage-Token: ext, paket, email).
 PORTAL_ANLAGE_SECRET = os.environ.get("PORTAL_ANLAGE_SECRET", "")
 PORTAL_TOKEN_S = 60
 PORTAL_KOERPER_MAX = 256 * 1024
@@ -4193,54 +4201,17 @@ PORTAL_METHODEN = ("GET", "POST", "PUT", "DELETE")
 #   {"binaer": {"typ", "daten" (base64), "von", "bis", "gesamt", "etag"}}
 # So bleibt der Weg ueber Rosenweg Geraet reiner JSON-Text (Binder ~1 MB).
 # Ein Stueck hoechstens 320 KB (base64 ~430 KB < PORTAL_ANTWORT_MAX), eine
-# Datei hoechstens 20 MB (64 Stuecke; Geraet erlaubt 120 Anfragen je Minute).
+# Datei hoechstens 64 MB (200 Stuecke; Geraet erlaubt 300 Anfragen je Minute).
+# Hochladen geht ebenso in Stuecken (portal_hochladen, siehe _portal_teil).
 PORTAL_BINAER_TEIL = 320 * 1024
-PORTAL_BINAER_MAX = 20 * 1024 * 1024
+PORTAL_BINAER_MAX = 64 * 1024 * 1024
 _PORTAL_BEREICH = re.compile(r"(^|&)portal_bereich=(\d{1,9})-(\d{1,9})(?=&|$)")
-PORTAL_PFADE_STANDARD = {
-    "*": ["GET /api/auth/me", "GET /api/me"],
-    "ch.rosenweg4303.salz": ["/api/salz/"],
-    # Rosenweg Uhr: Wecker, Weltuhren, Timer-Vorlagen der Person (Haupt-API routes/app-daten.js;
-    # die Haupt-API laesst je Anlage-Token ohnehin nur die App selbst an ihre Daten)
-    "ch.rosenweg4303.clock": ["GET,PUT /api/me/app-daten/ch.rosenweg4303.clock"],
-    # Rosenweg Zutritt (Technik/Praesident; die Haupt-API prueft die Rechte): Karten, UniFi Access,
-    # Anmeldungen der Apps, offene Bestaetigungen
-    "ch.rosenweg4303.zutritt": ["/api/karten/", "/api/access/", "GET /api/apps/sitzungen", "/api/apps/sitzungen/",
-                                "GET /api/me/bestaetigungen"],
-    # Rosenweg Mein Telefon: die eigene Nummer ueber die Haupt-API (api/routes/telefonanlage.js reicht
-    # hierher zurueck, nur fuer die Person am Telefon), eigene Handys abmelden
-    "ch.rosenweg4303.meintelefon": ["/api/telefonanlage/", "GET /api/messenger/zugaenge", "DELETE /api/messenger/zugaenge/",
-                                    "GET /api/apps/sitzungen", "DELETE /api/apps/sitzungen/"],
-    # Rosenweg Waschkueche (Bewohner der STWEG mit Waschkueche, Verwalten mit "waschküche-admin";
-    # die Haupt-API prueft Raeume/STWEG und Rechte selbst)
-    "ch.rosenweg4303.waschkueche": ["/api/wasch/"],
-    # Rosenweg TV: Senderliste, Programm und Stream-Token (nur lesen; keine Ferien-Zugaenge
-    # /api/tv/extern*, Entscheid Stefan 28.11.2026)
-    "ch.rosenweg4303.tv": ["GET /api/tv/channels", "GET /api/tv/jetzt", "GET /api/tv/epg",
-                           "GET /api/tv/stream-url/"],
-    # Rosenweg Wetter: nur der oeffentliche Verlauf der Wetterstation (live kommt per MQTT
-    # mit dem oeffentlichen Lese-Benutzer, nicht ueber das Portal)
-    "ch.rosenweg4303.wetter": ["GET /api/wetter/"],
-    # Rosenweg Unterlagen: auf geteilten Telefonen nur lesen und Vorschau (Entscheid E10
-    # 28.11.2026) – kein Hochladen, Loeschen, Verschieben. Dateien stueckweise (portal_bereich).
-    # Die Haupt-API prueft je Pfad, was die Person lesen darf.
-    "ch.rosenweg4303.unterlagen": ["GET /api/documents", "GET /api/documents/", "GET /api/documents-ordner",
-                                   "GET /api/documents-suche", "GET /api/documents-neu", "GET /api/documents-rechte",
-                                   "GET /api/documents-kennung/", "GET /api/documents-fassungen",
-                                   "GET /api/documents-fassungen/", "GET /api/documents-preview",
-                                   "POST /api/documents-preview"],
-
-    # Rosenweg TV: Senderliste, Programm und Stream-Token (nur lesen; keine Ferien-Zugaenge
-    # /api/tv/extern*, Entscheid Stefan 28.11.2026)
-    "ch.rosenweg4303.tv": ["GET /api/tv/channels", "GET /api/tv/jetzt", "GET /api/tv/epg",
-                           "GET /api/tv/stream-url/"],
-    # Rosenweg Projekte: auf geteilten Telefonen lesen und kommentieren (Entscheid P11, 28.11.2026).
-    # Die Haupt-API prueft je Projekt, was die Person lesen darf, und lehnt jede Aenderung am
-    # Projekt (Anlegen, Zeitachse, Offerten, Budget, Anhaenge, Loeschen) bei Anlage-Token ab
-    # (requireProjektBearbeiten); Kommentare der Person gehen. Dateien nur lesen/Vorschau.
-    "ch.rosenweg4303.projekte": ["GET /api/projects", "GET,POST,PUT,DELETE /api/projects/", "GET /api/projects-rechte",
-                                 "GET /api/documents/", "GET /api/documents-kennung/", "POST /api/documents-preview"],
-}
+PORTAL_PFADE_STANDARD = {"*": ["/api/"]}
+# Nie ueber das Telefon (relativ zu /api/, Segmentgrenze, wie PAT_GESPERRT der Haupt-API)
+PORTAL_GESPERRT = ("change-password", "me/tokens", "me/passkeys", "auth", "mqtt/my-app-passwords",
+                   "mqtt/user-app-passwords")
+# Ausnahmen davon (Methode, Pfad ohne /api/): wer bin ich
+PORTAL_AUSNAHMEN = (("GET", "auth/me"),)
 _PORTAL_PFAD = re.compile(r"/api/[A-Za-z0-9._~!$&'()*+,;=:@%/-]{1,1000}(\?[A-Za-z0-9._~!$&'()*+,;=:@%/?-]{0,1000})?")
 _PORTAL_KODIERT_VERBOTEN = re.compile(r"%(2e|2f|5c|00)", re.I)
 
@@ -4267,7 +4238,17 @@ def _portal_regeln(conn):
     return PORTAL_PFADE_STANDARD
 
 
+def _portal_gesperrt(methode, pfad):
+    """Pfad aendert einen Ausweis (Passwort, Token, Passkeys …)? Dann nie ueber das Telefon."""
+    weg = _portal_pfad_normal(urllib.parse.unquote(pfad.split("?", 1)[0]))
+    if (methode, weg) in PORTAL_AUSNAHMEN:
+        return False
+    return any(weg == g or weg.startswith(g + "/") for g in PORTAL_GESPERRT)
+
+
 def _portal_erlaubt(regeln, paket, methode, pfad):
+    if _portal_gesperrt(methode, pfad):
+        return False
     weg = pfad.split("?", 1)[0].lower()
     for eintrag in list(regeln.get("*") or []) + list(regeln.get(paket) or []):
         teile = str(eintrag).strip().split(None, 1)
@@ -4322,6 +4303,152 @@ def _portal_sitzung_marke(ext, sitzung):
     return hashlib.sha256(f"{ext}|{sitzung['email']}|{sitzung['seit']}".encode()).hexdigest()[:16]
 
 
+# ─── Hochladen in Stuecken (Entscheid Stefan 28.11.2026, 64 MB) ──────────────
+# Rosenweg Geraet reicht nur JSON-Text bis 256 KB weiter. Eine Datei geht darum in
+# Stuecken zu hoechstens PORTAL_HOCH_TEIL Bytes: je Stueck eine Portal-Anfrage mit
+#   teil: {id (16-32 Hex), nr (ab 0, lueckenlos), anzahl, gesamt (Bytes),
+#          kopf (nur nr 0): {name, typ, multipart, feld, felder, inhaltstyp, kopf}}
+#   koerper: das Stueck als base64
+# Methode und Pfad sind die der echten Anfrage (POST/PUT /api/documents/...). Die Anlage
+# legt die Stuecke ab (eine Datei je Telefon), prueft Person und Reihenfolge, und
+# schickt beim letzten Stueck EINE Anfrage an die Haupt-API (Anlage-Token fuer genau
+# diese Methode + diesen Pfad). Zwischenantwort: 202 {"teil": nr}; die letzte Antwort
+# ist die der Haupt-API. Wechselt die Person, ist der Upload hinfaellig (409).
+PORTAL_HOCH_TEIL = 180 * 1024
+PORTAL_HOCH_TEILE_MAX = 700
+PORTAL_HOCH_FRIST_S = 15 * 60
+PORTAL_HOCH_KOPF_ERLAUBT = ("if-match", "if-none-match")
+_PORTAL_HOCH_ID = re.compile(r"[0-9a-f]{16,32}")
+_PORTAL_HOCH_LOCK = threading.Lock()
+
+
+def _portal_hoch_dir():
+    return os.environ.get("PORTAL_HOCH_DIR") or os.path.join(tempfile.gettempdir(), "pbx-portal-hoch")
+
+
+def _portal_hoch_aufraeumen(wurzel, ext, ausser=None):
+    """Alte Uploads (Frist) und andere Uploads desselben Telefons entfernen."""
+    jetzt = time.time()
+    try:
+        for n in os.listdir(wurzel):
+            d = os.path.join(wurzel, n)
+            if d == ausser:
+                continue
+            alt = jetzt - os.path.getmtime(d) > PORTAL_HOCH_FRIST_S
+            if alt or n.startswith(f"{ext}-"):
+                shutil.rmtree(d, ignore_errors=True)
+    except OSError:
+        pass
+
+
+def _portal_teil(ext, s, paket, methode, pfad, koerper, teil):
+    if methode not in ("POST", "PUT"):
+        return jsonify({"error": "Hochladen nur mit POST oder PUT"}), 400
+    if not isinstance(teil, dict):
+        return jsonify({"error": "teil ungueltig"}), 400
+    tid, nr, anzahl, gesamt = teil.get("id"), teil.get("nr"), teil.get("anzahl"), teil.get("gesamt")
+    if not (isinstance(tid, str) and _PORTAL_HOCH_ID.fullmatch(tid)
+            and all(isinstance(x, int) and not isinstance(x, bool) for x in (nr, anzahl, gesamt))):
+        return jsonify({"error": "teil ungueltig"}), 400
+    if not (1 <= anzahl <= PORTAL_HOCH_TEILE_MAX and 0 <= nr < anzahl and 1 <= gesamt <= PORTAL_BINAER_MAX):
+        return jsonify({"error": "teil ungueltig"}), 400
+    if gesamt > anzahl * PORTAL_HOCH_TEIL or gesamt <= (anzahl - 1) * 1:
+        return jsonify({"error": "teil ungueltig"}), 400
+    try:
+        daten = base64.b64decode(koerper or "", validate=True)
+    except (binascii.Error, ValueError, TypeError):
+        return jsonify({"error": "Stueck ungueltig"}), 400
+    if not daten or len(daten) > PORTAL_HOCH_TEIL:
+        return jsonify({"error": f"Stueck leer oder zu gross (hoechstens {PORTAL_HOCH_TEIL // 1024} KB)"}), 413
+    marke = _portal_sitzung_marke(ext, s)
+    wurzel = _portal_hoch_dir()
+    ordner = os.path.join(wurzel, f"{ext}-{tid}")
+    email = (s["email"] or "").lower()
+    with _PORTAL_HOCH_LOCK:
+        os.makedirs(wurzel, exist_ok=True)
+        meta_pfad = os.path.join(ordner, "meta.json")
+        if nr == 0:
+            kopf = teil.get("kopf")
+            if not isinstance(kopf, dict):
+                return jsonify({"error": "kopf fehlt"}), 400
+            _portal_hoch_aufraeumen(wurzel, ext)
+            os.makedirs(ordner, exist_ok=True)
+            with open(meta_pfad, "w", encoding="utf-8") as f:
+                json.dump({"pfad": pfad, "methode": methode, "paket": paket, "email": email, "anzahl": anzahl,
+                           "gesamt": gesamt, "kopf": kopf, "naechstes": 0, "bytes": 0}, f)
+        try:
+            with open(meta_pfad, encoding="utf-8") as f:
+                meta = json.load(f)
+        except (OSError, ValueError):
+            return jsonify({"error": "Upload unbekannt oder abgelaufen", "upload_vorbei": True}), 410
+        if meta["email"] != email:
+            shutil.rmtree(ordner, ignore_errors=True)
+            return jsonify({"error": "Niemand angemeldet", "nicht_angemeldet": True}), 409
+        if (meta["pfad"], meta["methode"], meta["paket"], meta["anzahl"], meta["gesamt"]) != (pfad, methode, paket, anzahl, gesamt):
+            shutil.rmtree(ordner, ignore_errors=True)
+            return jsonify({"error": "Stueck passt nicht zum Upload"}), 400
+        if nr != meta["naechstes"]:
+            shutil.rmtree(ordner, ignore_errors=True)
+            return jsonify({"error": "Stueck in falscher Reihenfolge"}), 400
+        if meta["bytes"] + len(daten) > gesamt or (nr < anzahl - 1 and len(daten) == 0):
+            shutil.rmtree(ordner, ignore_errors=True)
+            return jsonify({"error": "Stuecke groesser als angekuendigt"}), 400
+        with open(os.path.join(ordner, f"teil-{nr:05d}"), "wb") as f:
+            f.write(daten)
+        meta["naechstes"] = nr + 1
+        meta["bytes"] += len(daten)
+        with open(meta_pfad, "w", encoding="utf-8") as f:
+            json.dump(meta, f)
+        if nr < anzahl - 1:
+            return jsonify({"status": 202, "json": json.dumps({"teil": nr}), "sitzung": marke})
+        if meta["bytes"] != gesamt:
+            shutil.rmtree(ordner, ignore_errors=True)
+            return jsonify({"error": "Groesse stimmt nicht"}), 400
+        try:
+            teile = []
+            for i in range(anzahl):
+                with open(os.path.join(ordner, f"teil-{i:05d}"), "rb") as f:
+                    teile.append(f.read())
+            ganz = b"".join(teile)
+        except OSError:
+            shutil.rmtree(ordner, ignore_errors=True)
+            return jsonify({"error": "Upload unvollstaendig", "upload_vorbei": True}), 410
+        kopf = meta["kopf"]
+        shutil.rmtree(ordner, ignore_errors=True)
+
+    name = str(kopf.get("name") or "datei")[:300]
+    typ = str(kopf.get("typ") or "application/octet-stream")[:100]
+    kopfzeilen = {"Authorization": f"Bearer {_portal_token(s, ext, paket, methode, pfad)}",
+                  "Accept": "application/json", "X-Rosenweg-Telefon": ext}
+    extra = kopf.get("kopf") if isinstance(kopf.get("kopf"), dict) else {}
+    for k, v in extra.items():
+        if str(k).lower() in PORTAL_HOCH_KOPF_ERLAUBT and isinstance(v, str) and len(v) < 300:
+            kopfzeilen[str(k)] = v
+    try:
+        if kopf.get("multipart"):
+            felder = {str(k): str(v) for k, v in (kopf.get("felder") or {}).items()} if isinstance(kopf.get("felder"), dict) else {}
+            r = requests.request(methode, f"{MAIN_API_BASE}{pfad}", headers=kopfzeilen, data=felder,
+                                 files={str(kopf.get("feld") or "datei"): (name, ganz, typ)},
+                                 timeout=300, allow_redirects=False, stream=True)
+        else:
+            kopfzeilen["Content-Type"] = str(kopf.get("inhaltstyp") or typ)[:100]
+            kopfzeilen["X-Filename"] = str(kopf.get("x_filename") or urllib.parse.quote(name))[:600]
+            r = requests.request(methode, f"{MAIN_API_BASE}{pfad}", headers=kopfzeilen, data=ganz,
+                                 timeout=300, allow_redirects=False, stream=True)
+        try:
+            roh = r.raw.read(PORTAL_ANTWORT_MAX + 1, decode_content=True)
+        finally:
+            r.close()
+    except requests.RequestException as e:
+        app.logger.warning("portal %s: Upload, Haupt-API nicht erreichbar (%s)", ext, type(e).__name__)
+        return jsonify({"error": "Keine Verbindung zum Portal"}), 502
+    app.logger.info("portal %s %s %s %s -> %s (Upload %d Bytes)", ext, paket, methode, pfad.split("?", 1)[0],
+                    r.status_code, len(ganz))
+    if len(roh) > PORTAL_ANTWORT_MAX:
+        return jsonify({"error": "Antwort zu gross fuer das Telefon"}), 502
+    return jsonify({"status": r.status_code, "json": roh.decode("utf-8", "replace"), "sitzung": marke})
+
+
 @app.post("/api/telefon/portal")
 def telefon_portal():
     """Rosenweg Geraet: {methode, pfad, koerper (JSON-Text|null), paket} -> {status, json, sitzung}.
@@ -4359,6 +4486,8 @@ def telefon_portal():
     if not _portal_erlaubt(regeln, paket, methode, pfad):
         app.logger.info("portal %s %s %s %s: nicht freigegeben", ext, paket, methode, pfad.split("?", 1)[0])
         return jsonify({"error": "Diese App darf das auf geteilten Telefonen nicht", "nicht_freigegeben": True}), 403
+    if b.get("teil") is not None:
+        return _portal_teil(ext, s, paket, methode, pfad, koerper, b.get("teil"))
     kopf = {"Authorization": f"Bearer {_portal_token(s, ext, paket, methode, pfad)}",
             "Accept": "application/json", "X-Rosenweg-Telefon": ext}
     if koerper is not None:

@@ -168,11 +168,9 @@ Technik sie auf /smartphones gesetzt hat. Erster Eintrag also: Zeile auf /smartp
   (`wasch_rooms`), ihre drei Gruppen hier dazunehmen. Die Hausverwaltung (`stwegN-verwaltung`)
   darf nur lesen und meldet sich an geteilten Telefonen nicht an. `portal_pfade` `/api/wasch/`;
   Räume, STWEG und das Recht „waschküche-admin“ prüft die Haupt-API selbst.
-- **Projekte:** Auf geteilten Telefonen lesen und kommentieren, nach der Kartenanmeldung (Entscheid P11,
-  28.11.2026): kein Hochladen, Anlegen, Bearbeiten oder Löschen. `portal_pfade` `/api/projects` (nur GET),
-  `/api/projects/` (alles darunter; die Haupt-API lehnt jede Änderung am Projekt bei einem Anlage-Token ab,
-  nur Kommentare der Person gehen) und lesend `/api/documents/` für die Vorschau. Welche Projekte die Person
-  sieht, prüft die Haupt-API je Projekt (eigene STWEG und Kooperation).
+- **Projekte:** Auf geteilten Telefonen dieselben Rechte wie am eigenen Gerät (28.11.2026, ersetzt P11): lesen,
+  kommentieren, bearbeiten, Dateien. Welche Projekte die Person sieht und bearbeiten darf, prüft die Haupt-API
+  je Projekt (eigene STWEG und Kooperation); das Löschen bleibt Technik/Präsident.
 - **Zutritt:** Seit dem ersten Release (1.0.0) aktiv; die APK kam von selbst in die vorbereitete Zeile.
 
 ## Wartung per USB
@@ -621,3 +619,11 @@ Rosenweg Telefon ohne Rosenweg Gerät (eigenes Handy) registriert sich über **T
 - **pbx-api:** `PBX_SIP_TRANSPORT_PRIVAT` (Vorgabe `tls`) bestimmt Transport und Port der eigenen Handys; geteilte Telefone bleiben bei `PBX_SIP_TRANSPORT`.
 - **`POST /api/telefon/privat/stand`** `{user, password}`: Rosenweg Telefon fragt regelmäßig nach. 200 = aktuelle Zugangsdaten (so kommt auch der Wechsel auf TLS aufs Handy), 401 = Zugang gibt es nicht mehr (im Web auf /smartphones abgemeldet) → die App meldet sich ab und fragt nicht weiter.
 - Sprache (RTP) ist noch unverschlüsselt; SRTP ist ein eigener Schritt.
+
+## Freigaben und Dateien (28.11.2026)
+
+Alle Rosenweg-Apps erreichen auf geteilten Telefonen alles unter `/api/` wie am eigenen Gerät
+(`PORTAL_PFADE_STANDARD`); gesperrt bleiben nur Passwort, Zugangstoken, Passkeys, MQTT-Zugang und die
+Anmelde-Wege von `auth/` (`PORTAL_GESPERRT`). Einzelne ältere Absätze oben, die „nur lesen“ oder
+bestimmte `portal_pfade` nennen, gelten damit nicht mehr. Dateien gehen in Stücken (Download 320 KB,
+Upload 180 KB), bis 64 MB. Siehe `pbx/README.md`.
