@@ -66,8 +66,10 @@ jobs:
           "$RUNNER_TEMP/pbx/bin/pip" install --quiet -r pbx/api/requirements.txt
           cd pbx/api && "$RUNNER_TEMP/pbx/bin/python" -m unittest test_karten_verwalter test_apps_stand test_fernwartung test_nextcloud_zugang test_hintergrund -v
 
-      # PHP fehlt auf den eigenen Runnern (Debian ohne php-cli)
+      # Eigene Runner haben php-cli aus Debian (CT 140/145); setup-php braucht sudo
+      # und laeuft darum nur auf GitHub-Runnern.
       - uses: shivammathur/setup-php@v2
+        if: runner.environment == 'github-hosted'
         with:
           php-version: '8.4'
           coverage: none
