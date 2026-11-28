@@ -179,6 +179,11 @@ function doppelteErkennen(lebenszeichen) {
   for (let i = 0; i < gruppen.length; i += 1) {
     for (let j = i + 1; j < gruppen.length; j += 1) {
       const a = gruppen[i]; const b = gruppen[j];
+      // Gleiche Adressen, nur die Startzeit weicht ab: ein einzelner Ausreisser ist
+      // eine gestellte Uhr (Zeitabgleich in einer VM verschiebt Jetzt minus Laufzeit),
+      // kein zweites Gerät. Gemeldet wird erst, wenn beide Absender mehrmals kommen.
+      const nurStartzeit = a.quelle_ip === b.quelle_ip && a.lokal_ip === b.lokal_ip;
+      if (nurStartzeit && (a.anzahl < 2 || b.anzahl < 2)) continue;
       if (a.von < b.bis && b.von < a.bis) { beteiligt.add(a); beteiligt.add(b); }
     }
   }
