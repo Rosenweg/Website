@@ -172,6 +172,15 @@ Technik sie auf /smartphones gesetzt hat. Erster Eintrag also: Zeile auf /smartp
   kommentieren, bearbeiten, Dateien. Welche Projekte die Person sieht und bearbeiten darf, prüft die Haupt-API
   je Projekt (eigene STWEG und Kooperation); das Löschen bleibt Technik/Präsident.
 - **Zutritt:** Seit dem ersten Release (1.0.0) aktiv; die APK kam von selbst in die vorbereitete Zeile.
+- **Karte wie Schlüssel (28.11.2026, `docs/sicherheit.md` 4.11):** Seit #255 erreicht jede Rosenweg-App
+  alles unter `/api/`; gesperrt bleibt `PORTAL_GESPERRT`. Neu als Ausnahmen (`PORTAL_AUSNAHMEN`, wie
+  `KARTE_FREI` in `api/lib/sperrliste.js`): `PUT /api/auth/profile` und `PUT /api/auth/avatar` (Profil-Angaben
+  und Profilbild, protokolliert). Mein Telefon stellt den App-QR für das eigene Handy aus (protokolliert,
+  Mail beim Einlösen). Vollmachten signiert nur nach erneuter Karte oder einem Anmelde-QR aus dem
+  Rosenweg-Konto (`POST /api/vollmachten/<id>/sign-bestaetigung`, 2 Minuten, nur diese Vollmacht).
+  Die Anlage merkt sich die Anzeige-ID der Karte an der Sitzung (`telefon_sitzungen.karte`) und gibt sie
+  im Anlage-Token mit (`karte`); so meldet die Haupt-API einen App-QR vom geteilten Telefon ab, wenn die
+  Karte entzogen wird.
 
 ## Wartung per USB
 

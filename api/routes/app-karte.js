@@ -40,7 +40,21 @@
 // "App auf eigenem Handy" einen Anmelde-QR; die App scannt ihn und bekommt
 // ihre eigene Sitzung (art 'qr', sonst wie oben: gerätegebunden, 15-min-Zugang,
 // 30 Tage, höchstens 20 je Person, Mail bei neuem Gerät). Der QR:
-//  - stellt nur eine Browser-Anmeldung aus (requireUserLogin: keine Karte, kein PAT),
+//  - stellt eine Anmeldung der Person aus: Rosenweg-Konto, und seit 28.11.2026 auch
+//    Karte, QR, Handy und geteiltes Telefon ("Karte wie Schlüssel", ak.qrAusstellenErlaubt;
+//    nie ein PAT). Jede Ausgabe steht im admin_protokoll (Bereich 'apps'), mit der Karte
+//    samt Karten- bzw. Geräte-Vermerk. Ein QR aus einer Karten-Anmeldung meldet beim
+//    Einlösen IMMER per Mail (nicht nur bei neuem Gerät): so fällt auf, wenn jemand an
+//    einem fremd angemeldeten Telefon einen QR für sein eigenes Handy holt. Die Sitzung
+//    trägt die Herkunft (herkunft, z. B. "anlage") und erscheint in der Übersicht.
+//  - Karte entzogen, gesperrt oder entfernt (Entscheid Stefan 28.11.2026): karteEntzogen()
+//    meldet alle Sitzungen ab, die über diese Karte entstanden sind — die Karten-Sitzungen
+//    und die QR-/App-Sitzungen aus einem QR, den eine Anmeldung mit dieser Karte ausgestellt
+//    hat (herkunft_karte_token bzw. herkunft_karte). Protokoll (Kartenprotokoll und
+//    admin_protokoll, Bereich 'apps') und Mail an die Person. Ausgelöst von der
+//    Kartenverwaltung (entziehen, löschen), /api/access/…/nfc (entfernen), der
+//    Konto-Löschung und beim Erneuern, wenn UniFi Access die Karte nicht mehr der Person
+//    zuordnet (Entzug direkt in UniFi Access).
 //  - gilt APP_QR_TTL_S (90 s) und genau einmal (atomar verbraucht), je Person
 //    nur der neueste,
 //  - trägt die Person (user_id, E-Mail, Gruppen) — die App schickt nur den Token,
@@ -70,6 +84,7 @@ const appkennung = require('../lib/appkennung');
 const gg = require('../lib/geraet-gruppe');
 const kartenAdmin = require('../lib/kartenadmin');
 const { istKartenSitzung } = require('../lib/stufen');
+const adminProtokoll = require('../lib/admin-protokoll');
 
 const MAX_SITZUNGEN = Math.max(1, parseInt(process.env.APP_KARTE_MAX_SITZUNGEN || '20', 10) || 20);
 const LAUFZEIT_TAGE = Math.max(1, parseInt(process.env.APP_KARTE_TAGE || '30', 10) || 30);
@@ -88,7 +103,7 @@ function appKarteRoutes(app, deps) {
   const {
     pool, authMiddleware, requireUserLogin, absenderIp, loggedSendMail, MAIL_FROM,
     karteNachschlagen, accessKarteLive, accessKartenBesitzerId, kartenPerson, kartenProtokollieren,
-    authentikUserByEmail,
+    authentikUserByEmail, karteZurAnzeige,
   } = deps;
 
   let bereit = null;
@@ -131,6 +146,17 @@ function appKarteRoutes(app, deps) {
       bestaetigt_at TIMESTAMPTZ, bestaetigt_ip TEXT, sitzung_id TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_ahc_ip ON app_handy_codes(created_ip, created_at);
+    ALTER TABLE app_qr_ausweise ADD COLUMN IF NOT EXISTS ausgestellt_art TEXT;
+    ALTER TABLE app_qr_ausweise ADD COLUMN IF NOT EXISTS ausgestellt_vermerk TEXT;
+    ALTER TABLE app_karten_sitzungen ADD COLUMN IF NOT EXISTS herkunft TEXT;
+    ALTER TABLE app_qr_ausweise ADD COLUMN IF NOT EXISTS herkunft_karte TEXT;
+    ALTER TABLE app_qr_ausweise ADD COLUMN IF NOT EXISTS herkunft_karte_token TEXT;
+    ALTER TABLE app_qr_ausweise ADD COLUMN IF NOT EXISTS herkunft_karte_besitzer TEXT;
+    ALTER TABLE app_karten_sitzungen ADD COLUMN IF NOT EXISTS herkunft_karte TEXT;
+    ALTER TABLE app_karten_sitzungen ADD COLUMN IF NOT EXISTS herkunft_karte_token TEXT;
+    ALTER TABLE app_karten_sitzungen ADD COLUMN IF NOT EXISTS herkunft_karte_besitzer TEXT;
+    CREATE INDEX IF NOT EXISTS idx_aks_karte ON app_karten_sitzungen(access_karten_token) WHERE revoked_at IS NULL;
+    CREATE INDEX IF NOT EXISTS idx_aks_hkarte ON app_karten_sitzungen(herkunft_karte_token) WHERE revoked_at IS NULL;
   `).catch(e => { bereit = null; throw e; }));
   // Gleich beim Start anlegen bzw. ergänzen (Spalte art): karteZugangPruefen liest sie schon,
   // bevor eine der Routen hier gelaufen ist.
@@ -178,13 +204,20 @@ function appKarteRoutes(app, deps) {
     return r.rows;
   }
 
-  async function neuesGeraetMelden(person, w, ip, art = 'karte') {
+  // Wo ein QR aus einer Karten-Anmeldung ausgestellt wurde, in Worten (für die Mail)
+  const qrOrt = (art) => art === 'anlage' ? 'an einem geteilten Telefon'
+    : art === 'karte' ? 'in einer App, die mit deiner Rosenweg-Karte angemeldet ist'
+    : 'in einer App, die mit einem Anmelde-QR bzw. vom Handy angemeldet ist';
+
+  /** herkunft: { ort, vermerk } bei einem QR aus einer Karten-Anmeldung, sonst null. */
+  async function neuesGeraetMelden(person, w, ip, art = 'karte', herkunft = null) {
     const wann = new Date().toLocaleString('de-CH', { timeZone: 'Europe/Zurich' });
     const qr = ak.ohneKarte(art);
     const text = [
       `Hallo ${person.name || ''}`.trim() + ',',
       '',
       art === 'handy' ? 'auf deinem Handy hast du gerade eine App auf einem neuen Gerät freigegeben („Mit dem Handy anmelden“):'
+        : qr && herkunft ? `mit einem Anmelde-QR, ausgestellt ${herkunft.ort}, hat sich gerade eine App angemeldet:`
         : qr ? 'mit einem Anmelde-QR aus deinem Rosenweg-Konto hat sich gerade eine App auf einem neuen Gerät angemeldet:'
         : 'mit deiner Rosenweg-Karte hat sich gerade jemand auf einem neuen Gerät angemeldet:',
       '',
@@ -192,6 +225,7 @@ function appKarteRoutes(app, deps) {
       `  Gerät:   ${w.geraetName}${w.plattform ? ' (' + w.plattform + ')' : ''}`,
       `  Zeit:    ${wann}`,
       `  Adresse: ${ip}`,
+      ...(herkunft ? [`  QR von: ${herkunft.vermerk}`] : []),
       '',
       'Warst du das, ist alles in Ordnung.',
       '',
@@ -214,7 +248,7 @@ function appKarteRoutes(app, deps) {
    * App auf demselben Gerät, löst über der Obergrenze die am längsten unbenutzte ab, stellt den
    * ersten Zugang aus. -> { id, zugang..., bekannt, abgeloest }
    */
-  async function sitzungAnlegen({ userId, email, name, groups, w, ip, art, karte }) {
+  async function sitzungAnlegen({ userId, email, name, groups, w, ip, art, karte, herkunft = null, herkunftKarte = null }) {
     // Neues Gerät für diese Person? (vor dem Anlegen fragen; auch widerrufene zählen als bekannt)
     const bekannt = (await pool.query(
       'SELECT 1 FROM app_karten_sitzungen WHERE LOWER(email) = $1 AND geraet_kennung = $2 LIMIT 1', [email, w.kennung])).rowCount > 0;
@@ -230,13 +264,78 @@ function appKarteRoutes(app, deps) {
     const k = karte || {};
     await pool.query(`INSERT INTO app_karten_sitzungen
         (id, user_id, email, name, app, app_name, geraet_kennung, geraet_name, plattform, schluessel, groups_json,
-         access_karten_token, access_user_id, karte_anzeige, karte_geprueft_at, created_ip, expires_at, art)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, NOW() + make_interval(days => $17::int), $18)`,
+         access_karten_token, access_user_id, karte_anzeige, karte_geprueft_at, created_ip, expires_at, art, herkunft,
+         herkunft_karte, herkunft_karte_token, herkunft_karte_besitzer)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, NOW() + make_interval(days => $17::int), $18, $19,
+                $20, $21, $22)`,
       [id, userId, email, name, w.app, w.appName, w.kennung, w.geraetName, w.plattform,
        w.schluessel, JSON.stringify(groups || []), k.token || null, k.besitzer ? String(k.besitzer) : null,
-       k.anzeige || null, karte ? new Date() : null, ip, String(LAUFZEIT_TAGE), art]);
+       k.anzeige || null, karte ? new Date() : null, ip, String(LAUFZEIT_TAGE), art, herkunft ? String(herkunft).slice(0, 300) : null,
+       herkunftKarte?.anzeige || null, herkunftKarte?.token || null, herkunftKarte?.besitzer || null]);
     const z = await zugangAusstellen(id, ip);
     return { id, ...z, bekannt, abgeloest: weg.length };
+  }
+
+  /**
+   * Karte entzogen, gesperrt oder entfernt: alle Sitzungen abmelden, die über sie entstanden
+   * sind, offene Anmelde-QR aus ihr verwerfen, laufende Signatur-Bestätigungen mit ihr
+   * beenden; Protokoll und Mail an jede betroffene Person. Blockiert den Aufrufer nicht mit
+   * Fehlern (wirft nur, wenn die Datenbank nicht geht). -> Anzahl abgemeldeter Sitzungen
+   */
+  async function karteEntzogen({ token, anzeige } = {}, { durch = 'system', grund = 'karte entzogen' } = {}) {
+    const b = ak.entzugBedingung({ token, anzeige });
+    if (!b) return 0;
+    await tabellen();
+    const r = await pool.query(
+      `UPDATE app_karten_sitzungen SET revoked_at = NOW(), revoked_by = $${b.params.length + 1},
+              revoked_reason = $${b.params.length + 2}, zugang_hash = NULL, herausforderung_hash = NULL
+        WHERE revoked_at IS NULL AND ${b.where}
+        RETURNING id, email, name, app, app_name, geraet_name, art, karte_anzeige, herkunft_karte`,
+      [...b.params, String(durch || '').slice(0, 200), String(grund || '').slice(0, 200)]);
+    // Noch nicht eingelöste QR aus dieser Karte gelten nicht mehr
+    const q = ak.entzugBedingung({ token, anzeige }, { nurHerkunft: true });
+    await pool.query(`DELETE FROM app_qr_ausweise WHERE eingeloest_at IS NULL AND ${q.where}`, q.params)
+      .catch(e => console.error('[app-karte] QR verwerfen:', e.message));
+    // Laufende Signatur-Bestätigungen mit dieser Karte (lib/signaturbestaetigung.js) beenden
+    const anz = anzeige || r.rows.find(x => x.karte_anzeige)?.karte_anzeige || null;
+    if (anz) {
+      pool.query(`UPDATE vollmacht_sign_bestaetigungen SET expires_at = NOW()
+                    WHERE karte = $1 AND used_at IS NULL AND expires_at > NOW()`, [anz]).catch(() => {});
+    }
+    const je = new Map();
+    for (const z of r.rows) {
+      const e = String(z.email || '').toLowerCase();
+      if (!je.has(e)) je.set(e, { name: z.name, sitzungen: [] });
+      je.get(e).sitzungen.push(z);
+    }
+    for (const [email, p] of je) {
+      const liste = p.sitzungen.map(z => `${z.app_name || z.app} auf ${z.geraet_name || '?'} (${z.id}, ${z.art})`).join('; ');
+      kartenProtokollieren('app-abmeldung', { displayId: anz, email, name: p.name, durch, erfolg: true,
+        detail: `${grund}: ${p.sitzungen.length} Sitzung(en) abgemeldet · ${liste}`.slice(0, 1900) }).catch?.(() => {});
+      adminProtokoll.eintragen(pool, null, { user: { email: durch, name: durch }, auth: { art: 'system' } }, {
+        bereich: 'apps', aktion: 'karte-entzogen-abgemeldet', ziel: email,
+        detail: `Karte ${anz || '?'} · ${grund} · ${p.sitzungen.length} Sitzung(en): ${liste}`,
+      }).catch(e => console.error('[app-karte] Protokoll Entzug:', e.message));
+      const m = ak.entzugMail({ name: p.name, anzeige: anz, sitzungen: p.sitzungen, portal: PORTAL_URL });
+      loggedSendMail({ from: MAIL_FROM, to: email, subject: m.subject, text: m.text }, 'app-karte-entzogen')
+        .catch?.(e => console.error('[app-karte] Mail Entzug:', e.message));
+    }
+    if (r.rows.length) console.log(`[app-karte] Karte ${anz || '?'} ${grund}: ${r.rows.length} Sitzung(en) abgemeldet (${durch})`);
+    return r.rows.length;
+  }
+
+  /** Woher stammt die Karte der Anmeldung dieser Anfrage? Karten-Sitzung bzw. geteiltes Telefon. */
+  async function kartenHerkunft(req) {
+    const aus = ak.kartenHerkunftAusSitzung(req.appKarte);
+    if (aus) return aus;
+    const anz = req.anlage?.karte;
+    if (!anz) return null;
+    // Geteiltes Telefon: die Anlage nennt die Anzeige-ID der Karte vom Sperrbildschirm
+    try {
+      const k = karteZurAnzeige ? await karteZurAnzeige(anz, req.user?.email) : null;
+      if (k?.token) return { token: String(k.token), besitzer: k.besitzer ? String(k.besitzer) : null, anzeige: anz };
+    } catch (e) { console.warn('[app-karte] Karte zur Anzeige:', e.message); }
+    return { token: null, besitzer: null, anzeige: anz };
   }
 
   // ── Anmelden mit der Karte (ohne Anmeldung: die Karte IST der Ausweis) ──
@@ -324,11 +423,17 @@ function appKarteRoutes(app, deps) {
     }
   });
 
-  // ── Anmelde-QR für eine App ausstellen (Portal, nur Browser-Anmeldung) ──
-  app.post('/api/apps/qr-ausweis', authMiddleware, requireUserLogin, async (req, res) => {
+  // ── Anmelde-QR für eine App ausstellen (Portal, Mein Telefon; Konto oder Karte, nie PAT) ──
+  const qrAusstellen = (req, res, next) => {
+    const e = ak.qrAusstellenErlaubt(req);
+    if (!e.ok) return res.status(e.status).json({ error: e.fehler });
+    next();
+  };
+  app.post('/api/apps/qr-ausweis', authMiddleware, qrAusstellen, async (req, res) => {
     const email = String(req.user?.email || '').toLowerCase();
     const userId = parseInt(req.user?.id ?? req.user?.user_id, 10);
-    if (!email || !Number.isInteger(userId)) return res.status(403).json({ error: 'Kein Rosenweg-Konto' });
+    const art = String(req.auth?.art || 'unbekannt').slice(0, 40);
+    const vermerk = kartenAdmin.herkunftVermerk(req);
     try {
       await tabellen();
       // Je Person gilt nur der neueste QR; abgelaufene (auch fremde) nach einem Tag weg.
@@ -337,10 +442,17 @@ function appKarteRoutes(app, deps) {
       const token = ak.neuesQrToken();
       const id = 'qa_' + ak.zufall(12);
       const bis = new Date(Date.now() + QR_TTL_S * 1000);
-      await pool.query(`INSERT INTO app_qr_ausweise (id, token_hash, user_id, email, name, groups_json, created_ip, expires_at)
-                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      const hk = await kartenHerkunft(req);
+      await pool.query(`INSERT INTO app_qr_ausweise (id, token_hash, user_id, email, name, groups_json, created_ip, expires_at,
+                          ausgestellt_art, ausgestellt_vermerk, herkunft_karte, herkunft_karte_token, herkunft_karte_besitzer)
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
         [id, ak.hash(token), userId, email, ak.anzeigeText(req.user.name || email, 80),
-         JSON.stringify((req.user.groups || []).map(String)), absenderIp(req), bis]);
+         JSON.stringify((req.user.groups || []).map(String)), absenderIp(req), bis, art, vermerk ? vermerk.slice(0, 500) : null,
+         hk?.anzeige || null, hk?.token || null, hk?.besitzer || null]);
+      await adminProtokoll.eintragen(pool, null, req, {
+        bereich: 'apps', aktion: 'app-qr-ausgestellt', ziel: email,
+        detail: `${id} · gilt ${QR_TTL_S} s · ${vermerk || 'mit dem Rosenweg-Konto (' + art + ')'}`,
+      }).catch(e => console.error('[app-karte] Protokoll QR:', e.message));
       const inhalt = ak.QR_PRAEFIX + token;
       const qr_svg = await require('qrcode').toString(inhalt, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 });
       res.set('Cache-Control', 'no-store');
@@ -352,7 +464,7 @@ function appKarteRoutes(app, deps) {
   });
 
   // ── Stand eines ausgestellten QR (die Portalseite zeigt, wer ihn eingelöst hat) ──
-  app.get('/api/apps/qr-ausweis/:id', authMiddleware, requireUserLogin, async (req, res) => {
+  app.get('/api/apps/qr-ausweis/:id', authMiddleware, qrAusstellen, async (req, res) => {
     const id = String(req.params.id || '');
     if (!/^qa_[A-Za-z0-9_-]{16}$/.test(id)) return res.status(400).json({ error: 'Ungültig' });
     try {
@@ -388,7 +500,8 @@ function appKarteRoutes(app, deps) {
       const a = (await pool.query(`UPDATE app_qr_ausweise SET eingeloest_at = NOW(), eingeloest_ip = $2,
                                        app_name = $3, geraet_name = $4
                                      WHERE token_hash = $1 AND eingeloest_at IS NULL AND expires_at > NOW()
-                                     RETURNING id, user_id, email, name, groups_json`,
+                                     RETURNING id, user_id, email, name, groups_json, ausgestellt_art, ausgestellt_vermerk,
+                                               herkunft_karte, herkunft_karte_token, herkunft_karte_besitzer`,
         [tokenHash, ip, w.appName, w.geraetName])).rows[0];
       if (!a) {
         await versuch(tokenHash, ip, w.kennung, false, 'qr-unbekannt');
@@ -403,13 +516,27 @@ function appKarteRoutes(app, deps) {
       try { groups = JSON.parse(a.groups_json || '[]'); } catch {}
       const email = String(zeile.email).toLowerCase();
       const name = a.name || zeile.name;
+      // QR aus einer Karten-Anmeldung (Karte, QR, Handy, geteiltes Telefon): Herkunft an der Sitzung
+      const ausKarte = !!a.ausgestellt_art && !ak.qrVomKonto(a.ausgestellt_art);
+      const herkunft = ausKarte ? (a.ausgestellt_vermerk || a.ausgestellt_art) : null;
       const { id, bekannt, abgeloest, ...z } = await sitzungAnlegen({
-        userId: zeile.id, email, name, groups, w, ip, art: 'qr',
+        userId: zeile.id, email, name, groups, w, ip, art: 'qr', herkunft,
+        herkunftKarte: ausKarte && (a.herkunft_karte_token || a.herkunft_karte)
+          ? { token: a.herkunft_karte_token, besitzer: a.herkunft_karte_besitzer, anzeige: a.herkunft_karte } : null,
       });
       await pool.query('UPDATE app_qr_ausweise SET sitzung_id = $2 WHERE id = $1', [a.id, id]);
       await versuch(tokenHash, ip, w.kennung, true, bekannt ? 'qr-ok' : 'qr-ok-neues-geraet', email);
-      console.log(`[app-karte] QR-Anmeldung ${email}: ${w.appName} auf ${w.geraetName} (${ip}), sitzung ${id}${bekannt ? '' : ', neues Geraet'}`);
-      if (!bekannt) neuesGeraetMelden({ email, name }, w, ip, 'qr');
+      console.log(`[app-karte] QR-Anmeldung ${email}: ${w.appName} auf ${w.geraetName} (${ip}), sitzung ${id}${bekannt ? '' : ', neues Geraet'}${ausKarte ? ', QR aus Karten-Anmeldung' : ''}`);
+      if (ausKarte) {
+        adminProtokoll.eintragen(pool, null, { user: { email, name }, auth: { art: 'qr' } }, {
+          bereich: 'apps', aktion: 'app-qr-eingeloest', ziel: email,
+          detail: `${a.id} -> Sitzung ${id} · ${w.appName} auf ${w.geraetName} (${ip}) · QR ausgestellt ${herkunft}`,
+        }).catch(e => console.error('[app-karte] Protokoll QR:', e.message));
+      }
+      // Bei einem QR aus einer Karten-Anmeldung immer melden, sonst nur bei neuem Gerät
+      if (!bekannt || ausKarte) {
+        neuesGeraetMelden({ email, name }, w, ip, 'qr', ausKarte ? { ort: qrOrt(a.ausgestellt_art), vermerk: herkunft } : null);
+      }
       res.set('Cache-Control', 'no-store');
       res.json({ ok: true, sitzung: id, ...z, name, email,
         gueltig_bis: new Date(Date.now() + LAUFZEIT_TAGE * 864e5).toISOString(), neues_geraet: !bekannt, abgeloest });
@@ -584,6 +711,17 @@ function appKarteRoutes(app, deps) {
       }
       // QR- oder Handy-Sitzung (ohne Karte): Konto und Gruppen live aus Authentik
       if (ak.ohneKarte(s.art)) {
+        // Aus einer Karten-Anmeldung entstanden: Karte noch der Person? Sonst alles dieser Karte ab.
+        if (s.herkunft_karte_token) {
+          let d, erreicht = true;
+          try { d = await accessKarteLive(s.herkunft_karte_token); } catch (e) { erreicht = false; }
+          if (erreicht && !(d && String(d.status || '').toLowerCase() === 'assigned'
+              && (!s.herkunft_karte_besitzer || String(accessKartenBesitzerId(d)) === String(s.herkunft_karte_besitzer)))) {
+            await karteEntzogen({ token: s.herkunft_karte_token, anzeige: s.herkunft_karte },
+              { durch: 'system', grund: 'karte entzogen (beim Erneuern bemerkt)' });
+            return weg('karte-entzogen');
+          }
+        }
         let au, erreicht = true;
         try { au = authentikUserByEmail ? await authentikUserByEmail(s.email) : undefined; } catch (e) { erreicht = false; }
         if (erreicht && au === null) {
@@ -603,9 +741,9 @@ function appKarteRoutes(app, deps) {
         if (erreicht) {
           const ok = d && String(d.status || '').toLowerCase() === 'assigned' && String(accessKartenBesitzerId(d)) === String(s.access_user_id);
           if (!ok) {
-            await widerrufen('id = $1', [id], 'system', 'karte entzogen');
-            await kartenProtokollieren('app-abmeldung', { displayId: s.karte_anzeige, email: s.email, name: s.name,
-              durch: `${s.app_name} auf ${s.geraet_name}`, erfolg: true, detail: 'karte entzogen' });
+            // Diese und alle anderen Sitzungen aus derselben Karte (auch QR-Sitzungen daraus)
+            await karteEntzogen({ token: s.access_karten_token, anzeige: s.karte_anzeige },
+              { durch: 'system', grund: 'karte entzogen (beim Erneuern bemerkt)' });
             return weg('karte-entzogen');
           }
           geprueft = true;
@@ -666,7 +804,7 @@ function appKarteRoutes(app, deps) {
     }).catch?.(() => {});
   };
   const spalten = `id, email, name, app, app_name, geraet_name, plattform, LEFT(geraet_kennung, 8) AS geraet, geraet_kennung,
-                   karte_anzeige, art, created_at, created_ip, last_used_at, last_used_ip, expires_at,
+                   karte_anzeige, art, herkunft, created_at, created_ip, last_used_at, last_used_ip, expires_at,
                    revoked_at, revoked_by, revoked_reason`;
   app.get('/api/apps/sitzungen', authMiddleware, kontoOderKarte, async (req, res) => {
     try {
@@ -726,7 +864,7 @@ function appKarteRoutes(app, deps) {
     }
   });
 
-  return { tabellen };
+  return { tabellen, karteEntzogen };
 }
 
 /**
@@ -738,7 +876,8 @@ async function karteZugangPruefen(pool, token, ip) {
   let r;
   try {
     r = await pool.query(
-      `SELECT s.id, s.app, s.art, s.groups_json, s.app_name, s.geraet_name, s.karte_anzeige, u.id AS user_id, u.email, u.name, u.wohnung, u.stweg
+      `SELECT s.id, s.app, s.art, s.groups_json, s.app_name, s.geraet_name, s.karte_anzeige, s.access_karten_token, s.access_user_id,
+              s.herkunft_karte, s.herkunft_karte_token, s.herkunft_karte_besitzer, u.id AS user_id, u.email, u.name, u.wohnung, u.stweg
          FROM app_karten_sitzungen s JOIN users u ON u.id = s.user_id
         WHERE s.zugang_hash = $1 AND s.revoked_at IS NULL AND s.zugang_bis > NOW() AND s.expires_at > NOW()
           AND COALESCE(u.active, true)`, [ak.hash(token)]);
@@ -757,7 +896,11 @@ async function karteZugangPruefen(pool, token, ip) {
       id: z.user_id, user_id: z.user_id, email: z.email, name: z.name, wohnung: z.wohnung, stweg: z.stweg,
       role, isAdmin: role === 'admin', groups, auth_source: z.art === 'qr' ? 'app-qr' : z.art === 'handy' ? 'app-handy' : 'karte', auth_client: 'rosenweg-apps',
     },
-    sitzung: { id: z.id, app: z.app, art: z.art || 'karte', app_name: z.app_name || '', geraet: z.geraet_name || '', karte: z.karte_anzeige || '' },
+    sitzung: { id: z.id, app: z.app, art: z.art || 'karte', app_name: z.app_name || '', geraet: z.geraet_name || '', karte: z.karte_anzeige || '',
+      // nur intern (Herkunft eines Anmelde-QR, karteEntzogen); geht nie in eine Antwort
+      karte_token: z.access_karten_token || null, karte_besitzer: z.access_user_id || null,
+      herkunft_karte: z.herkunft_karte || null, herkunft_karte_token: z.herkunft_karte_token || null,
+      herkunft_karte_besitzer: z.herkunft_karte_besitzer || null },
   };
 }
 

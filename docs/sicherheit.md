@@ -331,6 +331,84 @@ Die UID ist kopierbar und das Gerät steht nicht im Haus. Darum:
 - **Laufzeit** 30 Tage (`APP_KARTE_TAGE`), höchstens 20 aktive Sitzungen je
   Person (`APP_KARTE_MAX_SITZUNGEN`); eine neue löst die am längsten unbenutzte ab.
 
+### 4.11 Karte wie Schlüssel: App-QR, Profil, Signieren (Entscheid Stefan 28.11.2026)
+
+Karten-, QR- und Handy-Sitzungen (`rw_app_…`) und geteilte Telefone (Anlage-Token)
+dürfen seit 28.11.2026 drei Dinge, die vorher nur mit dem Rosenweg-Konto gingen.
+Alles andere aus 4.10 bleibt: **kein Passwort, keine SSH-Schlüssel, keine
+API-Tokens, keine Passkeys, keine MQTT-Zugänge** (Konto-Übernahme), und nie mit
+einem persönlichen Zugangstoken (PAT) oder über MCP.
+
+| Was | Route | Schutz |
+|---|---|---|
+| **C** App-Anmelde-QR (RWAPP1) ausstellen, z. B. in Mein Telefon am geteilten Telefon | `POST /api/apps/qr-ausweis`, `GET /api/apps/qr-ausweis/:id` (`ak.qrAusstellenErlaubt`) | nur fürs eigene Konto; 90 s, einmal, je Person nur der neueste (unverändert); jede Ausgabe im `admin_protokoll` (Bereich `apps`, Karten-/Geräte-Vermerk); ein QR aus einer Karten-Anmeldung meldet beim Einlösen **immer** per Mail und die neue Sitzung trägt `herkunft` |
+| **F** Profil-Angaben und Profilbild | `PUT /api/auth/profile`, `PUT /api/auth/avatar` (`lib/sperrliste.js` `KARTE_FREI`); am geteilten Telefon dazu die übrigen Angaben wie mit der Karte auf dem eigenen Handy (Zusatznummern, E-Mail-Aliase, WhatsApp, Desktop-Stil) | genau diese zwei Anfragen, sonst bleibt `/api/auth/` zu; jede Änderung mit der Karte im `admin_protokoll` (Bereich `profil`, nur Feldnamen); signiert wird nie unter einem selbst geänderten Namen (`vmKontoNamen`) |
+| **E** Vollmacht digital signieren | `POST /api/vollmachten/:id/sign-bestaetigung`, dann `POST …/sign-digital {bestaetigung}` (`lib/signaturbestaetigung.js`) | direkt vor dem Signieren **Karte erneut vorlegen** (live in UniFi Access: zugewiesen, derselben Person) **oder Anmelde-QR aus dem Konto scannen** (nur ein QR, den eine Konto-Anmeldung ausgestellt hat); Nachweis gilt `VOLLMACHT_BESTAETIGUNG_S` (120 s), einmal, nur diese Vollmacht und Person; 5 Fehlversuche / 15 Min je Person; Protokoll in `vollmacht_sign_bestaetigungen`, `admin_protokoll` (Bereich `vollmachten-signatur`) und Kartenprotokoll |
+
+Technik/Präsident lesen die drei Bereiche mit `GET /api/admin-protokoll/:bereich`
+(`profil`, `apps`, `vollmachten-signatur`).
+
+**Warum der QR fürs Signieren vom Konto stammen muss:** Seit C kann man an einem
+geteilten Telefon einen App-QR ausstellen. Wer an einem Telefon steht, an dem
+jemand anderes noch angemeldet ist, könnte sich so selbst einen QR holen
+(abfotografieren, der Kamera zeigen) und die „Bestätigung“ wäre wertlos. Darum
+zählt für E nur ein QR mit `ausgestellt_art` website, otp, app oder authentik.
+
+**Karte entzogen → alles aus dieser Karte abgemeldet** (Entscheid Stefan 28.11.2026,
+`karteEntzogen` in `routes/app-karte.js`): Ein QR aus einer Karten-Anmeldung merkt
+sich die Karte (`herkunft_karte_token`, am geteilten Telefon über die Anzeige-ID, die
+die PBX im Anlage-Token mitgibt). Wird die Karte entzogen, gesperrt oder entfernt,
+meldet die API alle Karten-Sitzungen dieser Karte **und** alle QR-/App-Sitzungen
+daraus ab, verwirft offene Anmelde-QR aus ihr und beendet laufende
+Signatur-Bestätigungen mit ihr. Dazu kommen ein Eintrag im Kartenprotokoll
+(`app-abmeldung`) und im `admin_protokoll` (Bereich `apps`,
+`karte-entzogen-abgemeldet`) sowie eine Mail an die Person. Ausgelöst wird es von:
+
+- Kartenverwaltung „Entziehen“ und „Löschen“, auch wenn die Karte schon ohne Inhaber ist
+- `DELETE /api/access/users/:id/nfc/:token` und `DELETE /api/access/me/nfc/:token`
+- der Konto-Löschung (Nachlauf Karten)
+- dem Erneuern einer Sitzung, wenn UniFi Access die Karte nicht mehr der Person zuordnet
+  (Entzug direkt in UniFi Access; spätestens beim nächsten Erneuern, also nach höchstens
+  15 Minuten Nutzung)
+
+Nicht erfasst: die Anmeldung am geteilten Telefon selbst (sie endet beim Abmelden,
+beim Neustart oder bei der nächsten Person) und ein QR, der aus einer
+QR-Anmeldung am Sperrbildschirm des geteilten Telefons stammt (dort gibt es keine
+Karte). „Alle Apps abmelden“ (`POST /api/apps/sitzungen/alle-abmelden`) bleibt der
+Weg für alles.
+
+#### Rechtsverbindlichkeit und Beweiskraft der Signatur mit Karte oder QR
+
+Keine Rechtsberatung; Einschätzung für den Betrieb.
+
+- **Rechtliche Kategorie gleich:** Mit Konto, Karte oder QR entsteht dieselbe
+  *einfache elektronische Signatur* (ZertES Art. 2 lit. a). Für keine der drei
+  gilt eine gesetzliche Vermutung; im Streit würdigt das Gericht den Nachweis
+  frei (Art. 157 ZPO). Keine ist der eigenhändigen Unterschrift gleichgestellt —
+  das kann nur die qualifizierte elektronische Signatur (Art. 14 Abs. 2bis OR).
+  Verlangt ein Reglement der STWEG für die Vollmacht Schriftform, genügt also
+  weder die Konto- noch die Karten-Signatur; dafür bleibt der Papierweg
+  (unterschriebene PDF hochladen). Das galt schon vor dieser Änderung.
+- **Beweiskraft nicht gleichwertig:**
+  - *Konto (frisch):* Wissen (Passwort) bzw. die Anmeldung in Authentik, höchstens
+    15 Minuten alt (`STUFE_FRISCH_MIN`).
+  - *QR aus dem Konto:* gleich stark wie eine Konto-Anmeldung (der QR wurde
+    höchstens 90 s vorher in einer Konto-Sitzung ausgestellt), aber diese
+    Sitzung muss nicht frisch sein; dazu Besitz des Geräts, das ihn zeigt.
+  - *Karte:* nur Besitz; gelesen wird die Seriennummer (UID) der Karte, die sich
+    kopieren lässt; keine PIN. Ein Bestreiten („Karte verloren oder kopiert“) ist
+    leichter. Die Karte muss in UniFi Access der Person zugewiesen und nicht
+    gesperrt sein — das ist der stärkste Teil des Nachweises.
+- **Was dokumentiert wird:** Auf dem PDF steht die Methode im Klartext
+  (`signed_bestaetigung`, z. B. „Rosenweg-Karte 4F2A9C erneut vorgelegt am …
+  um … Uhr (angemeldet am geteilten Telefon 2098)“), dazu Zeit, Identität und
+  (für Technik/Präsident) IP. In der Datenbank: `signed_bestaetigung_art`
+  (konto, karte, qr), `signed_bestaetigung_ref` → `vollmacht_sign_bestaetigungen`
+  (Karte, QR-ID, Sitzung, App, Gerät, IP, Zeit der Vorlage, Zeit des Signierens)
+  und die Einträge im `admin_protokoll` und im Kartenprotokoll. Wer die Vollmacht
+  prüft (Verwaltung, Versammlungsleitung), sieht so, womit bestätigt wurde, und
+  kann bei Zweifel eine Konto- oder Papier-Signatur verlangen.
+
 ---
 
 ## 5. Grenzwerte (Rate-Limits) auf einen Blick
@@ -360,6 +438,7 @@ Die UID ist kopierbar und das Gerät steht nicht im Haus. Darum:
 | Push-Test | 5 / 10 Min |
 | Voicemail-Reklamation | 3 / Tag je Nummer, 20 / Tag gesamt |
 | Doodle-Einladungen | 50 je Umfrage, 100 / Tag je Konto |
+| Signatur-Bestätigung mit Karte/QR (`POST /api/vollmachten/:id/sign-bestaetigung`) | 5 Fehlversuche / 15 Min je Person |
 | Karten-Anmeldung der Apps (`POST /api/apps/karte-anmelden`) | je 15 Min: 10 Fehlversuche und 40 Versuche je IP, 5 Fehlversuche je Karte, 10 je Gerät, 200 Fehlversuche gesamt; höchstens 20 Sitzungen je Person |
 | Z-Push (ActiveSync) | 5 Fehlversuche / 15 Min je Benutzer; nginx 10 / s gesamt |
 
@@ -397,6 +476,7 @@ nie im Repo.**
 | `ZEV_ABSENDER` | erlaubte Absender der ZEV-Rechnungsmails |
 | `IMAP_SERVERNAME`, `ZEV_IMAP_SERVERNAME` | Servername für die TLS-Prüfung der Postfächer |
 | `IMAP_TLS_INSECURE=1`, `ZEV_IMAP_TLS_INSECURE=1`, `DMARC_IMAP_TLS_INSECURE=1` | Notausgang, falls ein Zertifikat ungültig ist (nur vorübergehend) |
+| `VOLLMACHT_BESTAETIGUNG_S` | wie lange die Karten-/QR-Bestätigung fürs Signieren gilt (Standard 120 s, 30–300) |
 | `PORTAL_ANLAGE_SECRET` | Apps auf geteilten Telefonen (Rosenweg Gerät → PBX-API → hier, `lib/anlagetoken.js`); derselbe Wert in `/etc/default/pbx-api` auf CT 220. Fehlt er, ist der Weg aus (401) |
 | `NODE_ENV=production` | keine Stacktraces im Browser |
 | `NODE_TLS_REJECT_UNAUTHORIZED=0` | **noch gesetzt** (UniFi/Mailcow/PVE mit eigenen Zertifikaten) – soll durch `NODE_EXTRA_CA_CERTS` ersetzt werden |
