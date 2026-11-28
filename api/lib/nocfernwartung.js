@@ -54,9 +54,11 @@ function fernwartungFuerNoc(d, jetztMs = Date.now()) {
   return { eingerichtet, zentrale: !!(d && d.zentrale), zusammenfassung: zs, telefone };
 }
 
-// Anonyme Wandbild-Sicht: ohne Gerätenamen.
+// Wandbild-Sicht: der Gerätename wie auf /smartphones (z. B. „Rosenweg Smartphone 1“, Entscheid
+// Stefan 28.11.2026). Es sind Namen geteilter Telefone, keine Personen; die Zuordnung zur
+// Nebenstelle bleibt so fest, auch wenn die Ampel die Reihenfolge ändert.
 function fernwartungOeffentlich(out) {
-  return { ...out, telefone: (out.telefone || []).map((t, i) => ({ ...t, name: 'Telefon ' + (i + 1) })) };
+  return { ...out, telefone: (out.telefone || []).map((t) => ({ ...t })) };
 }
 
 module.exports = { fernwartungFuerNoc, fernwartungOeffentlich, telefonFuerNoc };
