@@ -309,7 +309,12 @@ func TestSitzungEndeZuEnde(t *testing.T) {
 func TestPeersPruefen(t *testing.T) {
 	_, pub := paar(t)
 	k := base64.StdEncoding.EncodeToString(pub)
-	u := neueUmgebung(t, nil)
+	// Starten gleicht die Peers einmal im Hintergrund mit der Anlage ab. Kaeme
+	// dieser Abgleich nach dem PeersSetzen unten, setzte er die Liste wieder auf
+	// den Stand der Anlage (Rennen, rot in der CI). Darum erst darauf warten.
+	gueltig := []PeerEintrag{{Ext: "2002", PublicKey: k, IP: "10.243.44.5"}}
+	u := neueUmgebung(t, gueltig)
+	warten(t, "erster Abgleich", func() bool { return u.l.Anzahl() == 1 })
 	for _, falsch := range [][]PeerEintrag{
 		{{Ext: "20x2", PublicKey: k, IP: "10.243.44.5"}},
 		{{Ext: "2002", PublicKey: k, IP: "10.243.44.1"}},   // Adresse der Zentrale
@@ -322,7 +327,7 @@ func TestPeersPruefen(t *testing.T) {
 			t.Fatalf("angenommen: %+v", falsch)
 		}
 	}
-	if err := u.l.PeersSetzen([]PeerEintrag{{Ext: "2002", PublicKey: k, IP: "10.243.44.5"}}, "test"); err != nil || u.l.Anzahl() != 1 {
+	if err := u.l.PeersSetzen(gueltig, "test"); err != nil || u.l.Anzahl() != 1 {
 		t.Fatal(err)
 	}
 	if err := u.l.PeersSetzen(nil, "test"); err != nil || u.l.Anzahl() != 0 {
