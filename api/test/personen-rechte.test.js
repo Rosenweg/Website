@@ -100,3 +100,32 @@ test('Seite: Felder nur zeigen, wenn der Server sie liefert', () => {
   assert.match(html, /FELDER\.geburtsdatum/);
   assert.match(html, /FELDER\.notiz/);
 });
+
+test('Vorschau „Wo wird die Person verwendet?“ zählt jeden Verweis, nur > 0', async () => {
+  const zahlen = { 'vollmachten.vollmachtgeber_person_id': 2, 'reklamationen.person_id': 1 };
+  const client = {
+    query: async (q, p) => {
+      if (q.startsWith('SELECT to_regclass')) return { rows: [{ t: 'x' }] };
+      const m = q.match(/FROM (\w+) WHERE (\w+) = \$1/);
+      assert.deepEqual(p, [7]);
+      return { rows: [{ n: zahlen[`${m[1]}.${m[2]}`] || 0 }] };
+    },
+  };
+  const z = await pr.verwendungZaehlen(client, 7);
+  assert.deepEqual(z.map(x => [x.tabelle + '.' + x.spalte, x.anzahl]).sort(),
+    [['reklamationen.person_id', 1], ['vollmachten.vollmachtgeber_person_id', 2]]);
+  assert.equal(z.find(x => x.tabelle === 'reklamationen').text, 'Reklamationen');
+  // jede Spalte der Zusammenführung hat einen lesbaren Text
+  for (const [t, s] of pr.PERSONEN_VERWEISE) assert.ok(pr.VERWEIS_TEXT[`${t}.${s}`], `${t}.${s}`);
+});
+
+test('Vorschau-Route: gleiche Schutzregeln wie Ändern, ohne Daten fremder STWEG', () => {
+  const i = server.indexOf("app.get('/api/personen/:id/verwendung'");
+  assert.ok(i > 0);
+  const r = server.slice(i, i + 2600);
+  assert.match(r, /requireWohnungsverwaltungWrite/);
+  assert.match(r, /userCanEditPerson\(req\.user, id\)/);
+  assert.match(r, /personGeschuetztFuer\(req\.user, id\)/);
+  assert.match(r, /w\.stweg = ANY\(\$2::int\[\]\)/);
+  assert.match(r, /personenRechte\.verwendungZaehlen\(pool, id\)/);
+});

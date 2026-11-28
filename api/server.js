@@ -13402,8 +13402,7 @@ async function requireProjektBearbeiten(req, res, next) {
     const { rows: [p] } = await pool.query('SELECT id, stweg, status FROM projects WHERE slug = $1', [req.params.slug]);
     if (!p) return res.status(404).json({ error: 'Projekt nicht gefunden' });
     const groups = req.user?.groups || [];
-    // P11: auf geteilten Telefonen (Anlage-Token) nur lesen und kommentieren, nichts aendern
-    if (req.anlage) return res.status(403).json({ error: 'Auf einem geteilten Telefon kannst du Projekte nur lesen und kommentieren' });
+    // Geteiltes Telefon (Anlage-Token): dieselben Rechte wie am eigenen Geraet, nur die Rechtepruefung der Person
     if (!projekteRechte.projektBearbeiten(groups, await projektePerm(req), p.stweg)) {
       return res.status(403).json({ error: p.stweg ? 'Nur Ausschuss oder Verwaltung dieser STWEG' : 'Nur Ausschuss, Technik oder Präsident' });
     }
@@ -13874,7 +13873,6 @@ app.delete('/api/projects/:slug', authMiddleware, async (req, res) => {
     if (!projekteRechte.projektLoeschen(req.user?.groups || [])) {
       return res.status(403).json({ error: 'Projekte löschen nur Technik oder Präsident (sonst archivieren)' });
     }
-    if (req.anlage) return res.status(403).json({ error: 'Auf einem geteilten Telefon nicht möglich' });
     if (req.body?.bestaetigt !== true && req.query.bestaetigt !== '1') {
       return res.status(400).json({ error: 'Löschen bitte bestätigen (bestaetigt: true)', bestaetigung_noetig: true });
     }
@@ -14087,7 +14085,7 @@ app.delete('/api/projects/:slug/comments/:id', authMiddleware, requireProjekteLe
     const id = parseInt(req.params.id, 10) || 0;
     const { rows: [k] } = await pool.query('SELECT * FROM project_comments WHERE id = $1 AND project_id = $2', [id, req.projekt.id]);
     if (!k) return res.status(404).json({ error: 'Kommentar nicht gefunden' });
-    const bearbeiter = !req.anlage && projekteRechte.projektBearbeiten(groups, req.projektePerm, req.projekt.stweg);
+    const bearbeiter = projekteRechte.projektBearbeiten(groups, req.projektePerm, req.projekt.stweg);
     if (!bearbeiter && !projekteRechte.kommentarEigenAenderbar(k, req.user?.email)) {
       return res.status(403).json({ error: `Eigene Kommentare lassen sich ${projekteRechte.KOMMENTAR_FRIST_MIN} Minuten lang löschen` });
     }
@@ -17083,6 +17081,41 @@ app.get('/api/personen/:id', authMiddleware, requireWohnungsverwaltungRead, asyn
   }
 });
 
+// GET /api/personen/:id/verwendung — Vorschau vor dem Zusammenfuehren (Klaerung L11):
+// wo wird die Person verwendet (Wohnungen der eigenen Sicht, Vollmachten, Reklamationen,
+// WhatsApp, Rufgruppen), hat sie ein Konto, ist sie fuer dieses Konto geschuetzt (dann
+// fuehrt nur die Technik zusammen). Wer aendern darf (userCanEditPerson), sieht sie.
+app.get('/api/personen/:id/verwendung', authMiddleware, requireWohnungsverwaltungWrite, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
+    if (!(await userCanEditPerson(req.user, id))) {
+      return res.status(403).json({ error: 'Diese Person gehört nicht zu einer STWEG, für die du als Ausschuss oder Verwaltung zuständig bist' });
+    }
+    const p = await pool.query('SELECT id, name, email FROM personen WHERE id = $1', [id]);
+    if (!p.rows[0]) return res.status(404).json({ error: 'Nicht gefunden' });
+    const scope = personenScope(req.user);
+    const wp = [id];
+    let wScope = '';
+    if (scope) { wp.push(scope); wScope = ' AND w.stweg = ANY($2::int[])'; }
+    const w = await pool.query(
+      `SELECT w.stweg, w.bezeichnung, k.rolle FROM wohnungen_kontakte k JOIN wohnungen w ON w.id = k.wohnung_id
+        WHERE k.person_id = $1 AND k.archiviert_am IS NULL${wScope} ORDER BY w.stweg, w.bezeichnung`, wp);
+    const konto = await pool.query(
+      `SELECT EXISTS (SELECT 1 FROM users u WHERE u.active IS NOT FALSE AND COALESCE($1::text, '') <> '' AND LOWER(u.email) = LOWER($1::text)) AS konto`,
+      [p.rows[0].email]);
+    res.json({
+      person: { id: p.rows[0].id, name: p.rows[0].name },
+      wohnungen: w.rows,
+      verweise: await personenRechte.verwendungZaehlen(pool, id),
+      hat_konto: !!konto.rows[0]?.konto,
+      geschuetzt: await personGeschuetztFuer(req.user, id),
+    });
+  } catch (err) {
+    res.status(500).json({ error: fehlerFuerClient(err, 'Fehler beim Laden') });
+  }
+});
+
 // PUT /api/personen/:id — Person aktualisieren (Trigger propagiert auf alle Kontakte)
 app.put('/api/personen/:id', authMiddleware, requireWohnungsverwaltungWrite, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   try {
@@ -18158,7 +18191,31 @@ app.post('/api/wetter/:station/ingest', mqttBrokerGuard, async (req, res) => {
       [st, num(b.outdoortemp), num(b.outdoorhumidity), num(b.windspeed), num(b.winddir), num(b.pressureabs), num(b.solarradiation), num(b.rain), num(b.uvi), num(b.windgustspeed)]
     );
     res.json({ ok: true });
+    // Gesund -> sofort die eigenen Werte nach MQTT (rosenweg/wetter/#); nie die Antwort aufhalten
+    if (st === wetterErsatz.cfg.station) {
+      wetterErsatz.nachIngest({ outdoortemp: num(b.outdoortemp), outdoorhumidity: num(b.outdoorhumidity), windspeed: num(b.windspeed),
+        winddir: num(b.winddir), pressureabs: num(b.pressureabs), solarradiation: num(b.solarradiation), rain: num(b.rain),
+        uvi: num(b.uvi), windgustspeed: num(b.windgustspeed) }).catch(e => console.warn('[wetter-ersatz] nach Ingest:', e.message));
+    }
   } catch (e) { console.error('[wetter] ingest:', e.message); res.status(500).json({ error: 'ingest' }); }
+});
+
+// Ersatzwerte der Wetterstation aus den Open Data von MeteoSchweiz (lib/wetter-ersatz.js).
+const wetterErsatz = require('./lib/wetter-ersatz').erstelle({
+  pool,
+  publish: (topic, payload, opt) => { try { apiMqttPublishClient()?.publish(topic, payload, opt); } catch (_) {} },
+});
+setTimeout(() => wetterErsatz.takt().catch(e => console.warn('[wetter-ersatz] Takt:', e.message)), 30000);
+setInterval(() => wetterErsatz.takt().catch(e => console.warn('[wetter-ersatz] Takt:', e.message)), 10 * 60 * 1000);
+
+// Aktuelle Werte (PUBLIC): eigene Station, bei Ausfall MeteoSchweiz. Feld quelle sagt, was es ist.
+app.get('/api/wetter/:station/aktuell', async (req, res) => {
+  try {
+    const st = String(req.params.station || 'r9').slice(0, 16);
+    if (st !== wetterErsatz.cfg.station) return res.status(404).json({ error: 'unbekannte Station' });
+    res.set('Cache-Control', 'public, max-age=30');
+    res.json(await wetterErsatz.aktuell());
+  } catch (e) { console.error('[wetter] aktuell:', e.message); res.status(500).json({ error: 'aktuell' }); }
 });
 
 // History (PUBLIC, kein Login): Zeitreihe der letzten h Stunden (default 24, max 168).
@@ -18173,8 +18230,10 @@ app.get('/api/wetter/:station/history', async (req, res) => {
         ORDER BY ts ASC`,
       [st, hours]
     );
+    // Ersatzwerte von MeteoSchweiz (eigene Quelle, ersatz:true je Punkt) einmischen
+    const m = await wetterErsatz.verlaufMischen(st, hours, r.rows).catch(() => ({ points: r.rows, ersatz: null }));
     res.set('Cache-Control', 'public, max-age=120');
-    res.json({ station: st, hours, points: r.rows });
+    res.json({ station: st, hours, points: m.points, ersatz: m.ersatz });
   } catch (e) { console.error('[wetter] history:', e.message); res.status(500).json({ error: 'history' }); }
 });
 
@@ -23359,6 +23418,17 @@ app.get('/api/isp/noc/server', authMiddleware, requireTechnikOrPraesident, nocSe
 // Runner-Waechter (pve2, scripts/rw-runner-waechter.sh): Bericht annehmen, NOC-Kachel
 // "Runner" (routes/nocrunner.js). POST nur mit X-Runner-Token von pve2.
 const nocRunner = require('./routes/nocrunner');
+// Wetterstation im NOC (Kachel in der Dienste-Leiste): gelb, wenn Ersatzwerte laufen.
+async function nocWetterHandler(req, res) {
+  try { res.json(await wetterErsatz.nocStatus()); }
+  catch (e) { console.warn('[noc] Wetter:', e.message); res.status(500).json({ error: 'Wetter nicht lesbar' }); }
+}
+app.get('/api/isp/noc/public/wetter', (req, res) => {
+  if (!checkNocToken(req, res)) return;
+  return nocWetterHandler(req, res);
+});
+app.get('/api/isp/noc/wetter', authMiddleware, requireTechnikOrPraesident, nocWetterHandler);
+
 app.post('/api/isp/noc/runner', nocRunner.annehmen);
 app.get('/api/isp/noc/public/runner', (req, res) => {
   const zugang = checkNocToken(req, res);

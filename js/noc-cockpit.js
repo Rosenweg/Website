@@ -33,6 +33,7 @@
     .noc-big { font-size: 1.85rem; font-weight: 700; color: #f1f5f9; font-variant-numeric: tabular-nums; line-height: 1.1; }
     .noc-mid { font-size: 1.15rem; font-weight: 600; color: #f1f5f9; font-variant-numeric: tabular-nums; line-height: 1.15; }
     .noc-wert { margin-left: auto; font-family: ui-monospace, monospace; font-size: .72rem; color: #f1f5f9; font-variant-numeric: tabular-nums; }
+    .noc-svc[data-svc="wetter"] .noc-wert { white-space: normal; text-align: right; font-size: .65rem; line-height: 1.2; }
     .noc-svc { display: flex; align-items: center; gap: .5rem; background: rgba(15,23,42,0.5); border: 1px solid #334155; padding: .4rem .6rem; border-radius: .5rem; }
     .noc-led { width: .55rem; height: .55rem; border-radius: 50%; background: #94a3b8; box-shadow: 0 0 6px rgba(148,163,184,0.5); display: inline-block; flex-shrink: 0; }
     .led-green { background: #34d399; box-shadow: 0 0 8px #34d399; animation: noc-pulse 2s infinite; }
@@ -105,7 +106,7 @@
         const [k, l] = s.split(':');
         return `<div class="noc-svc" data-svc="${k}"><span class="noc-led led-amber"></span><span class="text-xs text-slate-300">${l}</span></div>`;
       }).join('')}
-      ${[['wacht', 'Dienstwacht'], ['nextcloud', 'Nextcloud'], ['q-relay', 'Relay-Queue'], ['q-pmg', 'PMG-Queue']].map(([k, l]) =>
+      ${[['wacht', 'Dienstwacht'], ['nextcloud', 'Nextcloud'], ['q-relay', 'Relay-Queue'], ['q-pmg', 'PMG-Queue'], ['wetter', 'Wetterstation']].map(([k, l]) =>
         `<div class="noc-svc" data-svc="${k}"><span class="noc-led led-amber"></span><span class="text-xs text-slate-300">${l}</span>` +
         `<span class="noc-wert" data-el="${k}">—</span></div>`).join('')}
     </div>`;
@@ -292,7 +293,8 @@
       <span class="text-[10px] text-slate-500 font-mono" data-el="runner-fehler"></span>
     </div>
     <div data-el="runner-liste" class="noc-stationen"><div class="text-xs text-slate-500 font-mono">lade…</div></div>
-    <div class="text-[10px] text-slate-500 font-mono mt-1 whitespace-pre-line" data-el="runner-fuss"></div>`;
+    <div class="text-[10px] text-slate-500 font-mono mt-1 whitespace-pre-line" data-el="runner-fuss"></div>
+    <div class="text-[10px] font-mono mt-1" data-el="runner-offen"></div>`;
 
   // Alter eines Lebenszeichens, kurz: 3 min, 2 h, 4 T.
   const fmtAlter = (min) => {
@@ -875,7 +877,31 @@
           + (w.trocken ? ' · Trockenlauf' : '')
           + (sch && sch.text ? ' · zuletzt: ' + sch.text + (sch.zeit ? ' (' + new Date(sch.zeit).toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' }) + ')' : '') : '')
           + stauZeile + relZeile + (cts ? '\n' + cts : '') + (queue ? '\nWarten: ' + queue : ''));
+        // alle offenen Laeufe der Organisation: wo laufen die Jobs, was wartet
+        const of = d.offen || [];
+        const sum = of.reduce((a, o) => ({ eigen: a.eigen + o.eigen, github: a.github + o.github, mac: a.mac + o.mac, wartend: a.wartend + o.wartend }), { eigen: 0, github: 0, mac: 0, wartend: 0 });
+        const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        const zeile = (o) => {
+          const name = o.repo ? esc(o.repo.replace(/^rosenweg-/, '')) + ' · ' + esc(o.workflow) + (o.pr ? ' #' + o.pr : o.branch ? ' (' + esc(o.branch) + ')' : '') : esc(o.status);
+          const wo = [o.eigen ? o.eigen + ' eigen' : '', o.github ? o.github + ' GitHub' : '', o.mac ? o.mac + ' macOS' : '', o.wartend ? '<span class="text-amber-400">' + o.wartend + ' wartend</span>' : ''].filter(Boolean).join(', ') || '—';
+          const link = o.url ? '<a class="hover:underline" target="_blank" rel="noopener" href="' + esc(o.url) + '">' + name + '</a>' : name;
+          return '<div class="flex justify-between gap-2 text-slate-400"><span class="truncate">' + link + '</span><span class="shrink-0">' + wo + ' · ' + o.fertig + '/' + o.gesamt + ' · ' + fmtDauer(o.alter_s) + '</span></div>';
+        };
+        el('runner-offen').innerHTML = '<div class="text-slate-300 mb-0.5">Offene Läufe: ' + of.length + ' · Jobs laufend ' + sum.eigen + ' eigen, ' + sum.github + ' GitHub, ' + sum.mac + ' macOS · wartend ' + sum.wartend + '</div>'
+          + of.slice(0, 25).map(zeile).join('') + (of.length > 25 ? '<div class="text-slate-500">… und ' + (of.length - 25) + ' weitere</div>' : '');
       }, 'runner');
+    }
+
+    // Wetterstation: gelb, wenn Ersatzwerte von MeteoSchweiz laufen (API: lib/wetter-ersatz.js)
+    async function wetterTest() {
+      if (document.hidden) return;
+      try {
+        const r = await holen('/api/isp/noc/public/wetter');
+        if (!r.ok) { dienst('wetter', false, 'HTTP ' + r.status, 'Wetterstation: keine Antwort der API'); return; }
+        const w = await r.json();
+        dienst('wetter', w.ampel === 'gruen' ? true : w.ampel === 'gelb' ? 'warn' : false,
+          w.ampel === 'gruen' ? 'ok' : w.text, w.text);
+      } catch (e) { dienst('wetter', false, 'weg', 'Wetterstation: ' + e.message); }
     }
 
     async function runnerTest() {
@@ -1013,10 +1039,10 @@
       if (el('utc')) setz('utc', now.toISOString().slice(11, 19));
     }
 
-    el('jetzt').addEventListener('click', () => { laden(); ampeln(); stationen(); fernwartung(); appsTest(); runnerTest(); server(); });
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) { laden(); stationen(); fernwartung(); appsTest(); runnerTest(); server(); } });
+    el('jetzt').addEventListener('click', () => { laden(); ampeln(); stationen(); fernwartung(); appsTest(); runnerTest(); server(); wetterTest(); });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { laden(); stationen(); fernwartung(); appsTest(); runnerTest(); server(); wetterTest(); } });
 
-    uhr(); laden(); ampeln(); stationen(); fernwartung(); appsTest(); runnerTest(); server();
+    uhr(); laden(); ampeln(); stationen(); fernwartung(); appsTest(); runnerTest(); server(); wetterTest();
     const t1 = setInterval(uhr, 1000);
     const t2 = setInterval(laden, intervallMs);
     const t3 = setInterval(ampeln, Math.max(intervallMs, 60000));
@@ -1029,7 +1055,8 @@
     // Apps-Test: läuft stündlich - jede Minute nachsehen genügt.
     const t7 = setInterval(appsTest, Math.max(intervallMs, 60000));
     const t8 = setInterval(runnerTest, Math.max(intervallMs, 20000));
-    return { laden, ampeln, stationen, fernwartung, appsTest, runnerTest, server, beenden: () => { [t1, t2, t3, t4, t5, t6, t7, t8].forEach(clearInterval); } };
+    const t9 = setInterval(wetterTest, Math.max(intervallMs, 30000));
+    return { laden, ampeln, stationen, fernwartung, appsTest, runnerTest, server, wetterTest, beenden: () => { [t1, t2, t3, t4, t5, t6, t7, t8, t9].forEach(clearInterval); } };
   }
 
   global.NocCockpit = { starten };

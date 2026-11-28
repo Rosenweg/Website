@@ -76,6 +76,31 @@ async function verweiseUmhaengen(client, keepId, mergeId) {
   return zahl;
 }
 
+// Lesbare Bezeichnung je Verweis für die Vorschau „Wo wird die Person verwendet?“
+// (GET /api/personen/:id/verwendung, Rosenweg Personen vor dem Zusammenführen).
+const VERWEIS_TEXT = {
+  'wohnungen_kontakte.person_id': 'Wohnungs-Kontakte',
+  'pbx_ring_members.person_id': 'Rufgruppen-Mitgliedschaften',
+  'whatsapp_messages.person_id': 'WhatsApp-Nachrichten',
+  'reklamationen.person_id': 'Reklamationen',
+  'vollmachten.vollmachtgeber_person_id': 'Vollmachten (als Vollmachtgeber)',
+  'vollmachten.bevollmaechtigter_person_id': 'Vollmachten (als Bevollmächtigte)',
+  'vollmachten_vollmachtgeber.person_id': 'Vollmachten (weitere Vollmachtgeber)',
+};
+
+/** Wie oft wird die Person verwendet? -> [{ tabelle, spalte, text, anzahl }] (nur Anzahl > 0). */
+async function verwendungZaehlen(client, personId) {
+  const aus = [];
+  for (const [tabelle, spalte] of PERSONEN_VERWEISE) {
+    const da = await client.query('SELECT to_regclass($1) AS t', [`public.${tabelle}`]);
+    if (!da.rows[0]?.t) continue;
+    const r = await client.query(`SELECT COUNT(*)::int AS n FROM ${tabelle} WHERE ${spalte} = $1`, [personId]);
+    const anzahl = r.rows[0]?.n || 0;
+    if (anzahl > 0) aus.push({ tabelle, spalte, text: VERWEIS_TEXT[`${tabelle}.${spalte}`] || `${tabelle}.${spalte}`, anzahl });
+  }
+  return aus;
+}
+
 /** Geänderte Felder (Namen, keine Werte) für das Protokoll. */
 function geaenderteFelder(alt, neu, felder) {
   const norm = (v) => (v === undefined || v === null ? ''
@@ -86,5 +111,5 @@ function geaenderteFelder(alt, neu, felder) {
 
 module.exports = {
   personenSchreibStwegs, darfGeburtsdatum, darfNotiz, personenFelder, personFuerLeser,
-  personBodyFiltern, PERSONEN_VERWEISE, verweiseUmhaengen, geaenderteFelder,
+  personBodyFiltern, PERSONEN_VERWEISE, VERWEIS_TEXT, verweiseUmhaengen, verwendungZaehlen, geaenderteFelder,
 };
