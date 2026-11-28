@@ -78,6 +78,12 @@ test('apps-register.json ist gueltig und kennt die bisherigen Apps', () => {
   assert.ok(!daten.apps.projekte.technik);
   assert.equal(daten.apps.projekte.logo, '/img/apps/rosenweg-projekte.png?v=20261128');
   assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.projekte.logo.split('?')[0])));
+  // Rosenweg Internet: nur Bewohner, keine Verwaltung (Welle 4), also nie 'technik'
+  assert.equal(daten.apps.internet.paket, 'ch.rosenweg4303.internet');
+  assert.equal(daten.apps.internet.repo, 'Rosenweg/rosenweg-internet');
+  assert.ok(!daten.apps.internet.technik);
+  assert.equal(daten.apps.internet.logo, '/img/apps/rosenweg-internet.png?v=20261128');
+  assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.internet.logo.split('?')[0])));
 });
 
 test('pruefen findet Fehler', () => {

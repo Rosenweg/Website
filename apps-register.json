@@ -182,6 +182,16 @@
       "text": "Meine Gemeinschaft: Mitteilungen deiner STWEG (auch die wichtigen als Benachrichtigung), Kontaktliste, Hausverwaltung, Ausschuss, Wohnungen und bei der MEG die Einstellplätze, mit Sprüngen zu Termine, Unterlagen, Projekte, Reparatur und Waschküche. Mitteilungen schreiben mit Text, Bild und Sichtbarkeit.",
       "fuer": "Für alle Bewohner und Eigentümer. Mitteilungen schreiben: Ausschuss und Verwaltung ihrer STWEG; Kooperation: Technik und Präsident.",
       "_notiz": "Flutter, alle Plattformen (Klärung STWEG 28.11.2026). Ersetzt stwegN/index.html (Kontakte, Hausverwaltung) und den Seiten-Editor; Push ohne Server-Registrierung (Abfrage im Hintergrund, nur Mitteilungen mit „wichtig“, Opt-in je STWEG). Stationen: keine STWEG-Seite im Stationen-Menü, daher kein stationen_seite."
+    },
+    "internet": {
+      "name": "Rosenweg Internet",
+      "repo": "Rosenweg/rosenweg-internet",
+      "paket": "ch.rosenweg4303.internet",
+      "logo": "/img/apps/rosenweg-internet.png?v=20261128",
+      "reihenfolge": 110,
+      "text": "Dein Anschluss und das Rosenweg-Netz: Störungen im Haus, WLAN mit QR-Code (Haus und Gast), WireGuard-VPN mit Schlüssel auf dem Gerät, Speedtest ins Haus, Mailboxen.",
+      "fuer": "Für Bewohner mit Wohnung im Rosenweg, ab dem Einzug (Mieter, Mitbewohner, selbst bewohnende Eigentümer). Auf den geteilten Telefonen nur Übersicht und Gast-WLAN.",
+      "_notiz": "Flutter, alle Plattformen. Immer rot, keine Verwaltung (die bleibt in der ISP-Verwaltung, Welle 4). Der WireGuard-Schlüssel entsteht auf dem Gerät, die API bekommt nur public_key (Entscheid Stefan 28.11.2026). Web-Seiten isp.html, isp-mein-zugang.html und wlan.html bleiben."
     }
   },
   "katalog": {
