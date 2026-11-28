@@ -25,6 +25,23 @@ Den Unterschied der Routen macht ein optionales `allowed_ips` im Rumpf von
 `POST /peers`. Wer es weglässt, bekommt den vollen Tunnel — der ISP-Weg
 übergibt es nicht.
 
+**Tunnelnetz `192.168.2.0/24`.** Es existiert nur in CT 113 (`wg0`, Server
+`192.168.2.1`, Peers ab `.10`) und ist kein UniFi-Netz: Jeder Peer wird über die
+Tabelle seines Heim-VLANs geroutet und dort genatet (Absender
+`100.64.<VLAN>.250`), die UDM sieht ihn wie ein Gerät dieses VLANs. Dasselbe
+Subnetz hat in UniFi das Gast-WLAN (VLAN 8, `docs/unifi.md`); das ist kein
+Widerspruch in der Doku, sondern eine echte Überschneidung, die nicht stört,
+solange `192.168.2.x` CT 113 nie verlässt (am 28.11.2026 nachgesehen: nur
+Masquerade auf `eth1`–`eth15`, keine Route nach aussen). Die WireGuard-Server
+der UDM selbst nutzen `192.168.9.0/24` und `192.168.14.0/24`.
+
+**Schlüssel.** Bringt der Aufrufer `public_key` mit, erzeugt wg-control keinen
+privaten Schlüssel; `GET /peers/:id/config` und `/qr` antworten dann 409. Der
+ISP-Weg reicht den Schlüssel seit 28.11.2026 weiter (`schluessel_ort = 'geraet'`);
+ohne ihn bleibt der Server-Weg als gekennzeichneter Rückfall (`'server'`).
+Beim Auszug oder bei der Kontolöschung entfernt die Haupt-API den Peer
+(`DELETE /peers/:id`), die Zeile in `isp_vpn_accounts` bleibt als „gesperrt“.
+
 **Das Tunnelnetz gehört immer dazu.** Wer `allowed_ips` setzt, bekommt
 `192.168.2.0/24` automatisch angehängt. `AllowedIPs` ist bei WireGuard nicht
 nur eine Route, sondern auch der Filter für erlaubte Absender: fehlt das

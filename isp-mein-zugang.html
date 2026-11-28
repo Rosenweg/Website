@@ -272,7 +272,7 @@
   }
 
   async function loadVpn() {
-    const r = await AuthentikAuth.apiFetch('/api/isp/vpn-accounts');
+    const r = await AuthentikAuth.apiFetch('/api/isp/vpn-accounts?nur=meine');
     if (!r.ok) return;
     vpnAccounts = (await r.json()).vpn_accounts || [];
     renderVpn();
@@ -297,14 +297,17 @@
         <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
           <div><span class="text-xs bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded">${esc(v.backend)}</span>
             ${v.username ? `<span class="ml-2 font-mono text-sm">${esc(v.username)}</span>` : ''}
-            ${v.active ? '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded ml-2">aktiv</span>' : '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded ml-2">inaktiv</span>'}
+            ${v.gesperrt ? '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded ml-2">gesperrt</span>' : v.active ? '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded ml-2">aktiv</span>' : '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded ml-2">inaktiv</span>'}
+            ${v.schluessel === 'geraet' ? '<span class="text-xs bg-green-50 text-green-800 px-2 py-0.5 rounded ml-2" title="Der private Schlüssel ist nur auf deinem Gerät">🔒 Schlüssel auf dem Gerät</span>' : ''}
+            ${v.schluessel === 'server' ? '<span class="text-xs bg-amber-50 text-amber-800 px-2 py-0.5 rounded ml-2" title="Rückfall für ältere Geräte: der private Schlüssel liegt auch auf dem Server">Schlüssel auf dem Server (Rückfall)</span>' : ''}
           </div>
           <div class="flex gap-1">
-            <button onclick="showVpnConfig(${v.id})" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">.conf</button>
-            <button onclick="showVpnQr(${v.id})" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">QR</button>
+            ${!v.gesperrt && v.schluessel !== 'geraet' ? `<button onclick="showVpnConfig(${v.id})" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">.conf</button>
+            <button onclick="showVpnQr(${v.id})" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">QR</button>` : ''}
             <button onclick="delVpn(${v.id})" class="text-xs text-red-600 hover:underline px-2">Löschen</button>
           </div>
         </div>
+        ${v.gesperrt ? `<div class="text-xs text-red-700">Gesperrt: ${esc(v.gesperrt_grund || 'kein Wohnsitz mehr')}</div>` : ''}
         ${v.assigned_ip ? `<div class="text-xs"><span class="text-gray-500">IP:</span> <span class="font-mono">${esc(v.assigned_ip)}</span></div>` : ''}
         ${v.public_key ? `<details class="mt-1"><summary class="text-xs text-gray-500 cursor-pointer">Public-Key anzeigen</summary><pre class="bg-white border rounded p-2 mt-1 text-xs overflow-auto">${esc(v.public_key)}</pre></details>` : ''}
         <div class="text-xs text-gray-500 mt-1">Letzter Connect: ${fmtDt(v.last_connect_at)}</div>
@@ -371,9 +374,26 @@
     document.body.insertAdjacentHTML('beforeend', modal);
     loadQrIntoImg(v.id, qrImgId);
   }
+  function showVorlage(v) {
+    const vorlage = String(v.config_vorlage || '').replace(v.platzhalter || '%PRIVATKEY%', '<privater Schlüssel deines Geräts>');
+    const modal = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
+      <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-2xl w-full p-5 max-h-[90vh] overflow-y-auto">
+        <h2 class="font-bold mb-2">VPN-Konto — IP ${esc(v.assigned_ip || '?')}${v.vlan ? ' (VLAN ' + v.vlan + ')' : ''}</h2>
+        <p class="text-xs text-green-800 bg-green-50 border border-green-200 rounded p-2 mb-3">
+          🔒 Der private Schlüssel bleibt auf deinem Gerät. Übernimm in der WireGuard-App die Angaben unten
+          (Adresse, DNS, Gegenstelle); die Zeile <code>PrivateKey</code> hat dein Gerät schon.
+          Diese Angaben kommen nur jetzt; später gibt es hier keine Konfiguration, weil der Server deinen Schlüssel nicht kennt.
+        </p>
+        <textarea readonly class="w-full border rounded px-2 py-1 font-mono text-xs h-72" onclick="this.select()">${esc(vorlage)}</textarea>
+        <div class="flex justify-end mt-4">
+          <button onclick="this.closest('.fixed').remove()" class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Schliessen</button>
+        </div>
+      </div></div>`;
+    document.body.insertAdjacentHTML('beforeend', modal);
+  }
   async function showVpnConfig(id) {
     const r = await AuthentikAuth.apiFetch('/api/isp/vpn-accounts/' + id + '/config');
-    if (!r.ok) { alert('Fehler: ' + r.statusText); return; }
+    if (!r.ok) { let t = r.statusText; try { t = (await r.json()).error || t; } catch {} alert('Fehler: ' + t); return; }
     const cfg = await r.text();
     const v = vpnAccounts.find(x => x.id === id) || {};
     showCreatedConfig({ ...v, config: cfg });
@@ -398,7 +418,7 @@
     const kindIcon = { wohnung: '🏠', hobbyraum: '🔧', parkplatz: '🅿️' };
     const kindLabel = { wohnung: 'Wohnung', hobbyraum: 'Hobbyraum', parkplatz: 'Parkplatz' };
     const optHtml = opts.length === 0
-      ? `<p class="text-xs text-red-600 italic">Keine zugewiesene Wohnung/Hobbyraum/Parkplatz in der Objektverwaltung gefunden. Bitte Verwalter kontaktieren.</p>`
+      ? `<p class="text-xs text-red-600 italic">VPN ins Hausnetz gibt es nur für Personen, die in einer Wohnung (oder einem Hobbyraum bzw. Parkplatz) wohnen bzw. sie nutzen, ab dem Einzugsdatum. Für dich ist keine solche Einheit erfasst. Stimmt das nicht, melde dich bei der Verwaltung.</p>`
       : opts.length === 1
         ? `<p class="text-xs text-gray-500 italic">Heim-Netz: ${kindIcon[opts[0].kind]||''} ${esc(opts[0].bezeichnung)} (VLAN ${esc(opts[0].vlan)})</p><input type="hidden" id="v-vlan" value="${esc(opts[0].vlan)}">`
         : `<div><label class="block text-xs text-gray-600">Heim-Netz auswaehlen (Wohnung > Hobbyraum > Parkplatz)</label>
@@ -408,10 +428,11 @@
     const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
       <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5">
         <h2 class="font-bold mb-3">Neues WireGuard-Konto</h2>
-        <p class="text-xs text-gray-500 mb-3">Konto wird automatisch generiert (Server-seitig Private-Key + IP). Public-Key nur für eigenes Gerät ausfuellen, sonst leer lassen.</p>
+        <p class="text-xs text-gray-500 mb-3"><strong>Empfohlen:</strong> den Schlüssel auf dem Gerät erzeugen (WireGuard-App: „+" → „Leer erstellen", dort wird ein Schlüsselpaar erzeugt) und hier nur den <em>öffentlichen</em> Schlüssel eintragen. Dann bleibt der private Schlüssel auf deinem Gerät.<br>
+          Leer lassen = Rückfall für ältere Geräte: der Server erzeugt den Schlüssel und liefert Konfiguration und QR-Code; der private Schlüssel liegt dann auch auf dem Server.</p>
         <div class="space-y-2 text-sm">
           ${optHtml}
-          <div><label class="block text-xs text-gray-600">Public-Key <span class="text-gray-400">(optional)</span></label><textarea id="v-pub" rows="2" class="w-full border rounded px-2 py-1 font-mono text-xs" placeholder="z.B. xTI...= (sonst leer)"></textarea></div>
+          <div><label class="block text-xs text-gray-600">Öffentlicher Schlüssel des Geräts <span class="text-gray-400">(empfohlen; nie den privaten)</span></label><textarea id="v-pub" rows="2" class="w-full border rounded px-2 py-1 font-mono text-xs" placeholder="44 Zeichen, endet auf = (leer = Schlüssel vom Server)"></textarea></div>
           <div><label class="block text-xs text-gray-600">Bezeichnung <span class="text-gray-400">(wofür ist die VPN?)</span></label><input id="v-bez" class="w-full border rounded px-2 py-1" placeholder="z.B. Laptop privat, Homeoffice, Ferienhaus"></div>
         </div>
         <div class="flex justify-end gap-2 mt-3">
@@ -437,6 +458,8 @@
       await loadVpn();
       // Auto-show config + QR direkt (Private-Key ist nur jetzt unverschluesselt verfuegbar)
       if (created.config) showCreatedConfig(created);
+      // Schluessel auf dem Geraet: nur die Vorlage, der private Schluessel kommt vom Geraet
+      else if (created.config_vorlage) showVorlage(created);
     } catch (e) { alert('Fehler: ' + e.message); }
   }
   async function delVpn(id) {
@@ -447,7 +470,7 @@
 
   // VLAN
   async function loadVlan() {
-    const r = await AuthentikAuth.apiFetch('/api/isp/vlan-requests');
+    const r = await AuthentikAuth.apiFetch('/api/isp/vlan-requests?nur=meine');
     if (!r.ok) return;
     vlanRequests = (await r.json()).vlan_requests || [];
     renderVlan();
@@ -1057,7 +1080,7 @@
   // Mailboxen
   let mailboxRequests = [];
   async function loadMailboxes() {
-    const r = await AuthentikAuth.apiFetch('/api/isp/mailbox-requests');
+    const r = await AuthentikAuth.apiFetch('/api/isp/mailbox-requests?nur=meine');
     if (!r.ok) return;
     mailboxRequests = (await r.json()).requests || [];
     renderMailboxes();
