@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Projekt — Rosenweg</title>
+    <link rel="icon" href="/logo-rosenweg.png">
+    <meta name="robots" content="noindex">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=6"></script>
+    <script src="/js/nav.js?v=3"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script>RosenwegNav.init({ active: 'projekte' });</script>
+
+    <main class="max-w-3xl mx-auto px-4 py-10">
+        <header class="mb-6 flex items-center gap-3">
+            <img src="/logo-rosenweg.png" alt="Rosenweg" class="w-12 h-12 rounded-full bg-white p-1 border">
+            <div>
+                <p class="text-sm text-gray-600">STWEG-Kooperation Rosenweg · Projekt</p>
+                <h1 id="titel" class="text-2xl sm:text-3xl font-bold text-gray-900">Projekt</h1>
+            </div>
+        </header>
+
+        <p id="laden" class="text-gray-600">Lade Projekt …</p>
+
+        <section id="meldung" class="hidden bg-white rounded-xl shadow-sm border border-amber-300 p-5 mb-6">
+            <h2 id="meldung-titel" class="text-lg font-semibold text-gray-800 mb-1"></h2>
+            <p id="meldung-text" class="text-gray-700"></p>
+        </section>
+
+        <div id="projekt" class="hidden">
+            <section class="bg-white rounded-xl shadow-sm border p-5 mb-6">
+                <p class="mb-2"><span id="status" class="inline-block text-sm font-medium rounded-full px-3 py-1"></span></p>
+                <p id="beschreibung" class="text-gray-700 leading-relaxed whitespace-pre-line"></p>
+            </section>
+
+            <section class="bg-white rounded-xl shadow-sm border p-5 mb-6">
+                <h2 class="text-lg font-semibold text-gray-800 mb-3">Zeitachse</h2>
+                <p id="zeit-leer" class="hidden text-sm text-gray-500">Noch keine Einträge.</p>
+                <ol id="zeit" class="space-y-4"></ol>
+            </section>
+
+            <section id="unterlagen-box" class="hidden bg-white rounded-xl shadow-sm border p-5 mb-6">
+                <h2 class="text-lg font-semibold text-gray-800 mb-3">Weitere freigegebene Unterlagen</h2>
+                <ul id="unterlagen" class="space-y-1"></ul>
+            </section>
+
+            <p class="text-xs text-gray-500">Diese Seite zeigt nur, was die Verwaltung des Projekts öffentlich freigegeben hat.
+                Offerten und Bewertungen sind nicht sichtbar.</p>
+        </div>
+    </main>
+
+    <script>
+    (function () {
+        const STATUS = {
+            geplant: ['Geplant', 'bg-blue-100 text-blue-800'],
+            aktiv: ['Aktiv', 'bg-green-100 text-green-800'],
+            abgeschlossen: ['Abgeschlossen', 'bg-gray-200 text-gray-800'],
+            archiviert: ['Archiviert', 'bg-gray-200 text-gray-600']
+        };
+        const $ = (id) => document.getElementById(id);
+        const slug = (new URLSearchParams(location.search).get('p') || '').trim();
+
+        function meldung(titel, text) {
+            $('laden').classList.add('hidden');
+            $('projekt').classList.add('hidden');
+            $('titel').textContent = 'Projekt nicht verfügbar';
+            document.title = 'Projekt nicht verfügbar — Rosenweg';
+            $('meldung-titel').textContent = titel;
+            $('meldung-text').textContent = text;
+            $('meldung').classList.remove('hidden');
+        }
+        function datum(d) {
+            const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || ''));
+            return m ? `${m[3]}.${m[2]}.${m[1]}` : '';
+        }
+        function dokLink(a) {
+            const name = String(a.doc_path || '').split('/').pop();
+            const li = document.createElement('li');
+            const el = document.createElement('a');
+            el.href = '/api/public/project/' + encodeURIComponent(slug) + '/document/'
+                + String(a.doc_path).split('/').map(encodeURIComponent).join('/');
+            el.target = '_blank'; el.rel = 'noopener';
+            el.className = 'text-red-700 hover:text-red-800 text-sm font-medium';
+            el.textContent = '📎 ' + name;
+            li.appendChild(el);
+            return li;
+        }
+
+        async function laden() {
+            if (!slug || slug.length > 200) return meldung('Kein Projekt angegeben', 'Der Link ist unvollständig. Bitte den Link aus der Einladung verwenden.');
+            let r;
+            try { r = await fetch('/api/public/project/' + encodeURIComponent(slug)); }
+            catch (e) { return meldung('Keine Verbindung', 'Das Projekt konnte gerade nicht geladen werden. Bitte später nochmals versuchen.'); }
+            if (r.status === 404) return meldung('Dieses Projekt ist nicht öffentlich', 'Das Projekt existiert nicht oder wird nicht öffentlich gezeigt. Mitglieder sehen es nach der Anmeldung unter «Projekte».');
+            if (!r.ok) return meldung('Fehler beim Laden', 'Das Projekt konnte nicht geladen werden. Bitte später nochmals versuchen.');
+            const p = await r.json();
+
+            $('titel').textContent = p.title || 'Projekt';
+            document.title = (p.title || 'Projekt') + ' — Rosenweg';
+            const s = STATUS[p.status] || [p.status || '', 'bg-gray-200 text-gray-800'];
+            $('status').textContent = s[0];
+            $('status').className = 'inline-block text-sm font-medium rounded-full px-3 py-1 ' + s[1];
+            $('beschreibung').textContent = p.description || '';
+
+            const anhaenge = Array.isArray(p.attachments) ? p.attachments : [];
+            const zeit = Array.isArray(p.timeline) ? p.timeline : [];
+            if (!zeit.length) $('zeit-leer').classList.remove('hidden');
+            const ids = new Set(zeit.map((t) => t.id));
+            for (const t of zeit) {
+                const li = document.createElement('li');
+                li.className = 'border-l-2 pl-4 ' + (t.erledigt ? 'border-green-500' : 'border-gray-300');
+                const k = document.createElement('p');
+                k.className = 'text-sm text-gray-500';
+                k.textContent = datum(t.datum) + (t.erledigt ? ' · erledigt' : '');
+                const h = document.createElement('p');
+                h.className = 'font-medium text-gray-900';
+                h.textContent = t.titel || '';
+                li.append(k, h);
+                if (t.beschreibung) {
+                    const b = document.createElement('p');
+                    b.className = 'text-sm text-gray-700 whitespace-pre-line';
+                    b.textContent = t.beschreibung;
+                    li.appendChild(b);
+                }
+                const dok = anhaenge.filter((a) => a.target_type === 'timeline' && a.target_id === t.id);
+                if (dok.length) { const ul = document.createElement('ul'); ul.className = 'mt-1'; dok.forEach((a) => ul.appendChild(dokLink(a))); li.appendChild(ul); }
+                $('zeit').appendChild(li);
+            }
+            const uebrig = anhaenge.filter((a) => !(a.target_type === 'timeline' && ids.has(a.target_id)));
+            if (uebrig.length) { uebrig.forEach((a) => $('unterlagen').appendChild(dokLink(a))); $('unterlagen-box').classList.remove('hidden'); }
+
+            $('laden').classList.add('hidden');
+            $('projekt').classList.remove('hidden');
+        }
+        laden();
+    })();
+    </script>
+</body>
+</html>
