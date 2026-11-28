@@ -60,6 +60,12 @@ test('apps-register.json ist gueltig und kennt die bisherigen Apps', () => {
   assert.ok(!daten.apps.energie.technik);
   assert.equal(daten.apps.energie.logo, '/img/apps/rosenweg-energie.png?v=20261128');
   assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.energie.logo.split('?')[0])));
+  // Rosenweg Unterlagen (Flutter, 28.11.2026)
+  assert.equal(daten.apps.unterlagen.paket, 'ch.rosenweg4303.unterlagen');
+  assert.equal(daten.apps.unterlagen.repo, 'Rosenweg/rosenweg-unterlagen');
+  assert.ok(!daten.apps.unterlagen.technik);
+  assert.equal(daten.apps.unterlagen.logo, '/img/apps/rosenweg-unterlagen.png?v=20261128');
+  assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.unterlagen.logo.split('?')[0])));
 });
 
 test('pruefen findet Fehler', () => {
