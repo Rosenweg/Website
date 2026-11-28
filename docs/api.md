@@ -209,7 +209,7 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `GET /api/stweg-modules`, `/api/stweg-content/:stweg`, `/api/stweg-sections/:stweg` | Inhalte der STWEG-Seiten |
 | `GET /api/verteiler/by-stweg/:stweg` | Namen und Adressen der Verteiler einer STWEG |
 | `GET /api/calendar` | Termine (503, wenn `GOOGLE_CALENDAR_ICS_URL` fehlt) |
-| `GET /api/public/project/:slug`, `…/document/:path` | öffentlich geschaltete Projekte |
+| `GET /api/public/project/:slug`, `…/document/:path` | öffentlich geschaltete Projekte: Kandidaten nur `id, name, webseite, status`, nur als öffentlich markierte Anhänge (`oeffentlich`) |
 | `GET /api/unterschriftenliste/verify-json`, `verify`, `snapshot/:hash.pdf` | Echtheitsprüfung (30 / 10 Min. je Client) |
 | `GET /api/display/pdf/:name`, `pdfbild/:name`, `geraetedatei/…`, `rss` | Anzeigen im Treppenhaus |
 | `GET /api/isp/noc/public/*`, `/api/isp/status-summary`, `/api/isp/maintenance/public` | NOC-Wandbild (gekürzt), Störungen |
@@ -270,7 +270,11 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `GET /api/termine?stweg=` | Rosenweg Termine: Termine der eigenen STWEG(s) in einer Liste (`stwegs` je Termin), `stwegs` mit `schreiben` und `kalender` (Nextcloud-Kalender aus `TERMINE_NEXTCLOUD_KALENDER`, sonst null); `stweg=3,5` oder `alle` (T/P alle, sonst nur sichtbare → 403) |
 | `GET/POST /api/meg/einstellplaetze` | lesen angemeldet (fremde Plätze ohne Personendaten), schreiben MEG-Ausschuss oder T/P |
 | `/api/grundbuch/*` | angemeldet; Namen/Adressen nur Ausschuss/T/P oder wer erfasst hat; verifizieren Ausschuss/T/P; OCR 30 / Std. |
-| `/api/vollmachten*` | angemeldet: eigene; Ausschuss sieht seine STWEG; T/P/Verwaltung alle und für andere; Admin-Upload für alle Geber nur T/P mit `?als=admin` |
+| `/api/vollmachten*` | angemeldet: eigene; Ausschuss und Verwaltung sehen ihre STWEG nur mit Recht `vollmachten` (Ausschuss Vorgabe lesen); T/P alle; für andere erfassen T/P und Verwaltung mit `vollmachten` = schreiben; Admin-Upload für alle Geber nur T/P mit `?als=admin`. Erfassen/Signieren/Hochladen als Geber nur Eigentümer bzw. Wohnungs-Verwalter der Wohnung oder STWEG (ohne Objekt 403); Liste mit `darf_erteilen`, je Zeile `darf_widerrufen`, `darf_papier_aktivieren`, `darf_ki_pruefen`. `signed_ip`, `signed_user_agent`, `signed_authentik_sub` (und `digital_signed_*`) nur für T/P, auch auf dem PDF |
+| `POST /api/vollmachten/:id/sign-digital` | nur frisch angemeldet (Website/App, ≤ `STUFE_FRISCH_MIN` Min.), nie mit PAT, MCP (`X-Rosenweg-Kanal: mcp`), Karte oder Anlage-Token: sonst 403 `{reauth, fehler:'frisch'}` |
+| `POST /api/vollmachten/:id/verify-ai` `{bestaetigt_extern:true}` | KI-Prüfung (PDF an OpenRouter/Anthropic): nur T/P und Verwaltung der STWEG mit Recht `vollmachten`, nicht per PAT/MCP; ohne Bestätigung 400 `bestaetigung_noetig` |
+| `GET /api/vollmachten/lookup/personen?q=` | T/P und Verwaltung aller STWEGs: alle; sonst Name/E-Mail nur in STWEGs, wo das Konto Eigentümer (Gruppe oder Rolle `eigentuemer`/`verwalter`), Ausschuss oder Verwaltung (Recht) ist; Mieter leer |
+| `/api/vollmachten/templates` | lesen: globale (`stweg` leer) und die der eigenen STWEG(s), je Vorlage `darf_bearbeiten`, oben `anlegen_stwegs` (null = alle inkl. global); anlegen/ändern/löschen global nur T/P, sonst Ausschuss der STWEG |
 
 ### 4.5 Reparaturen, Waschküche, Zutritt
 
@@ -291,7 +295,7 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 |---|---|
 | `GET/POST/PUT/DELETE /api/auslagen…`, Belege, Positionen, `scan-beleg` | Recht `auslagen:read`; sehen: Ersteller, A🅢, T/P (Entwürfe nur Ersteller und T/P); Status ändern A🅢/T/P, keine Selbstgenehmigung; „ausbezahlt“ T/P/Verwaltung bzw. Ersteller („erhalten“); Scan 30 / Std. |
 | `PUT/DELETE /api/auslagen-stundensatz` | Recht `auslagen-stundensatz:write` |
-| `/api/projects…` | lesen: Eigentümer, T/P oder Verwaltung mit Recht `projekte` (Auslagen eines Projekts dann nur ihrer STWEG(s)); kommentieren: Eigentümer; anlegen (`POST /api/projects`) und bearbeiten: T/P, Ausschuss der STWEG des Projekts, Verwaltung der STWEG mit `projekte` = schreiben; Projekte der ganzen Kooperation (`stweg` leer) jeder Ausschuss bzw. eine Verwaltung aller STWEGs (`lib/projekte-rechte.js`) |
+| `/api/projects…` | lesen je Projekt (`projektLesen`, 28.11.2026): Eigentümer der STWEG des Projekts, Ausschuss der STWEG (auch ohne Eigentümergruppe), Verwaltung der STWEG mit Recht `projekte`, Projekte ohne STWEG (Kooperation) jeder Eigentümer/Ausschuss/jede Verwaltung mit Recht, T/P alle; `GET /api/projects` liefert nur lesbare (mit `darf_bearbeiten`), `/:slug` sonst 403; Kommentare ohne `user_email` (dafür `eigener`); `/:slug/auslagen` mit `user_email` nur für T/P und Verwaltung der STWEG; `GET /api/projects-mini` und `/api/doodle/projects` nur lesbare; Doodle-Umfragen mit `project_slug` nur für Leser des Projekts, Ersteller und Eingeladene; `PUT /:slug/public` `{public_access, bestaetigt}` (einschalten nur mit `bestaetigt:true`), `PUT /:slug/attachments/:id/public` `{oeffentlich, bestaetigt}`; kommentieren: Eigentümer (lesbare Projekte); anlegen (`POST /api/projects`) und bearbeiten: T/P, Ausschuss der STWEG des Projekts, Verwaltung der STWEG mit `projekte` = schreiben; Projekte der ganzen Kooperation (`stweg` leer) jeder Ausschuss bzw. eine Verwaltung aller STWEGs (`lib/projekte-rechte.js`) |
 | `/api/handwerker*`, `/api/handwerker-events`, `/api/handwerker-notfall` | Recht `handwerker` |
 | `GET /api/dashboard`, `POST /api/ki-search` (30 / Min.), `GET /api/telefonbuch` | angemeldet, Inhalt nach Rolle gefiltert |
 

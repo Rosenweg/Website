@@ -57,7 +57,7 @@ Generic:
 
 Vollmachten:
 - `vollmachten_list`, `vollmachten_get`, `vollmachten_create_draft`
-- `vollmachten_sign_digital`, `vollmachten_upload_signed`, `vollmachten_verify_ai`
+- kein Signieren und keine KI-Pruefung: `sign-digital` verlangt eine frische Anmeldung im Portal/in der App, die KI-Pruefung laeuft nur auf Knopfdruck der Verwaltung bzw. von Technik/Praesident (Entscheid 28.11.2026); die API lehnt beides mit einem Zugangstoken ab
 - `vollmachten_revoke`, `vollmachten_get_pdf`, `vollmachten_delete`
 - `vollmachten_templates_list/create/update/delete`
 - `vollmachten_lookup_verwaltungen/personen/my_kontakte/my_wohnungen`

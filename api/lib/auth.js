@@ -322,7 +322,7 @@ const MANAGED_PAGES = [
   { id: 'reklamationen', label: 'Reklamationen' },
   // Seit B19 prueft die API das Recht (lib/vollmacht-rechte.js): lesen = Vollmachten
   // der verwalteten STWEG(s) sehen, schreiben = fuer Dritte erfassen, Papier aktivieren.
-  { id: 'vollmachten', label: 'Vollmachten (Verwaltung)' },
+  { id: 'vollmachten', label: 'Vollmachten (Ausschuss, Verwaltung)' },
   // Befund F6-1: diese Rechte stehen in der Tabelle und wirken, fehlten aber als Spalte.
   { id: 'objektverwaltung', label: 'Objektverwaltung' },
   { id: 'projekte', label: 'Projekte' },

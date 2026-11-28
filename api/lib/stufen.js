@@ -86,4 +86,19 @@ function passwortWechselErlaubt(auth) {
   return auth?.stufe === 'frisch' && (auth.art === 'website' || auth.art === 'app');
 }
 
-module.exports = { STUFEN, RANG, FRISCH_MIN, KARTEN_ARTEN, jwtClaims, authTimeAus, anmeldung, stufeReicht, istKartenSitzung, passwortWechselErlaubt };
+/**
+ * Darf diese Anmeldung eine Vollmacht digital signieren (Fund R1, Entscheid
+ * Stefan 28.11.2026)? Gleich streng wie der Passwortwechsel: nur frisch und nur
+ * mit einer Anmeldung, die Authentik gerade bestaetigt hat (Website-Sitzung oder
+ * Access-Token der Rosenweg-Apps). Nie mit einem persoenlichen Zugangstoken
+ * (PAT) bzw. ueber MCP, nie mit Karte, QR, Anlage-Token oder einer
+ * E-Mail-bestaetigten Karten-Aktion - sonst setzte ein Agent im Namen der
+ * Person eine Signatur, die auf dem PDF wie ihre eigene aussieht.
+ */
+function signierenErlaubt(auth, { pat = false, kanal = '' } = {}) {
+  if (pat) return false;
+  if (String(kanal || '').toLowerCase() === 'mcp') return false;
+  return passwortWechselErlaubt(auth);
+}
+
+module.exports = { STUFEN, RANG, FRISCH_MIN, KARTEN_ARTEN, jwtClaims, authTimeAus, anmeldung, stufeReicht, istKartenSitzung, passwortWechselErlaubt, signierenErlaubt };

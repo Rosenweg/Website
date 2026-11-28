@@ -12,6 +12,8 @@ const crypto = require('crypto');
 const { pool } = require('./db');
 const { loggedSendMail, MAIL_FROM } = require('./mail');
 const { otpAusstellen, otpPruefen, ausstellenErlaubt, globalErlaubt, ipErlaubt, OTP_FEHLER } = require('./otp');
+const projekteRechte = require('./projekte-rechte');
+const { getUserPermissions } = require('./auth');
 
 const SITE_URL = process.env.SITE_URL || 'https://www.rosenweg4303.ch';
 const pollUrl = (id) => `${SITE_URL}/sitzungs-doodle.html` + (id ? `?poll=${id}` : '');
@@ -144,7 +146,7 @@ async function resolveActor(req) {
   if (s.rows[0]) {
     let groups = []; try { groups = JSON.parse(s.rows[0].groups_json || '[]'); } catch { /* */ }
     return {
-      email: normEmail(s.rows[0].email), name: s.rows[0].name, token,
+      email: normEmail(s.rows[0].email), name: s.rows[0].name, token, groups,
       isMember: true, isAdmin: s.rows[0].role === 'admin' || isAdminGroups(groups),
     };
   }
@@ -157,9 +159,9 @@ async function resolveActor(req) {
     const u = await pool.query('SELECT name, role, groups_json FROM users WHERE LOWER(email) = $1 AND active = true LIMIT 1', [email]);
     if (u.rows[0]) {
       let groups = []; try { groups = JSON.parse(u.rows[0].groups_json || '[]'); } catch { /* */ }
-      return { email, name: d.rows[0].name || u.rows[0].name, token, isMember: true, isAdmin: u.rows[0].role === 'admin' || isAdminGroups(groups) };
+      return { email, name: d.rows[0].name || u.rows[0].name, token, groups, isMember: true, isAdmin: u.rows[0].role === 'admin' || isAdminGroups(groups) };
     }
-    return { email, name: d.rows[0].name, token, isMember: false, isAdmin: false };
+    return { email, name: d.rows[0].name, token, groups: [], isMember: false, isAdmin: false };
   }
   return null;
 }
@@ -183,11 +185,40 @@ async function emailAllowed(email) {
   return undefined;
 }
 
-// Zugriff auf eine Umfrage? Mitglieder immer; Externe nur wenn eingeladen.
+// ── Projekt-Umfragen (D2, Entscheid Stefan 28.11.2026): eine Umfrage mit
+// project_slug sehen nur, wer das Projekt lesen darf (lib/projekte-rechte.js
+// projektLesen: Eigentuemer, Ausschuss, Verwaltung der STWEG, Technik/Praesident),
+// dazu wer sie angelegt hat oder eingeladen ist. Mieter sehen sie nicht.
+// Liefert die lesbaren Projekt-Kuerzel (null = alle).
+async function lesbareProjektSlugs(actor) {
+  if (!actor || !actor.isMember) return [];
+  if (actor.isAdmin) return null;
+  let perm;
+  try { perm = (await getUserPermissions(actor.groups || []))['projekte']; } catch { perm = undefined; }
+  const r = await pool.query('SELECT slug, stweg FROM projects');
+  return projekteRechte.lesbareProjekte(actor.groups || [], perm, r.rows).map(p => p.slug);
+}
+// SQL-Bedingung fuer Umfragen eines Mitglieds (params wird ergaenzt)
+function projektBedingung(slugs, email, params) {
+  if (slugs === null) return 'TRUE';
+  params.push(slugs); const iS = params.length;
+  params.push(email); const iE = params.length;
+  return `(p.project_slug IS NULL OR p.project_slug = ANY($${iS}::text[]) OR LOWER(p.creator_email) = $${iE}
+           OR p.id IN (SELECT poll_id FROM doodle_invites WHERE LOWER(email) = $${iE}))`;
+}
+
+// Zugriff auf eine Umfrage? Mitglieder, ausser bei Umfragen eines Projekts, das
+// sie nicht lesen duerfen (D2); Externe nur wenn eingeladen.
 async function canAccessPoll(actor, pollId) {
-  if (actor.isMember) return true;
-  const r = await pool.query('SELECT 1 FROM doodle_invites WHERE poll_id = $1 AND LOWER(email) = $2 LIMIT 1', [pollId, actor.email]);
-  return r.rows.length > 0;
+  const inv = await pool.query('SELECT 1 FROM doodle_invites WHERE poll_id = $1 AND LOWER(email) = $2 LIMIT 1', [pollId, actor.email]);
+  if (inv.rows.length > 0) return true;
+  if (!actor.isMember) return false;
+  const pr = await pool.query('SELECT project_slug, creator_email FROM doodle_polls WHERE id = $1', [pollId]);
+  const poll = pr.rows[0];
+  if (!poll || !poll.project_slug) return true;
+  if (normEmail(poll.creator_email) === actor.email) return true;
+  const slugs = await lesbareProjektSlugs(actor);
+  return slugs === null || slugs.includes(poll.project_slug);
 }
 
 // Codes: lib/otp.js (Zähler in der DB, 8 Stellen, an den Zweck 'doodle' gebunden).
@@ -277,6 +308,7 @@ function mountDoodle({ app }) {
       // Gaeste (nur eingeladen) sehen wie in /polls nur ihre eigenen Umfragen,
       // sonst verriete /next Titel, Ort und Termin fremder Sitzungen.
       if (!req.actor.isMember) { params.push(req.actor.email); conds.push(`p.id IN (SELECT poll_id FROM doodle_invites WHERE LOWER(email) = $${params.length})`); }
+      else conds.push(projektBedingung(await lesbareProjektSlugs(req.actor), req.actor.email, params)); // D2
       if (req.query.project) { params.push(String(req.query.project)); conds.push(`p.project_slug = $${params.length}`); }
       if (req.query.stweg) { params.push(parseInt(req.query.stweg, 10)); conds.push(`p.stweg = $${params.length}`); }
       if (req.query.gremium) { params.push(String(req.query.gremium)); conds.push(`p.gremium = $${params.length}`); }
@@ -290,10 +322,12 @@ function mountDoodle({ app }) {
   });
 
   // ── Projekte fürs Zuordnungs-Dropdown (auch für Code-Mitglieder) ─────────
+  // Nur Projekte, die das Mitglied lesen darf (D2): Mieter bekommen keine Titel.
   app.get('/api/doodle/projects', doodleAuth, memberOnly, async (req, res) => {
     try {
       const r = await pool.query("SELECT slug, title FROM projects WHERE COALESCE(status,'aktiv') != 'archiviert' ORDER BY title");
-      res.json({ projekte: r.rows });
+      const slugs = await lesbareProjektSlugs(req.actor);
+      res.json({ projekte: slugs === null ? r.rows : r.rows.filter(p => slugs.includes(p.slug)) });
     } catch (e) { res.status(500).json({ error: 'Fehler' }); }
   });
 
@@ -303,6 +337,7 @@ function mountDoodle({ app }) {
       const a = req.actor;
       const conds = [], params = [];
       if (!a.isMember) { params.push(a.email); conds.push(`p.id IN (SELECT poll_id FROM doodle_invites WHERE LOWER(email) = $${params.length})`); }
+      else conds.push(projektBedingung(await lesbareProjektSlugs(a), a.email, params)); // D2
       if (req.query.stweg) { params.push(parseInt(req.query.stweg, 10)); conds.push(`p.stweg = $${params.length}`); }
       if (req.query.project) { params.push(String(req.query.project)); conds.push(`p.project_slug = $${params.length}`); }
       if (req.query.gremium) { params.push(String(req.query.gremium)); conds.push(`p.gremium = $${params.length}`); }
@@ -346,6 +381,11 @@ function mountDoodle({ app }) {
       const stweg = Number.isFinite(parseInt(b.stweg, 10)) ? parseInt(b.stweg, 10) : null;
       const projectSlug = b.project_slug ? String(b.project_slug).trim().slice(0, 120) : null;
       const gremium = b.gremium ? String(b.gremium).trim().slice(0, 120) : null;
+      // D2: einem Projekt zuordnen nur, wer es lesen darf
+      if (projectSlug) {
+        const slugs = await lesbareProjektSlugs(req.actor);
+        if (slugs !== null && !slugs.includes(projectSlug)) return res.status(403).json({ error: 'Dieses Projekt darfst du nicht lesen' });
+      }
 
       await client.query('BEGIN');
       const pr = await client.query(

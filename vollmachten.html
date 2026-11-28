@@ -23,7 +23,11 @@
           <h1 class="text-2xl font-bold text-gray-900">📜 Vollmachten</h1>
           <p class="text-sm text-gray-600">Eigentümer können Verwalter, Mieter oder Dritte bevollmächtigen, sie zu vertreten.</p>
         </div>
-        <button onclick="openCreateModal()" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium whitespace-nowrap">+ Neue Vollmacht erteilen</button>
+        <button id="btn-neue-vollmacht" onclick="openCreateModal()" class="hidden bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium whitespace-nowrap">+ Neue Vollmacht erteilen</button>
+      </div>
+      <!-- D1: Vollmachten erteilen nur Eigentümer bzw. Wohnungs-Verwalter (der Server entscheidet: darf_erteilen) -->
+      <div id="hinweis-nur-eigentuemer" class="hidden bg-gray-50 border rounded p-3 text-sm text-gray-700 mb-4">
+        Vollmachten für eine Wohnung erteilen nur ihre Eigentümer oder Wohnungs-Verwalter. Unter „Mich betreffend“ siehst du Vollmachten, in denen du bevollmächtigt bist.
       </div>
 
       <!-- Tabs -->
@@ -137,13 +141,13 @@
           </div>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
             <div>
-              <label class="block text-xs font-medium text-gray-600 mb-1">Bezogen auf Wohnung <span class="text-gray-400">(optional)</span></label>
-              <select id="m-wohnung" class="w-full border rounded px-3 py-1.5">
+              <label class="block text-xs font-medium text-gray-600 mb-1">Wohnung <span class="text-gray-400">(Wohnung oder STWEG nötig)</span></label>
+              <select id="m-wohnung" onchange="onWohnungChange()" class="w-full border rounded px-3 py-1.5">
                 <option value="">— ohne Wohnungs-Bezug —</option>
               </select>
             </div>
             <div>
-              <label class="block text-xs font-medium text-gray-600 mb-1">STWEG <span class="text-gray-400">(optional)</span></label>
+              <label class="block text-xs font-medium text-gray-600 mb-1">STWEG <span class="text-gray-400">(ohne Wohnung: die ganze STWEG)</span></label>
               <select id="m-stweg" class="w-full border rounded px-3 py-1.5">
                 <option value="">—</option>
                 <option value="1">STWEG 1</option><option value="2">STWEG 2</option>
@@ -153,6 +157,7 @@
               </select>
             </div>
           </div>
+          <p class="text-xs text-gray-500 mt-1">Vollmachten erteilen nur Eigentümer oder Wohnungs-Verwalter der gewählten Wohnung bzw. STWEG. Ohne Wohnung und STWEG ist keine Vollmacht möglich.</p>
           <div class="mt-2">
             <div class="flex items-center justify-between mb-1">
               <label class="block text-xs font-medium text-gray-600">Geltungsbereich / konkrete Befugnisse</label>
@@ -195,6 +200,11 @@
       </div>
       <div class="p-5 space-y-3 text-sm">
         <input type="hidden" id="t-id">
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Gilt für *</label>
+          <select id="t-stweg" class="w-full border rounded px-3 py-1.5"></select>
+          <p class="text-xs text-gray-500 mt-1">Globale Vorlagen gelten für alle STWEGs und ändern nur Technik/Präsident. Der Ausschuss pflegt die Vorlagen seiner STWEG.</p>
+        </div>
         <div>
           <label class="block text-xs font-medium text-gray-600 mb-1">Titel *</label>
           <input type="text" id="t-titel" required placeholder="z.B. Generelle Verwalter-Vollmacht" class="w-full border rounded px-3 py-1.5">
@@ -242,6 +252,9 @@
   let myWohnungen = [];
   let templates = [];
   let canEditTemplates = false;
+  // R2: Vorlagen pro STWEG — null = alle STWEGs und global (Technik/Präsident)
+  let vorlagenAnlegenStwegs = [];
+  const stwegName = n => Number(n) === 8 ? 'MEG' : 'STWEG ' + n;
 
   document.addEventListener('DOMContentLoaded', async () => {
     const u = await AuthentikAuth.init({ requireAuth: true });
@@ -266,6 +279,8 @@
       allVollmachten = d.vollmachten || [];
       isAdmin = d.is_admin;
       if (isAdmin) document.getElementById('tab-alle-btn').classList.remove('hidden');
+      document.getElementById('btn-neue-vollmacht').classList.toggle('hidden', d.darf_erteilen !== true);
+      document.getElementById('hinweis-nur-eigentuemer').classList.toggle('hidden', d.darf_erteilen === true);
       renderList();
     } catch (e) {
       document.getElementById('liste').innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded">Fehler: ${esc(e.message)}</div>`;
@@ -297,6 +312,7 @@
       const d = await r.json();
       templates = d.templates || [];
       canEditTemplates = d.can_edit;
+      vorlagenAnlegenStwegs = d.anlegen_stwegs === undefined ? [] : d.anlegen_stwegs;
       document.getElementById('vorlagen-admin-bar').classList.toggle('hidden', !canEditTemplates);
       renderTemplates();
     } catch (e) {
@@ -319,13 +335,14 @@
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 mb-1">
             <span class="text-xs ${artColor[t.art] || 'bg-gray-100'} px-2 py-0.5 rounded">${esc(t.art)}</span>
+            <span class="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded">${t.stweg ? esc(stwegName(t.stweg)) : 'global'}</span>
             <h3 class="font-semibold">${esc(t.titel)}</h3>
           </div>
           ${t.beschreibung ? `<p class="text-xs text-gray-600">${esc(t.beschreibung)}</p>` : ''}
         </div>
         <div class="flex flex-wrap gap-1 shrink-0">
-          ${canEditTemplates ? `<button onclick="editTemplate(${t.id})" class="text-xs bg-gray-100 rounded px-2 py-1 hover:bg-gray-200">Bearbeiten</button>` : ''}
-          ${canEditTemplates ? `<button onclick="deleteTemplate(${t.id})" class="text-xs text-red-600 hover:underline">Löschen</button>` : ''}
+          ${t.darf_bearbeiten === true ? `<button onclick="editTemplate(${t.id})" class="text-xs bg-gray-100 rounded px-2 py-1 hover:bg-gray-200">Bearbeiten</button>` : ''}
+          ${t.darf_bearbeiten === true ? `<button onclick="deleteTemplate(${t.id})" class="text-xs text-red-600 hover:underline">Löschen</button>` : ''}
         </div>
       </div>
       <details class="text-xs"><summary class="cursor-pointer text-gray-500 hover:text-gray-700">Geltungsbereich-Text anzeigen</summary>
@@ -334,7 +351,19 @@
     </div>`).join('');
   }
 
+  // Auswahl „Gilt für“: Technik/Präsident global + alle STWEGs, Ausschuss seine STWEG(s)
+  function fillTemplateStweg(aktuell) {
+    const sel = document.getElementById('t-stweg');
+    const alle = vorlagenAnlegenStwegs === null;
+    const nrn = alle ? [1, 2, 3, 4, 5, 6, 7, 8] : (vorlagenAnlegenStwegs || []);
+    const opts = (alle ? ['<option value="">Global (alle STWEGs)</option>'] : [])
+      .concat(nrn.map(n => `<option value="${n}">${esc(stwegName(n))}</option>`));
+    sel.innerHTML = opts.join('');
+    sel.value = aktuell === null || aktuell === undefined ? (alle ? '' : String(nrn[0] || '')) : String(aktuell);
+  }
+
   function openTemplateModal() {
+    fillTemplateStweg(undefined);
     document.getElementById('t-title').textContent = 'Neue Vorlage';
     document.getElementById('t-id').value = '';
     document.getElementById('t-titel').value = '';
@@ -350,6 +379,7 @@
     const t = templates.find(x => x.id === id);
     if (!t) return;
     document.getElementById('t-title').textContent = 'Vorlage bearbeiten';
+    fillTemplateStweg(t.stweg);
     document.getElementById('t-id').value = t.id;
     document.getElementById('t-titel').value = t.titel || '';
     document.getElementById('t-beschreibung').value = t.beschreibung || '';
@@ -364,6 +394,7 @@
       beschreibung: document.getElementById('t-beschreibung').value.trim() || null,
       art: document.getElementById('t-art').value,
       geltungsbereich: document.getElementById('t-geltung').value.trim(),
+      stweg: parseInt(document.getElementById('t-stweg').value, 10) || null,
     };
     if (!body.titel || !body.art || !body.geltungsbereich) {
       alert('Titel, Art und Geltungsbereich sind Pflicht.');
@@ -444,6 +475,8 @@
       const canEdit = v.status === 'entwurf';
       // Der Server entscheidet (darf_widerrufen, gleiche Regel wie beim Widerrufen selbst)
       const canRevoke = v.darf_widerrufen === true;
+      // KI-Prüfung (D3): nur Verwaltung der STWEG, Technik, Präsident (darf_ki_pruefen) und nur mit hochgeladener PDF
+      const canKi = v.darf_ki_pruefen === true && (!!v.papier_pdf_path || vgListe.some(g => g.papier_pdf_path));
       return `<div class="bg-white border rounded-lg p-4 hover:shadow-md transition">
         <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
           <div class="flex-1 min-w-0">
@@ -474,7 +507,7 @@
             ${canSign ? `<button onclick="triggerUpload(${v.id})" class="text-xs bg-amber-600 text-white rounded px-3 py-1.5 hover:bg-amber-700">📤 Signierte PDF hochladen</button>` : ''}
             ${canAdminUpload ? `<button onclick="triggerUpload(${v.id}, true)" class="text-xs bg-amber-700 text-white rounded px-3 py-1.5 hover:bg-amber-800" title="Admin: PDF mit den Unterschriften aller Geber hochladen">📤 PDF aller Geber hochladen (Admin)</button>` : ''}
             ${canActivatePaper ? `<button onclick="activatePaper(${v.id})" class="text-xs bg-amber-100 text-amber-800 rounded px-3 py-1.5 hover:bg-amber-200">📄 Papier aktivieren</button>` : ''}
-            ${v.papier_pdf_path ? `<button onclick="verifyAi(${v.id})" class="text-xs bg-purple-600 text-white rounded px-3 py-1.5 hover:bg-purple-700">🤖 KI-Prüfung</button>` : ''}
+            ${canKi ? `<button onclick="verifyAi(${v.id})" class="text-xs bg-purple-600 text-white rounded px-3 py-1.5 hover:bg-purple-700" title="Schickt die PDF an einen externen Dienst (OpenRouter/Anthropic)">🤖 KI-Prüfung (extern)</button>` : ''}
             ${canRevoke ? `<button onclick="revoke(${v.id})" class="text-xs bg-red-600 text-white rounded px-3 py-1.5 hover:bg-red-700">Widerrufen</button>` : ''}
             ${canEdit ? `<button onclick="deleteEntry(${v.id})" class="text-xs text-red-600 hover:underline">Löschen</button>` : ''}
           </div>
@@ -750,9 +783,16 @@
       const d = await r.json();
       myWohnungen = d.wohnungen || [];
       const sel = document.getElementById('m-wohnung');
-      sel.innerHTML = '<option value="">— ohne Wohnungs-Bezug —</option>' +
+      sel.innerHTML = '<option value="">— keine einzelne Wohnung —</option>' +
         myWohnungen.map(w => `<option value="${w.id}">${esc(w.bezeichnung || ('Wohnung #' + w.id))}${w.stweg ? ' (STWEG ' + w.stweg + ')' : ''}</option>`).join('');
     } catch (e) { /* endpoint optional */ }
+  }
+
+  // Wohnung gewählt -> STWEG folgt (der Server nimmt ohnehin die STWEG der Wohnung)
+  function onWohnungChange() {
+    const id = document.getElementById('m-wohnung').value;
+    const w = myWohnungen.find(x => String(x.id) === String(id));
+    if (w && w.stweg) document.getElementById('m-stweg').value = w.stweg;
   }
 
   async function saveDraft() {
@@ -789,6 +829,10 @@
     };
     if (!body.bevollmaechtigter_name || !body.bevollmaechtigter_typ || !body.art) {
       alert('Bitte Pflichtfelder (Bevollmächtigter-Name + Typ, Art) ausfüllen.');
+      return;
+    }
+    if (!body.wohnung_id && !body.stweg) {
+      alert('Bitte eine Wohnung oder STWEG wählen — ohne Objekt ist keine Vollmacht möglich.');
       return;
     }
     const id = document.getElementById('m-id').value;
@@ -851,9 +895,20 @@
   }
 
   async function signDigital(id) {
-    if (!confirm('Vollmacht digital signieren?\n\nDies entspricht einer einfachen elektronischen Signatur (ZertES Art.2). Login-Zeit, IP-Adresse und Identität werden im Dokument festgehalten.\n\nNach Signatur ist die Vollmacht AKTIV und nicht mehr editierbar — nur Widerruf möglich.')) return;
+    if (!confirm('Vollmacht digital signieren?\n\nDies entspricht einer einfachen elektronischen Signatur (ZertES Art.2). Login-Zeit, IP-Adresse und Identität werden festgehalten (die IP-Adresse sehen nur Technik und Präsident). Signieren geht nur mit frischer Anmeldung.\n\nNach Signatur ist die Vollmacht AKTIV und nicht mehr editierbar — nur Widerruf möglich.')) return;
     try {
       const r = await AuthentikAuth.apiFetch(`/api/vollmachten/${id}/sign-digital`, { method: 'POST' });
+      if (r.status === 403) {
+        const d = await r.json().catch(() => ({}));
+        // R1: Signieren verlangt eine frische Anmeldung (höchstens 15 Minuten alt)
+        if (d.reauth) {
+          if (confirm((d.error || 'Bitte neu anmelden.') + '\n\nJetzt neu anmelden? Danach hier nochmals „Digital signieren“ wählen.')) {
+            AuthentikAuth.login('/vollmachten.html', { reauth: true });
+          }
+          return;
+        }
+        throw new Error(d.error || 'Keine Berechtigung');
+      }
       if (!r.ok) throw new Error(await r.text());
       await load();
     } catch (e) { alert('Fehler: ' + e.message); }
@@ -885,9 +940,8 @@
         });
         if (!r.ok) throw new Error(await r.text());
         const d = await r.json();
-        if (confirm(`✓ Signierte PDF hochgeladen (${Math.round(d.size_bytes/1024)} KB). Status: ${d.status}.\n\nJetzt automatisch von der KI prüfen lassen?`)) {
-          await verifyAi(id);
-        }
+        // D3: keine KI-Prüfung im Anschluss — die startet nur die Verwaltung bzw. Technik/Präsident von Hand
+        alert(`✓ Signierte PDF hochgeladen (${Math.round(d.size_bytes/1024)} KB). Status: ${d.status}.`);
         await load();
       } catch (e) { alert('Fehler beim Upload: ' + e.message); }
     };
@@ -895,12 +949,14 @@
   }
 
   async function verifyAi(id) {
+    // D3: klarer Hinweis vor dem Versand; der Server verlangt bestaetigt_extern
+    if (!confirm('KI-Prüfung starten?\n\nDie unterschriebene PDF (mit Namen, Adressen und Unterschriften) wird dafür an einen externen Dienst geschickt: OpenRouter, von dort an Anthropic (Claude). Die Daten verlassen damit das Rosenweg-Netz.\n\nNur fortfahren, wenn das nötig ist.')) return;
     const wrap = document.createElement('div');
     wrap.className = 'fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4';
     wrap.innerHTML = '<div class="bg-white rounded-lg shadow-xl p-6 max-w-md w-full text-center"><p class="text-gray-700 mb-2">🤖 KI prüft die signierte PDF…</p><p class="text-xs text-gray-400">Das kann bis zu 60 Sekunden dauern.</p></div>';
     document.body.appendChild(wrap);
     try {
-      const r = await AuthentikAuth.apiFetch(`/api/vollmachten/${id}/verify-ai`, { method: 'POST' });
+      const r = await AuthentikAuth.apiFetch(`/api/vollmachten/${id}/verify-ai`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bestaetigt_extern: true }) });
       const d = await r.json();
       wrap.remove();
       if (!r.ok) { alert('KI-Fehler: ' + (d.error || r.status)); return; }

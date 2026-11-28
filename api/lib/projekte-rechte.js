@@ -1,18 +1,24 @@
 // Wer darf Projekte (projekte.html, /api/projects…) lesen und kommentieren?
-// Eine Regel fuer die Routen in server.js und die Tests (Befund V1).
+// Eine Regel fuer die Routen in server.js, lib/doodle.js und die Tests
+// (Befund V1; Funde R1/R2/D2, Entscheid Stefan 28.11.2026).
 //
-//   lesen        Technik/Praesident, jede Eigentuemergruppe (wie bisher) und die
-//                Hausverwaltung (stwegN-verwaltung, Übergang „Verwaltung“) mit
-//                Seitenrecht „projekte“ ab lesen.
+//   lesen        je Projekt (projektLesen): Technik/Praesident, Eigentuemer
+//                der STWEG des Projekts bzw. jeder Eigentuemer bei
+//                Kooperations-Projekten (F5), wer das Projekt
+//                bearbeiten darf (Ausschuss der STWEG bzw. jeder Ausschuss bei
+//                Kooperations-Projekten, auch ohne Eigentuemergruppe – R2) und
+//                die Hausverwaltung mit Seitenrecht „projekte“ ab lesen nur fuer
+//                Projekte ihrer STWEG(s) und Kooperations-Projekte (R1, gleich
+//                wie bei den Dateien in projektDokRecht).
+//                Reine Bewohner (Mieter) lesen nichts – auch keine Titel
+//                (projects-mini, doodle/projects) und keine Projekt-Umfragen.
 //   kommentieren Technik/Praesident und Eigentuemer (unveraendert); die
 //                Verwaltung liest nur.
-//   bearbeiten   unveraendert Ausschuss/Technik (requireAusschussOrTechnik).
+//   bearbeiten   projektBearbeiten (unten).
 //
-// Projekte haben keine STWEG (Projekte der STWEG-Kooperation, Tabelle projects
-// ohne Spalte stweg) – sie sieht jede Verwaltung. STWEG-gebunden sind die
-// Auslagen eines Projekts: die Verwaltung sieht nur die ihrer STWEG(s)
-// (lib/stweg-sicht.js), wie auf auslagen.html.
-const { isTechnik, isPraesident, isVerwaltungForAny, isVerwaltungFor, verwaltungStwegs, verwaltetAlleStwegs, getAusschussStwegs, isAusschussForAny } = require('./groups');
+// STWEG-gebunden sind auch die Auslagen eines Projekts: die Verwaltung sieht
+// nur die ihrer STWEG(s) (lib/stweg-sicht.js), wie auf auslagen.html.
+const { STWEG_GROUPS, isTechnik, isPraesident, isVerwaltungForAny, isVerwaltungFor, verwaltungStwegs, verwaltetAlleStwegs, getAusschussStwegs, isAusschussForAny } = require('./groups');
 const { stwegSicht } = require('./stweg-sicht');
 
 const STUFE = { read: 1, write: 2 };
@@ -21,10 +27,71 @@ function istEigentuemer(groups) {
   return (groups || []).some(g => String(g).toLowerCase().includes('eigentuemer'));
 }
 
+function ohne(stweg) { return stweg === null || stweg === undefined || stweg === ''; }
+
+// Eigentuemer der STWEG nr (Eigentuemergruppe; dort liegen auch Wohnungs-Verwalter)
+function eigentuemerVon(groups, nr) {
+  const m = STWEG_GROUPS[Number(nr)];
+  if (!m || !m.eigentuemer) return false;
+  return (groups || []).some(x => String(x).toLowerCase() === m.eigentuemer.toLowerCase());
+}
+
+// Darf das Konto dieses Projekt (STWEG stweg, null = Kooperation) lesen?
+// F5 (Entscheid Stefan 28.11.2026): Eigentuemer nur Projekte ihrer STWEG(s)
+// und Kooperations-Projekte (jede Eigentuemergruppe).
+function projektLesen(groups, perm, stweg) {
+  const g = groups || [];
+  if (isTechnik(g) || isPraesident(g)) return true;
+  if (ohne(stweg) ? istEigentuemer(g) : eigentuemerVon(g, stweg)) return true;
+  if (projektBearbeiten(g, perm, stweg)) return true;
+  if ((STUFE[perm] || 0) < 1) return false;
+  return ohne(stweg) ? isVerwaltungForAny(g) : isVerwaltungFor(g, Number(stweg));
+}
+
+// Darf das Konto ueberhaupt irgendein Projekt lesen (Seite, Liste)?
 function projekteLesen(groups, perm) {
   const g = groups || [];
   if (isTechnik(g) || isPraesident(g) || istEigentuemer(g)) return true;
+  if (isAusschussForAny(g)) return true;                      // R2: Ausschuss ohne Eigentuemergruppe
   return isVerwaltungForAny(g) && (STUFE[perm] || 0) >= 1;
+}
+
+// Nur die lesbaren Projekte einer Liste [{ stweg, … }]
+function lesbareProjekte(groups, perm, projekte) {
+  return (projekte || []).filter(p => p && projektLesen(groups, perm, p.stweg));
+}
+
+// Auslagen eines Projekts (D3): die E-Mail der einreichenden Person sehen nur
+// Technik/Praesident und die Verwaltung der STWEG der Auslage; alle anderen
+// (Eigentuemer, Ausschuss) nur den Namen.
+function auslageEmailSehen(groups, stweg) {
+  const g = groups || [];
+  if (isTechnik(g) || isPraesident(g)) return true;
+  return !ohne(stweg) && isVerwaltungFor(g, Number(stweg));
+}
+
+// Kommentare (D4): neben dem Kommentar steht nur der Name, nie die E-Mail.
+// eigene = Kommentar des Kontos (fuer die Anzeige „du“).
+function kommentarOhneEmail(k, email) {
+  if (!k || typeof k !== 'object') return k;
+  const { user_email, ...rest } = k;
+  const e = String(email || '').trim().toLowerCase();
+  return { ...rest, eigener: !!e && String(user_email || '').trim().toLowerCase() === e };
+}
+
+// ─── Oeffentliche Projekte (D1, Entscheid Stefan 28.11.2026) ──────────
+// Ohne Anmeldung nur Titel, Beschreibung, Status, Zeitachse, Kandidaten ohne
+// Offertbetrag/-details/Bewertung (und ohne Kontakte/Notizen) und nur Anhaenge,
+// die ausdruecklich als oeffentlich markiert sind (project_attachments.oeffentlich).
+const OEFFENTLICH_KANDIDAT = ['id', 'name', 'webseite', 'status'];
+function oeffentlicherKandidat(k) {
+  const out = {};
+  for (const f of OEFFENTLICH_KANDIDAT) if (k && k[f] !== undefined) out[f] = k[f];
+  return out;
+}
+function oeffentlicheAnhaenge(anhaenge) {
+  return (anhaenge || []).filter(a => a && a.oeffentlich === true)
+    .map(a => ({ id: a.id, target_type: a.target_type, target_id: a.target_id, doc_path: a.doc_path }));
 }
 
 function projekteKommentieren(groups) {
@@ -95,11 +162,8 @@ function projektDokRecht(groups, perm, filePath, projektStwegs) {
   const slug = seg.length >= 3 ? seg[1] : null;
   if (!slug || !projektStwegs || !projektStwegs.has(slug)) return { lesen: eigentuemer, schreiben: false };
   const stweg = projektStwegs.get(slug);
-  const schreiben = projektBearbeiten(g, perm, stweg);
-  const ohneStweg = stweg === null || stweg === undefined || stweg === '';
-  const verwLesen = (STUFE[perm] || 0) >= 1
-    && (ohneStweg ? isVerwaltungForAny(g) : isVerwaltungFor(g, Number(stweg)));
-  return { lesen: eigentuemer || verwLesen || schreiben, schreiben };
+  // Gleiche Leseregel wie das Projekt selbst (projektLesen)
+  return { lesen: projektLesen(g, perm, stweg), schreiben: projektBearbeiten(g, perm, stweg) };
 }
 
 // Adresskuerzel aus dem Titel (ae/oe/ue, nur a-z0-9 und Bindestrich, max. 60)
@@ -113,7 +177,9 @@ function slugAusTitel(titel) {
 const PROJEKT_STATUS = ['geplant', 'aktiv', 'abgeschlossen', 'archiviert'];
 
 module.exports = {
-  projekteLesen, projekteKommentieren, projektAuslagenSicht,
+  projekteLesen, projektLesen, lesbareProjekte, auslageEmailSehen, kommentarOhneEmail,
+  OEFFENTLICH_KANDIDAT, oeffentlicherKandidat, oeffentlicheAnhaenge,
+  projekteKommentieren, projektAuslagenSicht,
   projektBearbeiten, projektAnlegenAuswahl, darfAnlegen, slugAusTitel, PROJEKT_STATUS,
   projektDokRecht,
 };

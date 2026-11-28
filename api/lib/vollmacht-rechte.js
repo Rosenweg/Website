@@ -2,7 +2,7 @@
 // (POST /api/vollmachten/:id/revoke) und die Liste (Feld darf_widerrufen,
 // danach zeigt vollmachten.html den Knopf „Widerrufen“). Befund B11: Ausschuss
 // und Verwaltung sehen „Alle“, duerfen aber nicht widerrufen.
-const { isTechnik, isPraesident, getAusschussStwegs, verwaltungStwegs, verwaltetAlleStwegs } = require('./groups');
+const { STWEG_GROUPS, isTechnik, isPraesident, getAusschussStwegs, verwaltungStwegs, verwaltetAlleStwegs } = require('./groups');
 
 // Technik und Praesident duerfen jede Vollmacht widerrufen.
 function widerrufAdmin(groups) {
@@ -52,10 +52,14 @@ function vmVerwaltungStwegs(groups, perm, mindestens = 'read') {
 
 // Wer sieht welche Vollmachten (ausser den eigenen)?
 // { alle, stwegs: [..], ohneStweg } — ohneStweg = Vollmachten ohne STWEG.
+// R2 (Entscheid Stefan 28.11.2026): auch der Ausschuss sieht die Vollmachten
+// seiner STWEG(s) nur mit Seitenrecht „vollmachten“ >= lesen (Vorgabe per
+// Rechte-Migration: alle Ausschuesse lesen). So laesst es sich in der
+// Rechteverwaltung abschalten.
 function vmSicht(groups, perm) {
   const g = groups || [];
   if (widerrufAdmin(g)) return { alle: true, stwegs: [], ohneStweg: true };
-  const s = getAusschussStwegs(g);
+  const s = stufe(perm) >= 1 ? getAusschussStwegs(g) : new Set();
   for (const n of vmVerwaltungStwegs(g, perm, 'read')) s.add(n);
   const alleVerwaltet = stufe(perm) >= 1 && verwaltetAlleStwegs(g);
   return { alle: false, stwegs: [...s].sort((a, b) => a - b), ohneStweg: alleVerwaltet };
@@ -85,6 +89,129 @@ function vmDarfFuerAndereIrgendwo(groups, perm) {
   return widerrufAdmin(groups || []) || vmVerwaltungStwegs(groups, perm, 'write').size > 0;
 }
 
+// ─── Wer darf eine Vollmacht erteilen? (D1, Entscheid Stefan 28.11.2026) ──
+// Nur Eigentuemer bzw. Wohnungs-Verwalter einer Wohnung erteilen eine
+// Vollmacht fuer diese Wohnung und schalten sie aktiv (digital signieren,
+// eigene PDF hochladen). Ohne Wohnung und ohne STWEG wird abgelehnt.
+// Fuer eine STWEG ohne Wohnung: Eigentuemer/Wohnungs-Verwalter einer Wohnung
+// dieser STWEG oder Mitglied ihrer Eigentuemergruppe (dort liegen auch die
+// Wohnungs-Verwalter, siehe lib/dok-stweg-sicht.js der Mieter-Sperre).
+// kontakte: aktive Eintraege des Kontos in wohnungen_kontakte
+//           [{ wohnung_id, stweg, rolle }].
+// Liefert { ok: true, stweg } oder { ok: false, fehler }.
+const GEBER_ROLLEN = ['eigentuemer', 'verwalter'];
+function leer(x) { return x === null || x === undefined || x === ''; }
+function inEigentuemerGruppe(groups, nr) {
+  const m = STWEG_GROUPS[Number(nr)];
+  if (!m || !m.eigentuemer) return false;
+  return (groups || []).some(g => String(g).toLowerCase() === m.eigentuemer.toLowerCase());
+}
+function vmGeberErlaubt(objekt, kontakte, groups) {
+  const wohnungId = objekt && objekt.wohnungId;
+  const stweg = objekt && objekt.stweg;
+  const k = (kontakte || []).filter(x => x && GEBER_ROLLEN.includes(String(x.rolle || '').toLowerCase()));
+  if (!leer(wohnungId)) {
+    const w = k.find(x => String(x.wohnung_id) === String(wohnungId));
+    if (!w) return { ok: false, fehler: 'Vollmachten für eine Wohnung erteilen nur ihre Eigentümer oder Wohnungs-Verwalter' };
+    return { ok: true, stweg: w.stweg === undefined ? null : w.stweg };
+  }
+  if (!leer(stweg)) {
+    const n = Number(stweg);
+    if (k.some(x => Number(x.stweg) === n) || inEigentuemerGruppe(groups, n)) return { ok: true, stweg: n };
+    return { ok: false, fehler: 'Vollmachten für eine STWEG erteilen nur ihre Eigentümer oder Wohnungs-Verwalter' };
+  }
+  return { ok: false, fehler: 'Bitte eine Wohnung oder STWEG angeben — Vollmachten ohne Objekt sind nicht möglich' };
+}
+// Darf das Konto ueberhaupt eine Vollmacht als Geber erteilen (Knopf „Neue Vollmacht“)?
+function vmDarfErteilenIrgendwo(kontakte, groups) {
+  if ((kontakte || []).some(x => x && GEBER_ROLLEN.includes(String(x.rolle || '').toLowerCase()))) return true;
+  return Object.keys(STWEG_GROUPS).some(n => inEigentuemerGruppe(groups, n));
+}
+
+// ─── Signatur-Nachweise (D2) ─────────────────────────────────────────
+// IP-Adresse, User-Agent und Authentik-Kennung der Vollmachtgeber sehen nur
+// Technik und Praesident — in der Liste, in Antworten und auf dem PDF.
+// Alle anderen bekommen diese Felder nicht (signed_at und signatur_typ bleiben).
+const NACHWEIS_FELDER_GEBER = ['signed_ip', 'signed_user_agent', 'signed_authentik_sub'];
+const NACHWEIS_FELDER_VM = ['digital_signed_ip', 'digital_signed_user_agent', 'digital_signed_authentik_sub'];
+function vmNachweisSehen(groups) { return widerrufAdmin(groups || []); }
+function vmOhneNachweis(v, groups) {
+  if (!v || typeof v !== 'object' || vmNachweisSehen(groups)) return v;
+  const out = { ...v };
+  for (const f of NACHWEIS_FELDER_VM) delete out[f];
+  if (Array.isArray(out.vollmachtgeber_liste)) {
+    out.vollmachtgeber_liste = out.vollmachtgeber_liste.map(g => {
+      if (!g || typeof g !== 'object') return g;
+      const x = { ...g };
+      for (const f of NACHWEIS_FELDER_GEBER) delete x[f];
+      return x;
+    });
+  }
+  return out;
+}
+
+// ─── KI-Pruefung (D3) ────────────────────────────────────────────────
+// Schickt die PDF an einen externen Dienst (OpenRouter -> Anthropic). Nur auf
+// Knopfdruck durch Technik/Praesident oder die Verwaltung der STWEG (Seitenrecht
+// „vollmachten“ >= lesen), nie automatisch, nie fuer Geber oder Ausschuss.
+function vmDarfKiPruefen(groups, perm, stweg) {
+  const g = groups || [];
+  if (widerrufAdmin(g)) return true;
+  if (leer(stweg)) return stufe(perm) >= 1 && verwaltetAlleStwegs(g);
+  return vmVerwaltungStwegs(g, perm, 'read').has(Number(stweg));
+}
+
+// ─── Personensuche (D4) ──────────────────────────────────────────────
+// Die Suche nach Bevollmaechtigten liefert Name und E-Mail nur fuer STWEGs,
+// deren Eigentuemer-Unterlagen das Konto sehen darf: Eigentuemer, Ausschuss
+// und Verwaltung der STWEG (gleiche Regel wie stwegDokZugang() === 'voll' in
+// lib/dok-stweg-sicht.js, Mieter-Sperre). Reine Bewohner (Mieter) bekommen
+// nichts. Die Verwaltung zaehlt hier wie bisher nur mit Seitenrecht
+// „vollmachten“ (vmVerwaltungStwegs).
+function vmSucheStwegs(groups, perm) {
+  const g = groups || [];
+  const lower = new Set(g.map(x => String(x).toLowerCase()));
+  const s = new Set();
+  for (const [nr, m] of Object.entries(STWEG_GROUPS)) {
+    const hat = rolle => !!m[rolle] && lower.has(m[rolle].toLowerCase());
+    if (hat('eigentuemer') || hat('ausschuss')) s.add(Number(nr));
+  }
+  for (const n of vmVerwaltungStwegs(g, perm, 'read')) s.add(n);
+  return s;
+}
+
+// ─── Vorlagen pro STWEG (R2) ─────────────────────────────────────────
+// Vorlage mit stweg NULL = global (Vorgabe fuer alle, auch die bestehenden).
+// Global anlegen/aendern/loeschen nur Technik/Praesident; der Ausschuss nur
+// Vorlagen seiner STWEG(s). Sehen: global + die der eigenen STWEG(s).
+function vmVorlageBearbeiten(groups, stweg) {
+  const g = groups || [];
+  if (widerrufAdmin(g)) return true;
+  if (leer(stweg)) return false;
+  return getAusschussStwegs(g).has(Number(stweg));
+}
+function vmVorlagenStwegs(groups) {
+  const g = groups || [];
+  if (widerrufAdmin(g)) return null; // alle
+  const s = new Set();
+  for (const [nr, m] of Object.entries(STWEG_GROUPS)) {
+    if (Object.values(m).some(name => g.some(x => String(x).toLowerCase() === name.toLowerCase()))) s.add(Number(nr));
+  }
+  for (const n of verwaltungStwegs(g)) s.add(n);
+  return s;
+}
+function vmVorlageSichtbar(groups, stweg) {
+  if (leer(stweg)) return true;
+  const s = vmVorlagenStwegs(groups);
+  return s === null || s.has(Number(stweg));
+}
+// STWEGs, fuer die das Konto Vorlagen anlegen darf (Formular): null = alle inkl. global
+function vmVorlagenAnlegenStwegs(groups) {
+  const g = groups || [];
+  if (widerrufAdmin(g)) return null;
+  return [...getAusschussStwegs(g)].sort((a, b) => a - b);
+}
+
 // ─── Typ des Bevollmaechtigten (Befund F2-6) ─────────────────────────
 // Die Datenbank kennt eigentuemer | verwaltung | mieter | extern
 // (vm_typ_chk). Das Formular bietet zusaetzlich „Person aus Objektverwaltung“
@@ -102,4 +229,7 @@ module.exports = {
   BV_TYPEN, bvTyp,
   widerrufAdmin, istVollmachtgeber, darfWiderrufenRecht, darfWiderrufen,
   vmVerwaltungStwegs, vmSicht, vmSichtErlaubt, vmDarfVerwalten, vmDarfFuerAndereIrgendwo,
+  GEBER_ROLLEN, vmGeberErlaubt, vmDarfErteilenIrgendwo,
+  vmNachweisSehen, vmOhneNachweis, vmDarfKiPruefen, vmSucheStwegs,
+  vmVorlageBearbeiten, vmVorlagenStwegs, vmVorlageSichtbar, vmVorlagenAnlegenStwegs,
 };

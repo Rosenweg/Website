@@ -61,7 +61,9 @@ nur, wenn sie in der Rechteverwaltung Einträge hat.
 | `requireStwegAccess` | Technik, Präsident, jede Gruppe (Ausschuss/Eigentümer/Bewohner) **dieser** STWEG, Verwaltung **dieser** STWEG |
 | `requireStwegWrite` / `stwegSchreibErlaubt` | Technik, Präsident, Ausschuss **dieser** STWEG, Verwaltung **dieser** STWEG |
 | `stwegSicht` (`api/lib/stweg-sicht.js`) | Reklamationen, Auslagen: Ausschuss und Verwaltung sehen ihre STWEG(s); Einträge ohne STWEG Ausschuss und eine Verwaltung aller STWEGs |
-| `vmSicht`, `vmDarfVerwalten` (`api/lib/vollmacht-rechte.js`) | Vollmachten: Verwaltung nur mit Seitenrecht `vollmachten` (lesen = ihre STWEG(s) sehen, schreiben = für Dritte erfassen, Papier aktivieren) |
+| `vmSicht`, `vmDarfVerwalten` (`api/lib/vollmacht-rechte.js`) | Vollmachten: Ausschuss und Verwaltung nur mit Seitenrecht `vollmachten` (lesen = Vollmachten ihrer STWEG(s) sehen, schreiben = Verwaltung für Dritte erfassen, Papier aktivieren); Vorgabe seit 28.11.2026: alle Ausschüsse lesen (Rechte-Migration) |
+| `vmGeberErlaubt`, `vmOhneNachweis`, `vmDarfKiPruefen`, `vmSucheStwegs`, `vmVorlageBearbeiten` (`api/lib/vollmacht-rechte.js`), `signierenErlaubt` (`api/lib/stufen.js`) | Vollmachten (Entscheide 28.11.2026): erteilen und aktiv schalten nur Eigentümer/Wohnungs-Verwalter der Wohnung bzw. STWEG; IP, User-Agent, Authentik-Kennung nur T/P; KI-Prüfung nur Verwaltung der STWEG und T/P auf Knopfdruck; Personensuche nur in STWEGs mit Eigentümer-Sicht; Vorlagen je STWEG; Signieren nur frisch angemeldet, nie per PAT/MCP |
+| `projektLesen`, `lesbareProjekte`, `auslageEmailSehen`, `kommentarOhneEmail` (`api/lib/projekte-rechte.js`) | Projekte je Projekt: Eigentümer ihrer STWEG und Kooperation, Ausschuss/Verwaltung (Recht `projekte`) ihrer STWEG und Kooperation, T/P alle; gilt auch für `projects-mini`, `doodle/projects`, Projekt-Umfragen, Suche und Projekt-Dateien |
 
 ### 1.3 Seeds der Rechte-Tabelle
 
@@ -157,12 +159,26 @@ hat dort keine Rechte, auch wenn er dort wohnt oder Eigentümer ist.
 | Grundbuch: reservieren, erfassen, OCR (30 / Std.) | — | ✅ eigene Reservation | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Grundbuch: verifizieren, Auszugsbild | — | nur eigenes Bild | nur eigenes Bild | ✅ (jede STWEG) | — | ✅ | ✅ |
 | MEG-Einstellplätze | freie Plätze | 👁 ohne Fremddaten | 👁 ohne Fremddaten | ✅ nur MEG-Ausschuss | — | ✅ | ✅ |
-| Projekte lesen, kommentieren | öffentliche Projekte | — | 👁 ✅ Kommentar | 👁 | — | ✅ | ✅ |
-| Projekte bearbeiten (Kandidaten, Zeitplan, Anhänge, Budget, öffentlich) | — | — | — | ✅ (jede STWEG) | — | ✅ | ✅ |
-| Vollmachten: eigene erfassen, signieren, PDF hochladen | — | ✅ eigene | ✅ eigene | ✅ eigene | ✅ | ✅ | ✅ |
-| Vollmachten der STWEG sehen | — | — | — | 👁 🅢 | (R `vollmachten` lesen) 🅢 | 👁 alle | 👁 alle |
+| Projekte lesen (inkl. Kandidaten, Kontakte, Notizen, Kommentare) | öffentliche Projekte (eingeschränkt, siehe unten) | — (auch keine Titel, keine Projekt-Umfragen) | 👁 🅢 + Kooperation | 👁 🅢 + Kooperation (auch ohne Eigentümergruppe) | (R `projekte` lesen) 👁 🅢 + Kooperation | 👁 alle | 👁 alle |
+| Projekte kommentieren (nur Name sichtbar, keine E-Mail) | — | — | ✅ 🅢 + Kooperation | als Eigentümer | — | ✅ | ✅ |
+| Auslagen eines Projekts: E-Mail der einreichenden Person | — | — | — (nur Name) | — (nur Name) | 👁 🅢 | 👁 | 👁 |
+| Projekte bearbeiten (Kandidaten, Zeitplan, Anhänge, Budget, öffentlich) | — | — | — | ✅ 🅢 + Kooperation | (R `projekte` schreiben) 🅢 | ✅ | ✅ |
+| Projekt öffentlich schalten (mit Bestätigung), Anhang einzeln öffentlich markieren | — | — | — | ✅ 🅢 + Kooperation | (R `projekte` schreiben) 🅢 | ✅ | ✅ |
+| Vollmachten erteilen, signieren, eigene PDF hochladen | — | — (nur „Mich betreffend“) | ✅ als Eigentümer/Wohnungs-Verwalter der Wohnung bzw. STWEG | wie Eigentümer | wie Eigentümer | ✅ | ✅ |
+| Vollmachten digital signieren | — | — | ✅ nur frisch angemeldet (≤ 15 Min.), nicht per PAT/MCP/Karte | dito | dito | dito | dito |
+| Vollmachten der STWEG sehen | — | — | — | (R `vollmachten` lesen, Vorgabe) 🅢 | (R `vollmachten` lesen) 🅢 | 👁 alle | 👁 alle |
+| Vollmachten: IP, User-Agent, Authentik-Kennung der Geber | — | — | — | — | — | 👁 | 👁 |
+| Vollmachten: KI-Prüfung (PDF geht an OpenRouter/Anthropic, nur auf Knopfdruck) | — | — | — | — | (R `vollmachten` lesen) 🅢 | ✅ | ✅ |
+| Vollmachten: Personensuche (Name, E-Mail) | — | — | 👁 🅢 | 👁 🅢 | (R) 🅢 | 👁 alle | 👁 alle |
+| Vollmacht-Vorlagen anlegen, ändern, löschen | — | — | — | ✅ nur Vorlagen der eigenen STWEG | — | ✅ auch global | ✅ auch global |
 | Vollmachten für andere erfassen, Papier-Vollmacht aktivieren | — | — | — | — | (R `vollmachten` schreiben) 🅢 | ✅ | ✅ |
 | Vollmachten: Admin-Upload für alle Geber (`?als=admin`) | — | — | — | — | — | ✅ | ✅ |
+
+Öffentliche Projekte (`/api/public/project/:slug`, Entscheid 28.11.2026): Titel, Beschreibung,
+Status, Zeitachse und Kandidaten nur mit Name, Webseite, Status – ohne Offertbetrag,
+Offertdetails, Bewertung, Kontakte, Notizen und Kommentare. Anhänge nur, wenn sie einzeln als
+öffentlich markiert sind (`project_attachments.oeffentlich`, Vorgabe nein); beim Öffentlich-
+Schalten werden bisherige Anhänge nicht öffentlich.
 
 ### 2.4 Finanzen, Handwerker, Mail
 
@@ -242,7 +258,9 @@ Seit dem 17.11.2026 gilt in allen schreibenden STWEG-Bereichen:
   Waschküche und Telefonbuch.
 - Datensätze **ohne STWEG** (z. B. Reklamationen oder Auslagen ohne Zuordnung) sehen
   und bearbeiten alle Ausschüsse.
-- Nicht STWEG-gebunden sind bewusst: Projekte, Briefe, E-Mail-Archiv, Grundbuch-
+- Projekte sind seit 28.11.2026 STWEG-gebunden (Projekte ohne STWEG = Kooperation,
+  für alle Eigentümer, Ausschüsse und Verwaltungen lesbar).
+- Nicht STWEG-gebunden sind bewusst: Briefe, E-Mail-Archiv, Grundbuch-
   Verifikation und – falls erteilt – Handwerker (gemeinsam gepflegt).
 
 ---
