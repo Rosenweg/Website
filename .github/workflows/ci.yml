@@ -10,8 +10,17 @@ permissions:
   contents: read
 
 jobs:
+  # Runner-Wahl (Rosenweg/rosenweg-basis, runner-wahl.yml): privat immer eigene,
+  # oeffentlich eigene wenn frei oder zuschaltbar, Forks nie. macOS bleibt bei GitHub.
+  wahl:
+    uses: Rosenweg/rosenweg-basis/.github/workflows/runner-wahl.yml@main
+    secrets:
+      PAKETE_APP_ID: ${{ secrets.PAKETE_APP_ID }}
+      PAKETE_APP_KEY: ${{ secrets.PAKETE_APP_KEY }}
+
   syntax-check:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    needs: wahl
     steps:
       - uses: actions/checkout@v4
 
@@ -65,7 +74,8 @@ jobs:
 
   kerberos-pruefer:
     # Prueft Kerberos-Tickets der Agent-Anmeldung (api/kerberos-pruefer, Protokoll v2)
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    needs: wahl
     defaults:
       run:
         working-directory: api/kerberos-pruefer
@@ -81,7 +91,8 @@ jobs:
   adb-zentrale:
     # Endpunkt des adb-Tunnels der geteilten Telefone (pbx/adb-zentrale): Format, vet, Tests
     # mit echtem WireGuard-Handshake (Netzstapel im Prozess, kein Root noetig), Skripte
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    needs: wahl
     defaults:
       run:
         working-directory: pbx/adb-zentrale
@@ -98,7 +109,8 @@ jobs:
 
   edge-plugin:
     # Eigenes Traefik-Plugin (edge-traefik/plugins/echteip): Format, vet, Tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    needs: wahl
     defaults:
       run:
         working-directory: edge-traefik/plugins/echteip

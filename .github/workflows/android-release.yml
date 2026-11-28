@@ -68,8 +68,17 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Runner-Wahl (Rosenweg/rosenweg-basis, runner-wahl.yml): privat immer eigene,
+  # oeffentlich eigene wenn frei oder zuschaltbar, Forks nie. macOS bleibt bei GitHub.
+  wahl:
+    uses: Rosenweg/rosenweg-basis/.github/workflows/runner-wahl.yml@main
+    secrets:
+      PAKETE_APP_ID: ${{ secrets.PAKETE_APP_ID }}
+      PAKETE_APP_KEY: ${{ secrets.PAKETE_APP_KEY }}
+
   release:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    needs: wahl
     timeout-minutes: 45
     env:
       GH_TOKEN: ${{ github.token }}

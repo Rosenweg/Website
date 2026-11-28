@@ -18,10 +18,19 @@ env:
   STWEG_IMAGE: ghcr.io/rosenweg/rosenweg-stweg
 
 jobs:
+  # Runner-Wahl (Rosenweg/rosenweg-basis, runner-wahl.yml): privat immer eigene,
+  # oeffentlich eigene wenn frei oder zuschaltbar, Forks nie. macOS bleibt bei GitHub.
+  wahl:
+    uses: Rosenweg/rosenweg-basis/.github/workflows/runner-wahl.yml@main
+    secrets:
+      PAKETE_APP_ID: ${{ secrets.PAKETE_APP_ID }}
+      PAKETE_APP_KEY: ${{ secrets.PAKETE_APP_KEY }}
+
   build-api:
     # GitHub-Runner: das API-Image darf nicht hinter den App-Builds auf den
     # eigenen Runnern warten (Sicherheitsfixes muessen sofort raus)
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    needs: wahl
     permissions:
       contents: read
       packages: write
@@ -71,7 +80,8 @@ jobs:
             ${{ env.WEBSITE_IMAGE }}:${{ github.sha }}
 
   build-isp:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    needs: wahl
     permissions:
       contents: read
       packages: write
@@ -96,7 +106,8 @@ jobs:
             ${{ env.ISP_IMAGE }}:${{ github.sha }}
 
   build-stweg:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    needs: wahl
     permissions:
       contents: read
       packages: write
@@ -146,7 +157,8 @@ jobs:
             ${{ env.ENERGY_IMAGE }}:${{ github.sha }}
 
   build-syslog-collector:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    needs: wahl
     permissions:
       contents: read
       packages: write
@@ -170,7 +182,8 @@ jobs:
             ${{ env.SYSLOG_IMAGE }}:${{ github.sha }}
 
   build-journal-remote:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    needs: wahl
     permissions:
       contents: read
       packages: write
@@ -194,7 +207,8 @@ jobs:
             ${{ env.JOURNAL_IMAGE }}:${{ github.sha }}
 
   build-whatsapp-bot:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    needs: wahl
     permissions:
       contents: read
       packages: write
@@ -219,7 +233,8 @@ jobs:
             ${{ env.WHATSAPP_BOT_IMAGE }}:${{ github.sha }}
 
   build-shelly-emulator:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    needs: wahl
     permissions:
       contents: read
       packages: write
