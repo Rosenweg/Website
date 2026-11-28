@@ -141,12 +141,14 @@ test('Vollmachten: für Dritte erfassen / Papier aktivieren nur mit „schreiben
   assert.equal(vr.vmDarfFuerAndereIrgendwo(VERW3, 'write'), true);
 });
 
-test('Vollmachten: Technik, Präsident, Ausschuss unverändert', () => {
+test('Vollmachten: Technik, Präsident unverändert, Ausschuss am Seitenrecht (R2)', () => {
   assert.equal(vr.vmDarfVerwalten(['technik'], undefined, 5), true);
   assert.equal(vr.vmDarfVerwalten(['Präsident'], undefined, null), true);
   assert.equal(vr.vmSicht(['technik'], undefined).alle, true);
-  // Ausschuss sieht seine STWEG ohne Seitenrecht, erfasst aber nicht für Dritte
-  assert.deepEqual(vr.vmSicht(AUSSCHUSS3, undefined).stwegs, [3]);
+  // R2 (28.11.2026): Ausschuss sieht seine STWEG nur mit Seitenrecht „vollmachten“
+  // (Vorgabe lesen per Rechte-Migration), erfasst aber nicht für Dritte
+  assert.deepEqual(vr.vmSicht(AUSSCHUSS3, 'read').stwegs, [3]);
+  assert.deepEqual(vr.vmSicht(AUSSCHUSS3, undefined).stwegs, []);
   assert.equal(vr.vmDarfVerwalten(AUSSCHUSS3, 'write', 3), false);
   // Widerrufen bleibt Technik/Präsident/Vollmachtgeber (lib/vollmacht-rechte.js, B11)
   assert.equal(vr.darfWiderrufenRecht(VERW3, false), false);

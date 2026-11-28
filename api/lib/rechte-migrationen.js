@@ -29,6 +29,10 @@ const RECHTE_MIGRATIONEN = [
   // STWEG-Termine anlegen/aendern/loeschen: alle Ausschuesse und Verwaltungen, die API
   // bindet es an die eigene STWEG (lib/termine.js; Entscheid Stefan 28.11.2026)
   { name: '2026-11-28-stweg-termine-ausschuss-verwaltung-write', page: 'stweg-termine', access: 'write', gruppen: [...AUSSCHUESSE, ...VERWALTUNGEN] },
+  // Vollmachten: die Ausschuss-Sicht (alle Vollmachten der eigenen STWEG) haengt
+  // jetzt am Seitenrecht „vollmachten“; Vorgabe lesen, damit nichts wegfaellt
+  // (Entscheid Stefan 28.11.2026, Fund R2). Abschalten: in der Rechteverwaltung auf none.
+  { name: '2026-11-28-vollmachten-ausschuss-read', page: 'vollmachten', access: 'read', gruppen: AUSSCHUESSE },
 ];
 
 const SQL_TABELLE = `

@@ -109,7 +109,7 @@ Erklär in drei Schritten: WireGuard-App installieren, QR-Code scannen, Tunnel e
     text: (a) => `Ich kann nicht an die Versammlung und möchte eine Vollmacht erteilen${a.bevollmaechtigte ? ` an ${a.bevollmaechtigte}` : ''}.
 Frag mich: für welche Versammlung (STWEG, Datum), wen ich bevollmächtige, und ob es eine Weisung gibt (wie abzustimmen ist).
 Leg den Entwurf mit vollmacht_erstellen an, falls du das Werkzeug hast — sonst verweise auf Portal → Vollmachten.
-Erklär den Rest: digital signieren oder ausdrucken, unterschreiben und hochladen; die Verwaltung prüft die Echtheit.`,
+Erklär den Rest: Signieren kann ich nur selbst, frisch angemeldet im Portal oder in der App (du kannst nicht für mich signieren): digital signieren oder ausdrucken, unterschreiben und hochladen. Vollmachten für eine Wohnung erteilen nur ihre Eigentümer oder Wohnungs-Verwalter; die Verwaltung prüft die Echtheit.`,
   },
 ];
 

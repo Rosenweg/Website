@@ -116,12 +116,9 @@ const TOOLS = [
       return api('POST', '/api/vollmachten', body);
     },
   },
-  {
-    name: 'vollmachten_sign_digital',
-    description: 'Eigene Vollmachtgeber-Zeile digital signieren (per Authentik-Login = einfache el. Signatur ZertES Art.2). Nur fuer Vollmachten wo eingeloggter User Vollmachtgeber ist. Vollmacht wird aktiv sobald ALLE Vollmachtgeber signiert haben.',
-    inputSchema: { type: 'object', properties: { id: { type: 'number' } }, required: ['id'] },
-    handler: (args) => api('POST', `/api/vollmachten/${args.id}/sign-digital`),
-  },
+  // vollmachten_sign_digital entfernt (Fund R1, Entscheid Stefan 28.11.2026):
+  // Signieren geht nur mit frischer Anmeldung im Portal/in der App, die API
+  // lehnt Zugangstoken (PAT) und MCP ab (api/lib/stufen.js signierenErlaubt).
   {
     name: 'vollmachten_revoke',
     description: 'Vollmacht widerrufen. Nur fuer Vollmachtgeber oder Admin. Grund optional.',
@@ -138,12 +135,9 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { id: { type: 'number' } }, required: ['id'] },
     handler: (args) => api('DELETE', `/api/vollmachten/${args.id}`),
   },
-  {
-    name: 'vollmachten_verify_ai',
-    description: 'Eine signierte (papier-)PDF einer Vollmacht durch KI verifizieren lassen — prueft ob Doc-Hash + alle Vollmachtgeber-Namen drauf sind + Unterschriften-Indikatoren.',
-    inputSchema: { type: 'object', properties: { id: { type: 'number' } }, required: ['id'] },
-    handler: (args) => api('POST', `/api/vollmachten/${args.id}/verify-ai`),
-  },
+  // vollmachten_verify_ai entfernt (Fund D3, 28.11.2026): die KI-Pruefung
+  // schickt die PDF an einen externen Dienst und laeuft nur auf Knopfdruck der
+  // Verwaltung bzw. von Technik/Praesident im Portal, nie per Token/MCP.
   {
     name: 'vollmachten_templates_list',
     description: 'Liste der Vollmacht-Vorlagen (vorgefertigte Geltungsbereich-Texte).',

@@ -219,6 +219,10 @@ SELECT created_at, user_email, door_id, erfolg, ip
 ### Vollmachten
 
 ```
+vollmachten_templates
+  id (PK), titel, beschreibung, art, geltungsbereich, gueltigkeit_default,
+  stweg (NULL = global fuer alle STWEGs; sonst nur diese STWEG, seit 28.11.2026)
+
 vollmachten
   id (PK), status ('entwurf' | 'aktiv' | …), signatur_typ, papier_pdf_path, …
 
@@ -257,7 +261,9 @@ project_comments      (FK project_id)
   id, project_id, author, text, internal
 
 project_attachments   (KEIN FK! lose Verknüpfung über project_slug)
-  id, project_slug, target_type (timeline|kandidaten), target_id, doc_path
+  id, project_slug, target_type (timeline|kandidaten), target_id, doc_path,
+  oeffentlich (BOOLEAN, Vorgabe false: nur markierte Anhaenge liefert ein
+  oeffentliches Projekt ohne Anmeldung aus, Entscheid 28.11.2026)
 ```
 
 ### Waschküche

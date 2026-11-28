@@ -158,7 +158,21 @@ if [ -s "$FEHLEND" ]; then
 fi
 rm -f "$FEHLEND"
 
-git add -A
+# Nie nach GitHub (Fund R3, Entscheid Stefan 28.11.2026): unterschriebene
+# Vollmachten (Vollmachten/) mit Unterschriften. Steht auch in .gitignore des
+# Repos; hier zusaetzlich, weil .gitignore auf der Samba-Freigabe liegt und von
+# jedem mit Schreibrecht geaendert werden kann. Landet trotzdem etwas im Index
+# (z. B. frueher aufgenommen), wird es aus dem Index genommen, nicht geloescht.
+NIE_SICHERN=(':(exclude)Vollmachten' ':(exclude)Vollmachten/**')
+sichern_aufnehmen() {
+  git add -A -- . "${NIE_SICHERN[@]}"
+  if [ -n "$(git ls-files -- Vollmachten | head -n 1)" ]; then
+    git rm -r -q --cached --ignore-unmatch -- Vollmachten >> $LOG 2>&1
+    echo "$(date) [$MODE]: Vollmachten/ aus dem Index genommen (nie nach GitHub)" >> $LOG
+  fi
+}
+
+sichern_aufnehmen
 if git diff --cached --quiet; then
   HAS_LOCAL_CHANGES=0
 else
@@ -184,7 +198,7 @@ if [ "$REMOTE" != "$BASE" ] && [ "$LOCAL" != "$REMOTE" ]; then
     echo "$(date) [$MODE]: FEHLER - Rebase-Konflikt! Breche ab." >> $LOG
     git rebase --abort >> $LOG 2>&1
     git reset --soft origin/main >> $LOG 2>&1
-    git add -A
+    sichern_aufnehmen
     if ! git diff --cached --quiet; then
       git commit -m "Auto-backup $(date +%Y-%m-%d_%H:%M) (nach Konflikt)" >> $LOG 2>&1
     fi

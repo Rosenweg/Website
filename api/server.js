@@ -289,7 +289,7 @@ const { authentikAPI, tokenCache, validateAuthentikToken, authentikPasswordLogin
 const { authMiddleware, adminOnly, requirePermission, requireUserLogin } = require('./middleware/auth');
 // Admin-Aktionen mit der Karte: Protokoll, Quittung, Bestaetigung per E-Mail (lib/kartenadmin.js)
 const kartenAdmin = require('./lib/kartenadmin');
-const { FRISCH_MIN: STUFE_FRISCH_MIN, passwortWechselErlaubt } = require('./lib/stufen');
+const { FRISCH_MIN: STUFE_FRISCH_MIN, passwortWechselErlaubt, signierenErlaubt } = require('./lib/stufen');
 // Web-Push (VAPID) -> lib/webpush.js (Opt-in-Benachrichtigungen fuer PWAs)
 const webpushLib = require('./lib/webpush');
 
@@ -974,7 +974,10 @@ app.post('/api/ki-search', authMiddleware, async (req, res) => {
         ? pool.query('SELECT id, bezeichnung, stweg, eigentuemer_name, mieter_name FROM wohnungen WHERE (de_norm(bezeichnung) LIKE de_norm($1) OR de_norm(COALESCE(eigentuemer_name,\'\')) LIKE de_norm($1) OR de_norm(COALESCE(mieter_name,\'\')) LIKE de_norm($1))' + (isAdmin ? '' : ' AND stweg = ANY($2::int[])') + ' LIMIT 5', isAdmin ? [like] : [like, wohnStwegs]).catch(() => ({ rows: [] }))
         : { rows: [] },
       // Projekte
-      pool.query('SELECT slug, title AS titel, status FROM projects WHERE de_norm(title) LIKE de_norm($1) OR de_norm(COALESCE(description,\'\')) LIKE de_norm($1) LIMIT 3', [like]).catch(() => ({ rows: [] })),
+      // nur lesbare Projekte (lib/projekte-rechte.js projektLesen; Mieter keine, D2)
+      pool.query('SELECT slug, title AS titel, status, stweg FROM projects WHERE de_norm(title) LIKE de_norm($1) OR de_norm(COALESCE(description,\'\')) LIKE de_norm($1) LIMIT 20', [like])
+        .then(r => ({ rows: projekteRechte.lesbareProjekte(groups, ksPerms['projekte'], r.rows).slice(0, 3).map(({ stweg, ...p }) => p) }))
+        .catch(() => ({ rows: [] })),
     ]);
 
     const [personen, handwerker, vollmachten, reklamationen, mails, verwaltungen, wohnungen, projekte] = searches.map(s => s.status === 'fulfilled' ? (s.value?.rows || []) : []);
@@ -12707,7 +12710,9 @@ function requireEigentuemer(req, res, next) {
   res.status(403).json({ error: 'Nur für Eigentümer' });
 }
 
-/** Middleware: Projekte lesen (Eigentuemer, Technik/Praesident, Verwaltung mit Recht projekte; lib/projekte-rechte.js) */
+/** Middleware: irgendein Projekt lesen (Eigentuemer, Technik/Praesident, Ausschuss,
+ *  Verwaltung mit Recht projekte; lib/projekte-rechte.js projekteLesen). Welche
+ *  Projekte genau: projektLesen je Projekt (Liste gefiltert, :slug -> requireProjektLesen). */
 async function requireProjekteLesen(req, res, next) {
   const groups = req.user?.groups || [];
   let perm;
@@ -12715,11 +12720,28 @@ async function requireProjekteLesen(req, res, next) {
     try { perm = (await getUserPermissions(groups))['projekte']; } catch { perm = undefined; }
   }
   if (projekteRechte.projekteLesen(groups, perm)) return next();
-  res.status(403).json({ error: 'Nur für Eigentümer oder die Verwaltung (Recht Projekte)' });
+  res.status(403).json({ error: 'Projekte nur für Eigentümer, Ausschuss oder die Verwaltung (Recht Projekte)' });
 }
 
 async function projektePerm(req) {
   try { return (await getUserPermissions(req.user?.groups || []))['projekte']; } catch { return undefined; }
+}
+
+/** Middleware: Projekt :slug lesen (R1/R2, Entscheid Stefan 28.11.2026): die Verwaltung
+ *  nur Projekte ihrer STWEG(s) und Kooperations-Projekte, der Ausschuss auch ohne
+ *  Eigentuemergruppe die Projekte, die er bearbeitet (lib/projekte-rechte.js projektLesen). */
+async function requireProjektLesen(req, res, next) {
+  try {
+    const { rows: [p] } = await pool.query('SELECT * FROM projects WHERE slug = $1', [req.params.slug]);
+    if (!p) return res.status(404).json({ error: 'Projekt nicht gefunden' });
+    const perm = await projektePerm(req);
+    if (!projekteRechte.projektLesen(req.user?.groups || [], perm, p.stweg)) {
+      return res.status(403).json({ error: 'Dieses Projekt gehört nicht zu deiner STWEG' });
+    }
+    req.projekt = p;
+    req.projektePerm = perm;
+    next();
+  } catch (e) { res.status(500).json({ error: 'Fehler' }); }
 }
 
 /** Middleware: Projekt :slug bearbeiten (Technik/Praesident, Ausschuss bzw. Verwaltung
@@ -12870,13 +12892,15 @@ app.get('/api/public/project/:slug', async (req, res) => {
     );
     if (!project) return res.status(404).json({ error: 'Projekt nicht gefunden oder nicht öffentlich' });
 
-    // Filter sensitive fields: omit notizen, comments, kontakt-details
+    // D1 (Entscheid Stefan 28.11.2026): ohne Anmeldung keine Offertbetraege,
+    // Offertdetails, Bewertungen, Kontakte, Notizen oder Kommentare, und nur die
+    // ausdruecklich als oeffentlich markierten Anhaenge (lib/projekte-rechte.js).
     const [candidates, timeline, attachments] = await Promise.all([
-      pool.query(`SELECT id, name, webseite, offerte_betrag, offerte_details, bewertung, status FROM project_candidates WHERE project_id = $1 ORDER BY sort_order, name`, [project.id]),
+      pool.query(`SELECT ${projekteRechte.OEFFENTLICH_KANDIDAT.join(', ')} FROM project_candidates WHERE project_id = $1 ORDER BY sort_order, name`, [project.id]),
       pool.query('SELECT id, datum, titel, beschreibung, erledigt FROM project_timeline WHERE project_id = $1 ORDER BY datum', [project.id]),
-      pool.query('SELECT id, target_type, target_id, doc_path FROM project_attachments WHERE project_slug = $1 ORDER BY created_at', [req.params.slug]),
+      pool.query('SELECT id, target_type, target_id, doc_path, oeffentlich FROM project_attachments WHERE project_slug = $1 AND oeffentlich = true ORDER BY created_at', [req.params.slug]),
     ]);
-    res.json({ ...project, candidates: candidates.rows, timeline: timeline.rows, attachments: attachments.rows });
+    res.json({ ...project, candidates: candidates.rows.map(projekteRechte.oeffentlicherKandidat), timeline: timeline.rows, attachments: projekteRechte.oeffentlicheAnhaenge(attachments.rows) });
   } catch (err) {
     res.status(500).json({ error: 'Fehler' });
   }
@@ -12892,7 +12916,7 @@ app.get('/api/public/project/:slug/document/:path(*)', async (req, res) => {
 
     // Verify the requested document is actually attached to this project
     const { rows: atts } = await pool.query(
-      'SELECT doc_path FROM project_attachments WHERE project_slug = $1 AND doc_path = $2',
+      'SELECT doc_path FROM project_attachments WHERE project_slug = $1 AND doc_path = $2 AND oeffentlich = true',
       [req.params.slug, req.params.path]
     );
     if (atts.length === 0) return res.status(404).json({ error: 'Dokument nicht gefunden' });
@@ -12924,13 +12948,19 @@ app.get('/api/public/project/:slug/document/:path(*)', async (req, res) => {
   }
 });
 
-// PUT /api/projects/:slug/public — toggle public access (admin only)
+// PUT /api/projects/:slug/public {public_access, bestaetigt} — oeffentlich schalten
+// (wer das Projekt bearbeitet). D1: Einschalten nur mit bestaetigt: true; die
+// bisherigen Anhaenge werden dabei NICHT oeffentlich (je Anhang einzeln markieren,
+// PUT /api/projects/:slug/attachments/:id/public).
 app.put('/api/projects/:slug/public', authMiddleware, requireProjektBearbeiten, async (req, res) => {
   try {
-    const { public_access } = req.body;
+    const public_access = req.body?.public_access === true;
+    if (public_access && req.body?.bestaetigt !== true) {
+      return res.status(400).json({ error: 'Öffentlich schalten bitte bestätigen (bestaetigt: true): Titel, Beschreibung, Status, Zeitachse und Firmennamen der Kandidaten sind dann ohne Anmeldung sichtbar', bestaetigung_noetig: true });
+    }
     const { rows: [row] } = await pool.query(
       'UPDATE projects SET public_access = $1 WHERE slug = $2 RETURNING slug, public_access',
-      [!!public_access, req.params.slug]
+      [public_access, req.params.slug]
     );
     if (!row) return res.status(404).json({ error: 'Projekt nicht gefunden' });
     res.json(row);
@@ -12967,17 +12997,21 @@ app.put('/api/projects/:slug/budget', authMiddleware, requireProjektBearbeiten, 
 app.get('/api/projects', authMiddleware, requireProjekteLesen, async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT * FROM projects ORDER BY created_at DESC');
-    res.json(rows);
+    // R1/R2: nur die Projekte, die das Konto lesen darf (lib/projekte-rechte.js projektLesen)
+    const perm = await projektePerm(req);
+    const groups = req.user?.groups || [];
+    res.json(projekteRechte.lesbareProjekte(groups, perm, rows)
+      .map(p => ({ ...p, darf_bearbeiten: projekteRechte.projektBearbeiten(groups, perm, p.stweg) })));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[projekte] liste', err.message);
+    res.status(500).json({ error: 'Projekte konnten nicht geladen werden' });
   }
 });
 
 // GET /api/projects/:slug - Get project with all data
-app.get('/api/projects/:slug', authMiddleware, requireProjekteLesen, async (req, res) => {
+app.get('/api/projects/:slug', authMiddleware, requireProjekteLesen, requireProjektLesen, async (req, res) => {
   try {
-    const { rows: [project] } = await pool.query('SELECT * FROM projects WHERE slug = $1', [req.params.slug]);
-    if (!project) return res.status(404).json({ error: 'Projekt nicht gefunden' });
+    const project = req.projekt;
     const [candidates, timeline, comments, attachments, auslagenSumme] = await Promise.all([
       pool.query('SELECT * FROM project_candidates WHERE project_id = $1 ORDER BY sort_order, name', [project.id]),
       pool.query('SELECT * FROM project_timeline WHERE project_id = $1 ORDER BY datum', [project.id]),
@@ -13003,18 +13037,22 @@ app.get('/api/projects/:slug', authMiddleware, requireProjekteLesen, async (req,
     }
     res.json({
       ...project,
-      candidates: candidates.rows, timeline: timeline.rows, comments: comments.rows, attachments: attachments.rows,
+      candidates: candidates.rows, timeline: timeline.rows,
+      // D4: Kommentare nur mit Namen, ohne E-Mail (eigener = vom Konto selbst)
+      comments: comments.rows.map(k => projekteRechte.kommentarOhneEmail(k, req.user?.email)),
+      attachments: attachments.rows,
       auslagen_stat: auslagenStat,
       darf_kommentieren: projekteRechte.projekteKommentieren(req.user?.groups || []),
-      darf_bearbeiten: projekteRechte.projektBearbeiten(req.user?.groups || [], await projektePerm(req), project.stweg),
+      darf_bearbeiten: projekteRechte.projektBearbeiten(req.user?.groups || [], req.projektePerm, project.stweg),
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[projekte] ansicht', err.message);
+    res.status(500).json({ error: 'Projekt konnte nicht geladen werden' });
   }
 });
 
 // GET /api/projects/:slug/auslagen — alle Auslagen eines Projekts mit Summen
-app.get('/api/projects/:slug/auslagen', authMiddleware, requireProjekteLesen, async (req, res) => {
+app.get('/api/projects/:slug/auslagen', authMiddleware, requireProjekteLesen, requireProjektLesen, async (req, res) => {
   try {
     // Verwaltung: nur Auslagen ihrer STWEG(s) (lib/projekte-rechte.js)
     const params = [req.params.slug];
@@ -13034,8 +13072,15 @@ app.get('/api/projects/:slug/auslagen', authMiddleware, requireProjekteLesen, as
     );
     const by_status = {};
     for (const row of summe.rows) by_status[row.status] = { count: row.n, summe: Number(row.s) };
-    res.json({ auslagen: r.rows, by_status });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    // D3: E-Mail der einreichenden Person nur Technik/Praesident und Verwaltung der STWEG
+    const groups = req.user?.groups || [];
+    const auslagen = r.rows.map(a => {
+      if (projekteRechte.auslageEmailSehen(groups, a.stweg)) return a;
+      const { user_email, ...rest } = a;
+      return rest;
+    });
+    res.json({ auslagen, by_status });
+  } catch (err) { console.error('[projekte] auslagen', err.message); res.status(500).json({ error: 'Auslagen konnten nicht geladen werden' }); }
 });
 
 // GET /api/projects-rechte — was darf das Konto anlegen (Formular „Neues Projekt“)
@@ -13116,12 +13161,15 @@ app.put('/api/projects/:slug', authMiddleware, requireProjektBearbeiten, async (
   } catch (err) { console.error('[projekt-bearbeiten]', err.message); res.status(500).json({ error: 'Projekt konnte nicht gespeichert werden' }); }
 });
 
-// GET /api/projects-mini — kompakte Liste für Dropdowns (kein Eigentümer-Check, alle eingeloggten User)
+// GET /api/projects-mini — kompakte Liste für Dropdowns. Nur Projekte, die das
+// Konto lesen darf (Regel „Projekte lesen nur Eigentuemer“, D2 28.11.2026):
+// Mieter bekommen eine leere Liste statt der Titel aller Projekte.
 app.get('/api/projects-mini', authMiddleware, async (req, res) => {
   try {
-    const r = await pool.query(`SELECT slug, title FROM projects WHERE COALESCE(status,'aktiv') != 'archiviert' ORDER BY title`);
-    res.json({ projekte: r.rows });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    const r = await pool.query(`SELECT slug, title, stweg FROM projects WHERE COALESCE(status,'aktiv') != 'archiviert' ORDER BY title`);
+    const perm = await projektePerm(req);
+    res.json({ projekte: projekteRechte.lesbareProjekte(req.user?.groups || [], perm, r.rows).map(({ slug, title }) => ({ slug, title })) });
+  } catch (err) { console.error('[projekte] mini', err.message); res.status(500).json({ error: 'Fehler' }); }
 });
 
 // POST /api/projects/:slug/candidates - Add candidate
@@ -13205,8 +13253,8 @@ app.delete('/api/projects/:slug/timeline/:id', authMiddleware, requireProjektBea
   }
 });
 
-// POST /api/projects/:slug/comments - Any eigentuemer can comment
-app.post('/api/projects/:slug/comments', authMiddleware, requireEigentuemer, async (req, res) => {
+// POST /api/projects/:slug/comments - Eigentuemer (und T/P), nur bei Projekten, die sie lesen (F5)
+app.post('/api/projects/:slug/comments', authMiddleware, requireEigentuemer, requireProjektLesen, async (req, res) => {
   try {
     const { rows: [project] } = await pool.query('SELECT id FROM projects WHERE slug = $1', [req.params.slug]);
     if (!project) return res.status(404).json({ error: 'Projekt nicht gefunden' });
@@ -13215,7 +13263,7 @@ app.post('/api/projects/:slug/comments', authMiddleware, requireEigentuemer, asy
     const { rows: [row] } = await pool.query(
       'INSERT INTO project_comments (project_id, user_name, user_email, text) VALUES ($1,$2,$3,$4) RETURNING *',
       [project.id, req.user.name, req.user.email, text.trim()]);
-    res.json(row);
+    res.json(projekteRechte.kommentarOhneEmail(row, req.user.email));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -13251,6 +13299,23 @@ app.post('/api/projects/:slug/attachments', authMiddleware, requireProjektBearbe
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// PUT /api/projects/:slug/attachments/:id/public {oeffentlich, bestaetigt} — Anhang
+// ausdruecklich oeffentlich markieren (D1). Nur so liefert ein oeffentliches Projekt
+// einen Anhang ohne Anmeldung aus; Markieren verlangt bestaetigt: true.
+app.put('/api/projects/:slug/attachments/:id/public', authMiddleware, requireProjektBearbeiten, async (req, res) => {
+  try {
+    const oeffentlich = req.body?.oeffentlich === true;
+    if (oeffentlich && req.body?.bestaetigt !== true) {
+      return res.status(400).json({ error: 'Bitte bestätigen (bestaetigt: true): die Datei ist bei einem öffentlichen Projekt ohne Anmeldung abrufbar', bestaetigung_noetig: true });
+    }
+    const { rows: [row] } = await pool.query(
+      'UPDATE project_attachments SET oeffentlich = $1 WHERE id = $2 AND project_slug = $3 RETURNING id, doc_path, target_type, target_id, oeffentlich',
+      [oeffentlich, parseInt(req.params.id, 10) || 0, req.params.slug]);
+    if (!row) return res.status(404).json({ error: 'Anhang nicht gefunden' });
+    res.json(row);
+  } catch (err) { console.error('[projekte] anhang-oeffentlich', err.message); res.status(500).json({ error: 'Fehler' }); }
 });
 
 // DELETE /api/projects/:slug/attachments/:id - Unlink doc
@@ -27689,38 +27754,74 @@ app.delete('/api/isp/mailboxes/:id', authMiddleware, async (req, res) => {
 });
 
 // ─── Vollmachten-Templates ──────────────────────────────────────────
-function canEditTemplates(groups) {
-  return isTechnik(groups) || isPraesident(groups) || isAusschussForAny(groups);
+// R2 (Entscheid Stefan 28.11.2026): Vorlagen gelten pro STWEG (Spalte stweg).
+// stweg NULL = globale Vorlage (Vorgabe fuer alle, die bestehenden bleiben so).
+// Global anlegen/aendern/loeschen nur Technik/Praesident, der Ausschuss nur
+// Vorlagen seiner STWEG(s) (lib/vollmacht-rechte.js vmVorlageBearbeiten).
+function vmVorlagenStwegAus(v) {
+  if (v === null || v === undefined || v === '') return { stweg: null };
+  const n = parseInt(v, 10);
+  if (!Number.isFinite(n) || n < 1 || n > 8) return { fehler: 'Ungültige STWEG' };
+  return { stweg: n };
 }
 
 app.get('/api/vollmachten/templates', authMiddleware, async (req, res) => {
   try {
+    const groups = req.user.groups || [];
     const r = await pool.query(
-      'SELECT * FROM vollmachten_templates ORDER BY art, titel',
+      'SELECT * FROM vollmachten_templates ORDER BY stweg NULLS FIRST, art, titel',
     );
-    res.json({ templates: r.rows, can_edit: canEditTemplates(req.user.groups || []) });
+    const templates = r.rows
+      .filter(t => vollmachtRechte.vmVorlageSichtbar(groups, t.stweg))
+      .map(t => ({ ...t, darf_bearbeiten: vollmachtRechte.vmVorlageBearbeiten(groups, t.stweg) }));
+    const anlegen = vollmachtRechte.vmVorlagenAnlegenStwegs(groups);
+    res.json({
+      templates,
+      can_edit: anlegen === null || anlegen.length > 0,
+      // null = alle STWEGs und global (Technik/Praesident), sonst die eigenen Ausschuss-STWEGs
+      anlegen_stwegs: anlegen,
+      anlegen_global: anlegen === null,
+    });
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 app.post('/api/vollmachten/templates', authMiddleware, async (req, res) => {
   try {
-    if (!canEditTemplates(req.user.groups || [])) return res.status(403).json({ error: 'Nur Technik/Präsident/Ausschuss' });
     const b = req.body || {};
+    const st = vmVorlagenStwegAus(b.stweg);
+    if (st.fehler) return res.status(400).json({ error: st.fehler });
+    if (!vollmachtRechte.vmVorlageBearbeiten(req.user.groups || [], st.stweg)) {
+      return res.status(403).json({ error: st.stweg ? 'Vorlagen dieser STWEG nur ihr Ausschuss, Technik oder Präsident' : 'Globale Vorlagen nur Technik/Präsident' });
+    }
     if (!b.titel || !b.art || !b.geltungsbereich) return res.status(400).json({ error: 'titel, art, geltungsbereich Pflicht' });
     if (!['generell','spezifisch','auskunft'].includes(b.art)) return res.status(400).json({ error: 'Ungueltige art' });
     const r = await pool.query(
-      `INSERT INTO vollmachten_templates (titel, beschreibung, art, geltungsbereich, gueltigkeit_default, created_by_user_email)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [b.titel.slice(0, 200), b.beschreibung || null, b.art, b.geltungsbereich, b.gueltigkeit_default || null, req.user.email || null],
+      `INSERT INTO vollmachten_templates (titel, beschreibung, art, geltungsbereich, gueltigkeit_default, created_by_user_email, stweg)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [String(b.titel).slice(0, 200), b.beschreibung || null, b.art, b.geltungsbereich, b.gueltigkeit_default || null, req.user.email || null, st.stweg],
     );
     res.json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
+// Bestehende Vorlage: das Konto muss ihre STWEG (bzw. global) bearbeiten duerfen,
+// beim Verschieben zusaetzlich die neue STWEG.
+async function vmVorlageLaden(req, res) {
+  const id = parseInt(req.params.id, 10);
+  const r = await pool.query('SELECT * FROM vollmachten_templates WHERE id = $1', [id]);
+  const t = r.rows[0];
+  if (!t || !vollmachtRechte.vmVorlageSichtbar(req.user.groups || [], t.stweg)) { res.status(404).json({ error: 'Nicht gefunden' }); return null; }
+  if (!vollmachtRechte.vmVorlageBearbeiten(req.user.groups || [], t.stweg)) {
+    res.status(403).json({ error: t.stweg ? 'Vorlagen dieser STWEG nur ihr Ausschuss, Technik oder Präsident' : 'Globale Vorlagen nur Technik/Präsident' });
+    return null;
+  }
+  return t;
+}
+
 app.put('/api/vollmachten/templates/:id', authMiddleware, async (req, res) => {
   try {
-    if (!canEditTemplates(req.user.groups || [])) return res.status(403).json({ error: 'Nur Technik/Präsident/Ausschuss' });
-    const id = parseInt(req.params.id, 10);
+    const t = await vmVorlageLaden(req, res);
+    if (!t) return;
     const b = req.body || {};
     const updates = []; const params = [];
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
@@ -27732,9 +27833,15 @@ app.put('/api/vollmachten/templates/:id', authMiddleware, async (req, res) => {
     }
     if (b.geltungsbereich !== undefined) push('geltungsbereich', b.geltungsbereich);
     if (b.gueltigkeit_default !== undefined) push('gueltigkeit_default', b.gueltigkeit_default || null);
+    if (b.stweg !== undefined) {
+      const st = vmVorlagenStwegAus(b.stweg);
+      if (st.fehler) return res.status(400).json({ error: st.fehler });
+      if (!vollmachtRechte.vmVorlageBearbeiten(req.user.groups || [], st.stweg)) return res.status(403).json({ error: 'Diese STWEG darfst du nicht zuweisen' });
+      push('stweg', st.stweg);
+    }
     if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
     push('updated_at', new Date());
-    params.push(id);
+    params.push(t.id);
     const r = await pool.query(
       `UPDATE vollmachten_templates SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`,
       params,
@@ -27746,9 +27853,9 @@ app.put('/api/vollmachten/templates/:id', authMiddleware, async (req, res) => {
 
 app.delete('/api/vollmachten/templates/:id', authMiddleware, async (req, res) => {
   try {
-    if (!canEditTemplates(req.user.groups || [])) return res.status(403).json({ error: 'Nur Technik/Präsident/Ausschuss' });
-    const id = parseInt(req.params.id, 10);
-    await pool.query('DELETE FROM vollmachten_templates WHERE id = $1', [id]);
+    const t = await vmVorlageLaden(req, res);
+    if (!t) return;
+    await pool.query('DELETE FROM vollmachten_templates WHERE id = $1', [t.id]);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
@@ -27801,7 +27908,10 @@ async function vmInsertWithRetry(client, sqlBuilder, params) {
   throw new Error('Konnte keinen eindeutigen Doc-Hash erzeugen (5 Versuche)');
 }
 
-function buildVollmachtHtml(v) {
+// D2: Den Signatur-Nachweis (IP-Adresse) zeigt das PDF nur Technik/Praesident;
+// alle anderen sehen „hinterlegt“. opts.nachweis = vmNachweisSehen(groups).
+function buildVollmachtHtml(v, opts = {}) {
+  const nachweis = opts.nachweis === true;
   const artLabel = { generell: 'Generelle Vertretungs-Vollmacht', spezifisch: 'Spezifische Vollmacht (Einzelgeschäft)', auskunft: 'Datenschutz- / Auskunfts-Vollmacht' }[v.art] || v.art;
   const typLabel = { eigentuemer: 'Miteigentümer/in', verwaltung: 'Verwaltung', mieter: 'Mieter/in der Liegenschaft', extern: 'Externe Person' }[v.bevollmaechtigter_typ] || v.bevollmaechtigter_typ;
   const fmtDate = d => d ? new Date(d).toLocaleDateString('de-CH', { year: 'numeric', month: 'long', day: 'numeric' }) : '—';
@@ -27820,7 +27930,7 @@ function buildVollmachtHtml(v) {
         <table class="kv" style="margin-top:4px;">
           <tr><td class="lbl">Signiert am</td><td>${fmtDate(g.signed_at)} · ${fmtTime(g.signed_at)}</td></tr>
           <tr><td class="lbl">Identität</td><td>${vmEscapeHtml(g.email || '')}</td></tr>
-          <tr><td class="lbl">IP-Adresse</td><td>${vmEscapeHtml(g.signed_ip || '—')}</td></tr>
+          <tr><td class="lbl">IP-Adresse</td><td>${nachweis ? vmEscapeHtml(g.signed_ip || '—') : 'hinterlegt (einsehbar für Technik/Präsident)'}</td></tr>
         </table>
       </div>`;
     }
@@ -28058,8 +28168,8 @@ function buildVollmachtHtml(v) {
 </body></html>`;
 }
 
-async function generateVollmachtPdf(v) {
-  const html = buildVollmachtHtml(v);
+async function generateVollmachtPdf(v, opts = {}) {
+  const html = buildVollmachtHtml(v, opts);
   const form = new FormData();
   form.append('files', new Blob([html], { type: 'text/html' }), 'index.html');
   const r = await fetch(`${DOC_CONVERTER_URL}/forms/chromium/convert/html`, {
@@ -28103,12 +28213,17 @@ app.get('/api/vollmachten/lookup/personen', authMiddleware, async (req, res) => 
       const sicht = await nummernSicht(req, pool);
       return res.json({ personen: r.rows.map(({ stwegs, ...p }) => sicht(p, { email: p.email, name: p.name, stwegs: stwegs || [] })) });
     }
-    // Alle anderen: nur Personen mit Wohnung in den eigenen STWEGs und nur
-    // Name/E-Mail (reicht fuer die Bevollmaechtigten-Auswahl). Frueher bekam
-    // jeder Angemeldete Telefon/Adresse aller Personen per Suchfeld.
+    // Alle anderen: nur Personen mit Wohnung in STWEGs, deren Eigentuemer-Sachen
+    // das Konto sehen darf, und nur Name/E-Mail (reicht fuer die Bevollmaechtigten-
+    // Auswahl). D4 (Entscheid Stefan 28.11.2026, Mieter-Sperre): Eigentuemer,
+    // Ausschuss und Verwaltung der STWEG wie bisher, reine Bewohner (Mieter)
+    // bekommen keine Namen und Mails der STWEG mehr. Als Eigentuemer zaehlt auch,
+    // wer in einer Wohnung der STWEG als Eigentuemer oder Wohnungs-Verwalter
+    // eingetragen ist (lib/vollmacht-rechte.js vmSucheStwegs, GEBER_ROLLEN).
     const email = (req.user.email || '').toLowerCase();
     const rl = rateLimitGuard('vm-personen', email, 60, 10 * 60 * 1000);
     if (!rl.ok) return res.status(429).json({ error: `Zu viele Suchanfragen — bitte in ${rl.retryAfter}s erneut` });
+    const erlaubt = [...vollmachtRechte.vmSucheStwegs(groups, perm)];
     const muster = '%' + q.replace(/[\\%_]/g, '\\$&') + '%';
     const r = await pool.query(
       `SELECT DISTINCT p.id, p.name, p.email FROM personen p
@@ -28119,9 +28234,9 @@ app.get('/api/vollmachten/lookup/personen', authMiddleware, async (req, res) => 
                OR w.stweg IN (SELECT w2.stweg FROM wohnungen w2
                                 JOIN wohnungen_kontakte k2 ON k2.wohnung_id = w2.id AND k2.archiviert_am IS NULL
                                 JOIN personen p2 ON p2.id = k2.person_id
-                               WHERE LOWER(p2.email) = $3))
+                               WHERE LOWER(p2.email) = $3 AND k2.rolle = ANY($4::text[])))
         ORDER BY p.name LIMIT 10`,
-      [muster, [...new Set([...getUserStwegs(groups), ...vollmachtRechte.vmVerwaltungStwegs(groups, perm, 'read')])], email],
+      [muster, erlaubt, email, vollmachtRechte.GEBER_ROLLEN],
     );
     res.json({ personen: r.rows });
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
@@ -28136,9 +28251,12 @@ app.get('/api/vollmachten/lookup/my-wohnungen', authMiddleware, async (req, res)
          JOIN wohnungen_kontakte k ON k.wohnung_id = w.id
          JOIN personen p ON p.id = k.person_id
         WHERE LOWER(p.email) = LOWER($1) AND k.archiviert_am IS NULL
+          AND k.rolle = ANY($2::text[])
         ORDER BY w.stweg, w.bezeichnung`,
-      [email],
+      [email, vollmachtRechte.GEBER_ROLLEN],
     );
+    // D1: nur Wohnungen, fuer die das Konto als Eigentuemer/Wohnungs-Verwalter
+    // eine Vollmacht erteilen darf (Mieter: leer)
     res.json({ wohnungen: r.rows });
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
@@ -28289,7 +28407,14 @@ app.get('/api/vollmachten', authMiddleware, async (req, res) => {
     for (const row of r.rows) row.darf_widerrufen = vollmachtRechte.darfWiderrufen({ groups, email }, row);
     // Knopf „Papier aktivieren“: gleiche Regel wie POST /:id/activate-paper
     for (const row of r.rows) row.darf_papier_aktivieren = row.status === 'entwurf' && vollmachtRechte.vmDarfVerwalten(groups, perm, row.stweg);
-    res.json({ vollmachten: r.rows, is_admin: isAdmin });
+    // Knopf „KI-Prüfung“ (D3): nur Technik/Praesident und die Verwaltung der STWEG
+    for (const row of r.rows) row.darf_ki_pruefen = vollmachtRechte.vmDarfKiPruefen(groups, perm, row.stweg);
+    // Knopf „Neue Vollmacht“ (D1): Eigentuemer/Wohnungs-Verwalter, Technik/Praesident,
+    // Verwaltung mit „vollmachten: schreiben“. Mieter sehen nur „Mich betreffend“.
+    const darfErteilen = vollmachtRechte.vmDarfFuerAndereIrgendwo(groups, perm)
+      || vollmachtRechte.vmDarfErteilenIrgendwo(await vmEigeneKontakte(req), groups);
+    // D2: IP, User-Agent und Authentik-Kennung nur fuer Technik/Praesident
+    res.json({ vollmachten: r.rows.map(row => vollmachtRechte.vmOhneNachweis(row, groups)), is_admin: isAdmin, darf_erteilen: darfErteilen });
   } catch (err) { console.error('[vollmachten] list:', err); res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
@@ -28315,27 +28440,27 @@ async function vmDarfFuerAndere(req, wohnungId, stweg) {
   return { ok: vollmachtRechte.vmDarfVerwalten(groups, perm, st), stweg: st, verwaltung: true };
 }
 
-// Wohnung/STWEG einer Vollmacht: alle anderen nur fuer eigene Wohnungen bzw.
-// STWEGs, in denen sie eine Wohnung haben — sonst liess sich eine Vollmacht
-// fuer eine fremde Wohnung erstellen und selbst signieren.
+// Aktive Kontakt-Eintraege des Kontos (Wohnung, STWEG, Rolle) aus der Objektverwaltung.
+async function vmEigeneKontakte(req) {
+  const email = (req.user.email || '').toLowerCase();
+  if (!email) return [];
+  const r = await pool.query(
+    `SELECT DISTINCT k.wohnung_id, w.stweg, k.rolle FROM wohnungen_kontakte k
+       JOIN wohnungen w ON w.id = k.wohnung_id
+       JOIN personen p ON p.id = k.person_id
+      WHERE LOWER(p.email) = $1 AND k.archiviert_am IS NULL`, [email]);
+  return r.rows;
+}
+
+// Wohnung/STWEG einer Vollmacht, die das Konto selbst als Vollmachtgeber erteilt
+// (D1, Entscheid Stefan 28.11.2026): nur Eigentuemer bzw. Wohnungs-Verwalter
+// dieser Wohnung (bzw. STWEG); ohne Wohnung und STWEG wird abgelehnt
+// (lib/vollmacht-rechte.js vmGeberErlaubt). Gilt beim Erfassen, Bearbeiten und
+// beim Aktivschalten (digital signieren, eigene PDF hochladen).
 // Liefert { fehler } oder { stweg } (bei Wohnung deren STWEG).
 async function vmObjektPruefen(req, wohnungId, stweg) {
-  const email = (req.user.email || '').toLowerCase();
-  const eigene = await pool.query(
-    `SELECT DISTINCT w.id, w.stweg FROM wohnungen w
-       JOIN wohnungen_kontakte k ON k.wohnung_id = w.id AND k.archiviert_am IS NULL
-       JOIN personen p ON p.id = k.person_id
-      WHERE LOWER(p.email) = $1`, [email]);
-  if (wohnungId) {
-    const w = eigene.rows.find(x => String(x.id) === String(wohnungId));
-    if (!w) return { fehler: 'Vollmacht nur für eigene Wohnungen möglich' };
-    return { stweg: w.stweg };
-  }
-  if (stweg) {
-    const erlaubt = new Set([...getUserStwegs(req.user.groups || []), ...eigene.rows.map(x => x.stweg)].map(Number));
-    if (!erlaubt.has(Number(stweg))) return { fehler: 'Vollmacht nur für die eigene STWEG möglich' };
-  }
-  return { stweg: stweg || null };
+  const e = vollmachtRechte.vmGeberErlaubt({ wohnungId, stweg }, await vmEigeneKontakte(req), req.user.groups || []);
+  return e.ok ? { stweg: e.stweg } : { fehler: e.fehler };
 }
 
 // Name eines Vollmachtgebers gegen das Konto pruefen: Wer seine eigene Zeile
@@ -28440,7 +28565,7 @@ app.post('/api/vollmachten', authMiddleware, async (req, res) => {
         [vollmacht.id, g.person_id || null, g.name, g.email || null, g.adresse || null, i],
       );
     }
-    res.json(vollmacht);
+    res.json(vollmachtRechte.vmOhneNachweis(vollmacht, req.user.groups || []));
   } catch (err) { console.error('[vollmachten] create:', err); res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
@@ -28487,13 +28612,14 @@ app.put('/api/vollmachten/:id', authMiddleware, async (req, res) => {
       b.stweg !== undefined ? b.stweg : v.stweg);
     if (fa.ok && fa.verwaltung && (b.wohnung_id !== undefined || b.stweg !== undefined)) b.stweg = fa.stweg;
     if (!fa.ok) {
-      if (b.wohnung_id !== undefined || b.stweg !== undefined) {
-        const o = await vmObjektPruefen(req,
-          b.wohnung_id !== undefined ? b.wohnung_id : v.wohnung_id,
-          b.stweg !== undefined ? b.stweg : v.stweg);
-        if (o.fehler) return res.status(403).json({ error: o.fehler });
-        b.stweg = o.stweg;
-      }
+      // D1: Wohnung/STWEG nach der Aenderung muss dem Konto als Eigentuemer bzw.
+      // Wohnungs-Verwalter gehoeren — auch wenn sie nicht mitgeschickt wird
+      // (alte Entwuerfe ohne Objekt oder von Mietern lassen sich so nicht weiterfuehren).
+      const o = await vmObjektPruefen(req,
+        b.wohnung_id !== undefined ? b.wohnung_id : v.wohnung_id,
+        b.stweg !== undefined ? b.stweg : v.stweg);
+      if (o.fehler) return res.status(403).json({ error: o.fehler });
+      if (b.wohnung_id !== undefined || b.stweg !== undefined || o.stweg !== v.stweg) b.stweg = o.stweg;
       await vmEigeneNamenAngleichen(req, b);
     }
     const updates = []; const params = [];
@@ -28525,7 +28651,7 @@ app.put('/api/vollmachten/:id', authMiddleware, async (req, res) => {
       }
     }
     const final = await pool.query('SELECT * FROM vollmachten WHERE id = $1', [id]);
-    res.json(final.rows[0]);
+    res.json(vollmachtRechte.vmOhneNachweis(final.rows[0], groups));
   } catch (err) { console.error('[vollmachten] update:', err); res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
@@ -28554,8 +28680,18 @@ function vmSignaturIp(req) {
   }
   return (req.socket?.remoteAddress || req.ip || '').replace(/^::ffff:/i, '') || null;
 }
+// R1 (Entscheid Stefan 28.11.2026): Signieren nur mit frischer Anmeldung
+// (lib/stufen.js signierenErlaubt) — nie per persoenlichem Zugangstoken (PAT)
+// bzw. MCP, nie mit Karte/QR/Anlage. D1: nur Eigentuemer/Wohnungs-Verwalter
+// der Wohnung bzw. STWEG der Vollmacht.
 app.post('/api/vollmachten/:id/sign-digital', authMiddleware, async (req, res) => {
   try {
+    if (!signierenErlaubt(req.auth, { pat: !!req.pat, kanal: req.headers['x-rosenweg-kanal'] })) {
+      return res.status(403).json({
+        error: `Digital signieren nur mit frischer Anmeldung: bitte zur Bestätigung neu anmelden und danach innert ${STUFE_FRISCH_MIN} Minuten signieren. Mit einem Zugangstoken oder über MCP ist Signieren nicht möglich.`,
+        reauth: !req.pat, fehler: 'frisch',
+      });
+    }
     const id = parseInt(req.params.id, 10);
     const existing = await pool.query('SELECT * FROM vollmachten WHERE id = $1', [id]);
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
@@ -28573,6 +28709,8 @@ app.post('/api/vollmachten/:id/sign-digital', authMiddleware, async (req, res) =
     if (my.rows[0].signed_at) {
       return res.status(400).json({ error: 'Du hast bereits signiert' });
     }
+    const obj = await vmObjektPruefen(req, v.wohnung_id, v.stweg);
+    if (obj.fehler) return res.status(403).json({ error: obj.fehler });
     const ip = vmSignaturIp(req);
     const ua = req.headers['user-agent'] || null;
     const sub = req.user.sub || req.user.id || null;
@@ -28607,7 +28745,7 @@ app.post('/api/vollmachten/:id/sign-digital', authMiddleware, async (req, res) =
     }
     const updated = await pool.query('SELECT * FROM vollmachten WHERE id = $1', [id]);
     res.json({
-      ...updated.rows[0],
+      ...vollmachtRechte.vmOhneNachweis(updated.rows[0], req.user.groups || []),
       signed_by_me: true,
       all_signed: allSigned,
       signatures_remaining: Number(counts.rows[0].total) - Number(counts.rows[0].signed),
@@ -28642,7 +28780,7 @@ app.post('/api/vollmachten/:id/activate-paper', authMiddleware, async (req, res)
          updated_at=NOW() WHERE id=$1 RETURNING *`,
       [id],
     );
-    res.json(r.rows[0]);
+    res.json(vollmachtRechte.vmOhneNachweis(r.rows[0], groups));
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
@@ -28667,6 +28805,11 @@ app.post('/api/vollmachten/:id/upload-signed', authMiddleware, async (req, res) 
     // Vollmacht bekaeme sonst nachtraeglich eine andere "unterschriebene" PDF.
     if (!isAdmin && v.status !== 'entwurf') {
       return res.status(400).json({ error: 'Nur zu Entwürfen kann eine unterschriebene PDF hochgeladen werden (Status: ' + v.status + ')' });
+    }
+    // D1: ein Geber schaltet nur als Eigentuemer/Wohnungs-Verwalter aktiv
+    if (!isAdmin) {
+      const obj = await vmObjektPruefen(req, v.wohnung_id, v.stweg);
+      if (obj.fehler) return res.status(403).json({ error: obj.fehler });
     }
     if (!Buffer.isBuffer(req.body) || req.body.length < 100) {
       return res.status(400).json({ error: 'Keine PDF-Datei im Body (Content-Type: application/pdf)' });
@@ -28756,14 +28899,22 @@ app.post('/api/vollmachten/:id/verify-ai', authMiddleware, async (req, res) => {
       [id]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = r.rows[0];
-    // Nur wer die Vollmacht verwaltet: Vollmachtgeber, Admin, Ausschuss der STWEG.
-    // Der Aufruf schickt die PDF an einen externen KI-Dienst und kostet Geld.
+    // D3 (Entscheid Stefan 28.11.2026): Der Aufruf schickt die PDF (Namen,
+    // Adressen, Unterschriften) an einen externen Dienst (OpenRouter -> Anthropic).
+    // Nur auf Knopfdruck durch Technik/Praesident oder die Verwaltung der STWEG
+    // (Seitenrecht „vollmachten“), nach ausdruecklicher Bestaetigung
+    // (bestaetigt_extern: true), nie automatisch: nicht per Zugangstoken/MCP,
+    // nicht fuer Geber oder Ausschuss.
     const groups = req.user.groups || [];
-    // Technik/Praesident; Verwaltung der STWEG mit Seitenrecht „vollmachten“ (B19)
-    const isGlobalAdmin = vollmachtRechte.vmSichtErlaubt(vollmachtRechte.vmSicht(groups, await vmPerm(req)), v.stweg);
-    const isAusschussForStweg = v.stweg && getAusschussStwegs(groups).has(v.stweg);
-    const isGeber = await vmIsUserVollmachtgeber(id, req.user.email, v.vollmachtgeber_email);
-    if (!isGlobalAdmin && !isAusschussForStweg && !isGeber) return res.status(403).json({ error: 'Kein Zugriff' });
+    if (!vollmachtRechte.vmDarfKiPruefen(groups, await vmPerm(req), v.stweg)) {
+      return res.status(403).json({ error: 'KI-Prüfung nur durch die Verwaltung der STWEG, Technik oder Präsident' });
+    }
+    if (req.pat || String(req.headers['x-rosenweg-kanal'] || '').toLowerCase() === 'mcp') {
+      return res.status(403).json({ error: 'KI-Prüfung nur auf Knopfdruck im Portal, nicht per Zugangstoken oder MCP' });
+    }
+    if (req.body?.bestaetigt_extern !== true) {
+      return res.status(400).json({ error: 'Bitte bestätigen, dass die PDF an einen externen Dienst (OpenRouter/Anthropic) geht (bestaetigt_extern: true)', bestaetigung_noetig: true });
+    }
     const rl = rateLimitGuard('vm-verify-ai', (req.user.email || '').toLowerCase(), 10, 60 * 60 * 1000);
     if (!rl.ok) return res.status(429).json({ error: `Zu viele KI-Prüfungen — bitte in ${rl.retryAfter}s erneut` });
     // Ohne Gesamt-PDF (S5-3-1: Einzel-Upload eines Gebers): die eigene Datei;
@@ -28773,7 +28924,7 @@ app.post('/api/vollmachten/:id/verify-ai', authMiddleware, async (req, res) => {
       const mitDatei = (v.vollmachtgeber_liste || []).filter(g => g.papier_pdf_path);
       const eigen = mitDatei.find(g => (g.email || '').toLowerCase() === (req.user.email || '').toLowerCase());
       const neueste = mitDatei.sort((a, b) => String(b.signed_at || '').localeCompare(String(a.signed_at || '')))[0];
-      pdfRel = eigen ? eigen.papier_pdf_path : ((isGlobalAdmin || isAusschussForStweg) && neueste ? neueste.papier_pdf_path : null);
+      pdfRel = eigen ? eigen.papier_pdf_path : (neueste ? neueste.papier_pdf_path : null);
     }
     if (!pdfRel) return res.status(400).json({ error: 'Keine signierte PDF hochgeladen' });
     const apiKey = process.env.OPENROUTER_API_KEY;
@@ -28881,7 +29032,7 @@ app.post('/api/vollmachten/:id/revoke', authMiddleware, async (req, res) => {
         WHERE id=$3 RETURNING *`,
       [req.user.email || null, grund || null, id],
     );
-    res.json(r.rows[0]);
+    res.json(vollmachtRechte.vmOhneNachweis(r.rows[0], groups));
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
@@ -28905,19 +29056,18 @@ app.get('/api/vollmachten/:id/pdf', authMiddleware, async (req, res) => {
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = r.rows[0];
     const groups = req.user.groups || [];
-    // Technik/Praesident; Verwaltung der STWEG mit Seitenrecht „vollmachten“ (B19)
+    // Technik/Praesident; Ausschuss und Verwaltung der STWEG nur mit Seitenrecht
+    // „vollmachten“ (B19, R2 28.11.2026: auch der Ausschuss haengt am Seitenrecht)
     const isGlobalAdmin = vollmachtRechte.vmSichtErlaubt(vollmachtRechte.vmSicht(groups, await vmPerm(req)), v.stweg);
-    const ausschussStwegs = getAusschussStwegs(groups);
-    const isAusschussForStweg = v.stweg && ausschussStwegs.has(v.stweg);
     const userEmail = (req.user.email || '').toLowerCase();
     const involved = await vmIsUserVollmachtgeber(id, req.user.email, v.vollmachtgeber_email)
                   || (v.bevollmaechtigter_email || '').toLowerCase() === userEmail;
-    if (!isGlobalAdmin && !isAusschussForStweg && !involved) return res.status(403).json({ error: 'Kein Zugriff' });
+    if (!isGlobalAdmin && !involved) return res.status(403).json({ error: 'Kein Zugriff' });
     // S5-3-1: ?geber=<Zeilen-ID> liefert den Papier-Upload eines einzelnen
     // Gebers — fuer Admin/Ausschuss und den Geber selbst.
     if (req.query.geber !== undefined) {
       const g = (v.vollmachtgeber_liste || []).find(x => Number(x.id) === parseInt(req.query.geber, 10));
-      const darf = g && (isGlobalAdmin || isAusschussForStweg || (g.email || '').toLowerCase() === userEmail);
+      const darf = g && (isGlobalAdmin || (g.email || '').toLowerCase() === userEmail);
       const gPfad = darf ? vollmachtPdfPfad(g.papier_pdf_path) : null;
       if (!gPfad) return res.status(404).json({ error: 'Keine Datei für diesen Vollmachtgeber' });
       try {
@@ -28941,7 +29091,7 @@ app.get('/api/vollmachten/:id/pdf', authMiddleware, async (req, res) => {
         console.warn('[vollmachten] papier-PDF nicht lesbar, fallback auf Template:', e.message);
       }
     }
-    const pdf = await generateVollmachtPdf(v);
+    const pdf = await generateVollmachtPdf(v, { nachweis: vollmachtRechte.vmNachweisSehen(groups) });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="vollmacht-${v.doc_hash || id}.pdf"`);
     res.send(pdf);
@@ -29724,6 +29874,9 @@ async function initDB() {
         created_at TIMESTAMP DEFAULT NOW(),
         UNIQUE(project_slug, target_type, target_id, doc_path)
       );
+      -- D1 (28.11.2026): nur ausdruecklich markierte Anhaenge sind oeffentlich;
+      -- bestehende bleiben privat (DEFAULT false), auch bei oeffentlichen Projekten.
+      ALTER TABLE project_attachments ADD COLUMN IF NOT EXISTS oeffentlich BOOLEAN NOT NULL DEFAULT false;
     `);
 
     await client.query(`
@@ -30865,6 +31018,8 @@ async function initDB() {
         updated_at TIMESTAMPTZ DEFAULT NOW(),
         CONSTRAINT vmt_art_chk CHECK (art IN ('generell','spezifisch','auskunft'))
       );
+      -- R2 (28.11.2026): Vorlagen pro STWEG; NULL = global (Vorgabe fuer alle)
+      ALTER TABLE vollmachten_templates ADD COLUMN IF NOT EXISTS stweg INTEGER;
 
       -- Migration: Bestands-Vollmachten bekommen den Primaer-Vollmachtgeber
       -- als ersten Eintrag in der Liste, falls noch keiner existiert.
