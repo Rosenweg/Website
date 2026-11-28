@@ -35,6 +35,7 @@ const { waschAdminErlaubt, waschRaumAenderbar } = require('./lib/wasch-admin');
 const waschRegeln = require('./lib/wasch-regeln');
 const adminProtokoll = require('./lib/admin-protokoll');
 const ispZugang = require('./lib/isp-zugang');
+const ispStoerung = require('./lib/isp-stoerung');
 const { taeglichUm } = require('./lib/tageszeit');
 const papierkorb = require('./lib/papierkorb');
 const unterlagen = require('./lib/unterlagen');
@@ -27082,6 +27083,31 @@ app.get('/api/isp/maintenance/public', async (req, res) => {
           start_at NULLS FIRST`,
     );
     res.json({ maintenance: r.rows });
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
+});
+
+// Wartungen und Stoerungen, die MEIN Haus betreffen (App Rosenweg Internet, "Stoerung melden":
+// erst nachsehen, ob es schon bekannt ist). Haus = Wohnung/Hobbyraum der Person (wie /api/wifi);
+// Wartungen fuer alle oder fuer eines dieser Haeuser. Ohne Wohnung nur die fuer alle.
+app.get('/api/isp/stoerungen/meine', authMiddleware, async (req, res) => {
+  try {
+    const email = (req.user.email || '').toLowerCase();
+    const haeuser = new Set();
+    for (const o of await getUserVlanOptions(email)) {
+      if (o.kind !== 'wohnung' && o.kind !== 'hobbyraum') continue;
+      const h = ispZugang.hausAusVlan(o.vlan);
+      if (h) haeuser.add(h);
+    }
+    const r = await pool.query(
+      `SELECT id, title, description, severity, scope, status, start_at, end_at
+         FROM isp_maintenance
+        WHERE status IN ('planned','active')
+          AND (start_at IS NULL OR start_at < NOW() + interval '7 days')
+          AND (end_at IS NULL OR end_at > NOW() - interval '1 hour')
+        ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, start_at NULLS FIRST`,
+    );
+    const vlanZuHaus = Object.fromEntries(Object.entries(VPN_RW_TO_VLAN).map(([h, v]) => [v, parseInt(h, 10)]));
+    res.json({ haeuser: [...haeuser].sort((a, b) => a - b), wartungen: ispStoerung.wartungenFuerHaeuser(r.rows, [...haeuser], vlanZuHaus) });
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
