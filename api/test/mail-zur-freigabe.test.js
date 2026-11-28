@@ -8,6 +8,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const groups = require('../lib/groups');
+const vierAugen = require('../lib/vier-augen');
 
 const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
 const stueck = (kopf) => { const i = src.indexOf(kopf); assert.ok(i >= 0, kopf); return src.slice(i, src.indexOf('\n}\n', i) + 2); };
@@ -17,6 +18,9 @@ const zeilen = [
   { id: 2, source_type: 'auslage-auszahlung', source_id: 9, subject: 'Auszahlung', created_at: '2026-11-28T08:00:00Z', edited_at: null, von_mir: false, freigaben: '1', attachment_count: '0' },
   { id: 3, source_type: 'ad-hoc', source_id: null, subject: 'Schon freigegeben', created_at: '2026-11-28T09:00:00Z', edited_at: null, von_mir: true, freigaben: '1', attachment_count: '0' },
   { id: 4, source_type: 'stweg3-info', source_id: null, subject: 'Nur Ausschuss', created_at: '2026-11-26T09:00:00Z', edited_at: '2026-11-28T10:00:00Z', von_mir: false, freigaben: '0', attachment_count: '0' },
+  // F2: eigene (per Konto-ID) bzw. selbst bearbeitete Mails nie zur eigenen Freigabe
+  { id: 5, source_type: 'ad-hoc', source_id: null, subject: 'Eigene', created_by: 'andere@example.ch', created_by_id: 7, created_at: '2026-11-28T11:00:00Z', edited_at: null, von_mir: false, freigaben: '0', attachment_count: '0' },
+  { id: 6, source_type: 'ad-hoc', source_id: null, subject: 'Selbst bearbeitet', created_by: 'x@example.ch', edited_by: 'erika@example.ch', created_at: '2026-11-28T11:30:00Z', edited_at: '2026-11-28T11:40:00Z', von_mir: false, freigaben: '0', attachment_count: '0' },
 ];
 const regeln = {
   'ad-hoc': { required_groups: 'technik,praesident', min_approvers: 1 },
@@ -25,6 +29,7 @@ const regeln = {
 };
 const sb = {
   ...groups,
+  vierAugen,
   anfragen: [],
   pool: { query: async (sql, params) => { sb.anfragen.push({ sql, params }); return { rows: zeilen.map(z => ({ ...z })) }; } },
   getApprovalRuleForQueueItem: async (row) => regeln[row.source_type],
@@ -34,7 +39,7 @@ vm.runInNewContext(
   + '\nglobalThis.zurFreigabe = mailsZurFreigabe;', sb);
 // Werte aus dem vm-Kontext haben eigene Array-Prototypen: als JSON vergleichen
 const ids = (mails) => JSON.stringify(mails.map(m => m.id));
-const ich = (g) => ({ groups: g, email: 'erika@example.ch' });
+const ich = (g) => ({ groups: g, email: 'erika@example.ch', id: 7 });
 
 test('Präsident: alle offenen, die er freigeben darf, ohne die schon freigegebene', async () => {
   const { mails, anzahl } = await sb.zurFreigabe(ich(['Präsident']), null);

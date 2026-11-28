@@ -1,6 +1,6 @@
 # Email-System — Rosenweg
 
-Stand: 27.11.2026. Sicherheitsregeln (Mail-Composer, Druck per Mail,
+Stand: 28.11.2026. Sicherheitsregeln (Mail-Composer, Druck per Mail,
 WhatsApp-Gateway) im Überblick: [`sicherheit.md`](sicherheit.md) Abschnitt 4.8.
 
 > **Bis Sommer 2026** lief der Mail-Eingang über Cloudflare Email Routing → Gmail
@@ -169,7 +169,53 @@ Absender enthalten; gegen die aktuelle Zone prüfen.
 | archiv@rosenweg4303.ch | Email-Archiv (automatisch) |
 | druckerr9@, druckerr13@ | Druck per Mail (siehe oben) |
 
-Pflege der Verteiler: `email-verteiler.html`.
+Pflege der Verteiler: `email-verteiler.html`. `PUT /api/verteiler/:id` ändert nur
+die mitgeschickten Felder; fehlt z. B. `members`, bleibt die Liste stehen.
+
+## Wer darf an einen Verteiler schreiben (Gate)
+
+Verteiler mit „extern erlaubt“ (`external_allowed`) nehmen Mails von allen an.
+Alle anderen aktiven Verteiler der Domain sind **gesperrt**: Mailcow verteilt sie
+nativ (Alias-`goto` = Mitglieder + `archiv@`), die API sieht die Mail nicht. Die
+Absenderprüfung macht deshalb Rspamd über das Gate
+[`mailcow/mailcow-verteiler-gate.py`](../mailcow/mailcow-verteiler-gate.py)
+(CT 240, Timer alle 5 Minuten). Es holt `GET /api/verteiler/mailcow-gate`
+(`version: 2`) und baut **je Verteiler** eine eigene Regel. Die Regeln stehen in
+[`api/lib/verteiler-gate.js`](../api/lib/verteiler-gate.js); dieselben gelten im
+Rückfall ohne nativen Fanout in der API:
+
+| Verteiler | Wer darf schreiben |
+|---|---|
+| alle gesperrten | Technik, Präsident, Funktions- und Gateway-Postfächer der Domain (`noreply@`, `2fa@`, `praesident@` …), `technik@`/`praesident@`, Adressen aus `VERTEILER_GATE_ALLE_LISTEN` (CT 128 `.env`, durch Komma getrennt) |
+| einer STWEG N, ohne Absender-Gruppen | Personen der STWEG N (Kontakte der Wohnungen, Mieter wie Eigentümer, nicht archiviert; Authentik-Gruppen Bewohner/Eigentümer/Ausschuss von N) |
+| einer STWEG N, mit Absender-Gruppen | nur Mitglieder dieser Gruppen |
+| einer STWEG N, immer | Verwaltung von N: Gruppe `stwegN-verwaltung` (Übergang „Verwaltung“), Adressen und Domains der Verwaltungen mit Vertrag für N oder für alle STWEGs |
+| STWEG-übergreifend (`stweg` 0), ohne Absender-Gruppen | alle bekannten Personen und alle aktiven Verwaltungen |
+| STWEG-übergreifend, mit Absender-Gruppen | nur diese Gruppen und die Verwaltung aller STWEGs (Vertrag ohne STWEG, Übergangsgruppe oder in jeder `stwegN-verwaltung`); `eigentuemer@` und `eigentuemer-direkt@`: `ausschuss` + `Verwaltung` (einmalige Migration, Entscheid 28.11.2026) |
+
+Ganze Domains gibt das Gate nur für Verwaltungen frei, nie Freemail-Domains
+(gmail.com …) und nie die eigenen Mailcow-Domains. Die Regel greift auch für
+`+tag`-Adressen (`stweg3+x@`). `GATE_ABSENDER_PRUEFEN=1` in
+`/etc/default/mailcow-verteiler-gate` weist zusätzlich Absender ab, die weder
+angemeldet sind noch SPF/DMARC bestehen (sonst nur Markierung
+`ROSENWEG_GATE_UNBELEGT` in der Rspamd-Historie).
+
+**Erneuern auf CT 240** (erst nach dem Ausrollen der API, die alte API liefert
+keine `version: 2`; das neue Skript ändert dann nichts):
+
+```bash
+# auf pve1 (100.64.2.20), Skript aus dem Repo vorher dorthin kopieren
+pct push 240 mailcow/mailcow-verteiler-gate.py /usr/local/sbin/mailcow-verteiler-gate.py --perms 0755
+pct exec 240 -- /usr/local/sbin/mailcow-verteiler-gate.py --trocken   # Blöcke ansehen, schreibt nichts
+pct exec 240 -- systemctl start mailcow-verteiler-gate.service          # schreibt, configtest, Rspamd-Neustart
+pct exec 240 -- journalctl -u mailcow-verteiler-gate.service -n 5 --no-pager
+```
+
+Schlägt `rspamadm configtest` fehl, rollt das Skript die Blöcke zurück. Zurück
+zum alten Stand: Skript aus dem Stand vor diesem Umbau (`git log -- mailcow/mailcow-verteiler-gate.py`)
+zurückspielen und den Dienst starten. Solange das alte Skript läuft, liefert die
+API die alten Felder (`gated_aliases`, `allowed_domains`, `allowed_emails`)
+weiter (ÜBERGANG, danach in `server.js` entfernen).
 
 ## Von aussen ins Postfach — welche Namen funktionieren
 

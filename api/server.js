@@ -36,6 +36,9 @@ const { taeglichUm } = require('./lib/tageszeit');
 const papierkorb = require('./lib/papierkorb');
 const unterlagen = require('./lib/unterlagen');
 const verteilerVerwaltung = require('./lib/verteiler-verwaltung');
+const verteilerGate = require('./lib/verteiler-gate');
+const vierAugen = require('./lib/vier-augen');
+const { gatewaysLesen } = require('./lib/mailgateway');
 
 const app = express();
 
@@ -4843,32 +4846,16 @@ app.get('/api/verteiler/by-stweg/:stweg', async (req, res) => {
 });
 
 const verteilerSendLog = new Map(); // userId → [timestamps]
-app.post('/api/verteiler/send', authMiddleware, async (req, res) => {
-  // T/P (isAdmin) wie bisher; die Verwaltung nur an aktive Verteiler ihrer
-  // STWEG(s), nur per verteiler_id (Befund V2, lib/verteiler-verwaltung.js).
-  if (!req.user?.isAdmin) {
-    const vid = parseInt(req.body?.verteiler_id, 10);
-    if (!Number.isFinite(vid) || (Array.isArray(req.body?.recipients) && req.body.recipients.length)) {
-      return res.status(403).json({ error: 'Admin-Rechte erforderlich' });
-    }
-    try {
-      const { rows: [vt] } = await pool.query('SELECT id, stweg, active FROM email_verteiler WHERE id = $1', [vid]);
-      const perm = await verteilerPortalPerm(req);
-      // V10: Senden verlangt „email-verteiler“ = schreiben (lesen zeigt nur die Liste).
-      if (!verteilerVerwaltung.portalDarfSendenRecht(perm)) {
-        return res.status(403).json({ error: 'Senden braucht das Recht „E-Mail-Verteiler“ = schreiben' });
-      }
-      if (!vt || !verteilerVerwaltung.portalDarfSenden(req.user?.groups || [], perm, vt)) {
-        return res.status(403).json({ error: 'Nur an Verteiler der eigenen STWEG' });
-      }
-    } catch (e) { return res.status(500).json({ error: 'Fehler' }); }
-  }
+// Versand einer Portal-Rundmail (ohne Rechtepruefung, die macht die Route).
+// -> { status, body, gesendet } (gesendet = Mail ging mindestens an einen Empfaenger).
+async function verteilerRundmailSenden(req) {
+  const antwort = (status, body) => ({ status, body, gesendet: false });
   // Rate limit: max 10 sends per 10 minutes per user
   const uid = req.user.user_id || req.user.id;
   const now = Date.now();
   const log = (verteilerSendLog.get(uid) || []).filter(t => now - t < 600000);
   if (log.length >= 10) {
-    return res.status(429).json({ error: 'Zu viele Emails — bitte 10 Minuten warten' });
+    return antwort(429, { error: 'Zu viele Emails — bitte 10 Minuten warten' });
   }
   log.push(now);
   verteilerSendLog.set(uid, log);
@@ -4879,34 +4866,34 @@ app.post('/api/verteiler/send', authMiddleware, async (req, res) => {
   const absName = verteilerVerwaltung.absenderName(req.body.sender_name, req.user?.name);
   let verteilerAdresse = null;
   if (!subject || !body) {
-    return res.status(400).json({ error: 'Betreff und Text erforderlich' });
+    return antwort(400, { error: 'Betreff und Text erforderlich' });
   }
   // Das Frontend schickt nur verteiler_id (keine expliziten Empfänger) — also hier
   // aus dem Verteiler auflösen. resolveVerteilerRecipients liefert die Mitglieder-Mails.
   if (recipients.length === 0 && verteiler_id) {
     try {
       const { rows: [vt] } = await pool.query('SELECT * FROM email_verteiler WHERE id = $1', [parseInt(verteiler_id)]);
-      if (!vt) return res.status(404).json({ error: 'Verteiler nicht gefunden' });
+      if (!vt) return antwort(404, { error: 'Verteiler nicht gefunden' });
       verteilerAdresse = vt.email_address || null;
       recipients = await resolveVerteilerRecipients(vt);
     } catch (e) {
       console.error('resolveVerteilerRecipients failed:', e.message);
-      return res.status(500).json({ error: 'Empfänger konnten nicht aufgelöst werden' });
+      return antwort(500, { error: 'Empfänger konnten nicht aufgelöst werden' });
     }
   }
   if (!recipients.length) {
-    return res.status(400).json({ error: 'Verteiler hat keine Empfänger' });
+    return antwort(400, { error: 'Verteiler hat keine Empfänger' });
   }
 
   // Validate all recipients are valid email addresses
   const emailRegex = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/;
   const validRecipients = recipients.filter(r => typeof r === 'string' && emailRegex.test(r));
   if (validRecipients.length === 0) {
-    return res.status(400).json({ error: 'Keine gültigen E-Mail-Adressen im Verteiler' });
+    return antwort(400, { error: 'Keine gültigen E-Mail-Adressen im Verteiler' });
   }
 
+  let sent = 0;
   try {
-    let sent = 0;
     let failed = [];
     let gateway = null;
     let messageId = null;
@@ -4962,12 +4949,71 @@ app.post('/api/verteiler/send', authMiddleware, async (req, res) => {
       ).catch(e => console.error('[verteiler-direct] Archivieren fehlgeschlagen:', e.message));
     }
 
-    res.json({ success: true, sent, failed: failed.length });
+    return { status: 200, body: { success: true, sent, failed: failed.length }, gesendet: sent > 0 };
   } catch (err) {
     console.error('Email send error:', err);
-    res.status(500).json({ error: 'Fehler beim E-Mail-Versand' });
+    return { status: 500, body: { error: 'Fehler beim E-Mail-Versand' }, gesendet: sent > 0 };
   }
+}
+
+app.post('/api/verteiler/send', authMiddleware, async (req, res) => {
+  // T/P (isAdmin) wie bisher; die Verwaltung nur an aktive Verteiler ihrer
+  // STWEG(s), nur per verteiler_id (Befund V2, lib/verteiler-verwaltung.js).
+  if (!req.user?.isAdmin) {
+    const vid = parseInt(req.body?.verteiler_id, 10);
+    if (!Number.isFinite(vid) || (Array.isArray(req.body?.recipients) && req.body.recipients.length)) {
+      return res.status(403).json({ error: 'Admin-Rechte erforderlich' });
+    }
+    try {
+      const { rows: [vt] } = await pool.query('SELECT id, stweg, active FROM email_verteiler WHERE id = $1', [vid]);
+      const perm = await verteilerPortalPerm(req);
+      // V10: Senden verlangt „email-verteiler“ = schreiben (lesen zeigt nur die Liste).
+      if (!verteilerVerwaltung.portalDarfSendenRecht(perm)) {
+        return res.status(403).json({ error: 'Senden braucht das Recht „E-Mail-Verteiler“ = schreiben' });
+      }
+      if (!vt || !verteilerVerwaltung.portalDarfSenden(req.user?.groups || [], perm, vt)) {
+        return res.status(403).json({ error: 'Nur an Verteiler der eigenen STWEG' });
+      }
+    } catch (e) { return res.status(500).json({ error: 'Fehler' }); }
+  }
+  // L11: Idempotenz. Mit Idempotency-Key (Kopf oder Feld idempotency_key) geht
+  // dieselbe Rundmail hoechstens einmal hinaus: eine Wiederholung (z. B. nach
+  // Netzabbruch in der App) bekommt die gespeicherte Antwort zurueck. Ohne
+  // Schluessel wie bisher.
+  const schluessel = verteilerVerwaltung.idempotenzSchluessel(req.get('Idempotency-Key') ?? req.body?.idempotency_key);
+  if (schluessel === false) return res.status(400).json({ error: 'Ungültiger Idempotency-Key (8–128 Zeichen: A–Z, a–z, 0–9, . _ : -)' });
+  const konto = String(req.user.user_id || req.user.id || req.user.email || '');
+  if (schluessel) {
+    const fp = verteilerVerwaltung.sendeFingerabdruck(req.body);
+    try {
+      await pool.query(`DELETE FROM verteiler_send_idempotenz WHERE created_at < NOW() - INTERVAL '24 hours'`);
+      const neu = await pool.query(
+        `INSERT INTO verteiler_send_idempotenz (konto, schluessel, fingerabdruck) VALUES ($1, $2, $3)
+         ON CONFLICT (konto, schluessel) DO NOTHING RETURNING schluessel`, [konto, schluessel, fp]);
+      if (!neu.rowCount) {
+        const { rows: [alt] } = await pool.query(
+          'SELECT fingerabdruck, status_code, antwort FROM verteiler_send_idempotenz WHERE konto = $1 AND schluessel = $2', [konto, schluessel]);
+        if (alt && alt.fingerabdruck !== fp) return res.status(422).json({ error: 'Dieser Idempotency-Key gehört zu einer anderen Rundmail' });
+        if (alt && alt.antwort) { res.set('Idempotent-Replayed', 'true'); return res.status(alt.status_code || 200).json(alt.antwort); }
+        return res.status(409).json({ error: 'Diese Rundmail wird schon gesendet oder der Versand wurde unterbrochen – bitte im Protokoll prüfen, nicht erneut senden' });
+      }
+    } catch (e) {
+      console.error('[verteiler-send] Idempotenz:', e.message);
+      return res.status(500).json({ error: 'Fehler' });
+    }
+  }
+  const out = await verteilerRundmailSenden(req);
+  if (schluessel) {
+    // Ging nichts hinaus, darf derselbe Schluessel erneut versuchen; sonst Antwort merken.
+    const q = out.gesendet
+      ? pool.query('UPDATE verteiler_send_idempotenz SET status_code = $3, antwort = $4::jsonb WHERE konto = $1 AND schluessel = $2',
+          [konto, schluessel, out.status, JSON.stringify(out.body)])
+      : pool.query('DELETE FROM verteiler_send_idempotenz WHERE konto = $1 AND schluessel = $2', [konto, schluessel]);
+    await q.catch(e => console.error('[verteiler-send] Idempotenz speichern:', e.message));
+  }
+  res.status(out.status).json(out.body);
 });
+
 
 // ═══════════════════════════════════════════════════════════════════
 // ENERGIE/ZÄHLER (replaces n8n zähler webhooks)
@@ -5106,43 +5152,34 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
   const senderEmail = parsed.from?.value?.[0]?.address || '';
   const senderName = parsed.from?.value?.[0]?.name || senderEmail;
 
-  // Sender-Validierung: wenn allowed_sender_groups gesetzt, muss Sender Mitglied sein
-  const allowedGroups = Array.isArray(list.allowed_sender_groups) ? list.allowed_sender_groups : [];
-  if (allowedGroups.length > 0 && senderEmail) {
-    const senderEmailLower = senderEmail.toLowerCase();
+  // Sender-Validierung (F1): an gesperrte Verteiler (external_allowed=false) nur
+  // erlaubte Absender, mit denselben Regeln wie das Rspamd-Gate beim nativen
+  // Fanout (lib/verteiler-gate.js): STWEG-gebunden, Technik/Präsident an alle,
+  // Verwaltung nur fuer ihre STWEG.
+  if (verteilerGate.istGesperrt(list, VERTEILER_DOMAIN)) {
     let allowed = false;
-    // Exemption: die aktive(n) Verwaltung(en) und ihre Kontakt-Emails duerfen
-    // an die geschuetzten Verteiler IHRER STWEG schreiben (Vertrag fuer diese
-    // STWEG oder STWEG-uebergreifend), ohne explizit in einer Authentik-Gruppe
-    // zu sein. Diese Adressen sind extern (Drittfirma). Frueher: an JEDEN Verteiler.
-    if (await isActiveVerwaltungEmail(senderEmailLower, list.stweg)) {
-      allowed = true;
-      console.log(`[Verteiler] Sender ${senderEmail} als aktive Verwaltung erkannt — erlaubt`);
+    let pruefFehler = null;
+    try {
+      const alle = (await pool.query('SELECT * FROM email_verteiler WHERE active = true')).rows;
+      const eintrag = (await verteilerGateLaden(alle)).find(x => x.id === list.id);
+      allowed = verteilerGate.absenderErlaubt(eintrag, senderEmail);
+    } catch (err) {
+      pruefFehler = err;
+      console.error('[Verteiler] Absenderpruefung fehlgeschlagen:', err.message);
     }
-    if (!allowed && AUTHENTIK_API_TOKEN) {
-      try {
-        const akData = await authentikAPI('GET', `/core/users/?email=${encodeURIComponent(senderEmailLower)}`);
-        const user = akData.results?.find(u => u.email?.toLowerCase() === senderEmailLower);
-        if (user) {
-          const userGroupNames = (user.groups_obj || []).map(g => g.name.toLowerCase());
-          allowed = allowedGroups.some(g => userGroupNames.includes(g.toLowerCase()))
-            // Hausverwaltung dieser STWEG (stwegN-verwaltung) – nur fuer ihre Verteiler
-            || verteilerVerwaltung.verwaltungsGruppeDarfSenden(userGroupNames, list);
-        }
-      } catch (err) { console.error('[Verteiler] Sender-Auth-Check fehler:', err.message); }
-    }
+    if (pruefFehler) throw pruefFehler; // nicht verschieben, beim naechsten Abruf erneut
     if (!allowed) {
-      console.log(`[Verteiler] Sender ${senderEmail} nicht in erlaubten Gruppen [${allowedGroups.join(',')}] für ${toAddress} — abgelehnt`);
+      console.log(`[Verteiler] Sender ${senderEmail} für ${toAddress} nicht erlaubt — abgelehnt`);
       // Höflicher Bounce an Sender
       try {
-        await loggedSendMail({
+        if (senderEmail) await loggedSendMail({
           from: `"Rosenweg Verteiler" <noreply@${VERTEILER_DOMAIN}>`,
           to: senderEmail,
           subject: `Rückläufer: Versand an ${toAddress} nicht erlaubt`,
-          text: `Hallo,\n\nIhre Email an ${toAddress} (Betreff: "${parsed.subject}") wurde nicht zugestellt — Sie sind nicht in einer der für diesen Verteiler erlaubten Gruppen (${allowedGroups.join(', ')}).\n\nBitte wenden Sie sich an den Ausschuss falls Sie hier publizieren möchten.\n\nRosenweg Verteiler`,
+          text: `Hallo,\n\nIhre Email an ${toAddress} (Betreff: "${parsed.subject}") wurde nicht zugestellt — an diesen Verteiler dürfen nur berechtigte Absender schreiben (in der Regel Personen und die Verwaltung derselben STWEG).\n\nBitte wenden Sie sich an den Ausschuss falls Sie hier publizieren möchten.\n\nRosenweg Verteiler`,
         }, 'verteiler-bounce-not-allowed');
       } catch (e) { console.error('[Verteiler] Bounce-Mail fehler:', e.message); }
-      return { success: true, action: 'rejected', reason: 'sender not in allowed_sender_groups' };
+      return { success: true, action: 'rejected', reason: 'sender not allowed' };
     }
   }
 
@@ -10534,31 +10571,97 @@ app.get('/api/verteiler', authMiddleware, async (req, res) => {
 });
 
 // Get single Verteiler
+// Erlaubte Absender je gesperrtem Verteiler (Befund F1, lib/verteiler-gate.js).
+// Wirft, wenn Authentik oder Mailcow nicht antworten: eine Teilliste wuerde
+// berechtigte Absender abweisen, deshalb lieber gar keine neue Liste.
+async function verteilerGateLaden(verteilerZeilen) {
+  const { allGroups, allUsers } = await fetchAuthentikGroupsUsers();
+  const gruppe = (name) => resolveGroupEmailsFromData(String(name || ''), allGroups, allUsers);
+
+  const mb = await mailcowApi('GET', '/get/mailbox/all');
+  const postfaecher = (Array.isArray(mb) ? mb : [])
+    .map(x => String(x.username || '').toLowerCase())
+    .filter(u => u.endsWith(`@${VERTEILER_DOMAIN.toLowerCase()}`));
+  let mailcowDomains = [];
+  const dm = await mailcowApi('GET', '/get/domain/all');
+  mailcowDomains = (Array.isArray(dm) ? dm : []).map(x => String(x.domain_name || x.domain || '').toLowerCase()).filter(Boolean);
+  if (!mailcowDomains.length) throw new Error('Mailcow lieferte keine Domains');
+
+  const gateways = Object.values(gatewaysLesen()).map(g => g.user);
+  // Funktionsadressen von Technik/Präsident (z. B. technik@, praesident@): Verteiler
+  // ohne STWEG, deren Gruppen nur Technik/Präsident sind.
+  const funktion = new Set(['technik', 'präsident', 'praesident']);
+  const funktionsAdressen = verteilerZeilen
+    .filter(v => !parseInt(v.stweg, 10) && v.active !== false)
+    .filter(v => { const g = (v.group_names?.length ? v.group_names : (v.group_name ? [v.group_name] : [])).map(x => String(x).toLowerCase());
+                   return g.length > 0 && g.every(x => funktion.has(x)); })
+    .map(v => v.email_address);
+  const zusatz = String(process.env.VERTEILER_GATE_ALLE_LISTEN || '').split(',').map(s => s.trim()).filter(Boolean);
+
+  const pq = await pool.query(
+    `SELECT DISTINCT w.stweg, LOWER(TRIM(x.e)) AS email
+       FROM wohnungen_kontakte k
+       JOIN wohnungen w ON w.id = k.wohnung_id
+       LEFT JOIN personen p ON p.id = k.person_id
+       CROSS JOIN LATERAL (VALUES (k.email), (p.email)) AS x(e)
+      WHERE k.archiviert_am IS NULL AND w.stweg IS NOT NULL
+        AND x.e LIKE '%@%' AND LOWER(x.e) NOT LIKE 'druckerr%'`);
+  const personenJeStweg = new Map();
+  for (const r of pq.rows) {
+    const n = Number(r.stweg);
+    if (!personenJeStweg.has(n)) personenJeStweg.set(n, []);
+    personenJeStweg.get(n).push(r.email);
+  }
+
+  const vq = await pool.query(
+    `SELECT v.id, v.stweg, LOWER(TRIM(a.addr)) AS addr FROM verwaltungen v
+       CROSS JOIN LATERAL (
+         SELECT v.email AS addr
+         UNION ALL SELECT k.email FROM verwaltungs_kontakte k WHERE k.verwaltung_id = v.id
+       ) a
+      WHERE v.aktiv = true AND (v.vertrag_von IS NULL OR v.vertrag_von <= CURRENT_DATE)
+        AND (v.vertrag_bis IS NULL OR v.vertrag_bis >= CURRENT_DATE)
+        AND a.addr LIKE '%@%'`);
+  const jeVerwaltung = new Map();
+  for (const r of vq.rows) {
+    if (!jeVerwaltung.has(r.id)) jeVerwaltung.set(r.id, { stweg: r.stweg == null ? null : Number(r.stweg), adressen: [] });
+    jeVerwaltung.get(r.id).adressen.push(r.addr);
+  }
+
+  return verteilerGate.gateEintraege({
+    verteiler: verteilerZeilen, verteilerDomain: VERTEILER_DOMAIN, gruppe, personenJeStweg,
+    verwaltungen: [...jeVerwaltung.values()],
+    systemAdressen: [...postfaecher, ...gateways, MAIL_FROM, ...funktionsAdressen, ...zusatz],
+    eigeneDomains: mailcowDomains,
+  });
+}
+
 // GET /api/verteiler/mailcow-gate — Config fuer das rspamd-Pull-Script auf CT 240.
 // MUSS vor '/api/verteiler/:id' stehen, sonst matcht :id="mailcow-gate" (→ 401).
-// Liefert gated Aliase (external_allowed=false) + erlaubte Absender (alle Mailcow-Domains
-// + aktive Verwaltungs-Domains als Domains, Objektverwaltung als Einzel-Adressen).
+// version 2 (F1): `verteiler` = je gesperrtem Verteiler (external_allowed=false)
+// die erlaubten Absender-Adressen und -Domains (lib/verteiler-gate.js). Das
+// Skript baut daraus je Verteiler eine eigene rspamd-Regel.
+// ÜBERGANG: gated_aliases/allowed_domains/allowed_emails (alte, globale Liste) nur
+// fuer das alte Skript, bis mailcow-verteiler-gate.py auf CT 240 erneuert ist.
+// Danach die drei Felder und die beiden Abfragen unten entfernen.
 app.get('/api/verteiler/mailcow-gate', requireTrackerSecret, async (req, res) => {
   try {
-    const { rows } = await pool.query(
-      `SELECT email_address FROM email_verteiler WHERE active = true AND external_allowed = false`
-    );
-    const gated_aliases = rows
-      .map(r => String(r.email_address || '').toLowerCase())
-      .filter(a => a.endsWith(`@${VERTEILER_DOMAIN}`));
-    // Ohne Mailcow-Domains keine Teilliste ausliefern: das Gate-Skript uebernimmt die
-    // Liste ungeprueft, und rspamd wiese dann interne Absender (noreply@, technik@ …) ab.
-    // Bei Fehler 503 -> das Skript bricht ab und behaelt die bisherige Liste.
-    let mailcowDomains = [];
+    const { rows } = await pool.query(`SELECT * FROM email_verteiler WHERE active = true`);
+    let verteiler;
+    try {
+      verteiler = await verteilerGateLaden(rows);
+    } catch (e) {
+      // Bei Fehler 503 -> das Skript bricht ab und behaelt die bisherige Liste.
+      console.warn('[mailcow-gate]', e.message);
+      return res.status(503).json({ error: 'Gate-Daten nicht vollstaendig abrufbar' });
+    }
+    const gated_aliases = verteiler.map(v => v.address).sort();
+    // ÜBERGANG (altes Skript): globale Listen wie bisher.
+    const mailcowDomains = [];
     try {
       const d = await mailcowApi('GET', '/get/domain/all');
-      mailcowDomains = (Array.isArray(d) ? d : [])
-        .map(x => String(x.domain_name || x.domain || '').toLowerCase()).filter(Boolean);
-    } catch (e) {
-      console.warn('[mailcow-gate] domain/all:', e.message);
-      return res.status(503).json({ error: 'Mailcow-Domains nicht abrufbar' });
-    }
-    if (!mailcowDomains.length) return res.status(503).json({ error: 'Mailcow lieferte keine Domains' });
+      (Array.isArray(d) ? d : []).forEach(x => { const n = String(x.domain_name || x.domain || '').toLowerCase(); if (n) mailcowDomains.push(n); });
+    } catch { return res.status(503).json({ error: 'Mailcow-Domains nicht abrufbar' }); }
     mailcowDomains.push(VERTEILER_DOMAIN.toLowerCase());
     const vq = await pool.query(
       `SELECT DISTINCT LOWER(SPLIT_PART(addr, '@', 2)) AS domain FROM (
@@ -10571,17 +10674,13 @@ app.get('/api/verteiler/mailcow-gate', requireTrackerSecret, async (req, res) =>
             AND (v.vertrag_bis IS NULL OR v.vertrag_bis >= CURRENT_DATE) AND k.email IS NOT NULL AND k.email <> ''
        ) s WHERE addr LIKE '%@%'`
     );
-    const verwaltungDomains = vq.rows.map(r => r.domain).filter(Boolean);
-    const allowed_domains = [...new Set([...mailcowDomains, ...verwaltungDomains])].sort();
-    const eq = await pool.query(
-      `SELECT DISTINCT LOWER(email) AS email FROM (
-         SELECT email FROM personen WHERE email IS NOT NULL AND email <> ''
-         UNION ALL
-         SELECT email FROM wohnungen_kontakte WHERE email IS NOT NULL AND email <> ''
-       ) s WHERE email LIKE '%@%'`
-    );
-    const allowed_emails = eq.rows.map(r => r.email).filter(Boolean).sort();
-    res.json({ gated_aliases: gated_aliases.sort(), allowed_domains, allowed_emails, generated_at: new Date().toISOString() });
+    const allowed_domains = [...new Set([...mailcowDomains, ...vq.rows.map(r => r.domain).filter(Boolean)])].sort();
+    const allowed_emails = [...new Set(verteiler.flatMap(v => v.emails))].sort();
+    res.json({
+      version: 2, verteiler,
+      gated_aliases, allowed_domains, allowed_emails,
+      generated_at: new Date().toISOString(),
+    });
   } catch (err) {
     console.error('[mailcow-gate]', err.message);
     res.status(500).json({ error: 'Fehler' });
@@ -10704,18 +10803,19 @@ app.post('/api/verteiler', authMiddleware, adminOnly, async (req, res) => {
 
 // Update Verteiler
 app.put('/api/verteiler/:id', authMiddleware, adminOnly, async (req, res) => {
-  const { stweg, name, email_address, members, active, reply_to, subject_prefix, group_name, group_names, allowed_sender_groups,
-          whatsapp_group_id, whatsapp_group_name, external_allowed } = req.body;
   try {
-    const groups = group_names?.length ? group_names : (group_name ? [group_name] : []);
-    const allowedSenders = Array.isArray(allowed_sender_groups) ? allowed_sender_groups : [];
+    // L4: fehlende Felder behalten ihren Wert (frueher: members geleert, active=true, stweg=null).
+    const alt = (await pool.query('SELECT * FROM email_verteiler WHERE id = $1', [req.params.id])).rows[0];
+    if (!alt) return res.status(404).json({ error: 'Nicht gefunden' });
+    const n = verteilerVerwaltung.verteilerAenderung(alt, req.body || {});
+    if (!n.name || !n.email_address) return res.status(400).json({ error: 'Name und Email-Adresse erforderlich' });
     const result = await pool.query(
       `UPDATE email_verteiler SET stweg=$1, name=$2, email_address=$3, members=$4, active=$5,
               reply_to=$6, subject_prefix=$7, group_name=$8, group_names=$9, allowed_sender_groups=$10,
               whatsapp_group_id=$11, whatsapp_group_name=$12, external_allowed=$13
        WHERE id=$14 RETURNING *`,
-      [stweg, name, email_address, JSON.stringify(members || []), active !== false, reply_to || 'sender', subject_prefix || null, groups[0] || null, JSON.stringify(groups), JSON.stringify(allowedSenders),
-       whatsapp_group_id || null, whatsapp_group_name || null, external_allowed === true,
+      [n.stweg, n.name, n.email_address, JSON.stringify(n.members), n.active, n.reply_to, n.subject_prefix, n.group_name, JSON.stringify(n.group_names), JSON.stringify(n.allowed_sender_groups),
+       n.whatsapp_group_id, n.whatsapp_group_name, n.external_allowed,
        req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
@@ -14465,7 +14565,7 @@ async function findVerwaltungForStweg(stweg) {
 // freigegeben werden. Inhalt ist in der Queue editierbar.
 
 async function enqueueVerwaltungMail({
-  source_type, source_id, mailTo, mailCc, mailBcc, mailReplyTo, mailFrom, subject, bodyText, attachments, createdBy,
+  source_type, source_id, mailTo, mailCc, mailBcc, mailReplyTo, mailFrom, subject, bodyText, attachments, createdBy, createdById,
 }) {
   const toStr = Array.isArray(mailTo) ? mailTo.join(', ') : String(mailTo || '');
   const ccStr = Array.isArray(mailCc) ? mailCc.join(', ') : (mailCc ? String(mailCc) : null);
@@ -14480,10 +14580,12 @@ async function enqueueVerwaltungMail({
   }));
   const r = await pool.query(
     `INSERT INTO verwaltung_mail_queue
-       (source_type, source_id, mail_to, mail_cc, mail_bcc, mail_reply_to, mail_from, subject, body_text, attachments, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)
+       (source_type, source_id, mail_to, mail_cc, mail_bcc, mail_reply_to, mail_from, subject, body_text, attachments, created_by, created_by_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11,
+             COALESCE($12::int, (SELECT id FROM users WHERE LOWER(email) = LOWER($11::text) LIMIT 1)))
      RETURNING id`,
-    [source_type, source_id || null, toStr, ccStr, bccStr, mailReplyTo || null, mailFrom || null, subject, bodyText, JSON.stringify(attMeta), createdBy || null],
+    [source_type, source_id || null, toStr, ccStr, bccStr, mailReplyTo || null, mailFrom || null, subject, bodyText, JSON.stringify(attMeta), createdBy || null,
+     Number.isFinite(parseInt(createdById, 10)) ? parseInt(createdById, 10) : null],
   );
   const queueId = r.rows[0].id;
   // Real Attachments in separate Tabelle
@@ -16177,7 +16279,17 @@ app.get(encodeURI('/api/mail-empfänger'), authMiddleware, requirePermission('ma
     const params = [];
     let where = 'TRUE';
     if (kategorie) { params.push(kategorie); where += ` AND kategorie = $${params.length}`; }
-    if (Number.isFinite(stwegFilter)) { params.push(stwegFilter); where += ` AND (stweg = $${params.length} OR stweg IS NULL)`; }
+    // F6: Ausschuss und Verwaltung sehen nur Eintraege ihrer STWEG(s) und die
+    // STWEG-uebergreifenden (stweg NULL); Technik/Präsident alles.
+    const g = req.user?.groups || [];
+    if (!(isTechnik(g) || isPraesident(g))) {
+      const eigene = [...new Set([...getAusschussStwegs(g), ...verwaltungStwegs(g)])];
+      if (Number.isFinite(stwegFilter) && !eigene.includes(stwegFilter)) {
+        return res.status(403).json({ error: 'Keine Berechtigung für diese STWEG' });
+      }
+      params.push(Number.isFinite(stwegFilter) ? [stwegFilter] : eigene);
+      where += ` AND (stweg = ANY($${params.length}::int[]) OR stweg IS NULL)`;
+    } else if (Number.isFinite(stwegFilter)) { params.push(stwegFilter); where += ` AND (stweg = $${params.length} OR stweg IS NULL)`; }
     const r = await pool.query(
       `SELECT * FROM mail_empfaenger WHERE ${where} ORDER BY aktiv DESC, kategorie, stweg NULLS FIRST, name`,
       params,
@@ -16707,6 +16819,7 @@ app.post('/api/mail-compose', authMiddleware, requirePermission('mail-compose', 
         bodyText: String(b.body_text).slice(0, 100000),
         attachments,
         createdBy: req.user.email,
+        createdById: req.user.id || req.user.user_id || null,
       });
       res.json({ ok: true, queued: true, queue_id: queueId, firma, requires_approval: true });
     } else {
@@ -19108,7 +19221,7 @@ async function mailsZurFreigabe(user, seit) {
     `SELECT q.id, q.source_type, q.source_id, q.mail_to, q.mail_cc, q.mail_reply_to,
             CASE WHEN q.mail_bcc IS NULL OR q.mail_bcc = '' THEN 0
                  ELSE array_length(string_to_array(q.mail_bcc, ','), 1) END AS bcc_count,
-            q.subject, q.created_by, q.created_at, q.edited_by, q.edited_at,
+            q.subject, q.created_by, q.created_by_id, q.created_at, q.edited_by, q.edited_by_id, q.edited_at,
             LEFT(COALESCE(q.body_text, ''), 280) AS vorschau,
             COALESCE((SELECT COUNT(*) FROM verwaltung_mail_attachments a WHERE a.queue_id = q.id),
                      jsonb_array_length(COALESCE(q.attachments, '[]'::jsonb))) AS attachment_count,
@@ -19123,6 +19236,7 @@ async function mailsZurFreigabe(user, seit) {
   const alle = [];
   for (const m of r.rows) {
     if (m.von_mir) continue;
+    if (vierAugen.selbstfreigabe(user, m)) continue; // F2: eigene Mails gibt eine andere Person frei
     const rule = await getApprovalRuleForQueueItem(m);
     if (!userHasAnyGroup(user, rule.required_groups)) continue;
     const { von_mir, ...rest } = m;
@@ -19264,6 +19378,7 @@ app.put('/api/verwaltung-mail-queue/:id', authMiddleware, ...mailQueueSchreibend
     }
     push('original_snapshot', JSON.stringify(snapshot));
     push('edited_by', req.user.email);
+    push('edited_by_id', req.user.id || req.user.user_id || null);
     push('edited_at', new Date());
     params.push(id);
     const r = await client.query(
@@ -19307,6 +19422,13 @@ app.post('/api/verwaltung-mail-queue/:id/freigeben', authMiddleware, kartenAdmin
     if (!userHasAnyGroup(req.user, rule.required_groups)) {
       await client.query('ROLLBACK');
       return res.status(403).json({ error: `Freigabe erfordert eine der Gruppen: ${rule.required_groups}` });
+    }
+    // F2: Ersteller bzw. letzter Bearbeiter gibt nicht selbst frei – auch nicht
+    // Technik/Präsident (Konto-ID, lib/vier-augen.js).
+    const selbst = vierAugen.selbstfreigabe(req.user, cur.rows[0]);
+    if (selbst) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: vierAugen.MELDUNG[selbst], vier_augen: selbst });
     }
     // Approval logen (UNIQUE constraint verhindert Doppel-Freigabe vom gleichen User)
     try {
@@ -31972,6 +32094,31 @@ async function initDB() {
       -- Empfaenger bleiben untereinander verborgen. mail_to traegt eine sichtbare
       -- Adresse (z.B. ausschuss@), mail_bcc die eigentliche Kundenliste.
       ALTER TABLE verwaltung_mail_queue ADD COLUMN IF NOT EXISTS mail_bcc TEXT;
+      -- F2 Vier-Augen-Prinzip: Ersteller und letzter Bearbeiter als Konto-ID (users.id),
+      -- damit Freigeber != Ersteller sicher verglichen wird (lib/vier-augen.js).
+      ALTER TABLE verwaltung_mail_queue ADD COLUMN IF NOT EXISTS created_by_id INTEGER;
+      ALTER TABLE verwaltung_mail_queue ADD COLUMN IF NOT EXISTS edited_by_id INTEGER;
+      -- F1 (Entscheid Stefan 28.11.2026): an eigentuemer@ und eigentuemer-direkt@
+      -- schreiben nur Ausschuss und Verwaltung (dazu immer Technik/Präsident, siehe
+      -- lib/verteiler-gate.js). Einmalig; spaetere Aenderungen in der Verwaltung bleiben.
+      CREATE TABLE IF NOT EXISTS verteiler_migrationen (name VARCHAR(100) PRIMARY KEY, am TIMESTAMPTZ DEFAULT NOW());
+      WITH neu AS (
+        INSERT INTO verteiler_migrationen (name) VALUES ('2026-11-eigentuemer-absender')
+        ON CONFLICT (name) DO NOTHING RETURNING name
+      )
+      UPDATE email_verteiler SET allowed_sender_groups = '["ausschuss", "Verwaltung"]'::jsonb
+       WHERE EXISTS (SELECT 1 FROM neu)
+         AND (LOWER(email_address) LIKE 'eigentuemer@%' OR LOWER(email_address) LIKE 'eigentuemer-direkt@%');
+      -- L11: Idempotenz fuer POST /api/verteiler/send (Schluessel je Konto, 24 h).
+      CREATE TABLE IF NOT EXISTS verteiler_send_idempotenz (
+        konto VARCHAR(255) NOT NULL,
+        schluessel VARCHAR(128) NOT NULL,
+        fingerabdruck CHAR(64) NOT NULL,
+        status_code INTEGER,
+        antwort JSONB,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (konto, schluessel)
+      );
 
       -- M7: Separate Tabelle für Mail-Attachments. Inline-base64 in JSONB skaliert
       -- nicht (20 MB Anhang × 100 Mails = 2 GB Tabelle). Hier nur Metadaten +
