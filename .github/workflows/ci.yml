@@ -20,6 +20,7 @@ jobs:
 
   syntax-check:
     runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    timeout-minutes: 20
     needs: wahl
     steps:
       - uses: actions/checkout@v4
@@ -55,7 +56,8 @@ jobs:
         run: npm install --prefix api --no-save --no-package-lock --omit=dev castv2@0.1.10 qrcode@1.5.4
 
       - name: API-Tests ohne Datenbank (node --test api/test/)
-        run: node --test api/test/
+        # --test-force-exit: offene Timer (lib/auth.js u.a.) hielten den Lauf sonst ewig offen
+        run: node --test --test-force-exit api/test/
 
       - name: Kontakte-Sync (Verzeichnis ohne echte Nummern)
         run: python3 -m unittest discover -s contacts-sync -v
@@ -83,6 +85,7 @@ jobs:
   kerberos-pruefer:
     # Prueft Kerberos-Tickets der Agent-Anmeldung (api/kerberos-pruefer, Protokoll v2)
     runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    timeout-minutes: 15
     needs: wahl
     defaults:
       run:
@@ -100,6 +103,7 @@ jobs:
     # Endpunkt des adb-Tunnels der geteilten Telefone (pbx/adb-zentrale): Format, vet, Tests
     # mit echtem WireGuard-Handshake (Netzstapel im Prozess, kein Root noetig), Skripte
     runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    timeout-minutes: 15
     needs: wahl
     defaults:
       run:
@@ -118,6 +122,7 @@ jobs:
   edge-plugin:
     # Eigenes Traefik-Plugin (edge-traefik/plugins/echteip): Format, vet, Tests
     runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    timeout-minutes: 15
     needs: wahl
     defaults:
       run:

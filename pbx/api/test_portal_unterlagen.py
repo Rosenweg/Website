@@ -1,4 +1,4 @@
-"""Rosenweg Unterlagen auf geteilten Telefonen (Entscheid E10 28.11.2026): nur lesen,
+"""Rosenweg Unterlagen auf geteilten Telefonen (Entscheid 28.11.2026: wie am eigenen Geraet),
 Dateien stueckweise ueber den Portal-Weg (portal_bereich -> Range, Antwort als JSON
 mit base64). Die Haupt-API ist eine Attrappe; es geht nichts ins Netz.
 
@@ -72,18 +72,20 @@ class PortalUnterlagenTest(unittest.TestCase):
     def _portal(self, methode, pfad, koerper=None):
         return self.client.post("/api/telefon/portal", json={"methode": methode, "pfad": pfad, "paket": PAKET, "koerper": koerper})
 
-    def test_nur_lesen_freigegeben(self):
+    def test_alles_freigegeben_ausser_ausweise(self):
         r = pbx.PORTAL_PFADE_STANDARD
         for m, p in [("GET", "/api/documents"), ("GET", "/api/documents/stweg3/bewohner/a.pdf"),
-                     ("GET", "/api/documents-ordner"), ("GET", "/api/documents-suche"), ("GET", "/api/documents-neu"),
-                     ("GET", "/api/documents-rechte"), ("GET", "/api/documents-kennung/abcdefghijkl"),
-                     ("GET", "/api/documents-fassungen"), ("GET", "/api/documents-fassungen/3/datei"),
-                     ("POST", "/api/documents-preview")]:
-            self.assertTrue(pbx._portal_erlaubt(r, PAKET, m, p), (m, p))
-        for m, p in [("PUT", "/api/documents/stweg3/a.pdf"), ("DELETE", "/api/documents/stweg3/a.pdf"),
+                     ("PUT", "/api/documents/stweg3/a.pdf"), ("DELETE", "/api/documents/stweg3/a.pdf"),
                      ("POST", "/api/documents/move"), ("POST", "/api/documents/folder"),
                      ("GET", "/api/documents-papierkorb"), ("POST", "/api/documents-papierkorb/3/wiederherstellen"),
-                     ("GET", "/api/salz/stand")]:
+                     ("GET", "/api/salz/stand"), ("GET", "/api/auth/me"), ("POST", "/api/projects/dach/timeline")]:
+            self.assertTrue(pbx._portal_erlaubt(r, PAKET, m, p), (m, p))
+        for m, p in [("POST", "/api/change-password"), ("GET", "/api/me/tokens"), ("POST", "/api/me/tokens"),
+                     # PUT auth/profile ist seit 28.11.2026 frei (PORTAL_AUSNAHMEN), POST bleibt zu
+                     ("DELETE", "/api/me/tokens/3"), ("POST", "/api/me/passkeys"), ("POST", "/api/auth/profile"),
+                     ("POST", "/api/auth/login"), ("GET", "/api/Change-Password/"), ("POST", "/api//me//tokens"),
+                     ("POST", "/api/%63hange-password"), ("POST", "/api/mqtt/my-app-passwords"),
+                     ("POST", "/api/mqtt/user-app-passwords/3")]:
             self.assertFalse(pbx._portal_erlaubt(r, PAKET, m, p), (m, p))
 
     def test_bereich_lesen(self):
@@ -95,6 +97,7 @@ class PortalUnterlagenTest(unittest.TestCase):
         self.assertIs(pbx._portal_bereich(f"/api/documents/a.pdf?portal_bereich=0-{pbx.PORTAL_BINAER_TEIL}")[1], False)
         gross = pbx.PORTAL_BINAER_MAX
         self.assertIs(pbx._portal_bereich(f"/api/documents/a.pdf?portal_bereich={gross - 10}-{gross + 10}")[1], False)
+        self.assertEqual(gross, 64 * 1024 * 1024)
 
     def test_stueck_als_base64(self):
         daten = bytes(range(256)) * 4
@@ -133,9 +136,16 @@ class PortalUnterlagenTest(unittest.TestCase):
         self.assertEqual(json.loads(r.get_json()["json"]), {"pfad": "", "ordner": []})
         self.assertNotIn("Range", self.anfragen[0][2])
 
-    def test_schreiben_abgelehnt(self):
-        with self._haupt(_Antwort(200, b"{}", {})):
+    def test_schreiben_geht_zur_haupt_api(self):
+        with self._haupt(_Antwort(200, b"{}", {"Content-Type": "application/json"})):
             r = self._portal("PUT", "/api/documents/stweg3/a.pdf", "{}")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(self.anfragen), 1)
+        self.assertIn("Bearer ", self.anfragen[0][2]["Authorization"])
+
+    def test_ausweis_aendern_abgelehnt(self):
+        with self._haupt(_Antwort(200, b"{}", {})):
+            r = self._portal("POST", "/api/change-password", "{}")
         self.assertEqual(r.status_code, 403)
         self.assertEqual(self.anfragen, [])
 

@@ -432,13 +432,19 @@ Kein Token verlässt CT 220. Antwort an die App: `{status, json, sitzung}`;
 
 - Einrichten: `PORTAL_ANLAGE_SECRET` mit demselben Wert in `/etc/default/pbx-api`
   und `/opt/rosenweg-core/.env`.
-- Freigaben: Config `portal_pfade` (PUT `/api/pbx/config`), JSON
-  `{"*": ["GET /api/auth/me", "GET /api/me"], "ch.rosenweg4303.salz": ["/api/salz/"],
-  "ch.rosenweg4303.clock": ["GET,PUT /api/me/app-daten/ch.rosenweg4303.clock"]}`
-  (Uhr: Wecker/Weltuhren/Timer der Person, `api/routes/app-daten.js`; TV: `ch.rosenweg4303.tv` darf `GET /api/tv/channels`, `jetzt`, `epg`, `stream-url/` – keine Ferien-Zugänge). Ist die Config
-  gesetzt, ersetzt sie den Standard ganz — neue Einträge dann auch dort nachtragen.
-  Endet ein Eintrag auf `/`, gilt alles darunter; davor optional Methoden
-  (`GET,PUT /api/...`). Ohne Config gilt `PORTAL_PFADE_STANDARD` in `app.py`.
+- Freigaben (Entscheid Stefan 28.11.2026: Karte, QR und Handy sind wie ein Schlüssel): jede
+  Rosenweg-App erreicht alles unter `/api/` wie am eigenen Gerät; die Haupt-API prüft die Rechte der
+  Person. Nie (`PORTAL_GESPERRT` in `app.py`, wie `PAT_GESPERRT`): Passwort, `me/tokens`, `me/passkeys`,
+  `auth/*` (ausser `GET auth/me`, `PORTAL_AUSNAHMEN`), MQTT-Zugangsdaten. Die Config `portal_pfade` (PUT
+  `/api/pbx/config`, JSON `{"*": [...], "<paket>": [...]}`) ersetzt nur die Standardliste
+  `PORTAL_PFADE_STANDARD = {"*": ["/api/"]}`; die Sperren gelten immer. Eintrag auf `/` = alles darunter,
+  davor optional Methoden (`GET,PUT /api/...`).
+- Dateien: Herunterladen in Stücken (`portal_bereich=<von>-<bis>`, 320 KB, base64 in JSON). Hochladen
+  in Stücken (`teil` in der Portal-Anfrage): `{id, nr, anzahl, gesamt, kopf (nur nr 0)}` und das Stück
+  als base64 in `koerper` (höchstens 180 KB). Die Anlage legt die Stücke ab (ein Upload je Telefon,
+  Frist 15 min, Person und Reihenfolge werden geprüft) und stellt beim letzten Stück EINE Anfrage an die
+  Haupt-API; Zwischenantwort `202 {"teil": nr}`. Höchstens 64 MB (`PORTAL_BINAER_MAX`), Rosenweg Gerät
+  erlaubt 300 Anfragen je Minute.
 - Grenzen: Anfrage 256 KiB, Antwort 512 KiB (Binder).
 
 ## Anpassung

@@ -239,11 +239,10 @@ test('E: Signieren per PAT/MCP bleibt aus, Konto braucht weiter "frisch"', () =>
   assert.equal(st.signierenErlaubt({ stufe: 'frisch', art: 'website' }), true);
 });
 
-test('Portal-Pfade der geteilten Telefone (PBX)', () => {
+test('Portal der geteilten Telefone (PBX): Profil und Bild als Ausnahmen der Sperrliste', () => {
   const py = lies('pbx/api/app.py');
-  assert.match(py, /"ch\.rosenweg4303\.meintelefon": \[[^\]]*"POST \/api\/apps\/qr-ausweis", "GET \/api\/apps\/qr-ausweis\/"\]/);
-  const profil = py.match(/"ch\.rosenweg4303\.profil": \[([^\]]*)\]/)[1];
-  assert.match(profil, /"PUT \/api\/auth\/profile", "PUT \/api\/auth\/avatar"/);
-  assert.doesNotMatch(profil, /change-password|me\/tokens|ssh|passkeys|mqtt/);
-  assert.match(py, /"ch\.rosenweg4303\.vollmachten": \["GET \/api\/vollmachten", "GET,POST,PUT,DELETE \/api\/vollmachten\/"/);
+  // seit #255: jede Rosenweg-App erreicht /api/, gesperrt bleibt PORTAL_GESPERRT
+  assert.match(py, /PORTAL_PFADE_STANDARD = \{"\*": \["\/api\/"\]\}/);
+  assert.match(py, /PORTAL_AUSNAHMEN = \(\("GET", "auth\/me"\), \("PUT", "auth\/profile"\), \("PUT", "auth\/avatar"\)\)/);
+  assert.match(py, /PORTAL_GESPERRT = \("change-password", "me\/tokens", "me\/passkeys", "auth",/);
 });

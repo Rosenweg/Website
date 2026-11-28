@@ -72,6 +72,8 @@
     .modal .grid { stroke: rgba(255,255,255,.09); stroke-width: 1; }
     .modal .ax { stroke: rgba(255,255,255,.3); stroke-width: 1; }
     .modal .tl { fill: rgba(255,255,255,.7); font-size: 11px; }
+    .ersatz { background: rgba(250,204,21,.18); border: 1px solid rgba(250,204,21,.7); color: #fff; border-radius: 12px; padding: .6rem .8rem; margin: .8rem 0; font-size: .88rem; line-height: 1.4; }
+    .ersatz[hidden] { display: none; }
     .foot { text-align: center; opacity: .8; font-size: .8rem; margin-top: 1.6rem; line-height: 1.6; }
   </style>
 </head>
@@ -85,6 +87,8 @@
       </div>
       <div id="conn" class="conn"><span class="dot"></span><span id="conn-t">…</span></div>
     </div>
+
+    <div id="ersatz" class="ersatz" role="status" hidden></div>
 
     <div class="clock">
       <div class="ct" id="clock-t">–</div>
@@ -120,7 +124,7 @@
     <div class="hint">↦ Diagramm antippen für Vollansicht mit Skalen</div>
     <div class="charts" id="charts"></div>
 
-    <div class="foot">Live via MQTT <span id="last"></span> · Verlauf jede Minute<br>Rosenweg 9 · öffentlich · berechnete Werte ohne Gewähr</div>
+    <div class="foot">Live via MQTT <span id="last"></span> · Verlauf jede Minute<span id="ersatz-foot"></span><br>Rosenweg 9 · öffentlich · berechnete Werte ohne Gewähr</div>
   </div>
 
   <div class="modal" id="modal">
@@ -394,6 +398,7 @@
   }
 
   function onMessage(topic, payload) {
+    if (ersatzAktiv && typeof payload !== 'string') return; // Ersatz laeuft: Live-Werte der ausgefallenen Station ignorieren
     const field = String(topic).split('/').pop();
     const raw = payload.toString().trim();
     let num = Number(raw);
@@ -419,6 +424,26 @@
     if (field === 'outdoortemp') $('hero-sub').textContent = 'Aussentemperatur' + (num >= 25 ? ' · warm 🥵' : num <= 3 ? ' · kalt 🥶' : '');
     $('last').textContent = '· Stand ' + new Date().toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
     recompute();
+  }
+
+  /* ===== Ersatzwerte: faellt die Station aus, liefert die API MeteoSchweiz-Werte ===== */
+  let ersatzAktiv = false;
+  function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+  async function pollAktuell() {
+    try {
+      const r = await fetch('/api/wetter/r9/aktuell', { cache: 'no-store' });
+      if (!r.ok) return;
+      const a = await r.json(), box = $('ersatz');
+      ersatzAktiv = a.zustand === 'ersatz' && !!a.quelle;
+      if (!ersatzAktiv) { box.hidden = true; return; }
+      const q = a.quelle, stand = new Date(q.stand).toLocaleString('de-CH', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      box.innerHTML = '<b>Ersatzwerte: MeteoSchweiz, Station ' + esc(q.name || q.station) + ' (' + esc(q.station) + '), Stand ' + esc(stand) + '.</b> '
+        + 'Die eigene Wetterstation liefert zurzeit keine brauchbaren Werte. Die Werte stammen aus der Messung einer Station '
+        + (q.abstand_km ? 'rund ' + Math.round(q.abstand_km) + ' km ' : '') + 'entfernt und weichen deshalb ab. '
+        + 'Quelle: <a href="https://opendata.swiss/de/organization/bundesamt-fur-meteorologie-und-klimatologie-meteoschweiz" style="color:#fff" target="_blank" rel="noopener">MeteoSchweiz</a>.';
+      box.hidden = false;
+      Object.keys(a.werte || {}).forEach((f) => { if (a.werte[f] != null && f !== 'sonnenschein_min') onMessage('wetter/r9/' + f, String(a.werte[f])); });
+    } catch (e) { /* offline: Anzeige bleibt */ }
   }
 
   /* ===== 24h-Verlaeufe (public History-Endpoint -> Inline-SVG-Sparklines) ===== */
@@ -575,6 +600,8 @@
     setInterval(updateClock, 1000); // Uhr jede Sekunde
     updateAstro();
     setInterval(updateAstro, 60000); // Sonne/Mond jede Minute
+    pollAktuell();
+    setInterval(pollAktuell, 60000);
     loadHistory();
     setInterval(loadHistory, 60000); // Verlauf jede Minute nachladen
     connect();

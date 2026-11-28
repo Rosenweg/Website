@@ -168,19 +168,19 @@ Technik sie auf /smartphones gesetzt hat. Erster Eintrag also: Zeile auf /smartp
   (`wasch_rooms`), ihre drei Gruppen hier dazunehmen. Die Hausverwaltung (`stwegN-verwaltung`)
   darf nur lesen und meldet sich an geteilten Telefonen nicht an. `portal_pfade` `/api/wasch/`;
   Räume, STWEG und das Recht „waschküche-admin“ prüft die Haupt-API selbst.
-- **Projekte:** Auf geteilten Telefonen lesen und kommentieren, nach der Kartenanmeldung (Entscheid P11,
-  28.11.2026): kein Hochladen, Anlegen, Bearbeiten oder Löschen. `portal_pfade` `/api/projects` (nur GET),
-  `/api/projects/` (alles darunter; die Haupt-API lehnt jede Änderung am Projekt bei einem Anlage-Token ab,
-  nur Kommentare der Person gehen) und lesend `/api/documents/` für die Vorschau. Welche Projekte die Person
-  sieht, prüft die Haupt-API je Projekt (eigene STWEG und Kooperation).
+- **Projekte:** Auf geteilten Telefonen dieselben Rechte wie am eigenen Gerät (28.11.2026, ersetzt P11): lesen,
+  kommentieren, bearbeiten, Dateien. Welche Projekte die Person sieht und bearbeiten darf, prüft die Haupt-API
+  je Projekt (eigene STWEG und Kooperation); das Löschen bleibt Technik/Präsident.
 - **Zutritt:** Seit dem ersten Release (1.0.0) aktiv; die APK kam von selbst in die vorbereitete Zeile.
-- **Karte wie Schlüssel (28.11.2026, `docs/sicherheit.md` 4.11):** `portal_pfade` neu für
-  **Mein Telefon** `POST /api/apps/qr-ausweis` und `GET /api/apps/qr-ausweis/` (App-QR für das eigene
-  Handy, protokolliert, Mail beim Einlösen); **Profil** die eigenen Angaben lesen sowie
-  `PUT /api/auth/profile`, `PUT /api/auth/avatar`, weitere Nummern, E-Mail-Aliase, WhatsApp und
-  Desktop-Stil (kein Passwort, keine SSH-Schlüssel, keine Tokens); **Vollmachten** `/api/vollmachten` und alles darunter — digital
-  signiert wird nur nach erneuter Karte oder einem Anmelde-QR aus dem Rosenweg-Konto
-  (`POST /api/vollmachten/<id>/sign-bestaetigung`, gilt 2 Minuten, nur diese Vollmacht).
+- **Karte wie Schlüssel (28.11.2026, `docs/sicherheit.md` 4.11):** Seit #255 erreicht jede Rosenweg-App
+  alles unter `/api/`; gesperrt bleibt `PORTAL_GESPERRT`. Neu als Ausnahmen (`PORTAL_AUSNAHMEN`, wie
+  `KARTE_FREI` in `api/lib/sperrliste.js`): `PUT /api/auth/profile` und `PUT /api/auth/avatar` (Profil-Angaben
+  und Profilbild, protokolliert). Mein Telefon stellt den App-QR für das eigene Handy aus (protokolliert,
+  Mail beim Einlösen). Vollmachten signiert nur nach erneuter Karte oder einem Anmelde-QR aus dem
+  Rosenweg-Konto (`POST /api/vollmachten/<id>/sign-bestaetigung`, 2 Minuten, nur diese Vollmacht).
+  Die Anlage merkt sich die Anzeige-ID der Karte an der Sitzung (`telefon_sitzungen.karte`) und gibt sie
+  im Anlage-Token mit (`karte`); so meldet die Haupt-API einen App-QR vom geteilten Telefon ab, wenn die
+  Karte entzogen wird.
 
 ## Wartung per USB
 
@@ -628,3 +628,11 @@ Rosenweg Telefon ohne Rosenweg Gerät (eigenes Handy) registriert sich über **T
 - **pbx-api:** `PBX_SIP_TRANSPORT_PRIVAT` (Vorgabe `tls`) bestimmt Transport und Port der eigenen Handys; geteilte Telefone bleiben bei `PBX_SIP_TRANSPORT`.
 - **`POST /api/telefon/privat/stand`** `{user, password}`: Rosenweg Telefon fragt regelmäßig nach. 200 = aktuelle Zugangsdaten (so kommt auch der Wechsel auf TLS aufs Handy), 401 = Zugang gibt es nicht mehr (im Web auf /smartphones abgemeldet) → die App meldet sich ab und fragt nicht weiter.
 - Sprache (RTP) ist noch unverschlüsselt; SRTP ist ein eigener Schritt.
+
+## Freigaben und Dateien (28.11.2026)
+
+Alle Rosenweg-Apps erreichen auf geteilten Telefonen alles unter `/api/` wie am eigenen Gerät
+(`PORTAL_PFADE_STANDARD`); gesperrt bleiben nur Passwort, Zugangstoken, Passkeys, MQTT-Zugang und die
+Anmelde-Wege von `auth/` (`PORTAL_GESPERRT`). Einzelne ältere Absätze oben, die „nur lesen“ oder
+bestimmte `portal_pfade` nennen, gelten damit nicht mehr. Dateien gehen in Stücken (Download 320 KB,
+Upload 180 KB), bis 64 MB. Siehe `pbx/README.md`.
