@@ -21,6 +21,11 @@ test('assetlinks.json: nur Apps aus dem Register, Rosenweg-Schluessel', () => {
     for (const f of e.target.sha256_cert_fingerprints) assert.match(f, /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/);
   }
   assert.ok(links.some((e) => e.target.package_name === 'ch.rosenweg4303.reparatur'));
+  // Rosenweg ZEV: zev-meine-rechnungen.html (Link aus Rosenweg Energie), gleicher Schluessel
+  const zev = links.find((e) => e.target.package_name === 'ch.rosenweg4303.zev');
+  const rep = links.find((e) => e.target.package_name === 'ch.rosenweg4303.reparatur');
+  assert.ok(zev);
+  assert.deepEqual(zev.target.sha256_cert_fingerprints, rep.target.sha256_cert_fingerprints);
 });
 
 test('nginx der PWA liefert /.well-known/*.json aus', () => {

@@ -1,9 +1,23 @@
 [
   {
-    "relation": ["delegate_permission/common.handle_all_urls"],
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
     "target": {
       "namespace": "android_app",
       "package_name": "ch.rosenweg4303.reparatur",
+      "sha256_cert_fingerprints": [
+        "7B:3B:AC:26:E8:2B:61:03:54:6B:96:86:1D:CF:1B:B8:9B:32:39:42:4F:F1:1F:DF:68:49:75:CF:78:C5:A5:AE"
+      ]
+    }
+  },
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "ch.rosenweg4303.zev",
       "sha256_cert_fingerprints": [
         "7B:3B:AC:26:E8:2B:61:03:54:6B:96:86:1D:CF:1B:B8:9B:32:39:42:4F:F1:1F:DF:68:49:75:CF:78:C5:A5:AE"
       ]
