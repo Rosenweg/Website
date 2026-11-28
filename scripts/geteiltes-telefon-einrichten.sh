@@ -189,6 +189,17 @@ if a shell pm path ch.rosenweg4303.messages >/dev/null 2>&1; then
 else
   echo "später   Rosenweg Messenger noch nicht installiert (Katalog) — Skript danach nochmals laufen lassen"
 fi
+# Kontakte/Kalender gleichen mit der Nextcloud ab: ohne Ausnahme sperrt Android ihnen im Ruhemodus
+# das Netz (XCover 27.11.2026: netpolicy blocked=DOZE|APP_STANDBY, Bucket 50). Ab Gerät v247 zieht
+# Rosenweg Gerät das selbst nach (Ausblenden nimmt die Ausnahme weg).
+for p in ch.rosenweg4303.contacts ch.rosenweg4303.calendar; do
+  if a shell pm list packages "$p" 2>/dev/null | grep -q "package:$p\$"; then
+    schritt "Akku-Optimierung aus ($p: Abgleich mit der Nextcloud)" a shell dumpsys deviceidle whitelist +$p
+    schritt "Standby-Bucket aktiv ($p)" a shell am set-standby-bucket $p active
+  else
+    echo "später   $p nicht installiert oder ausgeblendet (Katalog/Anmeldung) — Skript danach nochmals laufen lassen"
+  fi
+done
 schritt "Zugriff auf alle Dateien (Aufräumen beim Abmelden, Hintergrund lesen)" a shell appops set $GERAET MANAGE_EXTERNAL_STORAGE allow
 # Fernwartung (dauerhafter adb-Tunnel, pbx/adb-zentrale): Band "Fernwartung aktiv - Technik (Name)"
 # über allen Apps, im Kiosk und über dem Sperrbildschirm von Rosenweg Gerät
