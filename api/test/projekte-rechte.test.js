@@ -283,3 +283,10 @@ test('server.js: Anlage-Token (geteilte Telefone) ändern nichts, löschen nur T
   const b = src.indexOf('// POST /api/projects/:slug/attachments');
   assert.ok(!/error: err\.message/.test(src.slice(a, b)));
 });
+
+test('server.js: Projekt-Dateien und Anhänge mit stabiler Kennung aus lib/unterlagen.js (P6)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.ok(src.includes("app.get('/api/projects/:slug/dokumente', authMiddleware, requireProjekteLesen, requireProjektLesen,"));
+  assert.match(src, /unterlagenLib\.kennungenFuer\(pool, zeilen\.map\(a => a\.doc_path\)\)/);
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'lib', 'unterlagen.js')));
+});
