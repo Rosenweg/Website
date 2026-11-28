@@ -391,13 +391,13 @@ async function initDB() {
       END $$;
     `);
 
-    // Insert default tariffs if none exist
+    // Insert default tariffs if none exist (Solartarif Haus 9: 0.20 CHF/kWh, Entscheid Stefan 28.11.2026)
     const tariffsExist = await client.query('SELECT COUNT(*) FROM tariffs');
     if (parseInt(tariffsExist.rows[0].count) === 0) {
       await client.query(
         `INSERT INTO tariffs (name, price_per_kwh, description, valid_from) VALUES
          ('Netztarif', 0.2516, 'Standardtarif Netzbezug', '2025-01-01'),
-         ('Solartarif', 0.10, 'Eigenverbrauch Solarstrom', '2025-01-01')`
+         ('Solartarif', 0.20, 'Eigenverbrauch Solarstrom', '2025-01-01')`
       );
     }
 
