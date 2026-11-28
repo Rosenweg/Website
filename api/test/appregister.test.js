@@ -66,6 +66,12 @@ test('apps-register.json ist gueltig und kennt die bisherigen Apps', () => {
   assert.ok(!daten.apps.unterlagen.technik);
   assert.equal(daten.apps.unterlagen.logo, '/img/apps/rosenweg-unterlagen.png?v=20261128');
   assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.unterlagen.logo.split('?')[0])));
+  // Rosenweg Projekte (Flutter, 28.11.2026)
+  assert.equal(daten.apps.projekte.paket, 'ch.rosenweg4303.projekte');
+  assert.equal(daten.apps.projekte.repo, 'Rosenweg/rosenweg-projekte');
+  assert.ok(!daten.apps.projekte.technik);
+  assert.equal(daten.apps.projekte.logo, '/img/apps/rosenweg-projekte.png?v=20261128');
+  assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.projekte.logo.split('?')[0])));
 });
 
 test('pruefen findet Fehler', () => {

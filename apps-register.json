@@ -152,6 +152,16 @@
       "text": "Die Unterlagen der Gemeinschaft: Ordner von Allgemein und deiner STWEG ansehen, suchen und sehen, was neu ist; PDF, Bilder und Office-Dateien direkt in der App. Einzelne Dateien für unterwegs merken.",
       "fuer": "Für alle Bewohner und Eigentümer (Mieter sehen in ihrer STWEG den Ordner „bewohner“). Ablegen, ordnen, Kamera-Scan als PDF und Papierkorb: Ausschuss für Allgemein und seine STWEG, Technik und Präsident überall.",
       "_notiz": "Flutter, alle Plattformen. Löst index.html#dokumente nicht ab (die Seite bleibt). Entscheide Stefan 28.11.2026: offizielle Ablage, Bearbeiten über Nextcloud, Projektordner pflegt Rosenweg Projekte."
+    },
+    "projekte": {
+      "name": "Rosenweg Projekte",
+      "repo": "Rosenweg/rosenweg-projekte",
+      "paket": "ch.rosenweg4303.projekte",
+      "logo": "/img/apps/rosenweg-projekte.png?v=20261128",
+      "reihenfolge": 120,
+      "text": "Projekte deiner STWEG und der Kooperation begleiten: Zeitachse, Offerten, Unterlagen, Budget und Kommentare. Neuigkeiten kommen als Benachrichtigung.",
+      "fuer": "Für Eigentümer (Projekte ihrer STWEG und der Kooperation), Ausschuss und Verwaltung. Anlegen und bearbeiten: Ausschuss, Verwaltung mit Recht Projekte = schreiben, Technik und Präsident. Mieter sehen keine Projekte.",
+      "_notiz": "Flutter, alle Plattformen. Löst projekte.html ab (Entscheide Stefan 28.11.2026, P1-P12). Farbe: grün Technik/Präsident, blau Ausschuss und Verwaltung mit Schreibrecht, sonst rot."
     }
   },
   "katalog": {

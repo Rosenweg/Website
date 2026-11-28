@@ -269,10 +269,10 @@ project_candidates    (FK project_id)
   id, project_id, name, status, offerte_betrag, offerte_details, webseite
 
 project_timeline      (FK project_id)
-  id, project_id, datum, titel, beschreibung, erledigt
+  id, project_id, datum, titel, beschreibung, erledigt, uhrzeit, ort, als_termin, termin_id (-> stweg_events.id)
 
 project_comments      (FK project_id)
-  id, project_id, author, text, internal
+  id, project_id, author, text, internal, bearbeitet_am
 
 project_attachments   (KEIN FK! lose Verknüpfung über project_slug)
   id, project_slug, target_type (timeline|kandidaten), target_id, doc_path,
