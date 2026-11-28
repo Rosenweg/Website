@@ -138,12 +138,14 @@
     "ch.rosenweg4303.math": {
       "repo": "Rosenweg/calculator-rosenweg",
       "logo": "/img/apps/rosenweg-rechner.png?v=20261127",
-      "text": "Ein einfacher Rechner."
+      "text": "Rechner mit Grundrechenarten, Prozent, Wurzel und Verlauf der letzten Rechnungen. Ohne Werbung und ohne Internet.",
+      "fuer": "Für alle."
     },
     "ch.rosenweg4303.calendar": {
       "repo": "Rosenweg/calendar-rosenweg",
       "logo": "/img/apps/rosenweg-kalender.png?v=20261127",
-      "text": "Termine aus der Rosenweg-Nextcloud."
+      "text": "Deine Kalender aus der Rosenweg-Nextcloud: Termine ansehen, anlegen und erinnern lassen. Die Termine deiner STWEG lassen sich aus Rosenweg Termine übernehmen.",
+      "fuer": "Für alle mit Rosenweg-Konto."
     },
     "ch.rosenweg4303.camera": {
       "repo": "Rosenweg/camera-rosenweg",
@@ -153,17 +155,20 @@
     "ch.rosenweg4303.clock": {
       "repo": "Rosenweg/clock-rosenweg",
       "logo": "/img/apps/rosenweg-uhr.png?v=20261127",
-      "text": "Wecker, Timer und Stoppuhr."
+      "text": "Wecker, Timer, Stoppuhr und Weltzeituhr. Wecker klingeln auch, wenn das Telefon lautlos ist; deine Wecker und Einstellungen folgen dir auf jedes geteilte Telefon, an dem du dich anmeldest.",
+      "fuer": "Für alle. Auf den geteilten Telefonen schon installiert."
     },
     "ch.rosenweg4303.contacts": {
       "repo": "Rosenweg/contacts-rosenweg",
       "logo": "/img/apps/rosenweg-kontakte.png?v=20261127",
-      "text": "Adressbuch aus der Rosenweg-Nextcloud."
+      "text": "Dein Adressbuch aus der Rosenweg-Nextcloud. Neue Kontakte werden dort gespeichert und sind auf allen deinen Geräten und den geteilten Telefonen gleich. Rosenweg Telefon und Messenger nutzen dieses Adressbuch.",
+      "fuer": "Für alle mit Rosenweg-Konto."
     },
     "ch.rosenweg4303.documents": {
       "repo": "Rosenweg/documents-rosenweg",
       "logo": "/img/apps/rosenweg-dokumente.png?v=20261127",
-      "text": "Dokumente ansehen und bearbeiten."
+      "text": "Dokumente ansehen und bearbeiten, direkt aus deiner Rosenweg-Nextcloud: auf jedem Gerät derselbe Stand, nichts bleibt auf dem geteilten Telefon liegen.",
+      "fuer": "Für alle mit Rosenweg-Konto."
     },
     "ch.rosenweg4303.filemanager": {
       "repo": "Rosenweg/file-manager-rosenweg",
@@ -173,7 +178,8 @@
     "ch.rosenweg4303.gallery": {
       "repo": "Rosenweg/gallery-rosenweg",
       "logo": "/img/apps/rosenweg-galerie.png?v=20261127",
-      "text": "Fotos und Videos ansehen."
+      "text": "Deine Fotos und Videos aus der Rosenweg-Nextcloud ansehen, ordnen, bearbeiten und teilen. Fotos der Rosenweg Kamera erscheinen hier automatisch. Auch beim „Foto auswählen“ in anderen Apps zeigt sie deine Nextcloud-Fotos.",
+      "fuer": "Für alle mit Rosenweg-Konto."
     },
     "ch.rosenweg4303.home": {
       "repo": "Rosenweg/launcher-rosenweg",
@@ -189,12 +195,14 @@
     "ch.rosenweg4303.notes": {
       "repo": "Rosenweg/notes-rosenweg",
       "logo": "/img/apps/rosenweg-notizen.png?v=20261127",
-      "text": "Notizen und Checklisten."
+      "text": "Notizen und Checklisten, gespeichert als Dateien in deiner Rosenweg-Nextcloud. So sind sie auf jedem Telefon und am Computer gleich, auch nach dem Wechsel auf ein anderes geteiltes Telefon.",
+      "fuer": "Für alle mit Rosenweg-Konto."
     },
     "ch.rosenweg4303.paint": {
       "repo": "Rosenweg/paint-rosenweg",
       "logo": "/img/apps/rosenweg-paint.png?v=20261127",
-      "text": "Skizzen und Zeichnungen."
+      "text": "Skizzen und Zeichnungen mit Finger oder Stift, z. B. um einen Schaden oder einen Plan schnell aufzuzeichnen. Bilder werden in deiner Rosenweg-Nextcloud abgelegt.",
+      "fuer": "Für alle mit Rosenweg-Konto."
     },
     "ch.rosenweg4303.phone": {
       "repo": "Rosenweg/phone-rosenweg",
@@ -206,12 +214,14 @@
       "repo": "Rosenweg/voice-recorder-rosenweg",
       "logo": "/img/apps/rosenweg-diktiergeraet.png?v=20261127",
       "name": "Rosenweg Diktiergerät",
-      "text": "Sprachaufnahmen."
+      "text": "Sprachaufnahmen und Diktate mit einem Tipp. Die Aufnahmen landen sofort in deiner Rosenweg-Nextcloud (Persönlich/Diktiergerät) und lassen sich dort anhören, teilen oder weiterverarbeiten.",
+      "fuer": "Für alle mit Rosenweg-Konto."
     },
     "ch.rosenweg4303.keyboard": {
       "repo": "Rosenweg/keyboard-rosenweg",
       "logo": "/img/apps/rosenweg-tastatur.png?v=20261127",
-      "text": "Tastatur ohne Datenweitergabe."
+      "text": "Tastatur mit Umlauten und Emojis, ohne Datenweitergabe und ohne Internet. Auf den geteilten Telefonen die Standard-Tastatur.",
+      "fuer": "Für alle. Auf den geteilten Telefonen schon installiert."
     },
     "ch.rosenweg4303.telefon": {
       "repo": "Rosenweg/android-sip-rosenweg",
