@@ -52,9 +52,9 @@ function annehmen(req, res) {
     const was = nr.stauEntscheiden(stauZustand, e.bericht.stau);
     const st = e.bericht.stau;
     if (was === 'alarm') {
-      technikMelden(`\u{1F7E0} Runner-Stau: ${st.lange} Jobs warten laenger als ${nr.STAU_S / 60} Minuten (insgesamt ${st.wartend} wartend, aeltester ${Math.round((st.aeltester_s || 0) / 60)} Min).\nDetails im NOC, Kachel Runner.`, 'Runner-Stau');
+      technikMelden(`\u{1F7E0} Runner-Stau: ${st.lange} Jobs warten laenger als ${nr.STAU_S / 60} Minuten (Grenze: mehr als ${nr.STAU_JOBS} oder ein Job ueber ${nr.STAU_EINZEL_S / 60} Min; insgesamt ${st.wartend} wartend, aeltester ${Math.round((st.aeltester_s || 0) / 60)} Min).\nDetails im NOC, Kachel Runner.`, 'Runner-Stau');
     } else if (was === 'entwarnung') {
-      technikMelden('\u2705 Runner-Stau abgebaut: weniger als ' + (nr.STAU_JOBS + 1) + ' Jobs warten laenger als ' + nr.STAU_S / 60 + ' Minuten.', 'Runner-Stau abgebaut');
+      technikMelden('\u2705 Runner-Stau abgebaut: die Warteschlange liegt wieder unter den Grenzen.', 'Runner-Stau abgebaut');
     }
   }
 }

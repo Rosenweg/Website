@@ -93,8 +93,9 @@ Ziel: Nie mehr 14 Releases gleichzeitig. Ein Merge auf `main` startet in einer F
   (300) Sekunden vergleicht er je App-Repo die Version in `pubspec.yaml` auf `main` mit den Tags. Fehlt
   `v<version>`, ist das Release fällig; sortiert wird nach der Zeit des Commits, der die Version
   gesetzt hat (Merge-Zeit). Er startet es per `workflow_dispatch` (`veroeffentlichen=true`, Zweig `main`)
-  und wartet, bis der Lauf zu Ende ist. **1** Release gleichzeitig, **2** wenn weniger als 2 macOS-Jobs
-  laufen und nicht alle eigenen Runner belegt sind (`RELEASE_PARALLEL_MAX`).
+  und wartet, bis der Lauf zu Ende ist. höchstens **2** Releases gleichzeitig (`RELEASE_PARALLEL_MAX`), weil GitHub Free nur 5 gleichzeitige
+  macOS-Jobs je Organisation erlaubt und ein Release macOS + iOS belegt: ein zweites startet nur bei
+  mindestens 2 freien macOS-Plätzen. Linux, Android und Windows haben keine eigene Grenze.
 - **Fehler:** Fehlt nach dem Lauf der Tag, startet er das Release **einmal** neu; scheitert auch das,
   wird es übersprungen (steht im NOC rot, Warnung) und die Reihe geht weiter.
 - **Berechtigung:** Der Start braucht für die GitHub-App „Rosenweg Automatik“ die Repository-
@@ -112,9 +113,10 @@ Ziel: Nie mehr 14 Releases gleichzeitig. Ein Merge auf `main` startet in einer F
 
 ## Massenänderungen gestaffelt
 
-`scripts/rw-massen-pr.sh` legt CI-Änderungen in vielen Repos gestaffelt an. Regel: **höchstens 3
-Repos gleichzeitig in der Prüfung** und Neues nur, wenn **weniger als 5 Jobs warten** und **keine
-Release-Läufe laufen oder anstehen**; sonst wartet das Skript (60 s). Die Lage liest es aus dem NOC
+`scripts/rw-massen-pr.sh` legt CI-Änderungen in vielen Repos gestaffelt an. Regel: **höchstens 6
+Repos gleichzeitig in der Prüfung** und Neues nur, wenn **weniger als 15 Jobs warten** und **weniger als 2
+Release-Läufe laufen** (`MAX_PARALLEL`, `MAX_WARTEND`, `MAX_RELEASES`; Releases bremsen nur, weil sie
+macOS-Plätze belegen); sonst wartet das Skript (60 s). Die Lage liest es aus dem NOC
 (`NOC_URL`, `NOC_TOKEN`), sonst zählt es selbst.
 
 ```bash
@@ -128,7 +130,8 @@ PRs mit `--mergen` zusammen; rote bleiben offen und werden gemeldet. Die Regel f
 
 ## Stau-Alarm
 
-Warten **mehr als 10 Jobs länger als 20 Minuten** (Label `rosenweg`), wird die NOC-Kachel rot und die
+Warten **mehr als 25 Jobs länger als 20 Minuten** oder wartet **ein einzelner Job länger als 45 Minuten**
+(Label `rosenweg`), wird die NOC-Kachel rot und die
 API (`routes/nocrunner.js`) meldet an die Technik-WhatsApp-Gruppe (Ersatz: Mail an technik@), wie
 beim Android-Dauertest. **Höchstens eine Meldung pro Stunde**; ist der Stau abgebaut, folgt einmal
 eine Entwarnung. Der Wächter zählt die langen Jobs (`STAU_S`, 1200) und liefert sie im Bericht mit;
@@ -166,3 +169,10 @@ Grenzen: Ist der Wächter durch die Lastgrenze gebremst, kann ein Job auf
 „zuschaltbar“ warten, obwohl GitHub frei wäre. Alle Jobs eines Laufs entscheiden
 nur einmal; viele gleichzeitige Läufe sehen alle denselben freien Runner und
 stauen sich dann auf den eigenen, bis der Wächter zugeschaltet hat.
+
+## Kapazität und Grenzen (Stand 28.11.2026)
+
+GitHub-gehostet stehen bis zu 20 gleichzeitige Jobs zur Verfügung (davon nur 5 macOS), dazu unsere 5
+Runner (4 Linux, win-runner). Die Grenzen sind darauf abgestimmt: Massen-PR 6 Repos / 15 wartende
+Jobs / 2 Releases, Release-Reihe 2 gleichzeitig, Stau ab 25 Jobs über 20 Minuten oder einem Job über
+45 Minuten. Zu streng gewordene Werte per Umgebung ändern, nicht im Code.

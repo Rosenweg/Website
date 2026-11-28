@@ -58,12 +58,18 @@ test('oeffentliche Sicht ohne Repo-Namen', () => {
 test('Stau: Alarm, hoechstens einer je Stunde, Entwarnung', () => {
   const z = { aktiv: false, gemeldet: false, zuletzt: 0 };
   const t0 = 1_000_000_000_000;
-  assert.equal(nr.stauEntscheiden(z, { lange: 5 }, t0), null, 'unter der Grenze');
-  assert.equal(nr.stauEntscheiden(z, { lange: 11 }, t0), 'alarm');
+  assert.equal(nr.stauEntscheiden(z, { lange: 5, aeltester_s: 600 }, t0), null, 'unter der Grenze');
+  assert.equal(nr.stauEntscheiden(z, { lange: 26 }, t0), 'alarm');
   assert.equal(nr.stauEntscheiden(z, { lange: 30 }, t0 + 10 * 60000), null, 'keine zweite Meldung in der Stunde');
   assert.equal(nr.stauEntscheiden(z, { lange: 30 }, t0 + 61 * 60000), 'alarm', 'nach einer Stunde nochmals');
   assert.equal(nr.stauEntscheiden(z, { lange: 2 }, t0 + 70 * 60000), 'entwarnung');
   assert.equal(nr.stauEntscheiden(z, { lange: 2 }, t0 + 80 * 60000), null, 'Entwarnung nur einmal');
+});
+
+test('Stau: ein einzelner Job ueber 45 Minuten genuegt', () => {
+  const z = { aktiv: false, gemeldet: false, zuletzt: 0 };
+  assert.equal(nr.stauEntscheiden(z, { lange: 1, aeltester_s: 44 * 60 }, 1e12), null);
+  assert.equal(nr.stauEntscheiden(z, { lange: 1, aeltester_s: 46 * 60 }, 1e12), 'alarm');
 });
 
 test('Stau und uebersprungenes Release faerben die Kachel', () => {
