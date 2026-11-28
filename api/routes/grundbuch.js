@@ -8,7 +8,10 @@ const fs = require('fs').promises;
 const pathModule = require('path');
 const { pool } = require('../lib/db');
 const { authMiddleware } = require('../middleware/auth');
-const { isTechnik, isPraesident, isAusschussForAny } = require('../lib/groups');
+const { isTechnik, isPraesident } = require('../lib/groups');
+const gb = require('../lib/grundbuch-rechte');
+const adminProtokoll = require('../lib/admin-protokoll');
+const kartenAdmin = require('../lib/kartenadmin');
 
 const router = express.Router();
 
@@ -17,9 +20,19 @@ const router = express.Router();
 const DOCS_PATH = process.env.DOCS_PATH || '/documents';
 const GRUNDBUCH_BILDER_DIR = 'allgemein/grundbuch-bilder';
 
-function isAusschussOrTechnik(req) {
-  const groups = req.user?.groups || [];
-  return isTechnik(groups) || isPraesident(groups) || isAusschussForAny(groups);
+// Rechte: lib/grundbuch-rechte.js (STWEG-gebunden, keine Mieter; Entscheid Stefan 28.11.2026)
+const gruppen = (req) => req.user?.groups || [];
+const istTP = (req) => isTechnik(gruppen(req)) || isPraesident(gruppen(req));
+const ich = (req) => req.user?.email || req.user?.name || 'unknown';
+const KEIN_ERFASSEN = 'Grundbuch erfassen nur Eigentümer, Ausschuss und Technik/Präsident (für Anteile der eigenen STWEG)';
+
+/** Anteil laden. -> Zeile | null (Antwort gesendet) */
+async function anteilLaden(req, res, felder = '*') {
+  const p = parseInt(req.params.parzelle), s = parseInt(req.params.sub_id);
+  if (!Number.isFinite(p) || !Number.isFinite(s)) { res.status(400).json({ error: 'Ungültige Parzelle' }); return null; }
+  const r = await pool.query(`SELECT ${felder} FROM grundbuch_anteile WHERE parzelle=$1 AND sub_id=$2`, [p, s]);
+  if (!r.rows[0]) { res.status(404).json({ error: 'Anteil nicht gefunden' }); return null; }
+  return r.rows[0];
 }
 
 // GET /api/grundbuch/status — Übersicht-Statistik
@@ -38,12 +51,12 @@ router.get('/status', authMiddleware, async (req, res) => {
       SELECT erfasst_von AS user, COUNT(*) AS anzahl
       FROM grundbuch_anteile WHERE erfasst_von IS NOT NULL
       GROUP BY erfasst_von ORDER BY anzahl DESC LIMIT 10`);
-    // Wer wie viel erfasst hat, sind E-Mail-Adressen: Namen nur fuer
-    // Ausschuss/Technik und den eigenen Eintrag, sonst nur die Anzahl.
-    const me = req.user?.email || req.user?.name || 'unknown';
-    const topListe = isAusschussOrTechnik(req) ? top.rows
+    // Wer wie viel erfasst hat, sind E-Mail-Adressen ueber alle STWEG: Namen nur
+    // fuer Technik/Praesident und den eigenen Eintrag, sonst nur die Anzahl.
+    const me = ich(req);
+    const topListe = istTP(req) ? top.rows
       : top.rows.map(t => ({ user: t.user === me ? t.user : null, anzahl: t.anzahl }));
-    res.json({ stats: r.rows[0], top_contributors: topListe });
+    res.json({ stats: r.rows[0], top_contributors: topListe, rechte: gb.gbRechte(gruppen(req)) });
   } catch (err) {
     console.error('grundbuch status err:', err.message);
     res.status(500).json({ error: 'Fehler' });
@@ -56,26 +69,32 @@ router.get('/anteile', authMiddleware, async (req, res) => {
     const where = [];
     const params = [];
     if (req.query.parzelle) { params.push(parseInt(req.query.parzelle)); where.push(`parzelle = $${params.length}`); }
+    if (req.query.stweg) { params.push(parseInt(req.query.stweg)); where.push(`stweg = $${params.length}`); }
     if (req.query.status) { params.push(req.query.status); where.push(`status = $${params.length}`); }
     if (req.query.mine === '1' && req.user?.email) { params.push(req.user.email); where.push(`(erfasst_von = $${params.length} OR reserviert_von = $${params.length})`); }
     const wsql = where.length ? 'WHERE ' + where.join(' AND ') : '';
     const r = await pool.query(`
-      SELECT parzelle, sub_id, anteil_z, anteil_n, anteil_typ, gemeinde, flaeche_m2,
+      SELECT parzelle, sub_id, stweg, anteil_z, anteil_n, anteil_typ, gemeinde, flaeche_m2,
              eigentumsform, eigentuemer, wohnadressen, bild_path,
              status, reserviert_von, reserviert_am, erfasst_von, erfasst_am,
              verifiziert_von, verifiziert_am, notizen
       FROM grundbuch_anteile ${wsql}
       ORDER BY parzelle, sub_id`, params);
     // Namen, Wohnadressen, Notizen und das Auszugsbild sind Personendaten:
-    // sie sieht nur Ausschuss/Technik und wer den Anteil selbst reserviert
-    // oder erfasst hat. Alle anderen sehen Status und Anteil, nicht wem er gehoert.
-    const alle = isAusschussOrTechnik(req);
-    const me = req.user?.email || req.user?.name || 'unknown';
+    // sie sieht Technik/Praesident, der Ausschuss nur fuer Anteile SEINER STWEG,
+    // und wer den Anteil selbst reserviert oder erfasst hat. Alle anderen sehen
+    // Status und Anteil, nicht wem er gehoert.
+    const g = gruppen(req);
+    const me = ich(req);
     // Auch wer erfasst/reserviert/verifiziert hat (E-Mail) bleibt Fremden verborgen.
-    const anteile = alle ? r.rows : r.rows.map(a => (a.erfasst_von === me || a.reserviert_von === me)
-      ? a : { ...a, eigentuemer: null, wohnadressen: null, notizen: null, bild_path: null,
-        erfasst_von: null, reserviert_von: null, verifiziert_von: null });
-    res.json({ anteile });
+    const anteile = r.rows.map(a => {
+      const voll = gb.gbVollSicht(g, a.stweg);
+      const out = (voll || a.erfasst_von === me || a.reserviert_von === me)
+        ? a : { ...a, eigentuemer: null, wohnadressen: null, notizen: null, bild_path: null,
+          erfasst_von: null, reserviert_von: null, verifiziert_von: null };
+      return { ...out, darf_erfassen: gb.gbAnteilErfassen(g, a.stweg), darf_freigeben: voll };
+    });
+    res.json({ anteile, rechte: gb.gbRechte(g) });
   } catch (err) {
     console.error('grundbuch list err:', err.message);
     res.status(500).json({ error: 'Fehler' });
@@ -86,7 +105,10 @@ router.get('/anteile', authMiddleware, async (req, res) => {
 router.post('/anteile/:parzelle/:sub_id/reserve', authMiddleware, async (req, res) => {
   try {
     const p = parseInt(req.params.parzelle), s = parseInt(req.params.sub_id);
-    const me = req.user?.email || req.user?.name || 'unknown';
+    const me = ich(req);
+    const cur = await anteilLaden(req, res, 'stweg');
+    if (!cur) return;
+    if (!gb.gbAnteilErfassen(gruppen(req), cur.stweg)) return res.status(403).json({ error: KEIN_ERFASSEN });
     // Auto-release nach 30 Min
     await pool.query(`
       UPDATE grundbuch_anteile SET status='offen', reserviert_von=NULL, reserviert_am=NULL
@@ -130,9 +152,30 @@ setInterval(() => {
   for (const [k, v] of ocrAufrufe) if (!v.some(t => jetzt - t < OCR_FENSTER_MS)) ocrAufrufe.delete(k);
 }, 10 * 60 * 1000).unref();
 
+// Der Auszug (Namen, Wohnadressen) geht an einen externen Dienst (OpenRouter,
+// Modell Claude Haiku): nur fuer einen Anteil, den das Konto gerade erfassen
+// darf (reserviert bzw. selbst erfasst, oder Ausschuss/T/P dieser STWEG), nur
+// nach ausdruecklicher Bestaetigung auf der Seite (bestaetigt_extern: true)
+// und nie per Zugangstoken/MCP (Entscheid Stefan 28.11.2026, F1/E3).
+// Body: { parzelle, sub_id, bild_base64, bild_filename, bestaetigt_extern: true }
 router.post('/ocr', authMiddleware, async (req, res) => {
   try {
     const { bild_base64, bild_filename } = req.body || {};
+    if (gb.gbMaschinenKanal(req)) return res.status(403).json({ error: 'KI-Auslese nur auf Knopfdruck im Portal, nicht per Zugangstoken oder MCP' });
+    if (!gb.gbErfassenDarf(gruppen(req))) return res.status(403).json({ error: KEIN_ERFASSEN });
+    const p = parseInt(req.body?.parzelle), s = parseInt(req.body?.sub_id);
+    if (!Number.isFinite(p) || !Number.isFinite(s)) return res.status(400).json({ error: 'parzelle und sub_id des Anteils fehlen' });
+    const cur = (await pool.query('SELECT stweg, status, reserviert_von, erfasst_von FROM grundbuch_anteile WHERE parzelle=$1 AND sub_id=$2', [p, s])).rows[0];
+    if (!cur) return res.status(404).json({ error: 'Anteil nicht gefunden' });
+    const me = ich(req);
+    const g = gruppen(req);
+    const eigen = (cur.status === 'reserviert' && cur.reserviert_von === me) || (cur.status === 'erfasst' && cur.erfasst_von === me);
+    if (!gb.gbAnteilErfassen(g, cur.stweg) || !(eigen || gb.gbVollSicht(g, cur.stweg))) {
+      return res.status(403).json({ error: 'Bitte den Anteil zuerst reservieren' });
+    }
+    if (req.body?.bestaetigt_extern !== true) {
+      return res.status(400).json({ error: 'Bitte bestätigen, dass der Auszug an einen externen Dienst (OpenRouter/Anthropic) geht (bestaetigt_extern: true)', bestaetigung_noetig: true });
+    }
     if (!bild_base64 || typeof bild_base64 !== 'string') return res.status(400).json({ error: 'bild_base64 fehlt' });
     // Wie beim Speichern: hoechstens 10 MB Bild (base64 ~ 4/3 davon).
     if (bild_base64.length > Math.ceil(10 * 1024 * 1024 * 4 / 3) + 4) return res.status(400).json({ error: 'Datei zu gross (>10MB)' });
@@ -227,17 +270,19 @@ router.post('/anteile/:parzelle/:sub_id', authMiddleware, async (req, res) => {
   try {
     const p = parseInt(req.params.parzelle), s = parseInt(req.params.sub_id);
     if (!Number.isFinite(p) || !Number.isFinite(s)) return res.status(400).json({ error: 'Ungültige Parzelle' });
-    const me = req.user?.email || req.user?.name || 'unknown';
+    const me = ich(req);
     const b = req.body || {};
     // Speichern darf, wer den Anteil reserviert hat oder ihn selbst erfasst hat (Korrektur
     // vor der Freigabe); Ausschuss/Technik immer. Vorher konnte jedes Konto auch
     // freigegebene Anteile ueberschreiben (Status sprang auf 'erfasst' zurueck).
-    const cur = (await pool.query('SELECT status, reserviert_von, erfasst_von, anteil_z FROM grundbuch_anteile WHERE parzelle=$1 AND sub_id=$2', [p, s])).rows[0];
+    const cur = (await pool.query('SELECT stweg, status, reserviert_von, erfasst_von, anteil_z FROM grundbuch_anteile WHERE parzelle=$1 AND sub_id=$2', [p, s])).rows[0];
     if (!cur) return res.status(404).json({ error: 'Anteil nicht gefunden' });
-    const darf = isAusschussOrTechnik(req)
+    const g = gruppen(req);
+    if (!gb.gbAnteilErfassen(g, cur.stweg)) return res.status(403).json({ error: KEIN_ERFASSEN });
+    const darf = gb.gbVollSicht(g, cur.stweg)
       || (cur.status === 'reserviert' && cur.reserviert_von === me)
       || (cur.status === 'erfasst' && cur.erfasst_von === me);
-    if (!darf) return res.status(403).json({ error: cur.status === 'freigegeben' ? 'Bereits freigegeben — nur Ausschuss/Technik' : 'Bitte zuerst reservieren' });
+    if (!darf) return res.status(403).json({ error: cur.status === 'freigegeben' ? 'Bereits freigegeben — nur Ausschuss dieser STWEG/Technik' : 'Bitte zuerst reservieren' });
     // Eigentuemer und Adressen landen in einer Tabelle, die andere im Browser
     // anzeigen: nur Listen kurzer Zeichenketten, keine spitzen Klammern.
     const textListe = (v) => v === undefined || v === null ? null
@@ -296,10 +341,12 @@ router.post('/anteile/:parzelle/:sub_id', authMiddleware, async (req, res) => {
 
 // POST /api/grundbuch/anteile/:parzelle/:sub_id/verify — Ausschuss/Technik bestätigt
 router.post('/anteile/:parzelle/:sub_id/verify', authMiddleware, async (req, res) => {
-  if (!isAusschussOrTechnik(req)) return res.status(403).json({ error: 'Nur Ausschuss/Technik darf verifizieren' });
   try {
+    const cur = await anteilLaden(req, res, 'stweg');
+    if (!cur) return;
+    if (!gb.gbVollSicht(gruppen(req), cur.stweg)) return res.status(403).json({ error: 'Nur der Ausschuss dieser STWEG oder Technik/Präsident darf verifizieren' });
     const p = parseInt(req.params.parzelle), s = parseInt(req.params.sub_id);
-    const me = req.user?.email || req.user?.name || 'unknown';
+    const me = ich(req);
     const r = await pool.query(`
       UPDATE grundbuch_anteile SET status='freigegeben', verifiziert_von=$1, verifiziert_am=now(), updated_at=now()
       WHERE parzelle=$2 AND sub_id=$3 AND status='erfasst' RETURNING *`, [me, p, s]);
@@ -312,13 +359,13 @@ router.post('/anteile/:parzelle/:sub_id/verify', authMiddleware, async (req, res
 router.get('/anteile/:parzelle/:sub_id/bild', authMiddleware, async (req, res) => {
   try {
     const p = parseInt(req.params.parzelle), s = parseInt(req.params.sub_id);
-    const r = await pool.query('SELECT bild_path, erfasst_von, reserviert_von FROM grundbuch_anteile WHERE parzelle=$1 AND sub_id=$2', [p, s]);
+    const r = await pool.query('SELECT stweg, bild_path, erfasst_von, reserviert_von FROM grundbuch_anteile WHERE parzelle=$1 AND sub_id=$2', [p, s]);
     if (!r.rows[0]?.bild_path) return res.status(404).end();
-    // Der Auszug zeigt Namen und Adressen — wie in der Liste nur fuer
-    // Ausschuss/Technik und wer den Anteil selbst bearbeitet.
-    const me = req.user?.email || req.user?.name || 'unknown';
-    if (!isAusschussOrTechnik(req) && r.rows[0].erfasst_von !== me && r.rows[0].reserviert_von !== me) {
-      return res.status(403).json({ error: 'Nur Ausschuss/Technik oder wer den Anteil erfasst hat' });
+    // Der Auszug zeigt Namen und Adressen — wie in der Liste nur fuer den
+    // Ausschuss dieser STWEG, Technik/Praesident und wer den Anteil selbst bearbeitet.
+    const me = ich(req);
+    if (!gb.gbVollSicht(gruppen(req), r.rows[0].stweg) && r.rows[0].erfasst_von !== me && r.rows[0].reserviert_von !== me) {
+      return res.status(403).json({ error: 'Nur der Ausschuss dieser STWEG, Technik/Präsident oder wer den Anteil erfasst hat' });
     }
     const fullPath = pathModule.join(DOCS_PATH, r.rows[0].bild_path);
     if (!fullPath.startsWith(pathModule.resolve(DOCS_PATH) + '/')) return res.status(400).end();
@@ -330,6 +377,26 @@ router.get('/anteile/:parzelle/:sub_id/bild', authMiddleware, async (req, res) =
     const strom = fsSync.createReadStream(fullPath);
     strom.on('error', () => { if (!res.headersSent) res.status(404).end(); else res.destroy(); });
     strom.pipe(res);
+  } catch (err) { res.status(500).json({ error: 'Fehler' }); }
+});
+
+// PUT /api/grundbuch/parzellen/:parzelle/stweg — STWEG einer Parzelle setzen
+// (alle Anteile der Parzelle). Nur Technik/Praesident, mit Protokoll. Body: { stweg: 1..8 | null }
+router.put('/parzellen/:parzelle/stweg', authMiddleware, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
+  if (!istTP(req)) return res.status(403).json({ error: 'STWEG zuordnen nur Technik/Präsident' });
+  try {
+    const p = parseInt(req.params.parzelle);
+    if (!Number.isFinite(p)) return res.status(400).json({ error: 'Ungültige Parzelle' });
+    const roh = req.body?.stweg;
+    const stweg = roh === null || roh === '' || roh === undefined ? null : parseInt(roh, 10);
+    if (stweg !== null && !(Number.isInteger(stweg) && stweg >= 1 && stweg <= 8)) return res.status(400).json({ error: 'stweg: 1 bis 8 oder leer' });
+    const r = await pool.query('UPDATE grundbuch_anteile SET stweg = $1, updated_at = now() WHERE parzelle = $2', [stweg, p]);
+    if (!r.rowCount) return res.status(404).json({ error: 'Parzelle nicht gefunden' });
+    await adminProtokoll.eintragen(pool, null, req, {
+      bereich: 'grundbuch', aktion: 'stweg-zugeordnet', ziel: `Parzelle ${p}`, neu: stweg ? `STWEG ${stweg}` : 'ohne STWEG',
+      detail: `${r.rowCount} Anteile`,
+    }).catch(e => console.error('[grundbuch] Protokoll:', e.message));
+    res.json({ ok: true, parzelle: p, stweg, anteile: r.rowCount });
   } catch (err) { res.status(500).json({ error: 'Fehler' }); }
 });
 

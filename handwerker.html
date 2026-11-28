@@ -168,6 +168,11 @@
                     <input name="website" class="mt-1 w-full px-3 py-2 border rounded text-sm">
                 </label>
                 <input type="hidden" name="ansprechpartner">
+                <label id="stweg-row" class="hidden block text-sm sm:col-span-2">
+                    <span class="text-gray-700">Firma gehört zu</span>
+                    <select name="stweg" id="firma-stweg" class="mt-1 w-full px-3 py-2 border rounded text-sm bg-white"></select>
+                    <span class="text-xs text-gray-500">Firmen einer STWEG pflegt deren Verwaltung; den gemeinsamen Stamm Technik und Präsident.</span>
+                </label>
 
                 <!-- Personen / Mitarbeiter -->
                 <div class="sm:col-span-2 border-t pt-3 mt-1">
@@ -326,6 +331,7 @@
                     <button id="modal-cancel" type="button" class="text-sm px-4 py-1.5 text-gray-700 hover:bg-gray-100 rounded">Abbrechen</button>
                     <button type="submit" class="text-sm px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700">Speichern</button>
                 </div>
+                <div id="modal-hinweis" class="hidden sm:col-span-2 text-sm text-blue-800 bg-blue-50 border border-blue-200 rounded px-3 py-2"></div>
                 <div id="modal-error" class="hidden sm:col-span-2 text-sm text-red-600 mt-1"></div>
             </form>
 
@@ -425,6 +431,19 @@
 
     let allRows = [];
     let canWrite = false;
+    // Rechte je STWEG vom Server (GET /api/handwerker -> rechte, lib/handwerker-rechte.js)
+    let hwRechte = { alle: false, schreiben: [], firma_anlegen: false, event_typen: false };
+    const hwSchreibStwegs = () => hwRechte.alle ? [1,2,3,4,5,6,7,8] : (hwRechte.schreiben || []);
+    // Eintrag der STWEG s ändern? (leer = alle STWEG: nur Technik/Präsident)
+    const hwDarf = (s) => canWrite && (hwRechte.alle || (s != null && s !== '' && hwSchreibStwegs().includes(Number(s))));
+    const hwKannEintragen = () => canWrite && (hwRechte.alle || hwSchreibStwegs().length > 0);
+    // STWEG-Auswahl auf die schreibbaren STWEG beschränken ("alle" nur T/P)
+    function hwStwegAuswahl(sel, alleText) {
+        if (!sel) return;
+        const opts = (hwRechte.alle ? [`<option value="">${alleText}</option>`] : [])
+            .concat(hwSchreibStwegs().map(n => `<option value="${n}">STWEG ${n}</option>`));
+        sel.innerHTML = opts.join('');
+    }
     let currentHandwerkerId = null;
     let currentAuftraege = [];
     let currentVertraege = [];
@@ -521,7 +540,7 @@
                 personenCell = `<div class="text-gray-700">${esc(h.ansprechpartner)}</div>`;
             }
             const actions = canWrite
-                ? `<button data-edit="${h.id}" class="text-blue-600 hover:underline text-xs">Bearbeiten</button>`
+                ? `<button data-edit="${h.id}" class="text-blue-600 hover:underline text-xs">${h.darf_aendern ? 'Bearbeiten' : 'Ansehen'}</button>`
                 : '';
             return `<tr class="hover:bg-gray-50 ${h.archiviert ? 'archived' : ''}">
                 <td class="px-3 py-2 text-gray-700 align-top">${esc(h.kategorie)}</td>
@@ -565,6 +584,9 @@
             if (!r.ok) throw new Error('HTTP ' + r.status);
             const data = await r.json();
             allRows = data.handwerker || [];
+            if (data.rechte) hwRechte = data.rechte;
+            $('btn-add').classList.toggle('hidden', !(canWrite && hwRechte.firma_anlegen));
+            $('btn-manage-events').classList.toggle('hidden', !hwRechte.event_typen);
             fillFilters();
             render();
         } catch (err) {
@@ -594,9 +616,9 @@
             $('modal-delete').classList.toggle('hidden', !!h.archiviert);
             $('modal-delete').onclick = () => archiveEntry(h.id);
             $('aufträge-section').classList.remove('hidden');
-            $('auftrag-add-btn').classList.toggle('hidden', !canWrite);
+            $('auftrag-add-btn').classList.toggle('hidden', !hwKannEintragen());
             $('verträge-section').classList.remove('hidden');
-            $('vertrag-add-btn').classList.toggle('hidden', !canWrite);
+            $('vertrag-add-btn').classList.toggle('hidden', !hwKannEintragen());
             loadAuftraege(h.id);
             loadVertraege(h.id);
             // Personen aus Datensatz laden, oder Fallback auf altes ansprechpartner-Feld
@@ -619,8 +641,26 @@
         }
         updatePersonenEmpty();
         updateZuwEmpty();
-        $('btn-add-person').classList.toggle('hidden', !canWrite);
-        $('btn-add-zuw').classList.toggle('hidden', !canWrite);
+        // Stammdaten (Felder mit name, Mitarbeiter) nur, wer die Firma ändern darf;
+        // Notfall-Zuordnungen der eigenen STWEG gehen auch bei Firmen des gemeinsamen Stamms.
+        const stammOk = canWrite && (h ? !!h.darf_aendern : !!hwRechte.firma_anlegen);
+        form.querySelectorAll('[name]').forEach(el => { if (el.type !== 'hidden') el.disabled = !stammOk; });
+        $('personen-list').querySelectorAll('input, textarea, select, button').forEach(el => { el.disabled = !stammOk; });
+        $('btn-add-person').classList.toggle('hidden', !stammOk);
+        $('btn-add-zuw').classList.toggle('hidden', !hwKannEintragen());
+        if (h && !stammOk) $('modal-delete').classList.add('hidden');
+        const neuStweg = !h && stammOk && (hwRechte.alle || hwSchreibStwegs().length > 1);
+        $('stweg-row').classList.toggle('hidden', !neuStweg);
+        $('firma-stweg').disabled = !neuStweg;
+        if (neuStweg) hwStwegAuswahl($('firma-stweg'), 'gemeinsamer Stamm (alle STWEG)');
+        const hinweis = !canWrite ? ''
+            : (h && !stammOk) ? (hwKannEintragen()
+                ? 'Diese Firma gehört zum gemeinsamen Stamm oder einer anderen STWEG. Ihre Stammdaten ändern Technik und Präsident; du pflegst hier Notfall-Zuordnungen, Verträge und Einsätze deiner STWEG.'
+                : 'Du kannst diese Firma nur ansehen.')
+            : '';
+        $('modal-hinweis').textContent = hinweis;
+        $('modal-hinweis').classList.toggle('hidden', !hinweis);
+        $('modal-form').querySelector('button[type="submit"]')?.classList.toggle('hidden', !(stammOk || (h && hwKannEintragen())));
         cancelAuftragForm();
         cancelVertragForm();
         $('modal').classList.remove('hidden');
@@ -645,10 +685,13 @@
         body.leistungen = body.leistungen ? body.leistungen.split(',').map(s => s.trim()).filter(Boolean) : [];
         body.personen = collectPersonen();
         body.event_zuweisungen = collectZuweisungen();
-        const id = body.id;
+        const id = form.elements.id.value;
         delete body.id;
-        const url = id ? `/api/handwerker/${id}` : '/api/handwerker';
+        const firma = id ? allRows.find(x => String(x.id) === String(id)) : null;
+        const nurZuordnungen = !!(firma && !firma.darf_aendern);
+        const url = nurZuordnungen ? `/api/handwerker/${id}/zuweisungen` : id ? `/api/handwerker/${id}` : '/api/handwerker';
         const method = id ? 'PUT' : 'POST';
+        if (nurZuordnungen) { for (const k of Object.keys(body)) if (k !== 'event_zuweisungen') delete body[k]; }
         try {
             const r = await AuthentikAuth.apiFetch(url, {
                 method,
@@ -679,7 +722,7 @@
         if (!confirm('Eintrag archivieren? (Kann durch "Archivierte zeigen" wiederhergestellt werden)')) return;
         try {
             const r = await AuthentikAuth.apiFetch(`/api/handwerker/${id}`, { method: 'DELETE' });
-            if (!r.ok) throw new Error('HTTP ' + r.status);
+            if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || ('HTTP ' + r.status));
             closeModal();
             await Promise.all([loadList(), loadNotfallSummary()]);
         } catch (err) {
@@ -745,9 +788,14 @@
         const opts = eventTypen.map(e =>
             `<option value="${e.id}" ${e.id === z.event_typ_id ? 'selected' : ''}>${esc(e.icon || '🚨')} ${esc(e.name)}</option>`
         ).join('');
-        const stwegOpts = [1,2,3,4,5,6,7,8].map(s =>
+        // Neue Karten: nur schreibbare STWEG; bestehende Einträge, die man nicht
+        // ändern darf (alle STWEG), bleiben sichtbar, aber fest.
+        const fest = z.event_typ_id != null && !hwDarf(z.stweg);
+        const erlaubt = fest ? (z.stweg ? [z.stweg] : []) : hwSchreibStwegs();
+        const stwegOpts = erlaubt.map(s =>
             `<option value="${s}" ${s === z.stweg ? 'selected' : ''}>STWEG ${s}</option>`
         ).join('');
+        const alleOpt = (hwRechte.alle || (fest && !z.stweg)) ? '<option value="">alle STWEGs</option>' : '';
         const html = `
             <div id="${cardId}" class="zuw-card grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
                 <select class="zuw-event sm:col-span-5 px-2 py-1 border rounded text-sm bg-white">
@@ -761,14 +809,16 @@
                     <option value="4" ${z.prioritaet === 4 ? 'selected' : ''}>4</option>
                 </select>
                 <select class="zuw-stweg sm:col-span-3 px-2 py-1 border rounded text-sm bg-white">
-                    <option value="">alle STWEGs</option>
+                    ${alleOpt}
                     ${stwegOpts}
                 </select>
-                <button type="button" data-remove-zuw="${cardId}" class="sm:col-span-2 text-red-400 hover:text-red-600 text-xs text-right">× Entfernen</button>
+                ${fest ? '<span class="sm:col-span-2 text-xs text-gray-400 text-right" title="Einträge für alle STWEG ändern Technik und Präsident">fest</span>'
+                       : `<button type="button" data-remove-zuw="${cardId}" class="sm:col-span-2 text-red-400 hover:text-red-600 text-xs text-right">× Entfernen</button>`}
                 <input type="text" placeholder="Hinweis (optional, z.B. 'zuerst Hausverwaltung anrufen')" value="${esc(z.hinweis || '')}" class="zuw-hinweis sm:col-span-12 px-2 py-1 border rounded text-sm">
             </div>`;
         list.insertAdjacentHTML('beforeend', html);
-        list.querySelector(`#${cardId} button[data-remove-zuw]`).addEventListener('click', () => {
+        if (fest) list.querySelectorAll(`#${cardId} select, #${cardId} input`).forEach(el => { el.disabled = true; });
+        list.querySelector(`#${cardId} button[data-remove-zuw]`)?.addEventListener('click', () => {
             document.getElementById(cardId)?.remove();
             updateZuwEmpty();
         });
@@ -1017,8 +1067,8 @@
             // Nur http(s)- oder seitenrelative Links (kein javascript:/data: aus Freitext)
             const docUrl = String(v.vertragsdokument_url || '').trim();
             const docLink = docUrl && (/^https?:\/\//i.test(docUrl) || (docUrl.startsWith('/') && !docUrl.startsWith('//'))) ? ` · <a href="${esc(docUrl)}" target="_blank" rel="noopener" class="text-blue-600 hover:underline">Vertrag ↗</a>` : '';
-            const editBtn = canWrite ? `<button data-edit-vertrag="${v.id}" class="text-blue-600 hover:underline text-xs">✎</button>` : '';
-            const delBtn = canWrite ? `<button data-del-vertrag="${v.id}" class="text-red-600 hover:underline text-xs">×</button>` : '';
+            const editBtn = hwDarf(v.stweg) ? `<button data-edit-vertrag="${v.id}" class="text-blue-600 hover:underline text-xs">✎</button>` : '';
+            const delBtn = hwDarf(v.stweg) ? `<button data-del-vertrag="${v.id}" class="text-red-600 hover:underline text-xs">×</button>` : '';
             return `<div class="vertrag-row py-2">
                 <div class="flex items-start justify-between gap-2 flex-wrap">
                     <div class="min-w-0 flex-1">
@@ -1055,7 +1105,7 @@
         $('vertrag-titel').value = '';
         $('vertrag-beschreibung').value = '';
         $('vertrag-status').value = 'aktiv';
-        $('vertrag-stweg').value = '';
+        $('vertrag-stweg').selectedIndex = 0;
         $('vertrag-freq-intvl').value = '1';
         $('vertrag-freq-einheit').value = 'jahre';
         $('vertrag-naechst').value = '';
@@ -1067,7 +1117,7 @@
         $('vertrag-notiz').value = '';
         $('vertrag-form-wrap').classList.add('hidden');
         $('vertrag-error').classList.add('hidden');
-        if (canWrite && currentHandwerkerId) {
+        if (hwKannEintragen() && currentHandwerkerId) {
             $('vertrag-add-btn').classList.remove('hidden');
         }
     }
@@ -1231,7 +1281,7 @@
                         <th class="text-right py-1 pr-2 font-medium">Kosten</th>
                         <th class="text-left py-1 pr-2 font-medium">STWEG</th>
                         <th class="text-left py-1 pr-2 font-medium">Notiz</th>
-                        ${canWrite ? '<th class="py-1"></th>' : ''}
+                        ${hwKannEintragen() ? '<th class="py-1"></th>' : ''}
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-100">
@@ -1242,9 +1292,9 @@
                             <td class="py-1 pr-2 align-top text-right tabular-nums">${esc(fmtChf(a.kosten))}</td>
                             <td class="py-1 pr-2 align-top">${a.stweg ? 'STWEG ' + esc(a.stweg) : ''}</td>
                             <td class="py-1 pr-2 align-top text-gray-600">${esc(a.notiz || '')}</td>
-                            ${canWrite ? `<td class="py-1 align-top whitespace-nowrap">
+                            ${hwKannEintragen() ? `<td class="py-1 align-top whitespace-nowrap">${hwDarf(a.stweg) ? `
                                 <button data-edit-auftrag="${a.id}" class="text-blue-600 hover:underline mr-2">✎</button>
-                                <button data-delete-auftrag="${a.id}" class="text-red-600 hover:underline">×</button>
+                                <button data-delete-auftrag="${a.id}" class="text-red-600 hover:underline">×</button>` : ''}
                             </td>` : ''}
                         </tr>`).join('')}
                 </tbody>
@@ -1269,12 +1319,12 @@
         $('auftrag-datum').value = new Date().toISOString().slice(0, 10);
         $('auftrag-beschreibung').value = '';
         $('auftrag-kosten').value = '';
-        $('auftrag-stweg').value = '';
+        $('auftrag-stweg').selectedIndex = 0;
         $('auftrag-vertrag').value = '';
         $('auftrag-notiz').value = '';
         $('auftrag-form-wrap').classList.add('hidden');
         $('auftrag-error').classList.add('hidden');
-        if (canWrite && currentHandwerkerId) {
+        if (hwKannEintragen() && currentHandwerkerId) {
             $('auftrag-add-btn').classList.remove('hidden');
         }
     }
@@ -1378,7 +1428,6 @@
         canWrite = AuthentikAuth.hasPermission('handwerker', 'write');
         $('auth-gate').classList.add('hidden');
         $('content').classList.remove('hidden');
-        if (canWrite) $('btn-add').classList.remove('hidden');
 
         $('search').addEventListener('input', render);
         $('filter-kategorie').addEventListener('change', render);
@@ -1394,7 +1443,6 @@
         $('events-modal').addEventListener('click', e => { if (e.target.id === 'events-modal') closeEventsModal(); });
         $('evt-save').addEventListener('click', saveEvent);
         $('evt-cancel').addEventListener('click', resetEventForm);
-        if (canWrite) $('btn-manage-events').classList.remove('hidden');
         $('modal-close').addEventListener('click', closeModal);
         $('modal-cancel').addEventListener('click', closeModal);
         $('modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
@@ -1424,6 +1472,8 @@
 
         await loadEventTypen();
         await Promise.all([loadList(), loadNotfallSummary(), loadAnstehend()]);
+        hwStwegAuswahl($('vertrag-stweg'), '— alle —');
+        hwStwegAuswahl($('auftrag-stweg'), '—');
     });
     </script>
 </body>
