@@ -41,6 +41,10 @@ const RECHTE_MIGRATIONEN = [
   // STWEG (Sicht in server.js); „Eintrag entfernen“ bleibt Technik, „Sofort loeschen“
   // Technik/Praesident (lib/kontoloeschung.js; Entscheid Stefan 28.11.2026, E3b).
   { name: '2026-11-28-loeschungen-ausschuss-verwaltung-write', page: 'loeschungen', access: 'write', gruppen: [...AUSSCHUESSE, ...VERWALTUNGEN].filter(g => /^stweg\d+-/.test(g)) },
+  // E-Mail-Archiv: die API prueft jetzt das Seitenrecht „email-archiv“; die
+  // Verwaltung liest die Mails ihrer STWEG(s) plus „haus“ (Entscheid Stefan
+  // 28.11.2026, Klaerung Mail-Archiv E2/F2). Der Ausschuss hat den Seed „read“.
+  { name: '2026-11-28-email-archiv-verwaltung-read', page: 'email-archiv', access: 'read', gruppen: [...VERWALTUNGEN, 'Verwaltung'] },
 ];
 
 const SQL_TABELLE = `

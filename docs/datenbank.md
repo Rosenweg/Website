@@ -183,6 +183,18 @@ print_jobs  (Mail-to-Print Aufträge)
 
 `print_jobs.message_id` referenziert `email_archive.message_id` (lose, kein FK).
 
+Seit 28.11.2026 (`schemaSicherstellen` in `api/routes/email-archive.js`, beim Start):
+`email_archive.stweg` ('1'…'8' oder 'haus', aus der Verteiler-Adresse in `to_addresses`;
+nach jedem Archivieren und beim Start fuer `stweg IS NULL` nachgetragen),
+`anonymisiert_am` (Aufbewahrung 10 Jahre), `offene_dateien` (Anhang-Dateien, deren
+Entfernen scheiterte; der taegliche Lauf versucht es erneut); in
+`email_archive_deletions` die Konto-IDs `requested_by_id`/`confirmed_by_id` (Altbestand
+ueber die Adresse nachgetragen) und `antrag_stwegs`. Zugriffsprotokoll:
+`email_archive_zugriffe` (Lesen, Anhang, Suche, Export, Antraege; mit Weg konto/app/
+karte/token/mcp). Brief-Ablage (`api/routes/briefe.js`): `briefe_ablage` (STWEG je
+Foto), `briefe_loeschantraege` (Vier-Augen), `briefe_protokoll`, `briefe_ocr_nutzung`
+(Tageszaehler der externen Texterkennung je Konto).
+
 Der Unique-Index `idx_email_archive_deletions_pending` erlaubt **höchstens einen
 offenen Löschantrag je archivierter Mail**, auch bei parallelen Anfragen. Er wird
 beim ersten Löschantrag zur Laufzeit angelegt (`api/routes/email-archive.js`).

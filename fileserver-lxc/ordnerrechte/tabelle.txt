@@ -102,5 +102,7 @@ Messages aus der Immoapp von LangPartners nur RW 14 und 6   | - | -
 ~grundbuch-bilder      | - | -
 ~druckauftraege        | - | -
 
-# Brief-Fotos (DOC_AUSSCHUSS_ORDNER): nur Ausschuss
-~fotos_von_versendeten_briefen | - | stweg1-ausschuss,stweg2-ausschuss,stweg3-ausschuss,stweg4-ausschuss,stweg5-ausschuss,stweg6-ausschuss,stweg7-ausschuss,meg-ausschuss,stweg8-ausschuss
+# Brief-Fotos: nur ADMIN (Entscheid Stefan 28.11.2026). Der Ausschuss sieht
+# sie ueber /api/briefe nur fuer seine STWEG; geloescht wird nur dort
+# (Begruendung, Vier-Augen, Protokoll). Erfasst wird ueber das Dienstkonto.
+~fotos_von_versendeten_briefen | - | -

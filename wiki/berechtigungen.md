@@ -218,11 +218,12 @@ Schalten werden bisherige Anhänge nicht öffentlich.
 | Mail-Vorlagen, Freigabe-Regeln | — | — | — | — | — | ✅ | ✅ |
 | E-Mail-Verteiler (Listen, senden, Mitglieder) | Liste je STWEG 👁 | — | — | — | — | ✅ | ✅ |
 | An geschützte STWEG-Verteiler schreiben, Bewohner-Rundmails empfangen | — | nach Gruppe | nach Gruppe | nach Gruppe | ✅ nur Verteiler ihrer STWEG(s) (Gruppe oder Vertrag) | ✅ | ✅ |
-| E-Mail-Archiv lesen, Löschantrag stellen | — | — | — | 👁 ✅ **ganzes Archiv** (jede STWEG) | — | ✅ | ✅ |
-| Löschantrag bestätigen (4-Augen) | — | — | — | ✅ nicht den eigenen | — | ✅ nicht den eigenen | ✅ nicht den eigenen |
+| E-Mail-Archiv lesen (Recht „email-archiv“; Zugriffe protokolliert) | — | — | — | 👁 eigene STWEG(s) + „haus“ | 👁 ihre STWEG(s) + „haus“ | 👁 alles | 👁 alles |
+| E-Mail-Archiv: Löschantrag stellen | — | — | — | ✅ | — | ✅ | ✅ |
+| Löschantrag bestätigen (4-Augen, Mail-Archiv und Briefe) | — | — | — | ✅ andere Person (Konto-ID), nur derselben STWEG | — | ✅ nicht den eigenen | ✅ nicht den eigenen |
 | E-Mail-Log, Versandstatus, DMARC, SMTP-Kontingent | — | — | — | — | — | 👁 | 👁 |
-| Briefe (Fotos versendeter Briefe) | — | — | — | ✅ (jede STWEG) | — | ✅ | ✅ |
-| Dokumente lesen | — | 👁 `allgemein`, `scans`, aus der eigenen STWEG nur `stwegN/bewohner/` (Datenschutz, 28.11.2026) | + `projekte`, ganzer Ordner der eigenen STWEG | + `fotos_von_versendeten_briefen` | 👁 `allgemein`, `scans`, ihre STWEG(s), mit Recht „projekte“ die Projekte ihrer STWEG(s) und ohne STWEG | 👁 alles | 👁 alles |
+| Briefe (Fotos versendeter Briefe), erfassen, Löschantrag | — | — | — | ✅ eigene STWEG(s) | — | ✅ alle | ✅ alle |
+| Dokumente lesen | — | 👁 `allgemein`, `scans`, aus der eigenen STWEG nur `stwegN/bewohner/` (Datenschutz, 28.11.2026) | + `projekte`, ganzer Ordner der eigenen STWEG | (Brief-Fotos nur über „Briefe“) | 👁 `allgemein`, `scans`, ihre STWEG(s), mit Recht „projekte“ die Projekte ihrer STWEG(s) und ohne STWEG | 👁 alles | 👁 alles |
 | Dokumente schreiben, verschieben, löschen | — | — | — | ✅ `allgemein`, eigene STWEG, `projekte/<Projekt>` der eigenen STWEG bzw. ohne STWEG | ✅ `projekte/<Projekt>` ihrer STWEG(s) mit Recht „projekte“ = schreiben | ✅ | ✅ |
 | Gesperrte Ordner `auslagen/`, `anzeigen/`, `reklamationen/`, `unterschriftenlisten/`, `grundbuch-bilder/` über die Dokumenten-API | — | — | — | — | — | ✅ | ✅ |
 
@@ -348,6 +349,10 @@ Seit dem 17.11.2026 gilt in allen schreibenden STWEG-Bereichen:
   `grundbuch_anteile.stweg`, je Parzelle von Technik/Präsident zugeordnet).
   Das Telefonbuch zeigt die Handwerker weiter für alle angemeldeten Personen.
 - Nicht STWEG-gebunden sind bewusst: Briefe und E-Mail-Archiv.
+- E-Mail-Archiv und Briefe sind seit 28.11.2026 STWEG-gebunden (Archiv: Mails
+  ohne eindeutige STWEG = „haus“, für alle Ausschüsse und Verwaltungen).
+- Nicht STWEG-gebunden sind bewusst: Grundbuch-
+  Verifikation und – falls erteilt – Handwerker (gemeinsam gepflegt).
 
 ---
 

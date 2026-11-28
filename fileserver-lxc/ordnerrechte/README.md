@@ -24,7 +24,7 @@ Nicht neu erfunden, sondern aus der Website abgeschrieben:
 | `stwegN/bewohner`, `meg/bewohner` (Hausordnung, Schilder, Hinweise) | dazu die Bewohner (Mieter) der STWEG | Ausschuss der STWEG |
 | `projekte` (gibt es noch nicht) | alle Eigentümer | jeder Ausschuss |
 | Sperrordner (`auslagen`, `anzeigen`, `reklamationen`, `unterschriftenlisten`, `grundbuch-bilder`, `druckauftraege`) auf Ebene 1 oder 2 | nur Technik/Präsident | dito |
-| `fotos_von_versendeten_briefen` | Ausschuss | Ausschuss |
+| `fotos_von_versendeten_briefen` | nur ADMIN (Ausschuss über `/api/briefe`, je STWEG) | nur ADMIN |
 | alle anderen Ordner der obersten Ebene | nur Technik/Präsident | dito |
 
 Technik, Präsident und das Dienstkonto `api-svc` haben überall lesen und

@@ -325,11 +325,12 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `POST /api/verteiler/send` mit `Idempotency-Key` (Kopf oder Feld `idempotency_key`, 8–128 Zeichen) | dieselbe Rundmail geht höchstens einmal hinaus (24 h je Konto): Wiederholung → gespeicherte Antwort mit `Idempotent-Replayed: true`; läuft noch/unterbrochen → 409; anderer Inhalt → 422. Ging nichts hinaus, ist der Schlüssel wieder frei |
 | `POST /api/verwaltung-mail-queue/:id/freigeben` | zusätzlich: nicht durch Ersteller oder letzte Bearbeitende (Konto-ID, auch T/P) → 403 `vier_augen` |
 | `GET /api/email-log` | T/P |
-| `/api/email-archive*` | Ausschuss (jede STWEG) oder T/P; Löschen nach 4-Augen-Prinzip, höchstens ein offener Antrag je Mail |
+| `/api/email-archive*` | Recht `email-archiv` + Ausschuss/Verwaltung (eigene STWEG + `haus`) oder T/P; Lesen, Anhang, Suche, Export protokolliert (`/protokoll` nur T/P); Löschen nach 4-Augen (andere Konto-ID, gleiche STWEG oder T/P), höchstens ein offener Antrag je Mail; nach 10 Jahren anonymisiert |
 | `GET /api/documents`, `GET /api/documents/:path` | angemeldet; `allgemein`, `scans`, eigene STWEG, `projekte` für Eigentümer; gesperrte Unterordner nur T/P |
 | `POST/PUT/DELETE /api/documents…`, `POST /api/documents/move` | Ausschuss (eigene STWEG, `allgemein`, `projekte`) oder T/P |
 | `GET /api/documents-ordner?path=`, `-suche?q=`, `-neu?seit=&ordner=`, `-rechte`, `-kennung/:id`, `-fassungen?path=`, `-fassungen/:id/datei` | angemeldet, Rechte wie `GET /api/documents` (Pfad für Pfad); nur lesend. Für die App Rosenweg Unterlagen: eine Ordnerebene mit Datum, Typ, ETag, Kennung und `schreiben` je Eintrag; Suche nach Name und Pfad; neue Dateien seit einer Zeit (per mtime, also auch Samba/Nextcloud); wo man schreiben darf; stabile Kennung → Datei; frühere Fassungen (beim Ersetzen, 30 Tage). `alles=1` (auch Druckertreiber, `.DS_Store`, `desktop.ini`) nur T/P. Code: `api/lib/unterlagen.js` |
 | `GET /api/briefe`, `POST /api/briefe/upload` | Ausschuss oder T/P |
+| `GET /api/briefe`, `GET /api/briefe/:datei/bild`, `POST /api/briefe/upload`, `POST /api/briefe/:datei/loeschantrag`, `…/loeschentscheid` | Ausschuss (eigene STWEG) oder T/P; Upload nur mit `stweg` und `bestaetigt_extern: true`, nicht per PAT/MCP, Tageslimit je Konto; `PUT /api/briefe/:datei/stweg` nur T/P |
 
 ### 4.8 Energie
 
