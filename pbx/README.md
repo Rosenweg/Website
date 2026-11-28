@@ -435,7 +435,7 @@ Kein Token verlässt CT 220. Antwort an die App: `{status, json, sitzung}`;
 - Freigaben: Config `portal_pfade` (PUT `/api/pbx/config`), JSON
   `{"*": ["GET /api/auth/me", "GET /api/me"], "ch.rosenweg4303.salz": ["/api/salz/"],
   "ch.rosenweg4303.clock": ["GET,PUT /api/me/app-daten/ch.rosenweg4303.clock"]}`
-  (Uhr: Wecker/Weltuhren/Timer der Person, `api/routes/app-daten.js`). Ist die Config
+  (Uhr: Wecker/Weltuhren/Timer der Person, `api/routes/app-daten.js`; TV: `ch.rosenweg4303.tv` darf `GET /api/tv/channels`, `jetzt`, `epg`, `stream-url/` – keine Ferien-Zugänge). Ist die Config
   gesetzt, ersetzt sie den Standard ganz — neue Einträge dann auch dort nachtragen.
   Endet ein Eintrag auf `/`, gilt alles darunter; davor optional Methoden
   (`GET,PUT /api/...`). Ohne Config gilt `PORTAL_PFADE_STANDARD` in `app.py`.

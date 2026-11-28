@@ -2117,8 +2117,11 @@ app.get('/api/wifi', authMiddleware, async (req, res) => {
 //
 // udpxy für Multicast laeuft in LXC 109 (100.64.9.200:4022) — aktuell
 // blockiert die UDM-Firewall den Init7-Multicast-Inflow, deshalb HLS-Pfad.
+const tvEpg = require('./lib/tv-epg');
 const TV7_PLAYLIST_URL = 'https://api.init7.net/tvchannels.m3u?rp=true';
 const UDPXY_HOST = process.env.UDPXY_HOST || 'http://100.64.9.24:4022';
+// gleiche Quelle wie /api/tv/playlist.m3u (dort wird UDPXY_BASE gelesen)
+const UDPXY_BASE_URL = process.env.UDPXY_BASE || 'http://100.64.9.24:4022';
 const TV7_STREAMER_URL = process.env.TV7_STREAMER_URL || 'http://100.64.9.23:3000';
 // Public-Pfad den der Browser für den Stream anspricht. Default ist ein
 // relativer Pfad — die nginx der ISP-Seite proxyt /tv-stream/* direkt zum
@@ -2183,6 +2186,9 @@ async function fetchTV7Channels() {
       group: e.group,
       hevc: true,
       h264: !!httpId,
+      // additiv fuer die App Rosenweg TV: Schluessel fuers EPG und der Direktweg im Haus
+      tvg: e.tvg || '',
+      udpxy_url: `${UDPXY_BASE_URL}/udp/${u[1]}:${u[2]}`,
     });
   }
   tv7ChannelsCache = channels;
@@ -2253,6 +2259,7 @@ async function buildTV7Epg() {
   let offset = Math.max(0, total - 90000); // Zukunfts-Tail (~letzte ~7 Tage)
   const channels = new Map();
   const programmes = [];
+  const roh = [];   // fuer den JSON-Index (lib/tv-epg.js)
   while (offset < total) {
     const page = await (await fetch(`${BASE}?limit=${LIMIT}&offset=${offset}`, { signal: AbortSignal.timeout(30000) })).json();
     for (const r of (page.results || [])) {
@@ -2261,6 +2268,7 @@ async function buildTV7Epg() {
       if (!id) continue;
       if (!channels.has(id)) channels.set(id, { name: ch.name || id, logo: ch.logo || '' });
       programmes.push({ id, start: r.timeslot.lower, stop: r.timeslot.upper, title: r.title, sub: r.sub_title, desc: r.desc });
+      roh.push(r);
     }
     offset += LIMIT;
   }
@@ -2276,7 +2284,7 @@ async function buildTV7Epg() {
     xml += `</programme>\n`;
   }
   xml += '</tv>\n';
-  return { xml, channels: channels.size, programmes: programmes.length };
+  return { xml, index: tvEpg.indexBauen(roh, minTs), channels: channels.size, programmes: programmes.length };
 }
 // Ein Aufbau fuer alle gleichzeitigen Anfragen (S1-2-4): die Route ist offen, und
 // jeder Aufbau laedt ~90'000 Eintraege von Init7 — parallele Abrufe vervielfachten
@@ -2289,7 +2297,7 @@ function tv7EpgHolen() {
   if (Date.now() - _tv7EpgFehlerTs < 60 * 1000) return Promise.reject(new Error('EPG-Aufbau kurz pausiert'));
   _tv7EpgBau = buildTV7Epg()
     .then(built => {
-      _tv7EpgCache = { xml: built.xml, ts: Date.now() };
+      _tv7EpgCache = { xml: built.xml, index: built.index, ts: Date.now() };
       console.log(`[TV7-EPG] gebaut: ${built.channels} Kanaele, ${built.programmes} Sendungen`);
       return _tv7EpgCache;
     })
@@ -2308,6 +2316,35 @@ app.get('/api/tv/epg.xml', async (req, res) => {
     console.error('[TV7-EPG] error:', e.message);
     res.status(502).json({ error: 'EPG derzeit nicht verfügbar' });
   }
+});
+
+// JSON-Programm fuer die App Rosenweg TV, aus demselben Cache wie epg.xml.
+//   GET /api/tv/jetzt                      Jetzt und Danach aller Sender, Schluessel = tvg
+//   GET /api/tv/epg?kanal=<tvg>&von=&bis=  Programm eines Senders (ISO-Zeit; Standard: ab jetzt 24 h)
+async function tvEpgIndex(res) {
+  try {
+    return (await tv7EpgHolen()).index;
+  } catch (e) {
+    if (_tv7EpgCache) return _tv7EpgCache.index;
+    console.error('[TV7-EPG] error:', e.message);
+    res.status(502).json({ error: 'Programm derzeit nicht verfügbar' });
+    return null;
+  }
+}
+app.get('/api/tv/jetzt', authMiddleware, async (req, res) => {
+  const index = await tvEpgIndex(res);
+  if (!index) return;
+  res.set('Cache-Control', 'private, max-age=60');
+  res.json({ erzeugt: new Date().toISOString(), sender: tvEpg.jetztUndDanach(index) });
+});
+app.get('/api/tv/epg', authMiddleware, async (req, res) => {
+  const index = await tvEpgIndex(res);
+  if (!index) return;
+  const r = tvEpg.programm(index, req.query.kanal, req.query.von, req.query.bis);
+  if (r.fehler) return res.status(400).json({ error: r.fehler });
+  if (r.unbekannt) return res.status(404).json({ error: 'Sender nicht im Programm' });
+  res.set('Cache-Control', 'private, max-age=300');
+  res.json(r);
 });
 
 app.get('/api/tv/stream-url/:channelId', authMiddleware, (req, res) => {

@@ -111,6 +111,16 @@
       "text": "Stromrechnungen aus dem ZEV deines Hauses: ansehen, als bezahlt markieren, PDF teilen; Verbrauch und Solaranteil je Jahr, mit dem Netzstrompreis zum Vergleich.",
       "fuer": "Für Bewohner und Eigentümer in Häusern mit ZEV (heute Haus 9). Zuordnen, Umhängen und Konfiguration: Ausschuss und Verwaltung ihrer STWEG, Technik und Präsident.",
       "_notiz": "Flutter, alle Plattformen. Rechnungen stellt smart-me/Axova aus; die App zeigt, ordnet zu und meldet Wechsel (Entscheid Stefan 28.11.2026). Web-Seiten stweg3/pages/zev-*.html bleiben."
+    },
+    "tv": {
+      "name": "Rosenweg TV",
+      "repo": "Rosenweg/rosenweg-tv",
+      "paket": "ch.rosenweg4303.tv",
+      "logo": "/img/apps/rosenweg-tv.png?v=20261128",
+      "reihenfolge": 100,
+      "text": "Fernsehen im Rosenweg: alle Sender mit Suche und Programm (Jetzt/Danach, 7 Tage), im Haus direkt, unterwegs über den Streamer; auf dem Fernseher mit der Fernbedienung (Google TV).",
+      "fuer": "Für alle Bewohner und Eigentümer mit Rosenweg-Konto. Optional eine PIN je Gerät als Kindersicherung.",
+      "_notiz": "Flutter, Linux, Android (inkl. Google TV), Windows, macOS; iOS baut, wird noch nicht verteilt. Kein Replay, keine Aufnahme, kein Casten (Entscheid Stefan 28.11.2026). Web-Seite tv.html bleibt."
     }
   },
   "katalog": {

@@ -119,6 +119,18 @@ class ImAuftragTest(unittest.TestCase):
         self.assertFalse(pbx._portal_erlaubt(regeln, m, "POST", "/api/messenger/zugaenge"))
         self.assertFalse(pbx._portal_erlaubt(regeln, m, "GET", "/api/karten/personen"))
 
+    def test_portal_pfade_fuer_tv(self):
+        regeln = pbx.PORTAL_PFADE_STANDARD
+        t = "ch.rosenweg4303.tv"
+        self.assertTrue(pbx._portal_erlaubt(regeln, t, "GET", "/api/tv/channels"))
+        self.assertTrue(pbx._portal_erlaubt(regeln, t, "GET", "/api/tv/jetzt"))
+        self.assertTrue(pbx._portal_erlaubt(regeln, t, "GET", "/api/tv/epg?kanal=srf1&von=2026-11-28T18:00:00Z"))
+        self.assertTrue(pbx._portal_erlaubt(regeln, t, "GET", "/api/tv/stream-url/e9-32-e6-39"))
+        # keine Ferien-Zugaenge auf geteilten Telefonen
+        self.assertFalse(pbx._portal_erlaubt(regeln, t, "POST", "/api/tv/extern/token"))
+        self.assertFalse(pbx._portal_erlaubt(regeln, t, "GET", "/api/tv/extern/tokens"))
+        self.assertFalse(pbx._portal_erlaubt(regeln, "ch.rosenweg4303.salz", "GET", "/api/tv/channels"))
+
 
 if __name__ == "__main__":
     unittest.main()
