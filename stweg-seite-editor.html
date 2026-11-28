@@ -125,31 +125,21 @@
         document.getElementById('gate').style.display = 'none';
         document.getElementById('app').style.display = 'block';
 
-        const groups = (currentUser.groups || []).map(g => String(g).toLowerCase());
-
-        // Admin = isAdmin-Flag ODER Mitglied von technik / präsident
-        istAdmin = currentUser.isAdmin === true
-            || groups.some(g => g === 'technik' || g === 'präsident' || g === 'praesident');
-
-        // Eigene STWEGs aus den Gruppen ableiten
-        const eigeneStwegs = new Set();
-        for (const g of groups) {
-            const m = g.match(/^stweg(\d+)-/);      // z.B. stweg3-ausschuss / stweg3-eigentuemer
-            if (m) eigeneStwegs.add(parseInt(m[1], 10));
-            if (/^meg-/.test(g)) eigeneStwegs.add(8); // meg-* = STWEG 8 (MEG)
-        }
-
-        // Sichtbare STWEGs bestimmen
-        if (istAdmin) {
-            sichtbareStwegs = [1, 2, 3, 4, 5, 6, 7, 8]; // 8 = MEG
-        } else {
-            sichtbareStwegs = [...eigeneStwegs].sort((a, b) => a - b);
-        }
+        // Welche STWEGs darf das Konto speichern? Der Server entscheidet (gleiche
+        // Regel wie beim Speichern: Ausschuss der STWEG, Technik, Präsident). Früher
+        // leitete die Seite das aus allen stwegN-Gruppen ab, und Eigentümer bekamen
+        // den Editor angezeigt und beim Speichern 403 (F9).
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/stweg-sections-rechte');
+            const d = r.ok ? await r.json() : {};
+            sichtbareStwegs = Array.isArray(d.stwegs) ? d.stwegs : [];
+        } catch (e) { sichtbareStwegs = []; }
+        istAdmin = sichtbareStwegs.length === 8;
 
         // Nicht-Admin ohne STWEG-Zugehörigkeit -> Hinweis und Schluss
         if (sichtbareStwegs.length === 0) {
-            zeigeNotice('gray', 'Keine STWEG-Zugehörigkeit',
-                'Ihrem Konto ist keine STWEG zugeordnet. Wenden Sie sich an den Ausschuss.');
+            zeigeNotice('gray', 'Kein Bearbeitungsrecht',
+                'Die STWEG-Seite bearbeitet der Ausschuss der STWEG (sowie Technik und Präsident). Ihr Konto gehört zu keinem Ausschuss.');
             return;
         }
 
@@ -210,7 +200,12 @@
             return; // Editoren werden NICHT initialisiert
         }
 
-        // 2) Vorhandene Inhalte laden + Editoren aufbauen
+        // 2) Hinweis: alles hier ist öffentlich (F3, Entscheid 28.11.2026)
+        zeigeNotice('yellow', '🌐 Öffentlich sichtbar',
+            'Alle Abschnitte dieser Seite, auch „Aktuelles“ und eingefügte Bilder, sind ohne Anmeldung für alle im Internet lesbar. '
+            + 'Keine Namen, Telefonnummern, Schäden in Wohnungen oder internen Fotos eintragen; Internes gehört in Unterlagen oder Termine.');
+
+        // 3) Vorhandene Inhalte laden + Editoren aufbauen
         const data = await ladeSections(stweg);
         await baueEditoren(stweg, data);
     }
@@ -265,6 +260,12 @@
             h2.className = 'text-xl font-semibold text-gray-900 mb-3';
             h2.textContent = section.title;
             card.appendChild(h2);
+
+            // F3: jeder Abschnitt zeigt deutlich, dass er öffentlich ist
+            const oeff = document.createElement('p');
+            oeff.className = 'text-xs font-medium text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1 mb-3 inline-block';
+            oeff.textContent = '🌐 öffentlich sichtbar — ohne Anmeldung für alle lesbar';
+            card.appendChild(oeff);
 
             // Editor-Ziel
             const editorEl = document.createElement('div');

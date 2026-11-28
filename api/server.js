@@ -21,6 +21,7 @@ const { zevAliasAddress, zevGotoTargets, zevDarfRechnungSehen, zevStwegFuerEmpfa
 const reklMelder = require('./lib/reklamation-melder');
 const vollmachtRechte = require('./lib/vollmacht-rechte');
 const projekteRechte = require('./lib/projekte-rechte');
+const stwegOeffentlich = require('./lib/stweg-oeffentlich');
 const rechteSchluessel = require('./lib/rechte-schluessel');
 const rechteMigrationen = require('./lib/rechte-migrationen');
 const kontaktformular = require('./lib/kontaktformular');
@@ -6509,7 +6510,8 @@ app.get('/api/stweg/:nr/kontakte', authMiddleware, async (req, res) => {
     // Load apartments + contacts from Verwaltungs-DB
     const wRes = await pool.query('SELECT * FROM wohnungen WHERE stweg = $1', [nr]);
     const kRes = await pool.query(
-      `SELECT k.* FROM wohnungen_kontakte k JOIN wohnungen w ON k.wohnung_id = w.id WHERE w.stweg = $1 AND k.archiviert_am IS NULL ORDER BY k.rolle, k.sort_order, k.id`,
+      // F2 (28.11.2026): nur Kontakte, die schon gelten (keine kuenftigen Kaeufer/Mieter vor dem Einzug)
+      `SELECT k.* FROM wohnungen_kontakte k JOIN wohnungen w ON k.wohnung_id = w.id WHERE w.stweg = $1 AND k.archiviert_am IS NULL AND ${stwegOeffentlich.KONTAKT_GILT_SQL} ORDER BY k.rolle, k.sort_order, k.id`,
       [nr]
     );
 
@@ -7997,8 +7999,11 @@ app.post('/api/wohnungen/sync-authentik', authMiddleware, adminOnly, async (req,
   }
 });
 
-// GET /api/stweg/:stweg/wohnungen - Public apartment info (no personal data)
-app.get('/api/stweg/:stweg/wohnungen', async (req, res) => {
+// GET /api/stweg/:stweg/wohnungen — F1 (Entscheid Stefan 28.11.2026): ohne
+// Anmeldung nur die Anzahl; Belegung, Besonderheiten, Wertquote je Wohnung nur
+// fuer Mitglieder der STWEG, ihre Verwaltung, Technik und Praesident
+// (lib/stweg-oeffentlich.js). Mit Authorization-Kopf wird die Anmeldung geprueft.
+app.get('/api/stweg/:stweg/wohnungen', (req, res, next) => (req.headers.authorization ? authMiddleware(req, res, next) : next()), async (req, res) => {
   try {
     const stweg = parseInt(req.params.stweg, 10);
     if (!stweg || stweg < 1 || stweg > 8) return res.status(400).json({ error: 'Ungueltige STWEG' });
@@ -8006,6 +8011,9 @@ app.get('/api/stweg/:stweg/wohnungen', async (req, res) => {
       'SELECT bezeichnung, stockwerk, zimmer, flaeche_m2, typ, besonderheiten, bewohnt_von, wertquote_zaehler, wertquote_nenner FROM wohnungen WHERE stweg = $1',
       [stweg]
     );
+    if (!req.user || !stwegOeffentlich.stwegMitglied(req.user.groups || [], stweg)) {
+      return res.json({ stweg, ...stwegOeffentlich.wohnungenOeffentlich(result.rows) });
+    }
     result.rows.sort((a, b) => wohnungSort(a.bezeichnung, b.bezeichnung));
     res.json({ stweg, wohnungen: result.rows });
   } catch (err) {
@@ -18453,41 +18461,10 @@ app.post('/api/stweg-modules', authMiddleware, kartenAdmin.mitKarteProtokolliere
   } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
 });
 
-// ─── STWEG-Seiten-Inhalt (Modul "seiten-editor") ────────────────────
-pool.query(`CREATE TABLE IF NOT EXISTS stweg_content (
-  stweg      INTEGER PRIMARY KEY,
-  content    TEXT NOT NULL DEFAULT '',
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_by TEXT
-)`).catch(e => console.error('[stweg-content] table init:', e.message));
-
-// GET: Inhalt einer STWEG-Seite (public, fuers Rendern). Plain-Text (kein HTML).
-app.get('/api/stweg-content/:stweg', async (req, res) => {
-  try {
-    const stweg = parseInt(req.params.stweg, 10);
-    const r = await pool.query('SELECT content, updated_at FROM stweg_content WHERE stweg = $1', [stweg]);
-    res.json(r.rows[0] || { content: '', updated_at: null });
-  } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
-});
-
-// POST: Inhalt speichern. Admin jede STWEG, Ausschuss eigene — UND Modul aktiv.
-app.post('/api/stweg-content/:stweg', authMiddleware, async (req, res) => {
-  try {
-    const stweg = parseInt(req.params.stweg, 10);
-    if (!Number.isFinite(stweg)) return res.status(400).json({ error: 'stweg ungueltig' });
-    const groups = req.user?.groups || [];
-    const admin = isTechnik(groups) || isPraesident(groups);
-    if (!admin && !getAusschussStwegs(groups).has(stweg)) return res.status(403).json({ error: 'Nur die eigene STWEG' });
-    const m = await pool.query("SELECT 1 FROM stweg_modules WHERE stweg=$1 AND module='seiten-editor' AND active=true", [stweg]);
-    if (!m.rows.length) return res.status(403).json({ error: 'Modul Seiten-Editor nicht aktiv' });
-    const content = String(req.body?.content ?? '').slice(0, 20000);
-    await pool.query(
-      `INSERT INTO stweg_content (stweg, content, updated_at, updated_by) VALUES ($1,$2,NOW(),$3)
-         ON CONFLICT (stweg) DO UPDATE SET content=EXCLUDED.content, updated_at=NOW(), updated_by=EXCLUDED.updated_by`,
-      [stweg, content, req.user?.email || null]);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
-});
+// ─── STWEG-Seiten-Inhalt (alt) ───────────────────────────────────────
+// GET/POST /api/stweg-content/:stweg entfernt (Klaerung STWEG, 28.11.2026): keine
+// Seite nutzt sie mehr (Nachfolger: /api/stweg-sections), und das POST hatte kein
+// Karten-Protokoll. Die Tabelle stweg_content bleibt unangetastet (keine Daten loeschen).
 
 // ─── STWEG-Seiten-Abschnitte (Modul "seiten-editor", WYSIWYG) ───────
 const STWEG_SECTIONS = ['willkommen', 'aktuelles', 'infos', 'termine'];
@@ -18544,6 +18521,15 @@ app.get('/api/stweg-sections/:stweg', async (req, res) => {
     r.rows.forEach(x => { out[x.section] = { html: sanitizeHtml(x.html || '', SANITIZE_OPTS), updated_at: x.updated_at }; });
     res.json(out);
   } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
+});
+
+// GET: in welchen STWEGs darf das Konto Abschnitte speichern? Gleiche Regel wie
+// das POST unten (T/P alle, sonst der Ausschuss seiner STWEG(s)). Der Editor bietet
+// nur diese an (F9, Klaerung STWEG 28.11.2026) statt aus Gruppennamen zu raten.
+app.get('/api/stweg-sections-rechte', authMiddleware, (req, res) => {
+  const groups = req.user?.groups || [];
+  const admin = isTechnik(groups) || isPraesident(groups);
+  res.json({ stwegs: admin ? [1, 2, 3, 4, 5, 6, 7, 8] : [...getAusschussStwegs(groups)].sort((a, b) => a - b), oeffentlich: true });
 });
 
 // POST: einen Abschnitt speichern. Admin jede STWEG, Ausschuss eigene — Modul aktiv — HTML sanitisiert.

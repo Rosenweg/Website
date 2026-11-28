@@ -32,7 +32,7 @@
                 <div id="verfuegbar" class="text-gray-600">Lade …</div>
             </div>
 
-            <!-- Admin-Grid (nur Ausschuss/Technik) -->
+            <!-- Admin-Grid (nur MEG-Ausschuss, MEG-Verwaltung, Technik, Präsident) -->
             <div id="admin-wrap" class="hidden">
                 <div class="flex items-center justify-between mb-4">
                     <h2 class="text-xl font-bold text-gray-800">Platz-Verwaltung</h2>
@@ -56,7 +56,7 @@
             </div>
 
             <div id="login-hint" class="hidden text-center py-6">
-                <p class="text-gray-600 mb-3">Zur Platz-Verwaltung anmelden (MEG-Ausschuss / Technik).</p>
+                <p class="text-gray-600 mb-3">Zur Platz-Verwaltung anmelden (MEG-Ausschuss, MEG-Verwaltung, Technik).</p>
                 <button id="login-btn" class="bg-slate-700 text-white px-6 py-2 rounded-lg hover:bg-slate-800">Anmelden</button>
             </div>
         </div>
@@ -158,7 +158,7 @@
                 // Nicht angemeldet: Anmelden kann zur Platz-Verwaltung führen.
                 document.getElementById('login-hint').classList.remove('hidden');
             } else {
-                // M1/M3: Der Server entscheidet (MEG-Ausschuss, Technik, Präsident).
+                // M1/M3: Der Server entscheidet (MEG-Ausschuss, MEG-Verwaltung, Technik, Präsident).
                 // Angemeldete ohne Recht sehen nur den öffentlichen Teil – kein
                 // Anmelde-Knopf, der nicht weiterhilft.
                 const r = await fetch('/api/meg/einstellplaetze/rechte', { headers: { Authorization: 'Bearer ' + AuthentikAuth.getToken() } });

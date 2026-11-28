@@ -1,14 +1,26 @@
 // MEG (Tiefeinstellhalle) – reine Helfer fuer die Einstellplatz-Verwaltung
 // (kein DB/Netz-Bezug, testbar). Genutzt von routes/meg.js.
-const { getAusschussStwegs, isTechnik, isPraesident } = require('./groups');
+const { STWEG_GROUPS, getAusschussStwegs, isTechnik, isPraesident, isVerwaltungFor } = require('./groups');
 
-// M1: Plaetze verwalten (volle Tabelle mit Namen, Speichern) duerfen nur der
-// MEG-Ausschuss (Ausschuss STWEG 8) und Technik/Praesident. Dieselbe Regel
+// M1: Plaetze verwalten (volle Tabelle mit Namen, Speichern) duerfen der
+// MEG-Ausschuss (Ausschuss STWEG 8), seit 28.11.2026 auch die MEG-Verwaltung
+// (meg-verwaltung, Entscheid Stefan), und Technik/Praesident. Dieselbe Regel
 // bekommt die Seite ueber /einstellplaetze/rechte – sie raet nicht mehr am
 // Gruppennamen („ausschuss“ irgendeiner STWEG).
 function darfMegPlaetzeVerwalten(user) {
   const groups = (user && user.groups) || [];
-  return !!(user && user.isAdmin) || isTechnik(groups) || isPraesident(groups) || getAusschussStwegs(groups).has(8);
+  return !!(user && user.isAdmin) || isTechnik(groups) || isPraesident(groups)
+    || getAusschussStwegs(groups).has(8) || isVerwaltungFor(groups, 8);
+}
+
+// Liste der Plaetze (Platz, Typ, Status) sieht nur, wer zur MEG gehoert:
+// Mitglieder (meg-eigentuemer, meg-bewohner), MEG-Ausschuss, MEG-Verwaltung,
+// Technik, Praesident (Entscheid Stefan 28.11.2026, Fund F7). Oeffentlich
+// bleibt nur /einstellplaetze/verfuegbar (zu vermietende Plaetze).
+function darfMegPlaetzeSehen(user) {
+  if (darfMegPlaetzeVerwalten(user)) return true;
+  const groups = ((user && user.groups) || []).map(g => String(g).toLowerCase());
+  return Object.values(STWEG_GROUPS[8] || {}).some(name => groups.includes(String(name).toLowerCase()));
 }
 
 // M2: PUT fuehrt zusammen – nur Felder, die im Body stehen, werden geaendert.
@@ -51,4 +63,4 @@ function sortierePlaetze(rows) {
     String(a.typ || '').localeCompare(String(b.typ || '')) || platzNrVergleich(a.platz_nr, b.platz_nr));
 }
 
-module.exports = { darfMegPlaetzeVerwalten, megPlatzAenderung, platzNrVergleich, sortierePlaetze };
+module.exports = { darfMegPlaetzeVerwalten, darfMegPlaetzeSehen, megPlatzAenderung, platzNrVergleich, sortierePlaetze };
