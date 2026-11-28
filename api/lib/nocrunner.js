@@ -8,8 +8,11 @@ const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$/;
 // Der Waechter laeuft jede Minute: nach 5 Minuten ohne Bericht ist er selbst das Problem.
 const STILL_MS = 5 * 60 * 1000;
 // Stau: mehr als STAU_JOBS Jobs warten laenger als STAU_S (der Waechter zaehlt die langen).
-const STAU_JOBS = 10;
+const STAU_JOBS = 25;
 const STAU_S = 20 * 60;
+// ... oder ein einzelner Job wartet laenger als STAU_EINZEL_S.
+const STAU_EINZEL_S = 45 * 60;
+const istStau = (st) => !!st && (st.lange > STAU_JOBS || (st.aeltester_s || 0) > STAU_EINZEL_S);
 const STAU_PAUSE_MS = 60 * 60 * 1000;
 
 const text = (v, max) => (v == null ? '' : String(v)).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max);
@@ -102,8 +105,8 @@ function zusammenfassung(bericht, empfangen, jetzt = Date.now()) {
     if (r.soll_an && !r.online) warnungen.push(`${r.name} ist offline, soll aber laufen`);
     return { ...r, zustand, ampel };
   });
-  const stauAktiv = !!(bericht.stau && bericht.stau.lange > STAU_JOBS);
-  if (stauAktiv) warnungen.push(`Stau: ${bericht.stau.lange} Jobs warten laenger als ${STAU_S / 60} Min`);
+  const stauAktiv = istStau(bericht.stau);
+  if (stauAktiv) warnungen.push(`Stau: ${bericht.stau.lange} Jobs warten laenger als ${STAU_S / 60} Min, aeltester ${Math.round((bericht.stau.aeltester_s || 0) / 60)} Min`);
   if (bericht.release && bericht.release.uebersprungen.length) warnungen.push(`Release uebersprungen: ${bericht.release.uebersprungen.map((u) => u.repo + ' ' + u.tag).join(', ')}`);
   // win-runner ist eine eigene VM, die dauernd laufen soll
   return {
@@ -115,7 +118,7 @@ function zusammenfassung(bericht, empfangen, jetzt = Date.now()) {
     cts: bericht.cts,
     warteschlange: bericht.warteschlange,
     release: bericht.release,
-    stau: bericht.stau ? { ...bericht.stau, grenze_jobs: STAU_JOBS, grenze_min: STAU_S / 60, aktiv: bericht.stau.lange > STAU_JOBS } : null,
+    stau: bericht.stau ? { ...bericht.stau, grenze_jobs: STAU_JOBS, grenze_min: STAU_S / 60, grenze_einzel_min: STAU_EINZEL_S / 60, aktiv: istStau(bericht.stau) } : null,
     letzter_schaltvorgang: bericht.letzter_schaltvorgang,
     zeit: new Date(empfangen).toISOString(),
   };
@@ -125,7 +128,7 @@ function zusammenfassung(bericht, empfangen, jetzt = Date.now()) {
 // zustand = { aktiv, gemeldet, zuletzt } wird veraendert; Rueckgabe 'alarm' | 'entwarnung' | null.
 function stauEntscheiden(zustand, stau, jetzt = Date.now()) {
   if (!stau) return null;
-  const ist = stau.lange > STAU_JOBS;
+  const ist = istStau(stau);
   if (ist) {
     zustand.aktiv = true;
     if (!zustand.gemeldet || jetzt - zustand.zuletzt >= STAU_PAUSE_MS) {
@@ -148,4 +151,4 @@ function oeffentlich(z) {
     warteschlange: [], release: z.release ? { ...z.release, laeuft: [], wartend: [], uebersprungen: [], letzte: null } : null, letzter_schaltvorgang: z.letzter_schaltvorgang ? { zeit: z.letzter_schaltvorgang.zeit, text: '' } : null };
 }
 
-module.exports = { oeffentlich, stauEntscheiden, STAU_JOBS, STAU_S, eingabePruefen, zusammenfassung, STILL_MS };
+module.exports = { oeffentlich, stauEntscheiden, STAU_JOBS, STAU_S, STAU_EINZEL_S, eingabePruefen, zusammenfassung, STILL_MS };

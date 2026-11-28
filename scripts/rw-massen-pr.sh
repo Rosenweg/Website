@@ -3,9 +3,10 @@
 #
 # Laeuft auf dem Arbeitsplatz (gh angemeldet). Regeln (Stefan, 28.11.2026, nach dem Stau
 # durch 45 gleichzeitige Pull Requests):
-#   * hoechstens 3 Repos gleichzeitig in der Pruefung (offener PR mit laufenden Checks),
-#   * ein neuer Push/Neustart nur, wenn weniger als 5 Jobs auf unsere Runner warten UND
-#     keine Release-Laeufe laufen oder anstehen,
+#   * hoechstens 6 Repos gleichzeitig in der Pruefung (offener PR mit laufenden Checks),
+#   * ein neuer Push/Neustart nur, wenn weniger als 15 Jobs auf unsere Runner warten UND
+#     weniger als 2 Release-Laeufe laufen (je Release belegen macOS + iOS 2 der 5 macOS-
+#     Plaetze; sonst bremsen Releases nicht),
 #   * sonst wartet das Skript (alle 60 s neue Pruefung).
 # Die Lage kommt aus dem NOC (Bericht des Runner-Waechters), wenn NOC_URL und NOC_TOKEN
 # gesetzt sind; sonst zaehlt es selbst wartende Laeufe in den Repos (langsamer, mehr API).
@@ -19,12 +20,12 @@
 #       --mergen zusammenfuehren (squash). Ein roter PR bleibt offen und wird gemeldet.
 #   Mit --trocken nur anzeigen.
 # Umgebung: ORG (Rosenweg), NOC_URL (https://www.rosenweg4303.ch), NOC_TOKEN, ARBEIT (Clones),
-#           MAX_PARALLEL (3), MAX_WARTEND (5), WARTEN_S (60).
+#           MAX_PARALLEL (6), MAX_WARTEND (15), MAX_RELEASES (2), WARTEN_S (60).
 set -uo pipefail
 
 ORG=${ORG:-Rosenweg}; NOC_URL=${NOC_URL:-}; NOC_TOKEN=${NOC_TOKEN:-}
-ARBEIT=${ARBEIT:-${TMPDIR:-/tmp}/rw-massen-pr}; MAX_PARALLEL=${MAX_PARALLEL:-3}
-MAX_WARTEND=${MAX_WARTEND:-5}; WARTEN_S=${WARTEN_S:-60}
+ARBEIT=${ARBEIT:-${TMPDIR:-/tmp}/rw-massen-pr}; MAX_PARALLEL=${MAX_PARALLEL:-6}
+MAX_WARTEND=${MAX_WARTEND:-15}; MAX_RELEASES=${MAX_RELEASES:-2}; WARTEN_S=${WARTEN_S:-60}
 MODUS=${1:-}; shift || true
 ZWEIG=""; TITEL=""; SKRIPT=""; MERGEN=0; TROCKEN=0; REPOS=()
 while [ $# -gt 0 ]; do
@@ -38,7 +39,7 @@ ok=0
 [ $ok = 1 ] || { sed -n '2,/^set -uo/p' "$0" | sed '$d' | cut -c3-; exit 2; }
 mkdir -p "$ARBEIT"
 
-# Lage: "<wartend> <releases-aktiv>" - releases-aktiv = laufende/anstehende Release-Laeufe
+# Lage: "<wartend> <releases>" - releases = laufende Release-Laeufe
 lage() {
   if [ -n "$NOC_URL" ] && [ -n "$NOC_TOKEN" ]; then
     curl -fsS --max-time 15 -H "X-Noc-Token: $NOC_TOKEN" "$NOC_URL/api/isp/noc/public/runner" 2>/dev/null \
@@ -46,7 +47,7 @@ lage() {
 import json, sys
 d = json.load(sys.stdin)
 r = d.get("release") or {}
-rel = len(r.get("laeuft") or []) + (len(r.get("wartend") or []) if r.get("aktiv") else 0)
+rel = len(r.get("laeuft") or [])
 print(d.get("wartend") or 0, rel)' && return 0
   fi
   # Ersatz: wartende bzw. laufende "App"-Laeufe (Releases) und wartende Laeufe zaehlen
@@ -71,8 +72,8 @@ ruhe_abwarten() {
   while :; do
     read -r w rel < <(lage) || { w=999; rel=1; }
     p=$(in_pruefung)
-    if [ "${w:-999}" -lt "$MAX_WARTEND" ] && [ "${rel:-1}" -eq 0 ] && [ "$p" -lt "$MAX_PARALLEL" ]; then return 0; fi
-    echo "  warte: $w Jobs wartend (Grenze $MAX_WARTEND), Releases $rel, $p PR in Pruefung (Grenze $MAX_PARALLEL)"
+    if [ "${w:-999}" -lt "$MAX_WARTEND" ] && [ "${rel:-9}" -lt "$MAX_RELEASES" ] && [ "$p" -lt "$MAX_PARALLEL" ]; then return 0; fi
+    echo "  warte: $w Jobs wartend (Grenze $MAX_WARTEND), laufende Releases $rel (Grenze $MAX_RELEASES), $p PR in Pruefung (Grenze $MAX_PARALLEL)"
     [ "$TROCKEN" = 1 ] && return 0
     sleep "$WARTEN_S"
   done

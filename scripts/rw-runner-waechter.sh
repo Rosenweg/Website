@@ -46,8 +46,8 @@ export BERICHT_BASE="${BERICHT_BASE:-}" BERICHT_TOKEN="${BERICHT_TOKEN:-}"
 # Ein Lauf = eine Entscheidung + weitere Messungen im Abstand MESS_S (NOC-Anzeige alle ~20 s)
 export MESS_S="${MESS_S:-20}" MESSUNGEN="${MESSUNGEN:-3}" WIN_VM="${WIN_VM:-142}"
 # Release-Warteschlange (Flutter-Apps, app.yml): erst mit RELEASE_QUEUE=1 aktiv. Dann startet der
-# Waechter faellige Releases per workflow_dispatch (veroeffentlichen=true), 1 gleichzeitig, 2 wenn
-# weniger als 2 macOS-Jobs laufen und nicht alle eigenen Runner belegt sind.
+# Waechter faellige Releases per workflow_dispatch (veroeffentlichen=true), hoechstens
+# RELEASE_PARALLEL_MAX (2) gleichzeitig, ein weiteres nur bei mindestens 2 freien macOS-Plaetzen (von 5).
 export RELEASE_QUEUE="${RELEASE_QUEUE:-0}" RELEASE_PARALLEL_MAX="${RELEASE_PARALLEL_MAX:-2}" RELEASE_PRUEF_S="${RELEASE_PRUEF_S:-300}"
 export RELEASE_WORKFLOW="${RELEASE_WORKFLOW:-app.yml}" RELEASE_BRANCH="${RELEASE_BRANCH:-main}" STAU_S="${STAU_S:-1200}"
 export LOKAL_IP="${LOKAL_IP:-100.64.2.21}"
@@ -320,8 +320,9 @@ def release_schritt(tok, zustand, frei_eigene, laeuft_runner_voll):
     # 4. Naechstes starten, nach Merge-Zeit
     wartend = sorted(((v["seit"], r, v["tag"]) for r, v in rel["apps"].items()
                       if r not in rel["laeuft"] and "%s %s" % (r, v["tag"]) not in rel["uebersprungen"]))
-    parallel = 1
-    if int(E["RELEASE_PARALLEL_MAX"]) >= 2 and mac_laeuft[0] < 2 and not laeuft_runner_voll: parallel = 2
+    # 5 macOS-Plaetze je Organisation, ein Release belegt 2 (macOS + iOS): ein weiteres nur,
+    # wenn noch 2 frei sind. Linux, Android und Windows haben keine eigene Grenze.
+    parallel = int(E["RELEASE_PARALLEL_MAX"]) if mac_laeuft[0] <= 3 else max(1, len(rel["laeuft"]))
     hinweis = None
     if aktiv:
         while wartend and len(rel["laeuft"]) < parallel:

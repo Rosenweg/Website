@@ -868,7 +868,7 @@
           const skip = (rl.uebersprungen || []).length ? ' · übersprungen: ' + rl.uebersprungen.map((x) => x.repo.replace(/^rosenweg-/, '') + ' ' + x.tag).join(', ') : '';
           relZeile = '\nRelease-Warteschlange' + (rl.aktiv ? '' : ' (aus)') + ': läuft: ' + lauf + ' · wartend: ' + wart + ' · letzte: ' + let_ + skip;
         }
-        const stauZeile = d.stau && d.stau.aktiv ? '\nSTAU: ' + d.stau.lange + ' Jobs warten länger als ' + d.stau.grenze_min + ' Min (insgesamt ' + d.stau.wartend + ')' : '';
+        const stauZeile = d.stau && d.stau.aktiv ? '\nSTAU: ' + d.stau.lange + ' Jobs warten länger als ' + d.stau.grenze_min + ' Min (insgesamt ' + d.stau.wartend + ', ältester ' + Math.round((d.stau.aeltester_s || 0) / 60) + ' Min)' : '';
         const queue = (d.warteschlange || []).map((q) => `${q.repo} · ${q.job} (${fmtDauer(q.wartezeit_s)})`).join(' | ');
         setz('runner-fuss', 'Wächter: ' + ({ ok: 'läuft', still: 'still', fehler: 'Fehler', nie: 'nie gemeldet' }[w.zustand] || '—')
           + (w.alter_min != null ? ' (' + fmtAlter(w.alter_min) + ')' : '')
