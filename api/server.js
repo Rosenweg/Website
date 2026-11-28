@@ -13644,6 +13644,29 @@ app.get('/api/projects/:slug', authMiddleware, requireProjekteLesen, requireProj
   }
 });
 
+// GET /api/projects/:slug/dokumente — die Dateien im Projektordner projekte/<slug>/ (L2),
+// ohne die ganze Ablage zu laden. Wer das Projekt lesen darf, darf sie sehen (gleiche Regel
+// wie projektDokRecht). ordner: '' (Projekt), 'timeline/<id>' oder 'kandidaten/<id>'.
+app.get('/api/projects/:slug/dokumente', authMiddleware, requireProjekteLesen, requireProjektLesen, async (req, res) => {
+  try {
+    const slug = req.projekt.slug;
+    const roh = await walkDocs(pathModule.join(DOCS_PATH, 'projekte', slug), `projekte/${slug}`);
+    const dateien = roh.filter(f => !f.path.endsWith('/.gitkeep')).map(f => {
+      const rest = f.path.slice(`projekte/${slug}/`.length).split('/');
+      const name = rest.pop();
+      return { path: f.path, name, size: f.size, ordner: rest.join('/') };
+    });
+    let kennungen = new Map();
+    if (unterlagenLib && dateien.length) {
+      try { kennungen = await unterlagenLib.kennungenFuer(pool, dateien.map(d => d.path)); } catch (e) { console.warn('[projekte] Kennungen:', e.message); }
+    }
+    res.json({ dokumente: dateien.map(d => ({ ...d, kennung: kennungen.get(d.path) || null })) });
+  } catch (err) {
+    console.error('[projekte] dokumente', err.message);
+    res.status(500).json({ error: 'Dokumente konnten nicht geladen werden' });
+  }
+});
+
 // GET /api/projects/:slug/auslagen — alle Auslagen eines Projekts mit Summen
 app.get('/api/projects/:slug/auslagen', authMiddleware, requireProjekteLesen, requireProjektLesen, async (req, res) => {
   try {
