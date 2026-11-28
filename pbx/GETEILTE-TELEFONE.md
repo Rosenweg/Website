@@ -510,6 +510,12 @@ Daten gelöscht — die Akku-Ausnahme und die Freigabe des Anrufkontos gingen ve
   - Die Netz-Rückfrage von „Debugging über WLAN“ bestätigt die Bedienungshilfe nur im WLAN „Rosenweg“; in einem anderen, noch nicht vertrauten Netz (Zugangspunkt) muss sie einmal jemand bestätigen.
   - Zum Testen per adb: `am broadcast -a ch.rosenweg4303.telefon.ADB_SELBST_WIEDERHERSTELLEN -n ch.rosenweg4303.telefon/org.sipdroid.sipua.rosenweg.AdbFreigabe` (Ergebnis im Log `RosenwegAdbSelbst`).
 
+### Protokoll und installierter Stand von Rosenweg Gerät (ab 1.4-rosenweg.83)
+
+- **Protokoll:** Gerät sendet etwa jede Minute seine Rosenweg-Zeilen (Tags `Rosenweg…`, `StartReceiver`, Abstürze) und alle 5 Minuten Systemzeilen zu HOME, Launcher und Installationen der eigenen Pakete (über den eigenen adb-Zugang) an `POST /api/telefon/<ext>/log` (Geräte-Anmeldung, nur die eigene Nebenstelle). Vorher werden Telefonnummern, Mailadressen, lange Schlüssel und der Name der angemeldeten Person unkenntlich gemacht. Ist die Anlage nicht erreichbar, hält das Telefon höchstens 2 MB zurück. Tabelle `telefon_geraetelog`, 14 Tage (Aufräumen stündlich und bei jedem Empfang). Lesen: `GET /api/telefon/<ext>/log?stufe=W&tag=Sperre&von=&bis=&limit=` (Technik/Präsident); auf /smartphones der Knopf „Protokoll“ je Telefon.
+- **Installierter Stand:** Gerät meldet mit `POST /api/telefon/apps-ist` `{apps: {paket: versionCode}}`, was installiert ist (nach jedem Abgleich bei Änderung, sonst alle 6 Stunden, und nach jeder Installation). Bis .82 füllte nur der adb-Updater `telefon_apps_ist`; war adb nicht erreichbar, blieb die Tabelle leer (XCover 2101, 28.11.2026).
+- **Katalog:** `GET /api/telefon/katalog` liefert einen ETag; Gerät fragt alle 15 Minuten mit `If-None-Match` (304 bei unverändertem Katalog) und prüft zusätzlich alle 6 Stunden alles von Grund auf.
+
 ### Apps per adb aktualisieren (adb-Updater, Entwurf 26. November 2026)
 
 Stefan: „Das zentrale System soll sich per adb mit den geteilten Telefonen verbinden und neue App-Versionen selbst einspielen.“ Rosenweg Gerät holt den Katalog zwar selbst (beim Start, bei der Anmeldung, sonst höchstens alle 6 Stunden) und installiert still als Device Owner. Der adb-Weg kommt dazu, weil
