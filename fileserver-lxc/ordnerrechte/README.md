@@ -20,7 +20,8 @@ Nicht neu erfunden, sondern aus der Website abgeschrieben:
 |---|---|---|
 | Wurzel und Dateien darin | alle (`rosenweg`) | nur Technik/Präsident |
 | `allgemein`, `Scans` | alle | jeder Ausschuss bzw. der Scanner |
-| `stwegN`, `meg` | Bewohner, Eigentümer, Ausschuss und Hausverwaltung (`stwegN-verwaltung`, `meg-verwaltung`) der STWEG | Ausschuss der STWEG |
+| `stwegN`, `meg` (Eigentümer-Unterlagen) | Eigentümer, Ausschuss und Hausverwaltung (`stwegN-verwaltung`, `meg-verwaltung`) der STWEG; Bewohner nur der Durchgang | Ausschuss der STWEG |
+| `stwegN/bewohner`, `meg/bewohner` (Hausordnung, Schilder, Hinweise) | dazu die Bewohner (Mieter) der STWEG | Ausschuss der STWEG |
 | `projekte` (gibt es noch nicht) | alle Eigentümer | jeder Ausschuss |
 | Sperrordner (`auslagen`, `anzeigen`, `reklamationen`, `unterschriftenlisten`, `grundbuch-bilder`, `druckauftraege`) auf Ebene 1 oder 2 | nur Technik/Präsident | dito |
 | `fotos_von_versendeten_briefen` | Ausschuss | Ausschuss |
@@ -39,6 +40,37 @@ Bewusste Vereinfachungen gegenüber der Website:
 - Neue Ordner in der Wurzel erben „alle lesen“ (wie Dateien der Wurzel auf der
   Website). Ein neuer Ordner der obersten Ebene, der geschützt sein soll, muss
   in die Tabelle und das Skript neu laufen.
+
+## Eigentümer-Unterlagen und Bewohner (28.11.2026)
+
+Entscheid Stefan (Datenschutz): Mieter sehen die Abrechnungen, Protokolle und
+Kontaktdaten ihrer STWEG nicht mehr. Im Ordner einer STWEG ist alles
+Eigentümer-Unterlage, auch lose Dateien in der Wurzel und jeder neue
+Unterordner. Für Bewohner bestimmt ist nur `stwegN/bewohner/`. Der Ausschuss
+legt dort ab, was Mieter sehen sollen.
+
+Dafür kennt die Tabelle Zeilen mit **Unterpfad** (`stweg3/bewohner | … | …`).
+`anwenden.sh` setzt sie nach den Zeilen der obersten Ebene und gibt den Lesern
+und Schreibern auf jedem Elternordner den **Durchgang** (r-x). Er steht nur in
+der Zugriffs-ACL dieses Ordners, nicht in der Default-ACL und nicht auf den
+Dateien. Neue Dateien in `stwegN` sind damit von selbst nur für Eigentümer
+lesbar. Mit `hide unreadable` sieht ein Mieter in `stwegN` nur den Ordner
+`bewohner`. Im Trockenlauf erscheint der Durchgang nur, wenn er auf dem
+Elternordner noch fehlt.
+
+Ausgerollt am 28.11.2026 auf CT 106 (Sicherung
+`acl-cephfs-stage-2026-11-28-003320.txt`, dann `--nur stweg1,…,stweg8,meg`).
+Die Hausordnungen (32 Dateien) und die Ordner `stweg3/schilder` und
+`meg/schilder` liegen jetzt in `…/bewohner/`. Die Liste alt → neu steht in
+`/root/ordnerrechte-sicherung/verschiebung-bewohner-2026-11-28.tsv` (CT 106 und
+CT 206). raum-qr legt neue Schilder in `stwegN/bewohner/schilder/` ab.
+Geprüft mit dem Testkonto `acltest` über Samba (`smbclient`): als Mieter
+STWEG 5 nur `bewohner` sichtbar, Hausordnung lesbar, Verträge und
+Kontaktdaten verweigert, kein Schreiben. Als Eigentümer alles lesbar. Danach
+wieder aus allen Gruppen genommen und gesperrt.
+
+Gleiche Regel: API `lib/dok-stweg-sicht.js` (in `isDocPathAllowed`) und
+Nextcloud ([`nextcloud/einbindungen-ablage.md`](../../nextcloud/einbindungen-ablage.md)).
 
 ## Warum so gebaut
 

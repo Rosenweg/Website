@@ -1,0 +1,7 @@
+[Unit]
+Description=Nextcloud-Einbindungen der STWEG-Ordner nach der Fileserver-Regel setzen
+After=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/einbindungen-ablage.py

@@ -7,6 +7,8 @@
 # Aufbau:  pfad | lesen | schreiben
 #   pfad  /       = nur die Wurzel selbst und die Dateien darin
 #         name    = Ordner der obersten Ebene, mit allem darunter
+#         a/b     = Unterordner mit allem darunter; die Elternordner bekommen
+#                   fuer dessen Leser und Schreiber nur den Durchgang
 #         ~name   = jeder Ordner dieses Namens auf Ebene 1 oder 2
 #                   (gross/klein egal), mit allem darunter; gilt nach den
 #                   anderen Zeilen und gewinnt
@@ -49,21 +51,35 @@ Scans      | g:rosenweg,g:scanner-geraete | u:scanner
 # jeder Ausschuss (gibt es heute noch nicht, das Skript ueberspringt fehlende Ordner)
 projekte   | eigentuemer,stweg1-eigentuemer,stweg2-eigentuemer,r9-eigentuemer,stweg4-eigentuemer,stweg5-eigentuemer,r1-eigentuemer,stweg7-eigentuemer,meg-eigentuemer,stweg1-verwaltung,stweg2-verwaltung,stweg3-verwaltung,stweg4-verwaltung,stweg5-verwaltung,stweg6-verwaltung,stweg7-verwaltung,meg-verwaltung,verwaltung | stweg1-ausschuss,stweg2-ausschuss,stweg3-ausschuss,stweg4-ausschuss,stweg5-ausschuss,stweg6-ausschuss,stweg7-ausschuss,meg-ausschuss,stweg8-ausschuss
 
-# STWEG-Ordner: lesen Bewohner+Eigentuemer+Ausschuss der STWEG und deren
-# Hausverwaltung (stwegN-verwaltung, STWEG 8 = meg-verwaltung; isDocPathAllowed
-# mit getStwegsMitVerwaltung), schreiben nur deren Ausschuss.
-# STWEG 3 = r9-*, STWEG 6 = r1-*, STWEG 8 = meg-*.
+# STWEG-Ordner: Eigentuemer-Unterlagen (Entscheid Stefan 28.11.2026,
+# Datenschutz). Den ganzen Ordner lesen Eigentuemer+Ausschuss der STWEG und
+# deren Hausverwaltung (stwegN-verwaltung, STWEG 8 = meg-verwaltung), schreiben
+# nur deren Ausschuss. Bewohner (Mieter) sehen nur den Unterordner bewohner/
+# (Hausordnung, Schilder, Hinweise); fuer den Weg dorthin setzt anwenden.sh auf
+# stwegN nur den Durchgang. Gleiche Regel: isDocPathAllowed mit
+# lib/dok-stweg-sicht.js (API) und die Nextcloud-Einbindungen
+# (nextcloud-lxc/einbindungen-ablage.md).
+# STWEG 3 = r9-*, STWEG 6 = r1-*, STWEG 8 = meg-* (stweg8 ist nur noch Alias).
 # ÜBERGANG: "verwaltung" (alte globale Gruppe = alle STWEGs) streichen, sobald
 # niemand mehr darin steht (api/lib/groups.js).
-stweg1     | stweg1-bewohner,stweg1-eigentuemer,stweg1-verwaltung,verwaltung | stweg1-ausschuss
-stweg2     | stweg2-bewohner,stweg2-eigentuemer,stweg2-verwaltung,verwaltung | stweg2-ausschuss
-stweg3     | r9-bewohner,r9-eigentuemer,stweg3-verwaltung,verwaltung         | stweg3-ausschuss
-stweg4     | stweg4-bewohner,stweg4-eigentuemer,stweg4-verwaltung,verwaltung | stweg4-ausschuss
-stweg5     | stweg5-bewohner,stweg5-eigentuemer,stweg5-verwaltung,verwaltung | stweg5-ausschuss
-stweg6     | r1-bewohner,r1-eigentuemer,stweg6-verwaltung,verwaltung         | stweg6-ausschuss
-stweg7     | stweg7-bewohner,stweg7-eigentuemer,stweg7-verwaltung,verwaltung | stweg7-ausschuss
-meg        | meg-bewohner,meg-eigentuemer,meg-verwaltung,verwaltung          | meg-ausschuss
-stweg8     | meg-bewohner,meg-eigentuemer,meg-verwaltung,verwaltung          | meg-ausschuss
+stweg1          | stweg1-eigentuemer,stweg1-verwaltung,verwaltung | stweg1-ausschuss
+stweg2          | stweg2-eigentuemer,stweg2-verwaltung,verwaltung | stweg2-ausschuss
+stweg3          | r9-eigentuemer,stweg3-verwaltung,verwaltung | stweg3-ausschuss
+stweg4          | stweg4-eigentuemer,stweg4-verwaltung,verwaltung | stweg4-ausschuss
+stweg5          | stweg5-eigentuemer,stweg5-verwaltung,verwaltung | stweg5-ausschuss
+stweg6          | r1-eigentuemer,stweg6-verwaltung,verwaltung | stweg6-ausschuss
+stweg7          | stweg7-eigentuemer,stweg7-verwaltung,verwaltung | stweg7-ausschuss
+meg             | meg-eigentuemer,meg-verwaltung,verwaltung | meg-ausschuss
+stweg8          | meg-eigentuemer,meg-verwaltung,verwaltung | meg-ausschuss
+
+stweg1/bewohner | stweg1-bewohner,stweg1-eigentuemer,stweg1-verwaltung,verwaltung | stweg1-ausschuss
+stweg2/bewohner | stweg2-bewohner,stweg2-eigentuemer,stweg2-verwaltung,verwaltung | stweg2-ausschuss
+stweg3/bewohner | r9-bewohner,r9-eigentuemer,stweg3-verwaltung,verwaltung | stweg3-ausschuss
+stweg4/bewohner | stweg4-bewohner,stweg4-eigentuemer,stweg4-verwaltung,verwaltung | stweg4-ausschuss
+stweg5/bewohner | stweg5-bewohner,stweg5-eigentuemer,stweg5-verwaltung,verwaltung | stweg5-ausschuss
+stweg6/bewohner | r1-bewohner,r1-eigentuemer,stweg6-verwaltung,verwaltung | stweg6-ausschuss
+stweg7/bewohner | stweg7-bewohner,stweg7-eigentuemer,stweg7-verwaltung,verwaltung | stweg7-ausschuss
+meg/bewohner    | meg-bewohner,meg-eigentuemer,meg-verwaltung,verwaltung | meg-ausschuss
 
 # Ordner der obersten Ebene ohne STWEG-Bezug: auf der Website nur fuer
 # Technik/Praesident (isDocPathAllowed kennt sie nicht). Waeren auch ohne

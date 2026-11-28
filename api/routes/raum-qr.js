@@ -368,7 +368,10 @@ function logoFuer(kopfName) {
 // ─── Ablage in «Dokumente» ──────────────────────────────────────────
 // Jeder Druck (ohne Bearbeiten) wird zusaetzlich als PDF abgelegt, damit die
 // aktuelle Fassung im Dokumentenbereich liegt: <ordner>/schilder/<typ>-<kurz>-<vorlage>.pdf.
-// Ordner nach der Gemeinschaft im Kopf: STWEG n -> stwegN, MEG -> meg, sonst allgemein.
+// Ordner nach der Gemeinschaft im Kopf: STWEG n -> stwegN/bewohner, MEG ->
+// meg/bewohner, sonst allgemein. Schilder haengen im Haus und sind Bewohner-
+// Material (Entscheid 28.11.2026): im STWEG-Ordner sehen Mieter nur bewohner/
+// (lib/dok-stweg-sicht.js).
 // Die PDFs enthalten die Token-QR-Codes; lesen koennen sie nur Angemeldete mit
 // Zugriff auf den Ordner (isDocPathAllowed in server.js).
 const DOCS_PATH = process.env.DOCS_PATH || '/documents';
@@ -376,8 +379,8 @@ const GOTENBERG = process.env.GOTENBERG_URL || 'http://doc-converter:3000';
 function ablageOrdner(kopfName) {
   const t = String(kopfName || '').replace(/<[^>]*>/g, '');
   const m = t.match(/STWEG[ ]*([0-9]+)/i);
-  if (m) return `stweg${m[1]}`;
-  if (/\bMEG\b/i.test(t)) return 'meg';
+  if (m) return `stweg${m[1]}/bewohner`;
+  if (/\bMEG\b/i.test(t)) return 'meg/bewohner';
   return 'allgemein';
 }
 async function ablegen(html, relPfad) {

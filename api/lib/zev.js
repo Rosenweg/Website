@@ -171,4 +171,122 @@ function zevWechselMelden(k, kontakteDerWohnung) {
   return !!occ && Number(occ.id) === Number(k.id);
 }
 
-module.exports = { zevSlug, zevAliasAddress, isValidEmail, zevGotoTargets, zevBewohnendePartei, zevDarfRechnungSehen, zevStwegFuerEmpfaenger, zevAliasAusFormular, zevAktuellerBewohner, zevWechselMelden, zevMailFeldFehler, ZEV_MAIL_FELDER };
+// ─── Admin-Rechte je STWEG (L6, Rosenweg ZEV) ─────────────────────────────
+// Konfiguration und Wohnungen (Namen und Mails der Bewohner) sehen nur der
+// Ausschuss oder die Verwaltung GENAU DIESER STWEG, Technik und Praesident.
+// Eine andere Gruppe der STWEG reicht nicht: z. B. der Ausschuss von STWEG 5,
+// der in Haus 9 wohnt, ist dort nur Bewohner. Gleiche Regel wie beim Schreiben
+// (stwegSchreibErlaubt in server.js) und bei /api/zev/rechnungen/:stweg.
+const { isTechnik, isPraesident, getAusschussStwegs, isVerwaltungFor } = require('./groups');
+
+function zevAdminFuerStweg(groups, stweg) {
+  const g = groups || [];
+  const nr = Number(stweg);
+  if (!Number.isInteger(nr) || nr < 1) return false;
+  if (isTechnik(g) || isPraesident(g)) return true;
+  return getAusschussStwegs(g).has(nr) || isVerwaltungFor(g, nr);
+}
+
+const ZUGRIFF_RANG = { none: 0, read: 1, write: 2 };
+// Rechte der App je STWEG (L1): lesen/schreiben = Seitenrecht `wohnungsverwaltung`
+// UND Ausschuss/Verwaltung dieser STWEG (T/P immer); alias nur T/P.
+function zevRechte(groups, stweg, zugriff) {
+  const g = groups || [];
+  const tp = isTechnik(g) || isPraesident(g);
+  const rang = tp ? 2 : (ZUGRIFF_RANG[zugriff] || 0);
+  const admin = zevAdminFuerStweg(g, stweg);
+  return { lesen: admin && rang >= 1, schreiben: admin && rang >= 2, alias: tp };
+}
+
+// PDF fuer Admins (L5, Entscheid Stefan 28.11.2026): Ausschuss und Verwaltung
+// der STWEG der Rechnung (T/P immer) duerfen PDFs UNZUGEORDNETER und
+// ALLGEMEINZAEHLER-Rechnungen oeffnen, damit sie richtig zuordnen koennen.
+// Wohnungsrechnungen bleiben privat. Rechnung ohne STWEG: nur T/P.
+function zevAdminDarfPdf(groups, rechnung, zugriff) {
+  if (!rechnung) return false;
+  const zu = rechnung.zuordnung || 'unzugeordnet';
+  if (zu !== 'unzugeordnet' && zu !== 'allgemein') return false;
+  const g = groups || [];
+  if (isTechnik(g) || isPraesident(g)) return true;
+  if (rechnung.stweg == null) return false;
+  return zevRechte(g, rechnung.stweg, zugriff).lesen;
+}
+
+// ─── Datumsfelder (L2) ────────────────────────────────────────────────────
+// smart-me schreibt dd.mm.yyyy; die DB speichert den Text. Die API liefert
+// zusaetzlich *_iso (yyyy-mm-dd), die alten Felder bleiben.
+function zevIsoDatum(v) {
+  if (v == null || v === '') return null;
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v.toISOString().slice(0, 10);
+  const t = String(v).trim();
+  let m = t.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  let j, mo, d;
+  if (m) { d = +m[1]; mo = +m[2]; j = +m[3]; }
+  else if ((m = t.match(/^(\d{4})-(\d{2})-(\d{2})/))) { j = +m[1]; mo = +m[2]; d = +m[3]; }
+  else return null;
+  const dt = new Date(Date.UTC(j, mo - 1, d));
+  if (dt.getUTCFullYear() !== j || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return null;
+  return `${j}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+const ZEV_DATUMSFELDER = ['rechnungsdatum', 'zeitraum_von', 'zeitraum_bis'];
+function zevMitIso(row) {
+  if (!row) return row;
+  const out = { ...row };
+  for (const f of ZEV_DATUMSFELDER) if (f in row) out[`${f}_iso`] = zevIsoDatum(row[f]);
+  return out;
+}
+
+// ─── Verbrauchsstatistik (L3) ─────────────────────────────────────────────
+// Bisher im Browser (zev-meine-rechnungen.html): je Jahr Summe der kWh aller
+// Positionen, Solar = Positionsname enthaelt „solar“. Jetzt hier, damit Web
+// und App dieselbe Regel nutzen. Jahr = Beginn des Abrechnungszeitraums, sonst
+// Rechnungsdatum, sonst Empfang. Preise in Rp./kWh als gewichtetes Mittel.
+const istSolar = name => /solar/i.test(String(name || ''));
+const rund = (n, st = 1) => Math.round(n * 10 ** st) / 10 ** st;
+
+function zevJahr(r) {
+  const iso = zevIsoDatum(r.zeitraum_von) || zevIsoDatum(r.rechnungsdatum) || zevIsoDatum(r.empfangen_am);
+  return iso ? Number(iso.slice(0, 4)) : null;
+}
+
+function zevStatistik(rechnungen) {
+  const jahre = new Map();
+  for (const r of rechnungen || []) {
+    const jahr = zevJahr(r);
+    if (!jahr) continue;
+    const j = jahre.get(jahr) || { jahr, anzahl: 0, kwh: 0, solar_kwh: 0, netz_kwh: 0, chf: 0, _solarChf: 0, _netzChf: 0, _solarKwhPreis: 0, _netzKwhPreis: 0 };
+    j.anzahl++;
+    if (Number.isFinite(Number(r.betrag_chf)) && r.betrag_chf != null) j.chf += Number(r.betrag_chf);
+    let pos = r.positionen;
+    if (typeof pos === 'string') { try { pos = JSON.parse(pos); } catch { pos = []; } }
+    for (const p of Array.isArray(pos) ? pos : []) {
+      const kwh = Number(p && p.kwh);
+      if (p == null || p.kwh == null || !Number.isFinite(kwh)) continue;
+      j.kwh += kwh;
+      const total = Number(p.total);
+      if (istSolar(p.name)) {
+        j.solar_kwh += kwh;
+        if (Number.isFinite(total) && p.total != null) { j._solarChf += total; j._solarKwhPreis += kwh; }
+      } else {
+        j.netz_kwh += kwh;
+        if (Number.isFinite(total) && p.total != null) { j._netzChf += total; j._netzKwhPreis += kwh; }
+      }
+    }
+    jahre.set(jahr, j);
+  }
+  return [...jahre.values()].sort((a, b) => b.jahr - a.jahr).map(j => ({
+    jahr: j.jahr,
+    anzahl: j.anzahl,
+    kwh: rund(j.kwh),
+    solar_kwh: rund(j.solar_kwh),
+    netz_kwh: rund(j.netz_kwh),
+    solar_anteil: j.kwh > 0 ? Math.round(j.solar_kwh / j.kwh * 100) : 0,
+    chf: rund(j.chf, 2),
+    rp_kwh_solar: j._solarKwhPreis > 0 ? rund(j._solarChf / j._solarKwhPreis * 100, 2) : null,
+    rp_kwh_netz: j._netzKwhPreis > 0 ? rund(j._netzChf / j._netzKwhPreis * 100, 2) : null,
+  }));
+}
+
+module.exports = { zevSlug, zevAliasAddress, isValidEmail, zevGotoTargets, zevBewohnendePartei, zevDarfRechnungSehen, zevStwegFuerEmpfaenger, zevAliasAusFormular, zevAktuellerBewohner, zevWechselMelden, zevMailFeldFehler, ZEV_MAIL_FELDER,
+  zevAdminFuerStweg, zevRechte, zevAdminDarfPdf, zevIsoDatum, zevMitIso, zevStatistik, zevJahr };

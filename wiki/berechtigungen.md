@@ -144,8 +144,8 @@ hat dort keine Rechte, auch wenn er dort wohnt oder Eigentümer ist.
 | Benutzerkonto löschen | — | — | — | — | — | ✅ | ✅ |
 | Vorgemerkte Löschungen (`loeschungen`) | — | — | — | — | — | ✅ | ✅ |
 | ZEV: eigene Rechnungen, PDF, „bezahlt“ | — | ✅ eigene | ✅ eigene + Wohnungen | ✅ eigene | ✅ eigene | ✅ | ✅ |
-| ZEV-Konfiguration und Abgleich | — | — | — | ✅ 🅢 | (R) 🅢 | ✅ | ✅ |
-| ZEV: unzugeordnete Rechnungen zuordnen | — | — | — | ✅ 🅢, nur unzugeordnete | (R `wohnungsverwaltung` schreiben) 🅢, nur unzugeordnete | ✅ auch umhängen | ✅ |
+| ZEV-Konfiguration, Wohnungen/Aliase ansehen und abgleichen (nur Ausschuss/Verwaltung **dieser** STWEG, seit 28.11.2026) | — | — | — | ✅ 🅢 | (R) 🅢 | ✅ | ✅ |
+| ZEV: Rechnungen zuordnen und umhängen (protokolliert); PDF unzugeordneter und Allgemeinzähler-Rechnungen | — | — | — | ✅ 🅢 | (R `wohnungsverwaltung` schreiben) 🅢 | ✅ auch ohne STWEG | ✅ |
 | Unterschriftenliste erzeugen / Rückläufe erfassen | — | — | — | ✅ 🅢 | (R) 🅢 | ✅ | ✅ |
 | Echtheitsprüfung Unterschriftenliste (30 / 10 Min.) | 👁 | 👁 | 👁 | 👁 | 👁 | 👁 | 👁 |
 | STWEG-Seiten (Module, Inhalte, Abschnitte) | 👁 | 👁 | 👁 | ✅ 🅢 | — | ✅ | ✅ |
@@ -185,7 +185,7 @@ hat dort keine Rechte, auch wenn er dort wohnt oder Eigentümer ist.
 | Löschantrag bestätigen (4-Augen) | — | — | — | ✅ nicht den eigenen | — | ✅ nicht den eigenen | ✅ nicht den eigenen |
 | E-Mail-Log, Versandstatus, DMARC, SMTP-Kontingent | — | — | — | — | — | 👁 | 👁 |
 | Briefe (Fotos versendeter Briefe) | — | — | — | ✅ (jede STWEG) | — | ✅ | ✅ |
-| Dokumente lesen | — | 👁 `allgemein`, `scans`, eigene STWEG | + `projekte` | + `fotos_von_versendeten_briefen` | 👁 `allgemein`, `scans`, ihre STWEG(s), mit Recht „projekte“ die Projekte ihrer STWEG(s) und ohne STWEG | 👁 alles | 👁 alles |
+| Dokumente lesen | — | 👁 `allgemein`, `scans`, aus der eigenen STWEG nur `stwegN/bewohner/` (Datenschutz, 28.11.2026) | + `projekte`, ganzer Ordner der eigenen STWEG | + `fotos_von_versendeten_briefen` | 👁 `allgemein`, `scans`, ihre STWEG(s), mit Recht „projekte“ die Projekte ihrer STWEG(s) und ohne STWEG | 👁 alles | 👁 alles |
 | Dokumente schreiben, verschieben, löschen | — | — | — | ✅ `allgemein`, eigene STWEG, `projekte/<Projekt>` der eigenen STWEG bzw. ohne STWEG | ✅ `projekte/<Projekt>` ihrer STWEG(s) mit Recht „projekte“ = schreiben | ✅ | ✅ |
 | Gesperrte Ordner `auslagen/`, `anzeigen/`, `reklamationen/`, `unterschriftenlisten/`, `grundbuch-bilder/` über die Dokumenten-API | — | — | — | — | — | ✅ | ✅ |
 

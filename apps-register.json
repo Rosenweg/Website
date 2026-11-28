@@ -101,6 +101,16 @@
       "reihenfolge": 80,
       "text": "Versammlungen, Sitzungen, Wartungen und weitere Termine deiner STWEG an einem Ort: in den eigenen Kalender übernehmen und rechtzeitig erinnern lassen.",
       "fuer": "Für alle Bewohner und Eigentümer (Termine ihrer STWEG). Eintragen und ändern: Ausschuss und Verwaltung für ihre STWEG, Technik und Präsident."
+    },
+    "zev": {
+      "name": "Rosenweg ZEV",
+      "repo": "Rosenweg/rosenweg-zev",
+      "paket": "ch.rosenweg4303.zev",
+      "logo": "/img/apps/rosenweg-zev.png?v=20261128",
+      "reihenfolge": 90,
+      "text": "Stromrechnungen aus dem ZEV deines Hauses: ansehen, als bezahlt markieren, PDF teilen; Verbrauch und Solaranteil je Jahr, mit dem Netzstrompreis zum Vergleich.",
+      "fuer": "Für Bewohner und Eigentümer in Häusern mit ZEV (heute Haus 9). Zuordnen, Umhängen und Konfiguration: Ausschuss und Verwaltung ihrer STWEG, Technik und Präsident.",
+      "_notiz": "Flutter, alle Plattformen. Rechnungen stellt smart-me/Axova aus; die App zeigt, ordnet zu und meldet Wechsel (Entscheid Stefan 28.11.2026). Web-Seiten stweg3/pages/zev-*.html bleiben."
     }
   },
   "katalog": {

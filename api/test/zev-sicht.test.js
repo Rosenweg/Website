@@ -82,6 +82,14 @@ test('Server nutzt den Helfer für Liste, PDF und bezahlt (kein Weg am Schalter 
     const i = src.indexOf(pfad);
     assert.ok(i > 0, pfad);
     const block = src.slice(i, src.indexOf('\napp.', i + 10));
-    assert.match(block, /zevSichtbareRechnungen\(/, pfad);
+    assert.match(block, /zevSichtbareRechnungen\(|zevMeineRechnungen\(/, pfad);
+  }
+  // Liste, Statistik und Neuigkeiten laufen ueber zevMeineRechnungen -> zevSichtbareRechnungen
+  const i = src.indexOf('async function zevMeineRechnungen(');
+  assert.ok(i > 0);
+  assert.match(src.slice(i, src.indexOf('\n}\n', i)), /return zevSichtbareRechnungen\(user, r\.rows\)/);
+  for (const pfad of ["'/api/zev/meine-statistik'", "'/api/zev/neuigkeiten'"]) {
+    const j = src.indexOf(pfad);
+    assert.match(src.slice(j, src.indexOf('\napp.', j + 10)), /zevMeineRechnungen\(req\.user\)/, pfad);
   }
 });
