@@ -162,6 +162,16 @@
       "text": "Projekte deiner STWEG und der Kooperation begleiten: Zeitachse, Offerten, Unterlagen, Budget und Kommentare. Neuigkeiten kommen als Benachrichtigung.",
       "fuer": "Für Eigentümer (Projekte ihrer STWEG und der Kooperation), Ausschuss und Verwaltung. Anlegen und bearbeiten: Ausschuss, Verwaltung mit Recht Projekte = schreiben, Technik und Präsident. Mieter sehen keine Projekte.",
       "_notiz": "Flutter, alle Plattformen. Löst projekte.html ab (Entscheide Stefan 28.11.2026, P1-P12). Farbe: grün Technik/Präsident, blau Ausschuss und Verwaltung mit Schreibrecht, sonst rot."
+    },
+    "vollmachten": {
+      "name": "Rosenweg Vollmachten",
+      "repo": "Rosenweg/rosenweg-vollmachten",
+      "paket": "ch.rosenweg4303.vollmachten",
+      "logo": "/img/apps/rosenweg-vollmachten.png?v=20261128",
+      "reihenfolge": 100,
+      "text": "Vollmachten für die Versammlung erteilen, digital signieren oder als Foto-PDF hochladen, ansehen und drucken; Verwaltung und Ausschuss sehen, wer wen vertritt.",
+      "fuer": "Für Eigentümer (erteilen) und alle Bevollmächtigten (ansehen). Alle Vollmachten und „Wer vertritt wen“: Ausschuss und Verwaltung mit Recht „Vollmachten“, Technik und Präsident.",
+      "_notiz": "Flutter, alle Plattformen (Entscheide Stefan 28.11.2026). Stationen: SEITE=rosenweg-vollmachten (Seite vollmachten.html)."
     }
   },
   "katalog": {
