@@ -315,9 +315,11 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `/api/verwaltung-mail-queue*` | T/P; `POST …/:id/freigeben` nach Freigabe-Regel (`mail_approval_config`), schon freigegeben → 409 |
 | `GET /api/verwaltung-mail-queue/zur-freigabe?seit=` | angemeldet; nur Mails, die die Person jetzt freigeben kann (Gruppe der Regel, noch nicht selbst freigegeben), mit Vorschau; `seit` (ISO) = neu eingestellt oder bearbeitet seitdem; Antwort `{mails, anzahl, jetzt}` (Rosenweg Mail-Freigabe) |
 | `/api/mail-templates`, `/api/mail-approval-config` | T/P |
-| `/api/mail-empfänger` | Recht `mail-empfänger` |
+| `/api/mail-empfänger` | Recht `mail-empfänger`; `GET` für Ausschuss/Verwaltung nur Einträge ihrer STWEG(s) und STWEG-übergreifende (`stweg` NULL), fremde `?stweg=` → 403 |
 | `/api/verteiler*`, `POST /api/verteiler/send`, `POST /api/email/send`, `/api/email/log`, `/api/dmarc/reports`, `/api/email/quota` | T/P |
 | `GET /api/verteiler`, `POST /api/verteiler/send` (nur `verteiler_id`) | zusätzlich Verwaltung mit Recht `email-verteiler`: nur aktive Verteiler ihrer STWEG(s), ohne Mitgliederliste (`lib/verteiler-verwaltung.js`) |
+| `POST /api/verteiler/send` mit `Idempotency-Key` (Kopf oder Feld `idempotency_key`, 8–128 Zeichen) | dieselbe Rundmail geht höchstens einmal hinaus (24 h je Konto): Wiederholung → gespeicherte Antwort mit `Idempotent-Replayed: true`; läuft noch/unterbrochen → 409; anderer Inhalt → 422. Ging nichts hinaus, ist der Schlüssel wieder frei |
+| `POST /api/verwaltung-mail-queue/:id/freigeben` | zusätzlich: nicht durch Ersteller oder letzte Bearbeitende (Konto-ID, auch T/P) → 403 `vier_augen` |
 | `GET /api/email-log` | T/P |
 | `/api/email-archive*` | Ausschuss (jede STWEG) oder T/P; Löschen nach 4-Augen-Prinzip, höchstens ein offener Antrag je Mail |
 | `GET /api/documents`, `GET /api/documents/:path` | angemeldet; `allgemein`, `scans`, eigene STWEG, `projekte` für Eigentümer; gesperrte Unterordner nur T/P |

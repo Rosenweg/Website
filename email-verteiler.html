@@ -425,7 +425,9 @@
                 : '';
         });
 
-        // E-Mail senden
+        // E-Mail senden. Idempotency-Key (L11): bleibt fuer denselben Inhalt gleich,
+        // damit ein erneuter Klick nach Netzabbruch nicht doppelt sendet.
+        let sendeSchluessel = null, sendeInhalt = null;
         document.getElementById('emailVerteilerForm').addEventListener('submit', async function(e) {
             e.preventDefault();
 
@@ -443,10 +445,16 @@
             sendButton.disabled = true;
             sendButton.innerHTML = '<span class="animate-spin inline-block mr-2">⏳</span> Wird gesendet...';
 
+            const inhalt = JSON.stringify([verteilerId, subject, message, senderName]);
+            if (inhalt !== sendeInhalt || !sendeSchluessel) {
+                sendeInhalt = inhalt;
+                sendeSchluessel = (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(36).slice(2));
+            }
+
             try {
                 const res = await AuthentikAuth.apiFetch('/api/verteiler/send', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': sendeSchluessel },
                     body: JSON.stringify({
                         verteiler_id: verteilerId,
                         subject,
@@ -462,6 +470,7 @@
                 successDiv.classList.remove('hidden');
                 successDiv.querySelector('p').textContent = `E-Mail erfolgreich an ${result.sent} Empfänger gesendet!`;
                 document.getElementById('emailVerteilerForm').reset();
+                sendeSchluessel = null; sendeInhalt = null;
                 setTimeout(() => successDiv.classList.add('hidden'), 5000);
             } catch (error) {
                 errorDiv.classList.remove('hidden');

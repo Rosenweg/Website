@@ -196,8 +196,8 @@ Schalten werden bisherige Anhänge nicht öffentlich.
 | Auslagen-Stundensatz ändern | — | — | — | ✅ | — | ✅ | ✅ |
 | Handwerker, Verträge, Aufträge, Notfallliste | — | — | — | (R) | (R) | ✅ | ✅ |
 | Mail schreiben (Freigabe-Outbox, 50 / Std.) | — | — | — | ✅ | (R) | ✅ | ✅ |
-| Mail-Empfänger-Stammdaten | — | — | — | 👁 | (R) | ✅ | ✅ |
-| Mail-Outbox ansehen, freigeben, ablehnen | — | — | — | — | — | ✅ | ✅ |
+| Mail-Empfänger-Stammdaten | — | — | — | 👁 eigene STWEG + STWEG-übergreifende | (R) eigene STWEG | ✅ | ✅ |
+| Mail-Outbox ansehen, freigeben, ablehnen | — | — | — | — | — | ✅ freigeben nicht die eigene/selbst bearbeitete | ✅ freigeben nicht die eigene/selbst bearbeitete |
 | Mail-Vorlagen, Freigabe-Regeln | — | — | — | — | — | ✅ | ✅ |
 | E-Mail-Verteiler (Listen, senden, Mitglieder) | Liste je STWEG 👁 | — | — | — | — | ✅ | ✅ |
 | An geschützte STWEG-Verteiler schreiben, Bewohner-Rundmails empfangen | — | nach Gruppe | nach Gruppe | nach Gruppe | ✅ nur Verteiler ihrer STWEG(s) (Gruppe oder Vertrag) | ✅ | ✅ |

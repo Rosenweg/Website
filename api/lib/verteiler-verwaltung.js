@@ -108,7 +108,57 @@ function fuerVerwaltung(v) {
   };
 }
 
+/**
+ * PUT /api/verteiler/:id (L4): neue Werte aus dem Body, fehlende Felder behalten
+ * den alten Wert. Frueher wurde members ohne Feld geleert, active ohne Feld true
+ * und stweg ohne Feld NULL. Explizit gesendete Werte gelten wie bisher
+ * (members: [] leert, active: false deaktiviert).
+ */
+function verteilerAenderung(alt, body) {
+  const b = body || {};
+  const da = (k) => Object.prototype.hasOwnProperty.call(b, k) && b[k] !== undefined;
+  const liste = (v) => (Array.isArray(v) ? v : []);
+  let groupNames = gruppenNamen(alt);
+  if (da('group_names') || da('group_name')) {
+    groupNames = Array.isArray(b.group_names) && b.group_names.length ? b.group_names : (b.group_name ? [b.group_name] : []);
+  }
+  return {
+    stweg: da('stweg') ? b.stweg : alt.stweg,
+    name: da('name') ? b.name : alt.name,
+    email_address: da('email_address') ? b.email_address : alt.email_address,
+    members: da('members') ? liste(b.members) : liste(alt.members),
+    active: da('active') ? b.active !== false : alt.active !== false,
+    reply_to: da('reply_to') ? (b.reply_to || 'sender') : (alt.reply_to || 'sender'),
+    subject_prefix: da('subject_prefix') ? (b.subject_prefix || null) : (alt.subject_prefix ?? null),
+    group_name: groupNames[0] || null,
+    group_names: groupNames,
+    allowed_sender_groups: da('allowed_sender_groups') ? liste(b.allowed_sender_groups) : liste(alt.allowed_sender_groups),
+    whatsapp_group_id: da('whatsapp_group_id') ? (b.whatsapp_group_id || null) : (alt.whatsapp_group_id ?? null),
+    whatsapp_group_name: da('whatsapp_group_name') ? (b.whatsapp_group_name || null) : (alt.whatsapp_group_name ?? null),
+    external_allowed: da('external_allowed') ? b.external_allowed === true : alt.external_allowed === true,
+  };
+}
+
+/** L11: Idempotency-Key pruefen. -> Schluessel | null (keiner) | false (ungueltig). */
+function idempotenzSchluessel(wert) {
+  if (wert === undefined || wert === null || wert === '') return null;
+  const s = String(wert).trim();
+  return /^[A-Za-z0-9._:-]{8,128}$/.test(s) ? s : false;
+}
+
+/** L11: Fingerabdruck des Inhalts; derselbe Schluessel fuer anderen Inhalt wird abgewiesen. */
+function sendeFingerabdruck(body) {
+  const b = body || {};
+  const inhalt = JSON.stringify([
+    b.verteiler_id == null ? null : String(b.verteiler_id),
+    String(b.subject ?? ''), String(b.body ?? ''), String(b.sender_name ?? ''),
+    Array.isArray(b.recipients) ? b.recipients.map(String) : [],
+  ]);
+  return require('crypto').createHash('sha256').update(inhalt).digest('hex');
+}
+
 module.exports = {
+  verteilerAenderung, idempotenzSchluessel, sendeFingerabdruck,
   istBewohnerRundmail, verwaltungsGruppeFuerVerteiler, verwaltungsGruppeDarfSenden, verteilerStweg,
   portalVerteilerStwegs, portalDarfSenden, portalDarfSendenRecht, absenderName, portalRundmailArchiv, fuerVerwaltung,
 };
