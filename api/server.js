@@ -23152,6 +23152,18 @@ app.get('/api/isp/noc/public/server', async (req, res) => {
 });
 app.get('/api/isp/noc/server', authMiddleware, requireTechnikOrPraesident, nocServerHandler);
 
+// Runner-Waechter (pve2, scripts/rw-runner-waechter.sh): Bericht annehmen, NOC-Kachel
+// "Runner" (routes/nocrunner.js). POST nur mit X-Runner-Token von pve2.
+const nocRunner = require('./routes/nocrunner');
+app.post('/api/isp/noc/runner', nocRunner.annehmen);
+app.get('/api/isp/noc/public/runner', (req, res) => {
+  const zugang = checkNocToken(req, res);
+  if (!zugang) return;
+  req.nocOffen = zugang === 'offen';
+  return nocRunner.lesen(req, res);
+});
+app.get('/api/isp/noc/runner', authMiddleware, requireTechnikOrPraesident, nocRunner.lesen);
+
 // Android-Dauertest (CT 149, noc/android-dauertest): Läufe annehmen, NOC-Kachel, Meldungen
 // an die Technik (routes/android-dauertest.js). POST nur mit X-Dauertest-Token von CT 149.
 const androidDauertest = require('./routes/android-dauertest');
