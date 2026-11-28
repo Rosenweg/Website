@@ -65,6 +65,16 @@
                 <div id="contributors" class="mt-3 text-xs text-gray-500"></div>
             </div>
 
+            <!-- Vorschlag Parzelle -> STWEG (nur Technik/Präsident; nichts wird ohne Bestätigung gespeichert) -->
+            <div id="vorschlag-box" class="hidden bg-white rounded-lg border p-3 mb-4">
+                <div class="flex items-center justify-between gap-2 flex-wrap">
+                    <h2 class="text-sm font-semibold text-gray-800">Parzellen den STWEG zuordnen: Vorschlag</h2>
+                    <button onclick="vorschlagLaden()" class="px-3 py-1 text-xs bg-gray-100 border rounded hover:bg-gray-200">Vorschlag berechnen</button>
+                </div>
+                <p class="text-xs text-gray-500 mt-1">Abgeleitet aus den Wertquoten der Wohnungen, der Zahl der Anteile und erfassten Rosenweg-Adressen. Gespeichert wird erst mit „Übernehmen“.</p>
+                <div id="vorschlag-liste" class="mt-2 text-sm"></div>
+            </div>
+
             <!-- Filter bar -->
             <div class="bg-white rounded-lg border p-3 mb-4 flex flex-wrap gap-3 items-center">
                 <select id="filter-parzelle" onchange="loadAnteile()" class="border rounded px-2 py-1 text-sm">
@@ -81,6 +91,15 @@
                     <input type="checkbox" id="filter-mine" onchange="loadAnteile()" class="rounded">
                     Nur meine
                 </label>
+                <span id="stweg-zuordnen" class="hidden inline-flex items-center gap-1 text-sm">
+                    <span class="text-gray-600">Parzelle gehört zu</span>
+                    <select id="stweg-zuordnen-wahl" class="border rounded px-2 py-1 text-sm">
+                        <option value="">ohne STWEG</option>
+                        <option value="1">STWEG 1</option><option value="2">STWEG 2</option><option value="3">STWEG 3</option><option value="4">STWEG 4</option>
+                        <option value="5">STWEG 5</option><option value="6">STWEG 6</option><option value="7">STWEG 7</option><option value="8">MEG (8)</option>
+                    </select>
+                    <button onclick="stwegZuordnen()" class="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">Zuordnen</button>
+                </span>
                 <button onclick="loadAnteile()" class="ml-auto px-3 py-1 text-sm bg-gray-100 border rounded hover:bg-gray-200">Aktualisieren</button>
                 <button data-excel-export data-excel-source="#anteile-table" data-excel-name="grundbuch-anteile-{date}.xlsx" data-excel-sheet="Anteile" class="px-3 py-1 text-sm inline-flex items-center gap-1 bg-emerald-600 text-white rounded hover:bg-emerald-700">⬇ Excel</button>
             </div>
@@ -121,6 +140,10 @@
                 <div class="mb-3">
                     <label class="block text-xs font-medium text-gray-600 mb-1">Bild des Auszugs hochladen (PNG/JPG/PDF)</label>
                     <input type="file" id="m-bild" accept="image/png,image/jpeg,application/pdf" class="block w-full text-sm border rounded px-2 py-1.5">
+                    <div id="m-ocr-box" class="hidden mt-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+                        <p><strong>Auslesen per KI (externer Dienst):</strong> Der Auszug mit Namen und Wohnadressen wird dafür an OpenRouter geschickt und von dort an Anthropic (Claude). Die Daten verlassen damit das Rosenweg-Netz. Ohne Auslesen füllst du die Felder einfach von Hand aus.</p>
+                        <button type="button" id="m-ocr-btn" onclick="ocrStarten()" class="mt-2 px-3 py-1 text-xs bg-purple-600 text-white rounded hover:bg-purple-700">🤖 Per KI auslesen (extern)</button>
+                    </div>
                     <div id="m-ocr-status" class="text-xs text-gray-500 mt-1"></div>
                     <div id="m-bild-preview" class="mt-2 hidden">
                         <img id="m-bild-img" class="max-h-72 border rounded">
@@ -179,20 +202,25 @@
     <script>
     const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
     let me = null, anteileCache = [], current = null;
-    // Freigeben (verifizieren) dürfen Ausschuss, Technik und Präsident (wie die API, Befund W14)
+    // Freigeben (verifizieren) dürfen Technik und Präsident sowie der Ausschuss
+    // der STWEG des Anteils (Server: darf_freigeben je Anteil, lib/grundbuch-rechte.js).
+    // Erfassen dürfen Eigentümer, Ausschuss und Technik/Präsident, keine Mieter.
     let DARF_FREIGEBEN = false;
-    function istAusschussOderTechnik(groups) {
-        return (groups || []).some(g => { const gl = String(g).toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident' || /^stweg[1-7]-ausschuss$/.test(gl) || gl === 'meg-ausschuss'; });
-    }
+    let RECHTE = { erfassen: false, alle: false, stweg_zuordnen: false };
 
     document.addEventListener('DOMContentLoaded', async () => {
         const user = await AuthentikAuth.init({ requireAuth: true });
         if (!user) return; // init() leitet bei not-logged-in selbst nach Authentik weiter
         me = user;
-        DARF_FREIGEBEN = istAusschussOderTechnik(user.groups);
         document.getElementById('auth-gate').classList.add('hidden');
         document.getElementById('content').classList.remove('hidden');
         await Promise.all([loadStats(), loadAnteile()]);
+        if (!RECHTE.erfassen) {
+            const h = document.createElement('p');
+            h.className = 'mb-4 rounded border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700';
+            h.textContent = 'Grundbuchauszüge erfassen nur Eigentümerinnen und Eigentümer, der Ausschuss sowie Technik und Präsident. Du siehst hier den Stand der Erfassung.';
+            document.getElementById('content').prepend(h);
+        }
     });
 
     async function loadStats() {
@@ -240,6 +268,12 @@
             const res = await AuthentikAuth.apiFetch('/api/grundbuch/anteile?' + params);
             const data = await res.json();
             anteileCache = data.anteile || [];
+            if (data.rechte) RECHTE = data.rechte;
+            document.getElementById('vorschlag-box').classList.toggle('hidden', !RECHTE.stweg_zuordnen);
+            // STWEG je Parzelle zuordnen: nur Technik/Präsident, wenn eine Parzelle gewählt ist
+            const zu = document.getElementById('stweg-zuordnen');
+            zu.classList.toggle('hidden', !(RECHTE.stweg_zuordnen && p));
+            if (RECHTE.stweg_zuordnen && p && anteileCache[0]) document.getElementById('stweg-zuordnen-wahl').value = anteileCache[0].stweg || '';
             renderAnteile();
             populateParzellenFilter();
         } catch (e) { console.error(e); }
@@ -277,9 +311,11 @@
             // Fremde Erfasser/Reservierer liefert der Server ohne Namen (null).
             const erf = a.erfasst_von ? esc(a.erfasst_von) : (a.reserviert_von ? `<span class="text-blue-600">res: ${esc(a.reserviert_von)}</span>` : (a.status === 'reserviert' ? '<span class="text-blue-600">reserviert</span>' : ''));
             const cta = a.status === 'offen' ? 'Erfassen' : (a.status === 'reserviert' ? (a.reserviert_von === me?.email ? 'Fortsetzen' : 'Reserviert') : 'Bearbeiten');
-            const disabled = a.status === 'reserviert' && a.reserviert_von !== me?.email;
+            const eigen = a.reserviert_von === me?.email || a.erfasst_von === me?.email;
+            const disabled = (a.status === 'reserviert' && a.reserviert_von !== me?.email)
+                || !a.darf_erfassen || (a.status !== 'offen' && !eigen && !a.darf_freigeben);
             return `<tr class="hover:bg-gray-50">
-                <td class="px-3 py-2 font-mono text-xs">${esc(a.anteil_typ)} ${esc(a.parzelle)}-${esc(a.sub_id)} · ${esc(a.anteil_z)}/${esc(a.anteil_n)}</td>
+                <td class="px-3 py-2 font-mono text-xs">${esc(a.anteil_typ)} ${esc(a.parzelle)}-${esc(a.sub_id)} · ${esc(a.anteil_z)}/${esc(a.anteil_n)}${a.stweg ? ` <span class="ml-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-sans">STWEG ${esc(a.stweg)}</span>` : ''}</td>
                 <td class="px-3 py-2">${eig}</td>
                 <td class="px-3 py-2">${adr}</td>
                 <td class="px-3 py-2">${statusBadge(a.status)}</td>
@@ -308,7 +344,10 @@
         document.getElementById('m-bild').value = '';
         document.getElementById('m-error').classList.add('hidden');
         document.getElementById('m-release').classList.toggle('hidden', !(current.status === 'reserviert' && current.reserviert_von === me?.email));
+        DARF_FREIGEBEN = !!current.darf_freigeben;
         document.getElementById('m-verify').classList.toggle('hidden', !(DARF_FREIGEBEN && current.status === 'erfasst'));
+        document.getElementById('m-ocr-box').classList.add('hidden');
+        document.getElementById('m-ocr-status').textContent = '';
         // Reservieren
         if (current.status === 'offen') {
             try {
@@ -335,9 +374,19 @@
             };
             reader.readAsDataURL(f);
         }
-        // Auto-OCR: Felder per Claude Vision (OpenRouter) vorausfüllen
-        await runOcr(f);
+        // Kein automatisches Auslesen: der Auszug geht nur nach ausdrücklicher
+        // Bestätigung an den externen Dienst (Knopf im Hinweis, wie bei Vollmachten).
+        document.getElementById('m-ocr-box').classList.toggle('hidden', f.type === 'application/pdf');
+        document.getElementById('m-ocr-status').textContent = f.type === 'application/pdf' ? 'PDF: Felder bitte von Hand ausfüllen.' : '';
     });
+
+    async function ocrStarten() {
+        const f = document.getElementById('m-bild').files[0];
+        if (!f || !current) return;
+        if (!confirm('Auszug per KI auslesen?\n\nDas Bild des Grundbuchauszugs (mit Namen und Wohnadressen) wird dafür an einen externen Dienst geschickt: OpenRouter, von dort an Anthropic (Claude). Die Daten verlassen damit das Rosenweg-Netz.\n\nNur fortfahren, wenn du einverstanden bist. Sonst die Felder von Hand ausfüllen.')) return;
+        document.getElementById('m-ocr-box').classList.add('hidden');
+        await runOcr(f);
+    }
 
     async function runOcr(file) {
         if (!file || file.type === 'application/pdf') return; // PDFs aktuell ohne Auto-OCR
@@ -348,7 +397,7 @@
             const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
             const r = await AuthentikAuth.apiFetch('/api/grundbuch/ocr', {
                 method: 'POST', headers: {'Content-Type':'application/json'},
-                body: JSON.stringify({ bild_base64: b64, bild_filename: file.name }),
+                body: JSON.stringify({ bild_base64: b64, bild_filename: file.name, parzelle: current.parzelle, sub_id: current.sub_id, bestaetigt_extern: true }),
             });
             if (!r.ok) {
                 const e = await r.json().catch(() => ({}));
@@ -429,6 +478,59 @@
             const el = document.getElementById('m-error');
             el.textContent = e.message; el.classList.remove('hidden');
         }
+    }
+
+    // Vorschlag Parzelle -> STWEG: nur anzeigen; übernehmen je Zeile oder alle sicheren
+    let VORSCHLAEGE = [];
+    async function vorschlagLaden() {
+        const box = document.getElementById('vorschlag-liste');
+        box.textContent = 'Berechne…';
+        const r = await AuthentikAuth.apiFetch('/api/grundbuch/parzellen/vorschlag');
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { box.textContent = d.error || ('Fehler ' + r.status); return; }
+        VORSCHLAEGE = d.vorschlaege || [];
+        const offen = VORSCHLAEGE.filter(v => v.vorschlag && v.aktuell !== v.vorschlag);
+        const sichere = offen.filter(v => v.sicherheit === 'hoch');
+        const name = n => Number(n) === 8 ? 'MEG (8)' : 'STWEG ' + n;
+        box.innerHTML = `<table class="min-w-full text-xs"><thead class="text-gray-500"><tr>
+              <th class="text-left py-1 pr-2">Parzelle</th><th class="text-left pr-2">Anteile</th><th class="text-left pr-2">heute</th>
+              <th class="text-left pr-2">Vorschlag</th><th class="text-left pr-2">Sicherheit</th><th class="text-left pr-2">Gründe</th><th></th></tr></thead><tbody>
+            ${VORSCHLAEGE.map(v => `<tr class="border-t">
+              <td class="py-1 pr-2 font-mono">${esc(v.parzelle)}</td><td class="pr-2">${esc(v.anteile)}</td>
+              <td class="pr-2">${v.aktuell == null ? '—' : esc(v.aktuell === 'gemischt' ? 'gemischt' : name(v.aktuell))}</td>
+              <td class="pr-2">${v.vorschlag ? esc(name(v.vorschlag)) : '—'}</td>
+              <td class="pr-2">${esc(v.sicherheit)}</td>
+              <td class="pr-2 text-gray-500">${v.gruende ? esc(`${v.gruende.wertquoten} Wertquoten, ${v.gruende.adressen} Adressen${v.gruende.anzahl_gleich ? ', Anzahl gleich' : ''}${v.gruende.zweitbeste ? ` · danach ${name(v.gruende.zweitbeste.stweg)} (${v.gruende.zweitbeste.punkte})` : ''}`) : ''}</td>
+              <td>${v.vorschlag && v.aktuell !== v.vorschlag ? `<button onclick="vorschlagUebernehmen([${Number(v.parzelle)}])" class="px-2 py-0.5 bg-blue-600 text-white rounded">Übernehmen</button>` : ''}</td>
+            </tr>`).join('')}</tbody></table>
+            ${sichere.length ? `<button onclick="vorschlagUebernehmen(${JSON.stringify(sichere.map(v => Number(v.parzelle)))})" class="mt-2 px-3 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700">Alle sicheren übernehmen (${sichere.length})</button>` : ''}`;
+    }
+    async function vorschlagUebernehmen(parzellen) {
+        const liste = VORSCHLAEGE.filter(v => parzellen.includes(Number(v.parzelle)) && v.vorschlag);
+        if (!liste.length) return;
+        if (!confirm(`${liste.length} Parzelle(n) zuordnen?\n\n` + liste.map(v => `Parzelle ${v.parzelle} → STWEG ${v.vorschlag}`).join('\n')
+            + '\n\nDanach sehen nur noch der Ausschuss dieser STWEG sowie Technik und Präsident die Namen.')) return;
+        for (const v of liste) {
+            const r = await AuthentikAuth.apiFetch(`/api/grundbuch/parzellen/${encodeURIComponent(v.parzelle)}/stweg`, {
+                method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ stweg: v.vorschlag }),
+            });
+            if (!r.ok) { alert(`Parzelle ${v.parzelle}: ` + ((await r.json().catch(() => ({}))).error || r.status)); break; }
+        }
+        await Promise.all([vorschlagLaden(), loadAnteile()]);
+    }
+
+    // Technik/Präsident: STWEG der gewählten Parzelle setzen (alle Anteile der Parzelle)
+    async function stwegZuordnen() {
+        const p = document.getElementById('filter-parzelle').value;
+        if (!p) return;
+        const stweg = document.getElementById('stweg-zuordnen-wahl').value || null;
+        if (!confirm(`Parzelle ${p} ${stweg ? 'der STWEG ' + stweg : 'keiner STWEG'} zuordnen? Danach sehen nur noch der Ausschuss dieser STWEG sowie Technik und Präsident die Namen.`)) return;
+        const r = await AuthentikAuth.apiFetch(`/api/grundbuch/parzellen/${encodeURIComponent(p)}/stweg`, {
+            method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ stweg }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { alert(d.error || ('Fehler ' + r.status)); return; }
+        await loadAnteile();
     }
 
     async function releaseReservation() {

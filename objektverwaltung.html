@@ -581,6 +581,11 @@
             canWriteWohnungen = accessWohnungen === 'write';
             canWriteBewohner = accessBewohner === 'write' || accessVerwaltung === 'write';
             seesAll = isTechnik;
+            // Wohnung löschen und Import: nur Technik/Präsident (Entscheid Stefan 28.11.2026);
+            // der Ausschuss archiviert Kontakte statt die Wohnung zu löschen.
+            window.darfLoeschenUndImport = isTechnik;
+            // Export: Ausschuss/Verwaltung (der Server prüft je STWEG und protokolliert)
+            window.darfExport = isTechnik || isAusschuss || isVerwaltung;
 
             istGruppenAdmin = isTechnik;
 
@@ -643,11 +648,13 @@
                         </button>
                     `).join('');
 
-                    document.getElementById('btn-export').classList.remove('hidden');
-                    document.getElementById('btn-csv').classList.remove('hidden');
+                    if (window.darfExport) {
+                        document.getElementById('btn-export').classList.remove('hidden');
+                        document.getElementById('btn-csv').classList.remove('hidden');
+                    }
                     if (canWriteWohnungen) {
                         document.getElementById('btn-add').classList.remove('hidden');
-                        document.getElementById('btn-import').classList.remove('hidden');
+                        if (window.darfLoeschenUndImport) document.getElementById('btn-import').classList.remove('hidden');
                     }
 
                     currentStweg = accessibleStwegs[0].nr;
@@ -1047,7 +1054,7 @@
                 kontakte.forEach(k => addKontakt(k));
             }
 
-            if (canWriteWohnungen) document.getElementById('btn-delete').classList.remove('hidden');
+            if (canWriteWohnungen && window.darfLoeschenUndImport) document.getElementById('btn-delete').classList.remove('hidden');
             else document.getElementById('btn-delete').classList.add('hidden');
 
             const histBtn = document.getElementById('btn-historie');
@@ -1148,10 +1155,10 @@
 
         async function deleteWohnung() {
             const id = document.getElementById('f-id').value;
-            if (!id || !confirm('Wohnung wirklich löschen?')) return;
+            if (!id || !confirm('Wohnung wirklich löschen? Kontakte und ihre Historie werden mitgelöscht. Bei einem Wegzug stattdessen den Kontakt archivieren.')) return;
             try {
                 const res = await AuthentikAuth.apiFetch(`/api/wohnungen/${currentStweg}/${id}`, { method: 'DELETE' });
-                if (!res.ok) throw new Error('Löschen fehlgeschlagen');
+                if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Löschen fehlgeschlagen');
                 closeWohnungModal();
                 await loadWohnungen();
             } catch (err) {
@@ -1204,9 +1211,24 @@
             el.classList.remove('hidden');
         }
 
+        // Export vor dem Erzeugen beim Server anmelden: nur Ausschuss/Verwaltung dieser
+        // STWEG und Technik/Präsident, mit Protokolleintrag (POST /api/objekte/export).
+        async function exportFreigabe(art, stweg, format, anzahl) {
+            try {
+                const r = await AuthentikAuth.apiFetch('/api/objekte/export', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ art, stweg: stweg || null, format, anzahl }),
+                });
+                if (r.ok) return true;
+                alert((await r.json().catch(() => ({}))).error || ('Export nicht erlaubt (' + r.status + ')'));
+            } catch (e) { alert('Export nicht möglich: ' + e.message); }
+            return false;
+        }
+
         // ── Excel Export ──
-        function exportXLSX() {
+        async function exportXLSX() {
             if (!allWohnungen.length) return alert('Keine Daten zum Exportieren.');
+            if (!(await exportFreigabe('wohnungen', currentStweg, 'xlsx', allWohnungen.length))) return;
             const stweg = stwegList.find(s => s.nr === currentStweg);
             const stwegName = stweg ? stweg.name : `STWEG ${currentStweg}`;
 
@@ -1263,8 +1285,9 @@
             return s;
         }
 
-        function exportCSV() {
+        async function exportCSV() {
             if (!allWohnungen.length) return alert('Keine Daten zum Exportieren.');
+            if (!(await exportFreigabe('wohnungen', currentStweg, 'csv', allWohnungen.length))) return;
             const stweg = stwegList.find(s => s.nr === currentStweg);
             const stwegName = stweg ? stweg.name : `STWEG ${currentStweg}`;
             const headers = ['Bezeichnung','Stockwerk','Zimmer','Fläche m²','Typ','Wertquote','Besonderheiten','Bewohnung','Waschküche','Rolle','Name','E-Mail','Telefon','Adresse','Notizen'];
@@ -1378,9 +1401,10 @@
             }).join('');
         }
 
-        function exportEigentuemerXLSX() {
+        async function exportEigentuemerXLSX() {
             const search = document.getElementById('eig-search').value.toLowerCase();
             const stwegFilter = document.getElementById('eig-stweg-filter').value;
+            if (!(await exportFreigabe('eigentuemer', stwegFilter, 'xlsx', eigentuemerData.length))) return;
             const filtered = eigentuemerData.filter(e => {
                 if (stwegFilter && !e.objects.some(o => String(o.stweg) === stwegFilter)) return false;
                 if (search && !(e.name + ' ' + (e.email||'')).toLowerCase().includes(search)) return false;
@@ -1432,9 +1456,10 @@
             XLSX.writeFile(wb, `eigentuemer-übersicht-${new Date().toISOString().slice(0,10)}.xlsx`);
         }
 
-        function exportEigentuemerCSV() {
+        async function exportEigentuemerCSV() {
             const search = document.getElementById('eig-search').value.toLowerCase();
             const stwegFilter = document.getElementById('eig-stweg-filter').value;
+            if (!(await exportFreigabe('eigentuemer', stwegFilter, 'csv', eigentuemerData.length))) return;
             const rows = eigentuemerData.filter(e => {
                 if (stwegFilter && !e.objects.some(o => String(o.stweg) === stwegFilter)) return false;
                 if (search && !(e.name + ' ' + (e.email||'')).toLowerCase().includes(search)) return false;

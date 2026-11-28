@@ -55,8 +55,8 @@ const SERVICES_GROUPS = [
     items: [
       { label: 'Objektverwaltung', href: 'objektverwaltung.html', activeKey: 'verwaltung', permAny: 'wohnungsverwaltung,bewohner-verwaltung,verwaltung' },
       { label: 'Personen (Stammdaten)', href: 'personen.html', activeKey: 'personen', permAny: 'wohnungsverwaltung' },
-      { label: 'Grundbuch erfassen', href: 'grundbuch.html', activeKey: 'grundbuch', permAny: 'eigentuemer' },
-      { label: 'Verwaltung', href: 'verwaltung-admin.html', activeKey: 'verwaltungadmin', permAny: 'ausschuss,technik,praesident' },
+      { label: 'Grundbuch erfassen', href: 'grundbuch.html', activeKey: 'grundbuch', permAny: 'eigentuemer,ausschuss' },
+      { label: 'Verwaltung', href: 'verwaltung-admin.html', activeKey: 'verwaltungadmin', permAny: 'ausschuss,technik,praesident,verwaltung' },
       { label: 'Brief-Tracking', href: 'brief-tracking.html', activeKey: 'brief-tracking', permAny: 'ausschuss,technik,praesident' },
       { label: 'Vollmachten', href: 'vollmachten.html', activeKey: 'vollmachten', permAny: 'eigentuemer,ausschuss,technik,praesident,verwaltung,bewohner' },
       { label: 'Sitzungs-Doodle', href: 'sitzungs-doodle.html', activeKey: 'sitzungs-doodle', permAny: 'eigentuemer,ausschuss,technik,praesident,verwaltung,bewohner' },

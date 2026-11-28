@@ -23,6 +23,8 @@ const reklMelder = require('./lib/reklamation-melder');
 const vollmachtRechte = require('./lib/vollmacht-rechte');
 const vollmachtApp = require('./lib/vollmacht-app');
 const projekteRechte = require('./lib/projekte-rechte');
+const hwRechteLib = require('./lib/handwerker-rechte');
+const personenRechte = require('./lib/personen-rechte');
 const stwegOeffentlich = require('./lib/stweg-oeffentlich');
 const rechteSchluessel = require('./lib/rechte-schluessel');
 const rechteMigrationen = require('./lib/rechte-migrationen');
@@ -297,6 +299,8 @@ const { authentikAPI, tokenCache, validateAuthentikToken, authentikPasswordLogin
 const { authMiddleware, adminOnly, requirePermission, requireUserLogin } = require('./middleware/auth');
 // Admin-Aktionen mit der Karte: Protokoll, Quittung, Bestaetigung per E-Mail (lib/kartenadmin.js)
 const kartenAdmin = require('./lib/kartenadmin');
+// Schreibende Objekt-/Personen-Routen: Kartenvermerk (Karte wie Schluessel, nur protokollieren)
+const objSchreibend = [kartenAdmin.mitKarteProtokollieren];
 const { FRISCH_MIN: STUFE_FRISCH_MIN, passwortWechselErlaubt, signierenErlaubt } = require('./lib/stufen');
 // Web-Push (VAPID) -> lib/webpush.js (Opt-in-Benachrichtigungen fuer PWAs)
 const webpushLib = require('./lib/webpush');
@@ -7022,7 +7026,9 @@ function benutzernameRueckfrage(email, name, grund) {
 
 // Sync kontakte with email to Authentik as users and assign STWEG groups
 // bewohntVon: 'eigentuemer' means self-occupied → Eigentümer/Verwalter also get bewohner group
-async function syncKontakteToAuthentik(stweg, kontakte, bewohntVon) {
+// req (optional): wer speichert – Konten und Gruppen, die ueber einen Kontakt
+// entstehen, stehen dann im admin_protokoll (Bereich 'objekte', Befund F6/E5).
+async function syncKontakteToAuthentik(stweg, kontakte, bewohntVon, req = null) {
   if (!AUTHENTIK_API_TOKEN || !kontakte || !Array.isArray(kontakte)) return;
   // Authentik-Zugang: automatisch für Eigentümer/Verwalter, opt-in für Mieter/Bewohner.
   const withEmail = kontakte.filter(k => {
@@ -7079,6 +7085,7 @@ async function syncKontakteToAuthentik(stweg, kontakte, bewohntVon) {
             is_active: true,
           });
           console.log(`[Authentik] Created user: ${finalUsername} (${email})`);
+          if (req) await objProtokoll(req, 'objekte', 'konto-angelegt', email, [`STWEG ${stweg}`, `über Kontakt (${k.rolle})`, finalUsername]);
         } catch (err) {
           console.error(`[Authentik] Failed to create user ${email}:`, err.message);
           continue;
@@ -7122,6 +7129,7 @@ async function syncKontakteToAuthentik(stweg, kontakte, bewohntVon) {
               try {
                 await authentikAPI('POST', `/core/groups/${group.pk}/add_user/`, { pk: user.pk });
                 console.log(`[Authentik] Added ${email} to group ${targetGroupName}`);
+                if (req) await objProtokoll(req, 'objekte', 'gruppe-gesetzt', email, [`STWEG ${stweg}`, `über Kontakt (${k.rolle})`, targetGroupName]);
               } catch (err) {
                 console.error(`[Authentik] Failed to add ${email} to ${targetGroupName}:`, err.message);
               }
@@ -8184,8 +8192,18 @@ app.get('/api/verwaltungen/kontakte', authMiddleware, async (req, res) => {
 // Sonst liest jeder Ausschuss die Plattform-Passwoerter aller STWEGs.
 function verwaltungLesbar(groups, stweg) {
   if (isTechnik(groups) || isPraesident(groups)) return true;
-  return stweg == null || getAusschussStwegs(groups).has(Number(stweg));
+  if (verwaltungEigenerEintrag(groups, stweg)) return true;
+  return isAusschussForAny(groups) && (stweg == null || getAusschussStwegs(groups).has(Number(stweg)));
 }
+// Die Hausverwaltung pflegt ihren EIGENEN Eintrag (Entscheid Stefan 28.11.2026, E4 B):
+// Eintraege der STWEG, die sie verwaltet (stwegN-verwaltung), nicht die
+// STWEG-uebergreifenden. Sie aendert Kontaktpersonen und Kontaktdaten der Firma
+// (VERWALTUNG_SELBST_FELDER), nie Vertrag, Plattform-Zugang, Sichtbarkeit oder
+// Notizen, und sieht weder das Plattform-Passwort noch die Notizen des Ausschusses.
+function verwaltungEigenerEintrag(groups, stweg) {
+  return stweg != null && stweg !== '' && isVerwaltungFor(groups, Number(stweg));
+}
+const VERWALTUNG_SELBST_FELDER = ['adresse', 'telefon', 'email', 'website', 'oeffnungszeiten'];
 function verwaltungAenderbar(groups, stweg) {
   if (isTechnik(groups) || isPraesident(groups)) return true;
   return stweg != null && getAusschussStwegs(groups).has(Number(stweg));
@@ -8208,12 +8226,25 @@ function verwaltungUrl(v) {
 // STWEG-uebergreifende Eintraege (stweg NULL) ohne Passwort.
 function verwaltungFuerLeser(groups, v) {
   const darf = verwaltungAenderbar(groups, v.stweg);
-  if (darf) return { ...v, darf_aendern: true };
-  return { ...v, plattform_pass: null, plattform_pass_verborgen: !!v.plattform_pass, darf_aendern: false };
+  if (darf) return { ...v, darf_aendern: true, darf_kontakte: true };
+  const selbst = verwaltungEigenerEintrag(groups, v.stweg);
+  const out = { ...v, plattform_pass: null, plattform_pass_verborgen: !!v.plattform_pass, darf_aendern: false, darf_kontakte: selbst };
+  if (selbst) { out.notizen = null; out.darf_kontaktdaten = true; }
+  return out;
 }
+// Middleware: Liste/Kontakte der Hausverwaltungen – Ausschuss, Technik/Praesident
+// und die Hausverwaltung selbst (nur ihr eigener Eintrag, siehe oben).
+function requireVerwaltungenZugang(req, res, next) {
+  const g = req.user?.groups || [];
+  if (isTechnik(g) || isPraesident(g) || isAusschussForAny(g) || isVerwaltungForAny(g)) return next();
+  res.status(403).json({ error: 'Nur für Ausschuss, Verwaltung und Technik' });
+}
+// Darf Kontaktpersonen dieses Eintrags anlegen/aendern/loeschen?
+const verwaltungKontakteAenderbar = (groups, stweg) => verwaltungAenderbar(groups, stweg) || verwaltungEigenerEintrag(groups, stweg);
+const verwaltungProtokoll = (req, aktion, id, teile) => objProtokoll(req, 'verwaltungen', aktion, `Verwaltung ${id}`, teile);
 
 // Admin-View: alle Felder; Login-Passwort nur fuer Aenderungsberechtigte
-app.get('/api/verwaltungen', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+app.get('/api/verwaltungen', authMiddleware, requireVerwaltungenZugang, async (req, res) => {
   try {
     const g = req.user?.groups || [];
     const { rows: alleVerw } = await pool.query(`SELECT * FROM verwaltungen ORDER BY stweg NULLS FIRST, aktiv DESC, firma_name`);
@@ -8270,13 +8301,24 @@ async function maybeResendForVerwaltung(v) {
 }
 
 // Update
-app.put('/api/verwaltungen/:id', authMiddleware, requireAusschussOrTechnik, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
+app.put('/api/verwaltungen/:id', authMiddleware, requireVerwaltungenZugang, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const b = req.body || {};
     const g = req.user?.groups || [];
     const alt = await pool.query('SELECT stweg FROM verwaltungen WHERE id = $1', [id]);
     if (alt.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    // Die Hausverwaltung selbst: nur Kontaktdaten der Firma, alles andere bleibt
+    if (!verwaltungAenderbar(g, alt.rows[0].stweg) && verwaltungEigenerEintrag(g, alt.rows[0].stweg)) {
+      const website = verwaltungUrl(b.website);
+      if (website === undefined) return res.status(400).json({ error: 'Ungültige URL (nur http/https)' });
+      const r = await pool.query(
+        `UPDATE verwaltungen SET adresse = $1, telefon = $2, email = $3, website = $4, oeffnungszeiten = $5, updated_at = NOW()
+          WHERE id = $6 RETURNING *`,
+        [b.adresse || null, normalizePhone(b.telefon), b.email || null, website, b.oeffnungszeiten || null, id]);
+      await verwaltungProtokoll(req, 'kontaktdaten-geaendert', id, [`STWEG ${alt.rows[0].stweg}`, 'durch die Verwaltung selbst']);
+      return res.json(verwaltungFuerLeser(g, r.rows[0]));
+    }
     if (!verwaltungAenderbar(g, alt.rows[0].stweg) || !verwaltungAenderbar(g, b.stweg || null)) {
       return res.status(403).json({ error: 'Nur für die eigene STWEG' });
     }
@@ -8299,6 +8341,7 @@ app.put('/api/verwaltungen/:id', authMiddleware, requireAusschussOrTechnik, kart
         b.dokument_pfad || null, b.notizen || null, b.aktiv === false ? false : true, sichtbar, id]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const updated = r.rows[0];
+    await verwaltungProtokoll(req, 'geaendert', id, [updated.stweg ? `STWEG ${updated.stweg}` : 'übergreifend']);
     // Wenn die Verwaltung jetzt wirksam ist, offene Auslagen nachreichen
     const resent = await maybeResendForVerwaltung(updated);
     res.json({ ...updated, _nachgereicht: resent });
@@ -8318,44 +8361,47 @@ app.delete('/api/verwaltungen/:id', authMiddleware, requireAusschussOrTechnik, k
 });
 
 // Kontakt-Add
-app.post('/api/verwaltungen/:id/kontakte', authMiddleware, requireAusschussOrTechnik, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
+app.post('/api/verwaltungen/:id/kontakte', authMiddleware, requireVerwaltungenZugang, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   try {
     const verwId = parseInt(req.params.id);
     const b = req.body || {};
     const v = await pool.query('SELECT stweg FROM verwaltungen WHERE id = $1', [verwId]);
     if (v.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
-    if (!verwaltungAenderbar(req.user?.groups || [], v.rows[0].stweg)) return res.status(403).json({ error: 'Nur für die eigene STWEG' });
+    if (!verwaltungKontakteAenderbar(req.user?.groups || [], v.rows[0].stweg)) return res.status(403).json({ error: 'Nur für die eigene STWEG' });
     const r = await pool.query(
       `INSERT INTO verwaltungs_kontakte (verwaltung_id, name, funktion, email, telefon, sort_order, cc_default)
        VALUES ($1, $2, $3, $4, $5, COALESCE($6, 0), COALESCE($7, false)) RETURNING *`,
       [verwId, b.name, b.funktion || null, b.email || null, normalizePhone(b.telefon), b.sort_order || 0, !!b.cc_default]
     );
+    await verwaltungProtokoll(req, 'kontakt-angelegt', verwId, [`Kontakt ${r.rows[0].id}`, b.name]);
     res.json(r.rows[0]);
   } catch (err) { console.error('[verwaltungs-kontakt-post]', err.message); res.status(500).json({ error: 'Fehler' }); }
 });
 
 // Kontakt-Update
-app.put('/api/verwaltungen/kontakte/:kid', authMiddleware, requireAusschussOrTechnik, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
+app.put('/api/verwaltungen/kontakte/:kid', authMiddleware, requireVerwaltungenZugang, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   try {
     const b = req.body || {};
-    const v = await pool.query('SELECT v.stweg FROM verwaltungs_kontakte k JOIN verwaltungen v ON v.id = k.verwaltung_id WHERE k.id = $1', [parseInt(req.params.kid)]);
+    const v = await pool.query('SELECT v.id, v.stweg FROM verwaltungs_kontakte k JOIN verwaltungen v ON v.id = k.verwaltung_id WHERE k.id = $1', [parseInt(req.params.kid)]);
     if (v.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
-    if (!verwaltungAenderbar(req.user?.groups || [], v.rows[0].stweg)) return res.status(403).json({ error: 'Nur für die eigene STWEG' });
+    if (!verwaltungKontakteAenderbar(req.user?.groups || [], v.rows[0].stweg)) return res.status(403).json({ error: 'Nur für die eigene STWEG' });
     const r = await pool.query(
       `UPDATE verwaltungs_kontakte SET name=$1, funktion=$2, email=$3, telefon=$4, sort_order=$5, cc_default=$6
        WHERE id = $7 RETURNING *`,
       [b.name, b.funktion || null, b.email || null, normalizePhone(b.telefon), b.sort_order || 0, !!b.cc_default, parseInt(req.params.kid)]
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    await verwaltungProtokoll(req, 'kontakt-geaendert', v.rows[0].id, [`Kontakt ${req.params.kid}`, b.name]);
     res.json(r.rows[0]);
   } catch (err) { console.error('[verwaltungs-kontakt-put]', err.message); res.status(500).json({ error: 'Fehler' }); }
 });
 
 // Kontakt-Delete
-app.delete('/api/verwaltungen/kontakte/:kid', authMiddleware, requireAusschussOrTechnik, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
+app.delete('/api/verwaltungen/kontakte/:kid', authMiddleware, requireVerwaltungenZugang, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   try {
-    const v = await pool.query('SELECT v.stweg FROM verwaltungs_kontakte k JOIN verwaltungen v ON v.id = k.verwaltung_id WHERE k.id = $1', [parseInt(req.params.kid)]);
-    if (v.rows.length && !verwaltungAenderbar(req.user?.groups || [], v.rows[0].stweg)) return res.status(403).json({ error: 'Nur für die eigene STWEG' });
+    const v = await pool.query('SELECT v.id, v.stweg FROM verwaltungs_kontakte k JOIN verwaltungen v ON v.id = k.verwaltung_id WHERE k.id = $1', [parseInt(req.params.kid)]);
+    if (v.rows.length && !verwaltungKontakteAenderbar(req.user?.groups || [], v.rows[0].stweg)) return res.status(403).json({ error: 'Nur für die eigene STWEG' });
+    if (v.rows.length) await verwaltungProtokoll(req, 'kontakt-geloescht', v.rows[0].id, [`Kontakt ${req.params.kid}`]);
     await pool.query('DELETE FROM verwaltungs_kontakte WHERE id = $1', [parseInt(req.params.kid)]);
     res.json({ deleted: true });
   } catch (err) { console.error('[verwaltungs-kontakt-delete]', err.message); res.status(500).json({ error: 'Fehler' }); }
@@ -9893,6 +9939,22 @@ app.get('/api/unterschriftenliste/snapshot/:hash.pdf', async (req, res) => {
   }
 });
 
+// Aufbewahrung 10 Jahre (lib/unterschriftenliste-frist.js): taeglich abgelaufene
+// Listen samt Ruecklaeufen und PDF loeschen, mit Eintrag im admin_protokoll.
+const ulFrist = require('./lib/unterschriftenliste-frist');
+taeglichUm(4, 20, async () => {
+  try {
+    const n = await ulFrist.ulAbgelaufeneLoeschen(pool, { fs, docsPath: DOCS_PATH });
+    if (n.listen) {
+      console.log(`[Unterschriftenliste] ${n.listen} Liste(n) nach ${ulFrist.UL_AUFBEWAHRUNG_JAHRE} Jahren geloescht (${n.ruecklaeufe} Ruecklaeufe, ${n.pdfs} PDF)`);
+      await adminProtokoll.eintragen(pool, null, { user: { email: 'system', name: 'Aufräumlauf' }, auth: { art: 'zeitplan' } }, {
+        bereich: 'objekte', aktion: 'unterschriftenlisten-frist', ziel: `${n.listen} Listen`,
+        detail: `nach ${ulFrist.UL_AUFBEWAHRUNG_JAHRE} Jahren gelöscht · ${n.ruecklaeufe} Rückläufe · ${n.pdfs} PDF`,
+      });
+    }
+  } catch (e) { console.error('[Unterschriftenliste] Aufraeumen:', e.message); }
+}, { name: 'Unterschriftenlisten-Frist' });
+
 // STWEG-Zugriff wie requireStwegAccess, fuer Routen ohne :stweg-Parameter
 // (Ruecklaeufe/Historie haengen am Snapshot-Hash bzw. Query-Parameter).
 function ulStwegErlaubt(groups, stweg) {
@@ -9904,7 +9966,9 @@ function ulStwegErlaubt(groups, stweg) {
   return Object.values(m).some(g => lower.includes(g.toLowerCase()));
 }
 
-// GET /api/unterschriftenliste/:hash/rueckläufe — Liste aller Briefe + Rücklauf-Status
+// GET /api/unterschriftenliste/:hash/rueckläufe — Liste aller Briefe + Rücklauf-Status.
+// Ja/Nein mit Name sehen nur Ausschuss und Verwaltung DIESER STWEG sowie
+// Technik/Praesident (Entscheid Stefan 28.11.2026, E2/F4; zevAdminFuerStweg).
 app.get(encodeURI('/api/unterschriftenliste/:hash/rueckläufe'), authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
   try {
     const hash = req.params.hash.toUpperCase();
@@ -9913,7 +9977,7 @@ app.get(encodeURI('/api/unterschriftenliste/:hash/rueckläufe'), authMiddleware,
       [hash]
     );
     if (snap.rows.length === 0) return res.status(404).json({ error: 'Snapshot nicht gefunden' });
-    if (!ulStwegErlaubt(req.user?.groups || [], snap.rows[0].stweg)) return res.status(403).json({ error: 'Kein Zugriff auf diese STWEG' });
+    if (!zevAdminFuerStweg(req.user?.groups || [], snap.rows[0].stweg)) return res.status(403).json({ error: 'Rückläufe sehen nur Ausschuss und Verwaltung dieser STWEG' });
     const briefe = await pool.query(`
       SELECT brief_idx, brief_typ, einheit, empfaenger_name, empfaenger_adresse,
              retourniert_am, vote, notiz, erfasst_von, updated_at
@@ -9937,7 +10001,7 @@ app.get(encodeURI('/api/unterschriftenliste/:hash/rueckläufe'), authMiddleware,
 });
 
 // PUT /api/unterschriftenliste/:hash/rueckläufe/:idx — Rücklauf-Eintrag aktualisieren
-app.put(encodeURI('/api/unterschriftenliste/:hash/rueckläufe/:idx'), authMiddleware, requirePermission('wohnungsverwaltung', 'write'), async (req, res) => {
+app.put(encodeURI('/api/unterschriftenliste/:hash/rueckläufe/:idx'), authMiddleware, requirePermission('wohnungsverwaltung', 'write'), ...objSchreibend, async (req, res) => {
   try {
     const hash = req.params.hash.toUpperCase();
     const idx = parseInt(req.params.idx);
@@ -9948,6 +10012,7 @@ app.put(encodeURI('/api/unterschriftenliste/:hash/rueckläufe/:idx'), authMiddle
     const { retourniert_am, vote, notiz } = req.body || {};
     const validVote = ['ja', 'nein', 'enthaltung', null].includes(vote) ? vote : null;
     const me = req.user?.email || req.user?.name || 'unknown';
+    const vorher = await pool.query('SELECT vote, retourniert_am FROM unterschriftenliste_rueckläufe WHERE snapshot_hash = $1 AND brief_idx = $2', [hash, idx]);
     const r = await pool.query(`
       UPDATE unterschriftenliste_rueckläufe
       SET retourniert_am = $1, vote = $2, notiz = $3, erfasst_von = $4, updated_at = NOW()
@@ -9955,6 +10020,13 @@ app.put(encodeURI('/api/unterschriftenliste/:hash/rueckläufe/:idx'), authMiddle
       RETURNING *
     `, [retourniert_am || null, validVote, notiz || null, me, hash, idx]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Brief nicht gefunden' });
+    const alt = vorher.rows[0] || {};
+    await adminProtokoll.eintragen(pool, null, req, {
+      bereich: 'objekte', aktion: 'ruecklauf-erfasst', ziel: `Unterschriftenliste ${hash} · Brief ${idx}`,
+      alt: [alt.retourniert_am ? 'retourniert' : 'offen', alt.vote].filter(Boolean).join(' '),
+      neu: [r.rows[0].retourniert_am ? 'retourniert' : 'offen', r.rows[0].vote].filter(Boolean).join(' '),
+      detail: `STWEG ${snap.rows[0].stweg}`,
+    }).catch(e => console.error('[objekte] Protokoll:', e.message));
     res.json(r.rows[0]);
   } catch (err) {
     console.error('[UL-Ruecklauf-PUT]', err.message);
@@ -10056,6 +10128,11 @@ app.get('/api/unterschriftenliste/:stweg.pdf', authMiddleware, requirePermission
         );
       } catch (e) { console.error('[Unterschriftenliste] PDF save error:', e.message); }
     }
+    // Gespeicherte Liste (nicht die Vorschau): Protokoll, mit der Karte auch Kartenvermerk
+    if (opts._hash) {
+      kartenAdmin.vermerken(req, res, { lesend: true, text: 'Unterschriftenliste erzeugt' });
+      await objProtokoll(req, 'objekte', 'unterschriftenliste-erzeugt', `STWEG ${stweg}`, [opts._hash, opts.anlass_titel, opts.datum]);
+    }
     res.setHeader('Content-Type', 'application/pdf');
     const inline = req.query.preview === '1';
     const fname = `unterschriftenliste-${stwegFolderName(stweg)}-${opts.datum}-${opts._hash || ''}.pdf`;
@@ -10065,6 +10142,47 @@ app.get('/api/unterschriftenliste/:stweg.pdf', authMiddleware, requirePermission
     console.error('[Unterschriftenliste] error:', err.message);
     res.status(500).json({ error: 'PDF-Erstellung fehlgeschlagen' });
   }
+});
+
+// ─── Protokoll der Objekt- und Personenverwaltung (Befund F3/L4/L10) ─────
+// Jede Aenderung an Wohnungen, Kontakten, Import, Export, Unterschriftenlisten,
+// Ruecklaeufen und Personen steht im admin_protokoll (Bereich 'objekte' bzw.
+// 'personen'); mit der Karte zusaetzlich im Kartenprotokoll
+// (kartenAdmin.mitKarteProtokollieren – nur protokollieren, nie sperren).
+// Ein Fehler beim Eintragen bricht die Aktion nicht ab (nur Log).
+async function objProtokoll(req, bereich, aktion, ziel, teile, db = null) {
+  try {
+    const detail = (Array.isArray(teile) ? teile : [teile]).filter(x => x !== undefined && x !== null && x !== '').join(' · ') || null;
+    await adminProtokoll.eintragen(pool, db, req, { bereich, aktion, ziel, detail });
+  } catch (e) { console.error(`[${bereich}] Protokoll:`, e.message); }
+}
+const kontakteKurz = (kontakte) => {
+  const n = {};
+  for (const k of (Array.isArray(kontakte) ? kontakte : [])) if (k && k.rolle) n[k.rolle] = (n[k.rolle] || 0) + 1;
+  const t = Object.entries(n).map(([r, c]) => `${c} ${r}`).join(', ');
+  return t ? `Kontakte: ${t}` : null;
+};
+
+// POST /api/objekte/export — Export (XLSX/CSV) vor dem Erzeugen im Browser
+// anmelden (Entscheid Stefan 28.11.2026, E7): nur Ausschuss/Verwaltung DIESER
+// STWEG und Technik/Praesident, mit Protokolleintrag. Ohne stweg (Eigentuemer-
+// Uebersicht, Personen ueber die eigene Sicht): Technik/Praesident, Ausschuss
+// oder Verwaltung irgendeiner STWEG. Body: { art, stweg?, format?, anzahl? }
+const OBJ_EXPORT_ARTEN = { wohnungen: 'objekte', eigentuemer: 'objekte', personen: 'personen' };
+app.post('/api/objekte/export', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), ...objSchreibend, async (req, res) => {
+  const b = req.body || {};
+  const bereich = OBJ_EXPORT_ARTEN[b.art];
+  if (!bereich) return res.status(400).json({ error: 'art: wohnungen, eigentuemer oder personen' });
+  const g = req.user?.groups || [];
+  const stweg = b.stweg === undefined || b.stweg === null || b.stweg === '' ? null : parseStweg(b.stweg);
+  if (b.stweg && !stweg) return res.status(400).json({ error: 'Ungültige STWEG-Nummer' });
+  const darf = stweg ? zevAdminFuerStweg(g, stweg)
+    : (isTechnik(g) || isPraesident(g) || isAusschussForAny(g) || isVerwaltungForAny(g));
+  if (!darf) return res.status(403).json({ error: 'Export nur für Ausschuss und Verwaltung dieser STWEG sowie Technik/Präsident' });
+  const format = ['xlsx', 'csv'].includes(b.format) ? b.format : null;
+  const anzahl = Number.isFinite(Number(b.anzahl)) ? Math.max(0, Math.floor(Number(b.anzahl))) : null;
+  await objProtokoll(req, bereich, 'export', stweg ? `STWEG ${stweg}` : 'eigene Sicht', [b.art, format, anzahl !== null ? `${anzahl} Zeilen` : null]);
+  res.json({ ok: true });
 });
 
 // GET /api/wohnungen/:stweg - List all apartments for a STWEG (admin, with kontakte)
@@ -10209,7 +10327,7 @@ app.get('/api/wohnungen/:stweg/:id/historie', authMiddleware, requireStwegAccess
 });
 
 // POST /api/wohnungen/:stweg/:id/kontakte/:kid/archive - Einzelnen Kontakt archivieren
-app.post('/api/wohnungen/:stweg/:id/kontakte/:kid/archive', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, async (req, res) => {
+app.post('/api/wohnungen/:stweg/:id/kontakte/:kid/archive', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, ...objSchreibend, async (req, res) => {
   try {
     const stweg = parseStweg(req.params.stweg);
     const wId = parseInt(req.params.id, 10);
@@ -10228,6 +10346,7 @@ app.post('/api/wohnungen/:stweg/:id/kontakte/:kid/archive', authMiddleware, requ
       [kId, wId, stweg]
     );
     if (r.rowCount === 0) return res.status(404).json({ error: 'Kontakt nicht gefunden oder bereits archiviert' });
+    await objProtokoll(req, 'objekte', 'kontakt-archiviert', `STWEG ${stweg} · ${info.bezeichnung}`, [`Kontakt ${kId}`, info.rolle, info.name]);
     res.json({ ok: true });
     recordObjektChange(stweg, `${info.rolle === 'eigentuemer' ? 'Eigentümer' : 'Mieter'} "${info.name}" aus Wohnung "${info.bezeichnung}" archiviert (Wegzug)`, req.user.email).catch(() => {});
   } catch (err) {
@@ -10318,7 +10437,7 @@ async function adminKontaktePersonenAbgleichen(client, wohnungId, bisher, stweg)
 }
 
 // POST /api/wohnungen/:stweg - Create apartment
-app.post('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, async (req, res) => {
+app.post('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, ...objSchreibend, async (req, res) => {
   const client = await pool.connect();
   try {
     const stweg = parseStweg(req.params.stweg);
@@ -10337,9 +10456,10 @@ app.post('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsver
     await saveKontakte(client, result.rows[0].id, b.kontakte, stweg);
     await client.query('COMMIT');
     const wohnung = await loadWohnungMitKontakte(result.rows[0].id);
+    await objProtokoll(req, 'objekte', 'wohnung-angelegt', `STWEG ${stweg} · ${wohnung.bezeichnung}`, [`Wohnung ${wohnung.id}`, kontakteKurz(wohnung.kontakte)]);
     res.status(201).json(wohnung);
     // Sync kontakte to Authentik in background (don't block response)
-    syncKontakteToAuthentik(stweg, b.kontakte, b.bewohnt_von).catch(() => {});
+    syncKontakteToAuthentik(stweg, b.kontakte, b.bewohnt_von, req).catch(() => {});
     // Verwaltung informieren
     recordObjektChange(stweg, `Neue Wohnung "${wohnung.bezeichnung}" angelegt`, req.user.email).catch(() => {});
   } catch (err) {
@@ -10354,7 +10474,7 @@ app.post('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsver
 });
 
 // PUT /api/wohnungen/:stweg/:id - Update apartment
-app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, async (req, res) => {
+app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, ...objSchreibend, async (req, res) => {
   const client = await pool.connect();
   try {
     const stweg = parseStweg(req.params.stweg);
@@ -10394,9 +10514,18 @@ app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
     }
     await client.query('COMMIT');
     const wohnung = await loadWohnungMitKontakte(result.rows[0].id);
+    {
+      const ch = oldRow ? computeWohnungChanges(oldRow, result.rows[0], oldKontakte, wohnung.kontakte || []) : { felder: [] };
+      const teile = [`Wohnung ${wohnung.id}`];
+      if (ch.felder.length) teile.push(`Felder: ${ch.felder.map(f => f.label).join(', ')}`);
+      if (ch.eigentuemer) teile.push('Eigentümer geändert');
+      if (ch.mieter) teile.push('Mieter geändert');
+      teile.push(kontakteKurz(wohnung.kontakte));
+      await objProtokoll(req, 'objekte', 'wohnung-geaendert', `STWEG ${stweg} · ${wohnung.bezeichnung}`, teile);
+    }
     res.json(wohnung);
     // Sync kontakte to Authentik in background
-    syncKontakteToAuthentik(parseStweg(req.params.stweg), b.kontakte, b.bewohnt_von).catch(() => {});
+    syncKontakteToAuthentik(parseStweg(req.params.stweg), b.kontakte, b.bewohnt_von, req).catch(() => {});
     // Verwaltung informieren — aber NUR wenn verwaltungs-relevante Felder
     // sich aenderten. Interne Felder (bezeichnung, notizen, besonderheiten)
     // sind fuer die Verwaltung uninteressant.
@@ -10418,13 +10547,17 @@ app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
 });
 
 // DELETE /api/wohnungen/:stweg/:id - Delete apartment
-app.delete('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, async (req, res) => {
+// Loescht die Wohnung samt Kontakten und Historie: nur Technik/Praesident
+// (Entscheid Stefan 28.11.2026, E6). Der Ausschuss archiviert die Kontakte.
+app.delete('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireTechnikOrPraesident, ...objSchreibend, async (req, res) => {
   try {
     const stweg = parseStweg(req.params.stweg);
     const w = await pool.query('SELECT bezeichnung FROM wohnungen WHERE id = $1 AND stweg = $2', [req.params.id, stweg]);
     const bez = w.rows[0]?.bezeichnung || `#${req.params.id}`;
+    const kontakteVorher = await pool.query('SELECT rolle FROM wohnungen_kontakte WHERE wohnung_id = $1', [req.params.id]).catch(() => ({ rows: [] }));
     const result = await pool.query('DELETE FROM wohnungen WHERE id = $1 AND stweg = $2 RETURNING id', [req.params.id, stweg]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Wohnung nicht gefunden' });
+    await objProtokoll(req, 'objekte', 'wohnung-geloescht', `STWEG ${stweg} · ${bez}`, [`Wohnung ${req.params.id}`, kontakteKurz(kontakteVorher.rows)]);
     res.json({ success: true });
     recordObjektChange(stweg, `Wohnung "${bez}" geloescht`, req.user.email).catch(() => {});
   } catch (err) {
@@ -10434,7 +10567,8 @@ app.delete('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnu
 });
 
 // POST /api/wohnungen/:stweg/import - Import from kontakte.json format
-app.post('/api/wohnungen/:stweg/import', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, async (req, res) => {
+// Nur Technik/Praesident (Entscheid Stefan 28.11.2026, E7), mit Protokoll.
+app.post('/api/wohnungen/:stweg/import', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireTechnikOrPraesident, ...objSchreibend, async (req, res) => {
   const client = await pool.connect();
   try {
     const stweg = parseStweg(req.params.stweg);
@@ -10478,6 +10612,7 @@ app.post('/api/wohnungen/:stweg/import', authMiddleware, requirePermission('wohn
       }
     }
     await client.query('COMMIT');
+    await objProtokoll(req, 'objekte', 'import', `STWEG ${stweg}`, [`${imported} Wohnungen`]);
     res.json({ success: true, imported });
     // Sync all imported kontakte to Authentik in background
     const allKontakte = [];
@@ -10488,7 +10623,7 @@ app.post('/api/wohnungen/:stweg/import', authMiddleware, requirePermission('wohn
         if (u.mieter?.email) allKontakte.push({ rolle: 'mieter', name: u.mieter.name, email: u.mieter.email });
       }
     }
-    if (allKontakte.length > 0) syncKontakteToAuthentik(stweg, allKontakte).catch(() => {});
+    if (allKontakte.length > 0) syncKontakteToAuthentik(stweg, allKontakte, undefined, req).catch(() => {});
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Wohnungen import error:', err);
@@ -13758,7 +13893,27 @@ app.delete('/api/projects/:slug/attachments/:id', authMiddleware, requireProjekt
 });
 
 // ─── Handwerker- / Lieferantenliste ────────────────────────────────
-async function loadHandwerkerEventZuweisungen(handwerkerIds) {
+// STWEG-Bindung (lib/handwerker-rechte.js, Entscheid Stefan 28.11.2026): die
+// Verwaltung liest/schreibt Verträge, Einsätze, Kosten und Notfall-Zuordnungen
+// nur ihrer STWEG, der Ausschuss liest sie; Einträge „alle STWEG“ (stweg NULL)
+// und Event-Typen ändern nur Technik/Präsident. Jede schreibende Route trägt
+// den Kartenvermerk (Karte wie Schlüssel: nur protokollieren).
+const hwSchreibend = [requirePermission('handwerker', 'write'), kartenAdmin.mitKarteProtokollieren];
+const hwSichtVon = (req) => hwRechteLib.handwerkerSicht(req.user?.groups || []);
+
+/** Firma laden und gegen die Sicht prüfen. -> Zeile | null (Antwort gesendet) */
+async function hwFirmaLesbar(req, res, id, db = pool) {
+  if (!Number.isFinite(id) || id < 1) { res.status(400).json({ error: 'Ungültige Handwerker-ID' }); return null; }
+  const r = await db.query('SELECT id, stweg, archiviert FROM handwerker WHERE id = $1', [id]);
+  if (!r.rows[0] || !hwRechteLib.hwLesen(hwSichtVon(req), r.rows[0].stweg)) {
+    res.status(404).json({ error: 'Handwerker nicht gefunden' });
+    return null;
+  }
+  return r.rows[0];
+}
+const HW_NUR_EIGENE = 'Nur Einträge der eigenen STWEG; Einträge für alle STWEG ändern Technik und Präsident';
+
+async function loadHandwerkerEventZuweisungen(handwerkerIds, sicht = null) {
   if (!Array.isArray(handwerkerIds) || handwerkerIds.length === 0) return {};
   const result = await pool.query(
     `SELECT z.*, t.name AS event_name, t.icon AS event_icon
@@ -13770,30 +13925,35 @@ async function loadHandwerkerEventZuweisungen(handwerkerIds) {
   );
   const map = {};
   for (const z of result.rows) {
+    if (sicht && !hwRechteLib.hwLesen(sicht, z.stweg)) continue;
     if (!map[z.handwerker_id]) map[z.handwerker_id] = [];
     map[z.handwerker_id].push(z);
   }
   return map;
 }
 
+// Zuordnungen einer Firma neu schreiben: zuweisungen ist die ganze Liste, die
+// danach gelten soll (bei Nicht-T/P vorher mit zuweisungenZusammenfuehren
+// um die unsichtbaren und festen Einträge ergänzt).
 async function saveHandwerkerEventZuweisungen(client, handwerkerId, zuweisungen) {
   if (!Array.isArray(zuweisungen)) return;
-  const trim = (v) => (v == null ? null : String(v).trim() || null);
   await client.query('DELETE FROM handwerker_event_zuweisungen WHERE handwerker_id = $1', [handwerkerId]);
-  for (const z of zuweisungen) {
-    const eventId = parseInt(z.event_typ_id, 10);
-    if (!Number.isFinite(eventId)) continue;
-    const prio = parseInt(z.prioritaet, 10);
-    const stweg = z.stweg == null || z.stweg === '' ? null : parseInt(z.stweg, 10);
+  for (const z of zuweisungen.map(hwRechteLib.zuweisungNormal).filter(Boolean)) {
     await client.query(
       `INSERT INTO handwerker_event_zuweisungen (event_typ_id, handwerker_id, prioritaet, stweg, hinweis)
        VALUES ($1, $2, $3, $4, $5)`,
-      [eventId, handwerkerId,
-       Number.isFinite(prio) && prio >= 1 ? prio : 1,
-       Number.isFinite(stweg) && stweg >= 1 && stweg <= 8 ? stweg : null,
-       trim(z.hinweis)]
+      [z.event_typ_id, handwerkerId, z.prioritaet, z.stweg, z.hinweis]
     );
   }
+}
+
+/** Eingehende Zuordnungen mit dem Bestand zusammenführen. -> Liste | { fehler } */
+async function hwZuweisungenFuer(client, req, handwerkerId, eingehende) {
+  const sicht = hwSichtVon(req);
+  const alt = sicht.alle ? [] : (await client.query(
+    'SELECT event_typ_id, prioritaet, stweg, hinweis FROM handwerker_event_zuweisungen WHERE handwerker_id = $1',
+    [handwerkerId])).rows;
+  return hwRechteLib.zuweisungenZusammenfuehren(sicht, alt, eingehende);
 }
 
 async function loadHandwerkerPersonen(handwerkerIds) {
@@ -13861,14 +14021,25 @@ async function saveHandwerkerPersonen(client, handwerkerId, personen) {
   }
 }
 
+// Firma mit Mitarbeitern, sichtbaren Zuordnungen und dem Recht, sie zu ändern
+async function hwFirmaAntwort(req, row) {
+  const sicht = hwSichtVon(req);
+  const personenMap = await loadHandwerkerPersonen([row.id]);
+  const zuwMap = await loadHandwerkerEventZuweisungen([row.id], sicht);
+  return { ...row, personen: personenMap[row.id] || [], event_zuweisungen: zuwMap[row.id] || [],
+    darf_aendern: hwRechteLib.hwStammAendern(sicht, row.stweg), darf_archivieren: hwRechteLib.hwFirmaArchivieren(sicht, row.stweg) };
+}
+
 app.get('/api/handwerker', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
+    const sicht = hwSichtVon(req);
     const includeArchived = req.query.include_archived === '1';
     const kategorie = (req.query.kategorie || '').trim();
     const where = [];
     const params = [];
     if (!includeArchived) where.push('archiviert = false');
     if (kategorie) { params.push(kategorie); where.push(`kategorie = $${params.length}`); }
+    where.push(hwRechteLib.hwSichtSql(sicht, 'stweg', params));
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const result = await pool.query(
       `SELECT * FROM handwerker ${whereSql} ORDER BY archiviert ASC, kategorie ASC, firma ASC`,
@@ -13876,12 +14047,14 @@ app.get('/api/handwerker', authMiddleware, requirePermission('handwerker', 'read
     );
     const ids = result.rows.map(r => r.id);
     const personenMap = await loadHandwerkerPersonen(ids);
-    const zuwMap = await loadHandwerkerEventZuweisungen(ids);
+    const zuwMap = await loadHandwerkerEventZuweisungen(ids, sicht);
     for (const r of result.rows) {
       r.personen = personenMap[r.id] || [];
       r.event_zuweisungen = zuwMap[r.id] || [];
+      r.darf_aendern = hwRechteLib.hwStammAendern(sicht, r.stweg);
+      r.darf_archivieren = hwRechteLib.hwFirmaArchivieren(sicht, r.stweg);
     }
-    res.json({ handwerker: result.rows });
+    res.json({ handwerker: result.rows, rechte: hwRechteLib.hwRechte(sicht) });
   } catch (err) {
     console.error('Handwerker list error:', err);
     res.status(500).json({ error: 'Fehler beim Laden der Handwerker' });
@@ -13890,8 +14063,11 @@ app.get('/api/handwerker', authMiddleware, requirePermission('handwerker', 'read
 
 app.get('/api/handwerker/kategorien', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
+    const params = [];
+    const sichtSql = hwRechteLib.hwSichtSql(hwSichtVon(req), 'stweg', params);
     const result = await pool.query(
-      `SELECT kategorie, COUNT(*)::int AS anzahl FROM handwerker WHERE archiviert = false GROUP BY kategorie ORDER BY kategorie`
+      `SELECT kategorie, COUNT(*)::int AS anzahl FROM handwerker WHERE archiviert = false AND ${sichtSql} GROUP BY kategorie ORDER BY kategorie`,
+      params
     );
     res.json({ kategorien: result.rows });
   } catch (err) {
@@ -13928,31 +14104,35 @@ function sanitizeHandwerker(b) {
   };
 }
 
-app.post('/api/handwerker', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.post('/api/handwerker', authMiddleware, ...hwSchreibend, async (req, res) => {
   const client = await pool.connect();
   try {
+    const sicht = hwSichtVon(req);
+    if (!hwRechteLib.hwFirmaAnlegen(sicht)) return res.status(403).json({ error: 'Firmen anlegen nur Verwaltung, Technik und Präsident' });
     const h = sanitizeHandwerker(req.body || {});
     if (!h.kategorie || !h.firma) return res.status(400).json({ error: 'Kategorie und Firma sind Pflichtfelder' });
+    const ziel = hwRechteLib.hwNeueFirmaStweg(sicht, req.body?.stweg);
+    if (ziel.fehler) return res.status(ziel.fehler.startsWith('Bitte') ? 400 : 403).json({ error: ziel.fehler });
     await client.query('BEGIN');
     const result = await client.query(
       `INSERT INTO handwerker (kategorie, firma, ansprechpartner, telefon, mobile, email, website,
-         adresse, plz, ort, notiz, bewertung, letzter_auftrag, empfohlen_von, leistungen)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+         adresse, plz, ort, notiz, bewertung, letzter_auftrag, empfohlen_von, leistungen, stweg)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        RETURNING *`,
       [h.kategorie, h.firma, h.ansprechpartner, h.telefon, h.mobile, h.email, h.website,
-       h.adresse, h.plz, h.ort, h.notiz, h.bewertung, h.letzter_auftrag, h.empfohlen_von, h.leistungen]
+       h.adresse, h.plz, h.ort, h.notiz, h.bewertung, h.letzter_auftrag, h.empfohlen_von, h.leistungen, ziel.stweg]
     );
     const created = result.rows[0];
     await saveHandwerkerPersonen(client, created.id, req.body && req.body.personen);
     if (req.body && Array.isArray(req.body.event_zuweisungen)) {
-      await saveHandwerkerEventZuweisungen(client, created.id, req.body.event_zuweisungen);
+      const z = hwRechteLib.zuweisungenZusammenfuehren(sicht, [], req.body.event_zuweisungen);
+      if (z.fehler) { await client.query('ROLLBACK'); return res.status(403).json({ error: z.fehler }); }
+      await saveHandwerkerEventZuweisungen(client, created.id, z.liste);
     }
     await client.query('COMMIT');
-    const personenMap = await loadHandwerkerPersonen([created.id]);
-    const zuwMap = await loadHandwerkerEventZuweisungen([created.id]);
-    created.personen = personenMap[created.id] || [];
-    created.event_zuweisungen = zuwMap[created.id] || [];
-    res.status(201).json(created);
+    await objProtokoll(req, 'handwerker', 'firma-angelegt', `Firma ${created.id}`,
+      [created.firma, created.stweg ? `STWEG ${created.stweg}` : 'gemeinsamer Stamm']);
+    res.status(201).json(await hwFirmaAntwort(req, created));
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('Handwerker create error:', err);
@@ -13962,14 +14142,26 @@ app.post('/api/handwerker', authMiddleware, requirePermission('handwerker', 'wri
   }
 });
 
-app.put('/api/handwerker/:id', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.put('/api/handwerker/:id', authMiddleware, ...hwSchreibend, async (req, res) => {
   const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id) || id < 1) return res.status(400).json({ error: 'Ungültige ID' });
+    const firma = await hwFirmaLesbar(req, res, id);
+    if (!firma) return;
+    // Stammdaten: Verwaltung auch beim gemeinsamen Stamm (protokolliert); fremde STWEG nie
+    const sicht = hwSichtVon(req);
+    if (!hwRechteLib.hwStammAendern(sicht, firma.stweg)) {
+      return res.status(403).json({ error: 'Diese Firma gehört zu einer anderen STWEG; ihre Stammdaten ändern deren Verwaltung, Technik und Präsident.' });
+    }
     const h = sanitizeHandwerker(req.body || {});
     if (!h.kategorie || !h.firma) return res.status(400).json({ error: 'Kategorie und Firma sind Pflichtfelder' });
     const archivedFlag = req.body && typeof req.body.archiviert === 'boolean' ? req.body.archiviert : null;
+    // Archivieren (bzw. zurückholen) einer Firma des gemeinsamen Stamms: nur T/P
+    if (archivedFlag !== null && archivedFlag !== !!firma.archiviert && !hwRechteLib.hwFirmaArchivieren(sicht, firma.stweg)) {
+      return res.status(403).json({ error: 'Firmen des gemeinsamen Stamms archivieren Technik und Präsident' });
+    }
+    const vorher = (await pool.query('SELECT * FROM handwerker WHERE id = $1', [id])).rows[0];
     await client.query('BEGIN');
     const result = await client.query(
       `UPDATE handwerker SET
@@ -13991,19 +14183,48 @@ app.put('/api/handwerker/:id', authMiddleware, requirePermission('handwerker', '
       await saveHandwerkerPersonen(client, id, req.body.personen);
     }
     if (req.body && Array.isArray(req.body.event_zuweisungen)) {
-      await saveHandwerkerEventZuweisungen(client, id, req.body.event_zuweisungen);
+      const z = await hwZuweisungenFuer(client, req, id, req.body.event_zuweisungen);
+      if (z.fehler) { await client.query('ROLLBACK'); return res.status(403).json({ error: z.fehler }); }
+      await saveHandwerkerEventZuweisungen(client, id, z.liste);
     }
     await client.query('COMMIT');
-    const updated = result.rows[0];
-    const personenMap = await loadHandwerkerPersonen([id]);
-    const zuwMap = await loadHandwerkerEventZuweisungen([id]);
-    updated.personen = personenMap[id] || [];
-    updated.event_zuweisungen = zuwMap[id] || [];
-    res.json(updated);
+    {
+      const felder = hwRechteLib.hwGeaenderteFelder(vorher, result.rows[0]);
+      if (Array.isArray(req.body?.personen)) felder.push(`Mitarbeiter (${req.body.personen.filter(p => p && p.name).length})`);
+      await objProtokoll(req, 'handwerker', 'firma-geaendert', `Firma ${id}`,
+        [result.rows[0].firma, result.rows[0].stweg ? `STWEG ${result.rows[0].stweg}` : 'gemeinsamer Stamm',
+         felder.length ? `Felder: ${felder.join(', ')}` : 'ohne Änderung']);
+    }
+    res.json(await hwFirmaAntwort(req, result.rows[0]));
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('Handwerker update error:', err);
     res.status(500).json({ error: 'Fehler beim Aktualisieren' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/handwerker/:id/zuweisungen — nur die Notfall-Zuordnungen (der eigenen
+// STWEG) einer Firma, auch einer Firma des gemeinsamen Stamms. Body: { event_zuweisungen }
+app.put('/api/handwerker/:id/zuweisungen', authMiddleware, ...hwSchreibend, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const id = parseInt(req.params.id, 10);
+    const firma = await hwFirmaLesbar(req, res, id);
+    if (!firma) return;
+    if (!Array.isArray(req.body?.event_zuweisungen)) return res.status(400).json({ error: 'event_zuweisungen (Liste) fehlt' });
+    await client.query('BEGIN');
+    const z = await hwZuweisungenFuer(client, req, id, req.body.event_zuweisungen);
+    if (z.fehler) { await client.query('ROLLBACK'); return res.status(403).json({ error: z.fehler }); }
+    await saveHandwerkerEventZuweisungen(client, id, z.liste);
+    await client.query('COMMIT');
+    const r = await pool.query('SELECT * FROM handwerker WHERE id = $1', [id]);
+    res.json(await hwFirmaAntwort(req, r.rows[0]));
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Handwerker zuweisungen error:', err);
+    res.status(500).json({ error: 'Fehler beim Speichern der Zuordnungen' });
   } finally {
     client.release();
   }
@@ -14074,24 +14295,28 @@ function sanitizeVertrag(b) {
 app.get(encodeURI('/api/handwerker/:id/verträge'), authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige Handwerker-ID' });
+    if (!(await hwFirmaLesbar(req, res, id))) return;
+    const params = [id];
+    const sichtSql = hwRechteLib.hwSichtSql(hwSichtVon(req), 'stweg', params);
     const result = await pool.query(
-      `SELECT * FROM handwerker_vertraege WHERE handwerker_id = $1 ORDER BY status ASC, naechster_termin NULLS LAST, titel`,
-      [id]
+      `SELECT * FROM handwerker_vertraege WHERE handwerker_id = $1 AND ${sichtSql} ORDER BY status ASC, naechster_termin NULLS LAST, titel`,
+      params
     );
-    res.json({ verträge: result.rows });
+    const sicht = hwSichtVon(req);
+    res.json({ verträge: result.rows.map(v => ({ ...v, darf_aendern: hwRechteLib.hwSchreiben(sicht, v.stweg) })) });
   } catch (err) {
     console.error('Verträge list error:', err);
     res.status(500).json({ error: 'Fehler beim Laden der Verträge' });
   }
 });
 
-app.post(encodeURI('/api/handwerker/:id/verträge'), authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.post(encodeURI('/api/handwerker/:id/verträge'), authMiddleware, ...hwSchreibend, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige Handwerker-ID' });
+    if (!(await hwFirmaLesbar(req, res, id))) return;
     const v = sanitizeVertrag(req.body || {});
     if (!v.titel) return res.status(400).json({ error: 'Titel ist Pflichtfeld' });
+    if (!hwRechteLib.hwSchreiben(hwSichtVon(req), v.stweg)) return res.status(403).json({ error: HW_NUR_EIGENE });
     const result = await pool.query(
       `INSERT INTO handwerker_vertraege
          (handwerker_id, titel, beschreibung, frequenz_einheit, frequenz_intervall, naechster_termin,
@@ -14111,13 +14336,20 @@ app.post(encodeURI('/api/handwerker/:id/verträge'), authMiddleware, requirePerm
   }
 });
 
-app.put(encodeURI('/api/handwerker/:id/verträge/:vid'), authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.put(encodeURI('/api/handwerker/:id/verträge/:vid'), authMiddleware, ...hwSchreibend, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const vid = parseInt(req.params.vid, 10);
     if (!Number.isFinite(id) || !Number.isFinite(vid)) return res.status(400).json({ error: 'Ungültige IDs' });
+    if (!(await hwFirmaLesbar(req, res, id))) return;
     const v = sanitizeVertrag(req.body || {});
     if (!v.titel) return res.status(400).json({ error: 'Titel ist Pflichtfeld' });
+    const sicht = hwSichtVon(req);
+    const alt = await pool.query('SELECT stweg FROM handwerker_vertraege WHERE id = $1 AND handwerker_id = $2', [vid, id]);
+    if (!alt.rows[0] || !hwRechteLib.hwLesen(sicht, alt.rows[0].stweg)) return res.status(404).json({ error: 'Vertrag nicht gefunden' });
+    if (!hwRechteLib.hwSchreiben(sicht, alt.rows[0].stweg) || !hwRechteLib.hwSchreiben(sicht, v.stweg)) {
+      return res.status(403).json({ error: HW_NUR_EIGENE });
+    }
     const result = await pool.query(
       `UPDATE handwerker_vertraege SET
          titel=$1, beschreibung=$2, frequenz_einheit=$3, frequenz_intervall=$4, naechster_termin=$5,
@@ -14136,11 +14368,16 @@ app.put(encodeURI('/api/handwerker/:id/verträge/:vid'), authMiddleware, require
   }
 });
 
-app.delete(encodeURI('/api/handwerker/:id/verträge/:vid'), authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.delete(encodeURI('/api/handwerker/:id/verträge/:vid'), authMiddleware, ...hwSchreibend, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const vid = parseInt(req.params.vid, 10);
     if (!Number.isFinite(id) || !Number.isFinite(vid)) return res.status(400).json({ error: 'Ungültige IDs' });
+    if (!(await hwFirmaLesbar(req, res, id))) return;
+    const sicht = hwSichtVon(req);
+    const alt = await pool.query('SELECT stweg FROM handwerker_vertraege WHERE id = $1 AND handwerker_id = $2', [vid, id]);
+    if (!alt.rows[0] || !hwRechteLib.hwLesen(sicht, alt.rows[0].stweg)) return res.status(404).json({ error: 'Vertrag nicht gefunden' });
+    if (!hwRechteLib.hwSchreiben(sicht, alt.rows[0].stweg)) return res.status(403).json({ error: HW_NUR_EIGENE });
     const result = await pool.query(
       'DELETE FROM handwerker_vertraege WHERE id = $1 AND handwerker_id = $2 RETURNING id',
       [vid, id]
@@ -14153,10 +14390,14 @@ app.delete(encodeURI('/api/handwerker/:id/verträge/:vid'), authMiddleware, requ
   }
 });
 
-// Anstehende Wartungen über alle Handwerker
+// Anstehende Wartungen über alle Handwerker (nur sichtbare STWEG und Firmen)
 app.get(encodeURI('/api/handwerker-verträge/anstehend'), authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
     const days = Math.min(365, Math.max(7, parseInt(req.query.days, 10) || 90));
+    const sicht = hwSichtVon(req);
+    const params = [String(days)];
+    const vSql = hwRechteLib.hwSichtSql(sicht, 'v.stweg', params);
+    const hSql = hwRechteLib.hwSichtSql(sicht, 'h.stweg', params);
     const result = await pool.query(
       `SELECT v.*, h.firma, h.kategorie
          FROM handwerker_vertraege v
@@ -14165,8 +14406,9 @@ app.get(encodeURI('/api/handwerker-verträge/anstehend'), authMiddleware, requir
           AND v.naechster_termin IS NOT NULL
           AND v.naechster_termin <= CURRENT_DATE + ($1 || ' days')::interval
           AND h.archiviert = false
+          AND ${vSql} AND ${hSql}
         ORDER BY v.naechster_termin ASC, h.firma ASC`,
-      [String(days)]
+      params
     );
     res.json({ verträge: result.rows, days });
   } catch (err) {
@@ -14178,12 +14420,15 @@ app.get(encodeURI('/api/handwerker-verträge/anstehend'), authMiddleware, requir
 app.get(encodeURI('/api/handwerker/:id/aufträge'), authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    if (!Number.isFinite(id) || id < 1) return res.status(400).json({ error: 'Ungültige Handwerker-ID' });
+    if (!(await hwFirmaLesbar(req, res, id))) return;
+    const sicht = hwSichtVon(req);
+    const params = [id];
+    const sichtSql = hwRechteLib.hwSichtSql(sicht, 'stweg', params);
     const result = await pool.query(
-      'SELECT * FROM handwerker_auftraege WHERE handwerker_id = $1 ORDER BY datum DESC, id DESC',
-      [id]
+      `SELECT * FROM handwerker_auftraege WHERE handwerker_id = $1 AND ${sichtSql} ORDER BY datum DESC, id DESC`,
+      params
     );
-    res.json({ aufträge: result.rows });
+    res.json({ aufträge: result.rows.map(a => ({ ...a, darf_aendern: hwRechteLib.hwSchreiben(sicht, a.stweg) })) });
   } catch (err) {
     console.error('Aufträge list error:', err);
     res.status(500).json({ error: 'Fehler beim Laden der Aufträge' });
@@ -14205,13 +14450,23 @@ function sanitizeAuftrag(b) {
   };
 }
 
-app.post(encodeURI('/api/handwerker/:id/aufträge'), authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+// Ein Einsatz darf nur auf einen sichtbaren Vertrag derselben Firma zeigen
+// (sonst verschiebt er den nächsten Termin eines fremden Vertrags).
+async function hwVertragPasst(client, req, handwerkerId, vertragId) {
+  if (!vertragId) return true;
+  const r = await client.query('SELECT stweg FROM handwerker_vertraege WHERE id = $1 AND handwerker_id = $2', [vertragId, handwerkerId]);
+  return !!r.rows[0] && hwRechteLib.hwLesen(hwSichtVon(req), r.rows[0].stweg);
+}
+
+app.post(encodeURI('/api/handwerker/:id/aufträge'), authMiddleware, ...hwSchreibend, async (req, res) => {
   const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
-    if (!Number.isFinite(id) || id < 1) return res.status(400).json({ error: 'Ungültige Handwerker-ID' });
+    if (!(await hwFirmaLesbar(req, res, id))) return;
     const a = sanitizeAuftrag(req.body || {});
     if (!a.datum || !a.beschreibung) return res.status(400).json({ error: 'Datum und Beschreibung sind Pflichtfelder' });
+    if (!hwRechteLib.hwSchreiben(hwSichtVon(req), a.stweg)) return res.status(403).json({ error: HW_NUR_EIGENE });
+    if (!(await hwVertragPasst(client, req, id, a.vertrag_id))) return res.status(400).json({ error: 'Vertrag gehört nicht zu dieser Firma' });
     await client.query('BEGIN');
     const result = await client.query(
       `INSERT INTO handwerker_auftraege (handwerker_id, datum, beschreibung, kosten, stweg, notiz, vertrag_id)
@@ -14232,17 +14487,24 @@ app.post(encodeURI('/api/handwerker/:id/aufträge'), authMiddleware, requirePerm
   }
 });
 
-app.put(encodeURI('/api/handwerker/:id/aufträge/:aid'), authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.put(encodeURI('/api/handwerker/:id/aufträge/:aid'), authMiddleware, ...hwSchreibend, async (req, res) => {
   const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
     const aid = parseInt(req.params.aid, 10);
     if (!Number.isFinite(id) || !Number.isFinite(aid)) return res.status(400).json({ error: 'Ungültige IDs' });
+    if (!(await hwFirmaLesbar(req, res, id))) return;
     const a = sanitizeAuftrag(req.body || {});
     if (!a.datum || !a.beschreibung) return res.status(400).json({ error: 'Datum und Beschreibung sind Pflichtfelder' });
-    await client.query('BEGIN');
+    const sicht = hwSichtVon(req);
     // alten vertrag_id ermitteln, damit wir den vorherigen Vertrag ggf. auch neu rechnen
-    const before = await client.query('SELECT vertrag_id FROM handwerker_auftraege WHERE id = $1 AND handwerker_id = $2', [aid, id]);
+    const before = await client.query('SELECT vertrag_id, stweg FROM handwerker_auftraege WHERE id = $1 AND handwerker_id = $2', [aid, id]);
+    if (!before.rows[0] || !hwRechteLib.hwLesen(sicht, before.rows[0].stweg)) return res.status(404).json({ error: 'Auftrag nicht gefunden' });
+    if (!hwRechteLib.hwSchreiben(sicht, before.rows[0].stweg) || !hwRechteLib.hwSchreiben(sicht, a.stweg)) {
+      return res.status(403).json({ error: HW_NUR_EIGENE });
+    }
+    if (!(await hwVertragPasst(client, req, id, a.vertrag_id))) return res.status(400).json({ error: 'Vertrag gehört nicht zu dieser Firma' });
+    await client.query('BEGIN');
     const result = await client.query(
       `UPDATE handwerker_auftraege SET datum=$1, beschreibung=$2, kosten=$3, stweg=$4, notiz=$5, vertrag_id=$6
        WHERE id=$7 AND handwerker_id=$8 RETURNING *`,
@@ -14267,14 +14529,18 @@ app.put(encodeURI('/api/handwerker/:id/aufträge/:aid'), authMiddleware, require
   }
 });
 
-app.delete(encodeURI('/api/handwerker/:id/aufträge/:aid'), authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.delete(encodeURI('/api/handwerker/:id/aufträge/:aid'), authMiddleware, ...hwSchreibend, async (req, res) => {
   const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
     const aid = parseInt(req.params.aid, 10);
     if (!Number.isFinite(id) || !Number.isFinite(aid)) return res.status(400).json({ error: 'Ungültige IDs' });
+    if (!(await hwFirmaLesbar(req, res, id))) return;
+    const sicht = hwSichtVon(req);
+    const before = await client.query('SELECT vertrag_id, stweg FROM handwerker_auftraege WHERE id = $1 AND handwerker_id = $2', [aid, id]);
+    if (!before.rows[0] || !hwRechteLib.hwLesen(sicht, before.rows[0].stweg)) return res.status(404).json({ error: 'Auftrag nicht gefunden' });
+    if (!hwRechteLib.hwSchreiben(sicht, before.rows[0].stweg)) return res.status(403).json({ error: HW_NUR_EIGENE });
     await client.query('BEGIN');
-    const before = await client.query('SELECT vertrag_id FROM handwerker_auftraege WHERE id = $1 AND handwerker_id = $2', [aid, id]);
     const result = await client.query(
       'DELETE FROM handwerker_auftraege WHERE id = $1 AND handwerker_id = $2 RETURNING id',
       [aid, id]
@@ -14297,7 +14563,13 @@ app.delete(encodeURI('/api/handwerker/:id/aufträge/:aid'), authMiddleware, requ
   }
 });
 
-// Event-Typen (Notfall-Kategorien) CRUD
+// Event-Typen (Notfall-Kategorien): lesen alle mit Recht; anlegen, ändern und
+// löschen (Kaskade auf alle Zuordnungen aller STWEG) nur Technik/Präsident.
+function requireHwEventTypen(req, res, next) {
+  if (hwRechteLib.hwEventTypen(hwSichtVon(req))) return next();
+  res.status(403).json({ error: 'Notfall-Arten gelten für alle STWEG; sie ändern Technik und Präsident' });
+}
+
 app.get('/api/handwerker-events', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM handwerker_event_typen ORDER BY sort_order, name');
@@ -14308,7 +14580,7 @@ app.get('/api/handwerker-events', authMiddleware, requirePermission('handwerker'
   }
 });
 
-app.post('/api/handwerker-events', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.post('/api/handwerker-events', authMiddleware, ...hwSchreibend, requireHwEventTypen, async (req, res) => {
   try {
     const trim = (v) => (v == null ? null : String(v).trim() || null);
     const name = trim(req.body?.name);
@@ -14327,7 +14599,7 @@ app.post('/api/handwerker-events', authMiddleware, requirePermission('handwerker
   }
 });
 
-app.put('/api/handwerker-events/:id', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.put('/api/handwerker-events/:id', authMiddleware, ...hwSchreibend, requireHwEventTypen, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige ID' });
@@ -14351,7 +14623,7 @@ app.put('/api/handwerker-events/:id', authMiddleware, requirePermission('handwer
   }
 });
 
-app.delete('/api/handwerker-events/:id', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.delete('/api/handwerker-events/:id', authMiddleware, ...hwSchreibend, requireHwEventTypen, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige ID' });
@@ -14364,27 +14636,26 @@ app.delete('/api/handwerker-events/:id', authMiddleware, requirePermission('hand
   }
 });
 
-// Notfall-Übersicht: alle Event-Typen mit zugeordneten Handwerkern (sortiert nach Priorität)
+// Notfall-Übersicht: alle Event-Typen mit zugeordneten Handwerkern (sortiert nach Priorität).
+// Nur Zuordnungen und Firmen, die das Konto sehen darf (eigene STWEG und „alle“);
+// ?stweg= engt zusätzlich ein.
 app.get('/api/handwerker-notfall', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
+    const sicht = hwSichtVon(req);
     const stwegFilter = req.query.stweg ? parseInt(req.query.stweg, 10) : null;
     const events = await pool.query('SELECT * FROM handwerker_event_typen ORDER BY sort_order, name');
+    const params = [];
+    const zSql = hwRechteLib.hwSichtSql(sicht, 'z.stweg', params);
+    const hSql = hwRechteLib.hwSichtSql(sicht, 'h.stweg', params);
     const zuws = await pool.query(`
       SELECT z.*, h.firma, h.kategorie, h.telefon AS h_telefon, h.mobile AS h_mobile, h.email AS h_email,
              h.archiviert AS h_archiviert
         FROM handwerker_event_zuweisungen z
         JOIN handwerker h ON h.id = z.handwerker_id
-       WHERE h.archiviert = false
-       ORDER BY z.event_typ_id, z.prioritaet, h.firma`);
-    const personen = await pool.query(`
-      SELECT p.* FROM handwerker_personen p
-        JOIN handwerker_event_zuweisungen z ON z.handwerker_id = p.handwerker_id
-       ORDER BY p.handwerker_id, p.sort_order, p.id`);
-    const personenByHandwerker = {};
-    for (const p of personen.rows) {
-      if (!personenByHandwerker[p.handwerker_id]) personenByHandwerker[p.handwerker_id] = [];
-      personenByHandwerker[p.handwerker_id].push(p);
-    }
+       WHERE h.archiviert = false AND ${zSql} AND ${hSql}
+       ORDER BY z.event_typ_id, z.prioritaet, h.firma`, params);
+    const ids = [...new Set(zuws.rows.map(z => z.handwerker_id))];
+    const personenByHandwerker = await loadHandwerkerPersonen(ids);
     const zuwsByEvent = {};
     for (const z of zuws.rows) {
       // STWEG-Filter: leere stweg = gilt für alle, sonst nur passend
@@ -14406,24 +14677,32 @@ app.get('/api/handwerker-notfall', authMiddleware, requirePermission('handwerker
   }
 });
 
-app.delete('/api/handwerker/:id', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+// Archivieren: wer die Firma ändern darf. Hart löschen (Kaskade auf Mitarbeiter,
+// Verträge, Einsätze und Zuordnungen aller STWEG): nur Technik und Präsident.
+app.delete('/api/handwerker/:id', authMiddleware, ...hwSchreibend, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id) || id < 1) return res.status(400).json({ error: 'Ungültige ID' });
+    const firma = await hwFirmaLesbar(req, res, id);
+    if (!firma) return;
+    const sicht = hwSichtVon(req);
     const hard = req.query.hard === '1';
     if (hard) {
-      const groups = req.user?.groups || [];
-      const isTechnik = groups.some(g => g.toLowerCase() === 'technik');
-      if (!isTechnik) return res.status(403).json({ error: 'Hartes Löschen nur für Technik-Gruppe' });
-      const result = await pool.query('DELETE FROM handwerker WHERE id = $1 RETURNING id', [id]);
+      if (!sicht.alle) return res.status(403).json({ error: 'Hartes Löschen nur für Technik und Präsident' });
+      const result = await pool.query('DELETE FROM handwerker WHERE id = $1 RETURNING id, firma', [id]);
       if (result.rows.length === 0) return res.status(404).json({ error: 'Eintrag nicht gefunden' });
+      await objProtokoll(req, 'handwerker', 'firma-geloescht', `Firma ${id}`, [result.rows[0].firma]);
       return res.json({ success: true, hard_deleted: true });
+    }
+    if (!hwRechteLib.hwFirmaArchivieren(sicht, firma.stweg)) {
+      return res.status(403).json({ error: 'Diese Firma gehört zum gemeinsamen Stamm oder einer anderen STWEG; archivieren Technik und Präsident' });
     }
     const result = await pool.query(
       'UPDATE handwerker SET archiviert = true, updated_at = NOW() WHERE id = $1 AND archiviert = false RETURNING id',
       [id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Eintrag nicht gefunden oder bereits archiviert' });
+    await objProtokoll(req, 'handwerker', 'firma-archiviert', `Firma ${id}`, [firma.stweg ? `STWEG ${firma.stweg}` : 'gemeinsamer Stamm']);
     res.json({ success: true, archived: true });
   } catch (err) {
     console.error('Handwerker delete error:', err);
@@ -15241,14 +15520,19 @@ app.get('/api/dashboard', authMiddleware, async (req, res) => {
       } catch {}
     }
 
-    // 4) Anstehende Handwerker-Verträge (alle die Berechtigung haben)
+    // 4) Anstehende Handwerker-Verträge (wer das Recht hat; nur eigene STWEG und „alle“)
     if (darf('handwerker')) try {
+      const hwSicht = hwRechteLib.handwerkerSicht(req.user?.groups || []);
+      const hwParams = [];
+      const vSql = hwRechteLib.hwSichtSql(hwSicht, 'v.stweg', hwParams);
+      const hSql = hwRechteLib.hwSichtSql(hwSicht, 'h.stweg', hwParams);
       const r = await pool.query(
         `SELECT v.id, v.titel, v.naechster_termin, v.stweg, h.firma
            FROM handwerker_vertraege v JOIN handwerker h ON h.id = v.handwerker_id
           WHERE v.status = 'aktiv' AND v.naechster_termin IS NOT NULL
             AND v.naechster_termin <= CURRENT_DATE + INTERVAL '30 days'
-          ORDER BY v.naechster_termin LIMIT 10`,
+            AND h.archiviert = false AND ${vSql} AND ${hSql}
+          ORDER BY v.naechster_termin LIMIT 10`, hwParams,
       );
       widgets.anstehende_vertraege = r.rows;
     } catch {}
@@ -16374,12 +16658,13 @@ function requireWohnungsverwaltungWrite(req, res, next) {
 }
 
 // H4: Pruefe ob User berechtigt ist, eine Person zu editieren.
-// Technik/Präsident: alle Personen. Ausschuss: nur Personen aus dem eigenen STWEG
-// (mind. eine wohnungen_kontakte-Zeile zu einer Wohnung im STWEG des Users).
+// Technik/Präsident: alle Personen. Ausschuss und Verwaltung (stwegN-verwaltung,
+// Entscheid Stefan 28.11.2026): nur Personen aus der eigenen STWEG (mind. eine
+// aktive wohnungen_kontakte-Zeile zu einer Wohnung dort; lib/personen-rechte.js).
 async function userCanEditPerson(user, personId) {
   const groups = user?.groups || [];
   if (isTechnik(groups) || isPraesident(groups)) return true;
-  const ausschussStwegs = [...getAusschussStwegs(groups)];
+  const ausschussStwegs = [...personenRechte.personenSchreibStwegs(groups)];
   if (ausschussStwegs.length === 0) return false;
   const r = await pool.query(
     `SELECT 1 FROM wohnungen_kontakte k
@@ -16392,14 +16677,14 @@ async function userCanEditPerson(user, personId) {
 }
 
 // Schutz gemeinsamer Personen (Runde 4): Eine Person, die ein eigenes aktives Konto hat
-// oder an Wohnungen einer STWEG haengt, in der der Anfragende NICHT Ausschuss ist, darf
-// ein Ausschuss nicht umbenennen, umadressieren oder zusammenfuehren - sonst laesst sich
+// oder an Wohnungen einer STWEG haengt, in der der Anfragende NICHT Ausschuss bzw.
+// Verwaltung ist, darf er nicht umbenennen, umadressieren oder zusammenfuehren - sonst laesst sich
 // per neuem Kontakt (findOrCreatePerson) + Personen-Bearbeitung die Identitaet eines
 // Bewohners einer fremden STWEG uebernehmen (Trigger personen_propagate_to_kontakte).
 async function personGeschuetztFuer(user, personId) {
   const groups = user?.groups || [];
   if (isTechnik(groups) || isPraesident(groups)) return false;
-  const eigene = [...getAusschussStwegs(groups)];
+  const eigene = [...personenRechte.personenSchreibStwegs(groups)];
   const r = await pool.query(
     `SELECT EXISTS (SELECT 1 FROM wohnungen_kontakte k JOIN wohnungen w ON w.id = k.wohnung_id
                      WHERE k.person_id = $1 AND k.archiviert_am IS NULL AND NOT (w.stweg = ANY($2::int[]))) AS fremd_stweg,
@@ -16475,7 +16760,10 @@ app.get('/api/personen', authMiddleware, requireWohnungsverwaltungRead, async (r
       params,
     );
     const sicht = await nummernSicht(req, pool);
-    res.json({ personen: r.rows.map(p => sicht(p, personFuerSicht(p))) });
+    const g = req.user?.groups || [];
+    // Geburtsdatum nur T/P, Notiz nur Ausschuss und T/P (lib/personen-rechte.js)
+    res.json({ personen: r.rows.map(p => personenRechte.personFuerLeser(g, sicht(p, personFuerSicht(p)))),
+      felder: personenRechte.personenFelder(g) });
   } catch (err) {
     console.error('Personen list error:', err);
     res.status(500).json({ error: 'Fehler beim Laden' });
@@ -16508,21 +16796,23 @@ app.get('/api/personen/:id', authMiddleware, requireWohnungsverwaltungRead, asyn
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const sicht = await nummernSicht(req, pool);
-    res.json(sicht(r.rows[0], personFuerSicht(r.rows[0])));
+    const g = req.user?.groups || [];
+    res.json({ ...personenRechte.personFuerLeser(g, sicht(r.rows[0], personFuerSicht(r.rows[0]))), felder: personenRechte.personenFelder(g) });
   } catch (err) {
     res.status(500).json({ error: fehlerFuerClient(err, 'Fehler beim Laden') });
   }
 });
 
 // PUT /api/personen/:id — Person aktualisieren (Trigger propagiert auf alle Kontakte)
-app.put('/api/personen/:id', authMiddleware, requireWohnungsverwaltungWrite, async (req, res) => {
+app.put('/api/personen/:id', authMiddleware, requireWohnungsverwaltungWrite, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
-    // H4: STWEG-Scope-Check: Ausschuss darf nur Personen aus eigenem STWEG editieren
+    // H4: STWEG-Scope-Check: Ausschuss/Verwaltung nur Personen aus der eigenen STWEG
     const allowed = await userCanEditPerson(req.user, id);
-    if (!allowed) return res.status(403).json({ error: 'Diese Person gehört nicht zu einem STWEG für den du Ausschuss-Berechtigung hast' });
-    let b = req.body || {};
+    if (!allowed) return res.status(403).json({ error: 'Diese Person gehört nicht zu einer STWEG, für die du als Ausschuss oder Verwaltung zuständig bist' });
+    // Felder, die das Konto nicht sieht (Geburtsdatum, Notiz), nicht ueberschreiben
+    let b = personenRechte.personBodyFiltern(req.user?.groups || [], req.body || {});
     // Verborgene Nummern (GET liefert sie leer) beim Speichern nicht ueberschreiben
     if (!(await darfNummernDerPerson(req, id))) b = nummernAusBodyEntfernen(b);
     const IDENT_FELDER = ['name', 'vorname', 'nachname', 'email', 'telefon', 'mobile', 'telefone', 'adresse'];
@@ -16556,12 +16846,16 @@ app.put('/api/personen/:id', authMiddleware, requireWohnungsverwaltungWrite, asy
     if (b.notiz !== undefined) push('notiz', b.notiz || null);
     if (b.review_needed !== undefined) push('review_needed', !!b.review_needed);
     if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
+    const vorher = (await pool.query('SELECT * FROM personen WHERE id = $1', [id])).rows[0];
     params.push(id);
     const r = await pool.query(
       `UPDATE personen SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`,
       params,
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const felder = personenRechte.geaenderteFelder(vorher, r.rows[0],
+      ['name', 'vorname', 'nachname', 'anrede', 'email', 'telefon', 'mobile', 'telefone', 'adresse', 'geburtsdatum', 'notiz', 'review_needed']);
+    await objProtokoll(req, 'personen', 'geaendert', `Person ${id}`, [r.rows[0].name, felder.length ? `Felder: ${felder.join(', ')}` : 'ohne Änderung']);
 
     // Verwaltung informieren wenn Email/Telefon/Adresse geaendert
     const relevantChanged = ['email', 'telefon', 'adresse'].some(f => b[f] !== undefined);
@@ -16579,7 +16873,7 @@ app.put('/api/personen/:id', authMiddleware, requireWohnungsverwaltungWrite, asy
         }
       } catch {}
     }
-    res.json(r.rows[0]);
+    res.json(personenRechte.personFuerLeser(req.user?.groups || [], r.rows[0]));
   } catch (err) {
     console.error('Personen update error:', err);
     res.status(500).json({ error: 'Fehler beim Aktualisieren' });
@@ -16587,9 +16881,9 @@ app.put('/api/personen/:id', authMiddleware, requireWohnungsverwaltungWrite, asy
 });
 
 // POST /api/personen — neue Person anlegen
-app.post('/api/personen', authMiddleware, requireWohnungsverwaltungWrite, async (req, res) => {
+app.post('/api/personen', authMiddleware, requireWohnungsverwaltungWrite, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   try {
-    const b = req.body || {};
+    const b = personenRechte.personBodyFiltern(req.user?.groups || [], req.body || {});
     if (!b.name || !String(b.name).trim()) return res.status(400).json({ error: 'Name erforderlich' });
     const r = await pool.query(
       `INSERT INTO personen (name, vorname, nachname, anrede, email, telefon, mobile, adresse, geburtsdatum, notiz)
@@ -16597,7 +16891,8 @@ app.post('/api/personen', authMiddleware, requireWohnungsverwaltungWrite, async 
       [String(b.name).trim().slice(0,255), b.vorname || null, b.nachname || null, b.anrede || null,
        b.email || null, normalizePhone(b.telefon), normalizePhone(b.mobile), b.adresse || null, b.geburtsdatum || null, b.notiz || null],
     );
-    res.status(201).json(r.rows[0]);
+    await objProtokoll(req, 'personen', 'angelegt', `Person ${r.rows[0].id}`, [r.rows[0].name]);
+    res.status(201).json(personenRechte.personFuerLeser(req.user?.groups || [], r.rows[0]));
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
@@ -16716,15 +17011,20 @@ app.post('/api/personen/merge', authMiddleware, requireWohnungsverwaltungWrite, 
       params.push(keepId);
       await client.query(`UPDATE personen SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${params.length}`, params);
     }
-    // Alle Kontakte umhaengen
-    const reassigned = await client.query(
-      `UPDATE wohnungen_kontakte SET person_id = $1 WHERE person_id = $2`,
-      [keepId, mergeId],
-    );
+    // Alle Verweise umhaengen: Wohnungs-Kontakte, Vollmachten (Geber, Bevollmaechtigte),
+    // Reklamationen, WhatsApp, Rufgruppen-Mitglieder (lib/personen-rechte.js) -
+    // sonst setzt das Loeschen sie still auf NULL.
+    const umgehaengt = await personenRechte.verweiseUmhaengen(client, keepId, mergeId);
     // Merge-Person löschen
     await client.query('DELETE FROM personen WHERE id = $1', [mergeId]);
+    // Protokoll in derselben Transaktion: ohne Eintrag kein Zusammenfuehren
+    await adminProtokoll.eintragen(pool, client, req, {
+      bereich: 'personen', aktion: 'zusammengefuehrt', ziel: `Person ${keepId}`, alt: `Person ${mergeId}`, neu: `Person ${keepId}`,
+      detail: [k.rows[0].name, m.rows[0].name !== k.rows[0].name ? `aus: ${m.rows[0].name}` : null,
+        Object.entries(umgehaengt).filter(([, n]) => n > 0).map(([t, n]) => `${t} ${n}`).join(', ') || 'keine Verweise'].filter(Boolean).join(' · '),
+    });
     await client.query('COMMIT');
-    res.json({ success: true, reassigned_kontakte: reassigned.rowCount });
+    res.json({ success: true, reassigned_kontakte: umgehaengt['wohnungen_kontakte.person_id'] || 0, umgehaengt });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('Personen merge error:', err);
@@ -30663,6 +30963,21 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_handwerker_kategorie ON handwerker(kategorie);
       CREATE INDEX IF NOT EXISTS idx_handwerker_archiviert ON handwerker(archiviert);
       ALTER TABLE handwerker ADD COLUMN IF NOT EXISTS leistungen TEXT[];
+      -- STWEG der Firma (lib/handwerker-rechte.js, Entscheid Stefan 28.11.2026):
+      -- NULL = gemeinsamer Stamm (alle bestehenden Firmen, aendern nur Technik/
+      -- Praesident); eine Verwaltung legt Firmen fuer ihre STWEG an und pflegt sie.
+      ALTER TABLE handwerker ADD COLUMN IF NOT EXISTS stweg INTEGER;
+      CREATE INDEX IF NOT EXISTS idx_handwerker_stweg ON handwerker(stweg);
+      -- Grundbuch an die STWEG binden (lib/grundbuch-rechte.js, Entscheid Stefan
+      -- 28.11.2026): Spalte stweg je Anteil, NULL = noch nicht zugeordnet (Namen
+      -- dann nur Technik/Praesident). Zuordnen je Parzelle: PUT /api/grundbuch/
+      -- parzellen/:parzelle/stweg. Die Tabelle legt nicht initDB an (Import).
+      DO $$ BEGIN
+        IF to_regclass('public.grundbuch_anteile') IS NOT NULL THEN
+          ALTER TABLE grundbuch_anteile ADD COLUMN IF NOT EXISTS stweg INTEGER;
+          CREATE INDEX IF NOT EXISTS idx_grundbuch_anteile_stweg ON grundbuch_anteile(stweg);
+        END IF;
+      END $$;
       DO $$ BEGIN
         IF EXISTS (SELECT 1 FROM pg_proc WHERE proname='audit_trigger_fn')
            AND NOT EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_name='handwerker_audit') THEN

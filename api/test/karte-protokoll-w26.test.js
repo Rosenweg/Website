@@ -36,7 +36,9 @@ test('Routen und Dienste melden', () => {
   const server = lies('api/server.js');
   for (const r of ["post('/api/verwaltungen'", "put('/api/verwaltungen/:id'", "delete('/api/verwaltungen/:id'",
     "post('/api/verwaltungen/:id/kontakte'", "put('/api/verwaltungen/kontakte/:kid'", "delete('/api/verwaltungen/kontakte/:kid'"]) {
-    assert.ok(server.includes(`app.${r}, authMiddleware, requireAusschussOrTechnik, kartenAdmin.mitKarteProtokollieren`), r);
+    // Die Hausverwaltung pflegt ihren eigenen Eintrag (requireVerwaltungenZugang, Entscheid Stefan 28.11.2026)
+    assert.ok(server.includes(`app.${r}, authMiddleware, requireAusschussOrTechnik, kartenAdmin.mitKarteProtokollieren`)
+      || server.includes(`app.${r}, authMiddleware, requireVerwaltungenZugang, kartenAdmin.mitKarteProtokollieren`), r);
   }
   assert.ok(server.includes("app.post('/api/stweg-modules', authMiddleware, kartenAdmin.mitKarteProtokollieren"));
   assert.ok(server.includes("app.post('/api/stweg-sections/:stweg/:section', authMiddleware, kartenAdmin.mitKarteProtokollieren"));

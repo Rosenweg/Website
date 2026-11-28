@@ -33,6 +33,10 @@ const RECHTE_MIGRATIONEN = [
   // jetzt am Seitenrecht „vollmachten“; Vorgabe lesen, damit nichts wegfaellt
   // (Entscheid Stefan 28.11.2026, Fund R2). Abschalten: in der Rechteverwaltung auf none.
   { name: '2026-11-28-vollmachten-ausschuss-read', page: 'vollmachten', access: 'read', gruppen: AUSSCHUESSE },
+  // Handwerker: der Ausschuss liest Vertraege, Einsaetze und Notfall-Zuordnungen
+  // seiner STWEG (lib/handwerker-rechte.js; Entscheid Stefan 28.11.2026).
+  // Schreiben bleibt der Verwaltung der STWEG und Technik/Praesident vorbehalten.
+  { name: '2026-11-28-handwerker-ausschuss-read', page: 'handwerker', access: 'read', gruppen: AUSSCHUESSE },
 ];
 
 const SQL_TABELLE = `
