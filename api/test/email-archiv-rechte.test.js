@@ -130,8 +130,11 @@ test('server.js: Schema, STWEG-Zuordnung nach dem Archivieren, Aufräumlauf, arc
   assert.match(s, /require\('\.\/routes\/email-archive'\)\.aufbewahrungStarten\(activeIntervals\)/);
   const i = s.indexOf('async function archiveEmail(');
   assert.match(s.slice(i, i + 1500), /stwegZuordnen\(\)/);
-  const j = s.indexOf("app.post('/api/verteiler/send'");
-  assert.match(s.slice(j, s.indexOf('\napp.', j + 10)), /stwegZuordnen\(\)/);
+  // Portal-Rundmail: das Archivieren steht seit dem Vier-Augen-Umbau in der
+  // Versand-Funktion vor der Route /api/verteiler/send
+  const j = s.indexOf("[verteiler-direct] Archivieren fehlgeschlagen");
+  assert.ok(j > 0);
+  assert.match(s.slice(j - 800, j), /stwegZuordnen\(\)/);
   // archiv/ nur ueber die Archiv-Route (Protokoll), auch fuer Technik
   const k = s.indexOf('function isDocPathAllowed(');
   const block = s.slice(k, k + 400);
