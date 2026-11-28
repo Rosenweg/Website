@@ -224,6 +224,7 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `GET /api/tv/playlist.m3u`, `/api/tv/epg.xml` | TV-Senderliste |
 
 | `GET /api/wetter/:station/history`, `GET /api/push/vapid-public-key`, `GET /api/nav/audience-map` | Wetter, Push-Schlüssel, Menü-Zuordnung |
+| `GET /api/wetter/:station/aktuell` | aktuelle Werte der Wetterstation, bei Ausfall MeteoSchweiz-Ersatz (`quelle`), siehe [mqtt-wetter.md](mqtt-wetter.md) |
 | `GET /api/stations/drucker/:rechner` | Standarddrucker eines Rechners (`{"rechner","bekannt","standard"}`), **nur aus dem internen Netz** (jede Adresse in `X-Forwarded-For` muss innen liegen, sonst 403), `Cache-Control: no-store`; gesperrte/entfernte Stationen gelten als unbekannt |
 
 ### 4.2 Konto und Profil (`me`, `auth`)

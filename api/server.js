@@ -18166,7 +18166,31 @@ app.post('/api/wetter/:station/ingest', mqttBrokerGuard, async (req, res) => {
       [st, num(b.outdoortemp), num(b.outdoorhumidity), num(b.windspeed), num(b.winddir), num(b.pressureabs), num(b.solarradiation), num(b.rain), num(b.uvi), num(b.windgustspeed)]
     );
     res.json({ ok: true });
+    // Gesund -> sofort die eigenen Werte nach MQTT (rosenweg/wetter/#); nie die Antwort aufhalten
+    if (st === wetterErsatz.cfg.station) {
+      wetterErsatz.nachIngest({ outdoortemp: num(b.outdoortemp), outdoorhumidity: num(b.outdoorhumidity), windspeed: num(b.windspeed),
+        winddir: num(b.winddir), pressureabs: num(b.pressureabs), solarradiation: num(b.solarradiation), rain: num(b.rain),
+        uvi: num(b.uvi), windgustspeed: num(b.windgustspeed) }).catch(e => console.warn('[wetter-ersatz] nach Ingest:', e.message));
+    }
   } catch (e) { console.error('[wetter] ingest:', e.message); res.status(500).json({ error: 'ingest' }); }
+});
+
+// Ersatzwerte der Wetterstation aus den Open Data von MeteoSchweiz (lib/wetter-ersatz.js).
+const wetterErsatz = require('./lib/wetter-ersatz').erstelle({
+  pool,
+  publish: (topic, payload, opt) => { try { apiMqttPublishClient()?.publish(topic, payload, opt); } catch (_) {} },
+});
+setTimeout(() => wetterErsatz.takt().catch(e => console.warn('[wetter-ersatz] Takt:', e.message)), 30000);
+setInterval(() => wetterErsatz.takt().catch(e => console.warn('[wetter-ersatz] Takt:', e.message)), 10 * 60 * 1000);
+
+// Aktuelle Werte (PUBLIC): eigene Station, bei Ausfall MeteoSchweiz. Feld quelle sagt, was es ist.
+app.get('/api/wetter/:station/aktuell', async (req, res) => {
+  try {
+    const st = String(req.params.station || 'r9').slice(0, 16);
+    if (st !== wetterErsatz.cfg.station) return res.status(404).json({ error: 'unbekannte Station' });
+    res.set('Cache-Control', 'public, max-age=30');
+    res.json(await wetterErsatz.aktuell());
+  } catch (e) { console.error('[wetter] aktuell:', e.message); res.status(500).json({ error: 'aktuell' }); }
 });
 
 // History (PUBLIC, kein Login): Zeitreihe der letzten h Stunden (default 24, max 168).
@@ -18181,8 +18205,10 @@ app.get('/api/wetter/:station/history', async (req, res) => {
         ORDER BY ts ASC`,
       [st, hours]
     );
+    // Ersatzwerte von MeteoSchweiz (eigene Quelle, ersatz:true je Punkt) einmischen
+    const m = await wetterErsatz.verlaufMischen(st, hours, r.rows).catch(() => ({ points: r.rows, ersatz: null }));
     res.set('Cache-Control', 'public, max-age=120');
-    res.json({ station: st, hours, points: r.rows });
+    res.json({ station: st, hours, points: m.points, ersatz: m.ersatz });
   } catch (e) { console.error('[wetter] history:', e.message); res.status(500).json({ error: 'history' }); }
 });
 
@@ -23367,6 +23393,17 @@ app.get('/api/isp/noc/server', authMiddleware, requireTechnikOrPraesident, nocSe
 // Runner-Waechter (pve2, scripts/rw-runner-waechter.sh): Bericht annehmen, NOC-Kachel
 // "Runner" (routes/nocrunner.js). POST nur mit X-Runner-Token von pve2.
 const nocRunner = require('./routes/nocrunner');
+// Wetterstation im NOC (Kachel in der Dienste-Leiste): gelb, wenn Ersatzwerte laufen.
+async function nocWetterHandler(req, res) {
+  try { res.json(await wetterErsatz.nocStatus()); }
+  catch (e) { console.warn('[noc] Wetter:', e.message); res.status(500).json({ error: 'Wetter nicht lesbar' }); }
+}
+app.get('/api/isp/noc/public/wetter', (req, res) => {
+  if (!checkNocToken(req, res)) return;
+  return nocWetterHandler(req, res);
+});
+app.get('/api/isp/noc/wetter', authMiddleware, requireTechnikOrPraesident, nocWetterHandler);
+
 app.post('/api/isp/noc/runner', nocRunner.annehmen);
 app.get('/api/isp/noc/public/runner', (req, res) => {
   const zugang = checkNocToken(req, res);
