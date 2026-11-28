@@ -1,5 +1,17 @@
 # Dokumenten-Fileserver (Samba/CIFS + API + GitHub-Backup)
 
+> **Überholt für die API (geprüft 28.11.2026, nur lesend):** Die API läuft auf
+> CT 128 (`/opt/rosenweg-core`, `backend-lxc/core/compose.yml`) und hängt die
+> Ablage **nicht** über CIFS ein, sondern direkt aus dem CephFS:
+> `pct config 128` → `mp0: /mnt/pve/docs,mp=/mnt/documents`; im Container
+> zeigt `findmnt -T /mnt/documents` `100.64.2.20,100.64.2.21,100.64.2.22:/docs`
+> (ceph); der API-Container bindet `/mnt/documents:/documents`. Fällt CT 106
+> aus, bleibt die Ablage der API also da (die drei Ceph-Monitore genügen). Das
+> CIFS-Volume `//100.64.2.28/api` unten und in `docker-stack.yml` gehört zum
+> abgebauten Swarm (README: „historisch“) und wird nicht benutzt. Eine
+> Umstellung auf die VIP `files.ad.rosenweg4303.ch` ist darum nicht nötig.
+> Samba (`[dokumente]` über die VIP) bleibt der Weg für Windows und die Stationen.
+
 ## Architektur
 
 ```

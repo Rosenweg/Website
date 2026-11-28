@@ -52,6 +52,11 @@ Dateiliste. Er steht in der Container-Konfiguration und **nicht** im Repo; wer
 CT 128 neu aufsetzt, muss ihn von Hand setzen. Nachsehen mit
 `pct config 128 | grep ^mp`.
 
+Geprüft am 28.11.2026: `mp0: /mnt/pve/docs,mp=/mnt/documents`, im Container
+`findmnt -T /mnt/documents` → `ceph`, Quelle `100.64.2.20,100.64.2.21,100.64.2.22:/docs`,
+der API-Container bindet `/mnt/documents:/documents`. Die API hängt damit an keinem
+der beiden Fileserver; das CIFS-Volume in `docker-stack.yml` ist veraltet (Swarm).
+
 Vorher war es eine CIFS-Einhängung (`//100.64.2.28/api`, fstab im LXC), und nur
 dafür lief der Container privilegiert. Am 12. August 2026 war sie nach dem
 CephFS-Umbau nicht mehr eingehängt: Die API sah ein leeres `/documents`.
