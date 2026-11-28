@@ -37,7 +37,7 @@ test('Zentrale nicht erreichbar: rot; nicht eingerichtet: grau', () => {
   assert.equal(n.fernwartungFuerNoc({ eingerichtet: false, telefone: [] }, JETZT).zusammenfassung.ampel, 'grau');
 });
 
-test('öffentlich ohne Gerätenamen', () => {
+test('öffentlich mit Gerätenamen wie auf /smartphones', () => {
   const d = n.fernwartungOeffentlich(n.fernwartungFuerNoc({ eingerichtet: true, zentrale: true, telefone: [tel()] }, JETZT));
-  assert.equal(d.telefone[0].name, 'Telefon 1');
+  assert.equal(d.telefone[0].name, 'Rosenweg Smartphone 2');
 });
