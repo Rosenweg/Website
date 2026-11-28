@@ -22,6 +22,7 @@ const { zevAliasAddress, zevGotoTargets, zevDarfRechnungSehen, zevStwegFuerEmpfa
 const reklMelder = require('./lib/reklamation-melder');
 const vollmachtRechte = require('./lib/vollmacht-rechte');
 const vollmachtApp = require('./lib/vollmacht-app');
+const vollmachtMail = require('./lib/vollmacht-mail');
 const projekteRechte = require('./lib/projekte-rechte');
 const stwegOeffentlich = require('./lib/stweg-oeffentlich');
 const rechteSchluessel = require('./lib/rechte-schluessel');
@@ -16825,6 +16826,8 @@ const MAIL_TEMPLATE_DEFAULTS = [
   },
   // Waschküche: Sperrzeit hat Reservationen storniert (Text und Variablen in lib/wasch-regeln.js)
   waschRegeln.SPERR_VORLAGE,
+  // Vollmachten: bevollmächtigt, Miteigentümer, Verwaltung, Ablauf (Text und Variablen in lib/vollmacht-mail.js)
+  ...vollmachtMail.VORLAGEN,
 ];
 
 async function seedMailTemplates() {
@@ -28784,7 +28787,167 @@ app.get('/api/vollmachten', authMiddleware, async (req, res) => {
   } catch (err) { console.error('[vollmachten] list:', err); res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
-// Neuigkeiten fuer die App (V5, V6): klein, ohne Mail und Push-Dienst. Die App
+// ─── Mails zu Vollmachten (lib/vollmacht-mail.js, Absender vollmachten@) ──
+// Eigene Adresse je Person: ein Schluessel fuer den Abmelde-Link, gespeichert
+// in vollmachten_mail_einstellung. Verwaltung (Firma) bekommt keinen Link.
+async function vmMailSchluessel(email) {
+  const e = String(email || '').trim().toLowerCase();
+  const r = await pool.query(
+    `INSERT INTO vollmachten_mail_einstellung (email, token) VALUES ($1, $2)
+     ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email RETURNING token`,
+    [e, crypto.randomBytes(24).toString('base64url')]);
+  return r.rows[0].token;
+}
+async function vmMailAbgemeldet(emails) {
+  const l = [...new Set((emails || []).map((x) => String(x || '').trim().toLowerCase()).filter(Boolean))];
+  if (!l.length) return new Set();
+  const r = await pool.query('SELECT email FROM vollmachten_mail_einstellung WHERE aus = true AND email = ANY($1::text[])', [l]);
+  return new Set(r.rows.map((x) => x.email));
+}
+// Eine Mail ueber die Vorlage (Editor) – Fehler stoppen die Vollmacht nie.
+async function vmMailSenden(trigger, ctx, to, betreff, text) {
+  try {
+    await sendTemplated(trigger, ctx, {
+      from: { name: 'Rosenweg Vollmachten', address: MAIL_FROM }, to, subject: betreff, text,
+    });
+  } catch (e) { console.warn('[vollmachten-mail]', trigger, to, e.message); }
+}
+// Vollmacht mit Gebern, Wohnung, Versammlung und E-Mail der bevollmaechtigten Person.
+async function vmMailZeile(id) {
+  const r = await pool.query(
+    `SELECT v.*, to_char(v.gueltig_ab, 'YYYY-MM-DD') AS gueltig_ab, to_char(v.gueltig_bis, 'YYYY-MM-DD') AS gueltig_bis,
+            to_char(v.ablauf_gemeldet_fuer, 'YYYY-MM-DD') AS ablauf_gemeldet_fuer,
+            (SELECT COALESCE(json_agg(json_build_object('name', vg.name, 'email', vg.email) ORDER BY vg.sort_order, vg.id), '[]'::json)
+               FROM vollmachten_vollmachtgeber vg WHERE vg.vollmacht_id = v.id) AS vollmachtgeber_liste,
+            w.bezeichnung AS wohnung_bezeichnung, e.title AS versammlung_titel,
+            COALESCE(NULLIF(v.bevollmaechtigter_email, ''),
+                     (SELECT p.email FROM personen p WHERE p.id = v.bevollmaechtigter_person_id),
+                     (SELECT vw.email FROM verwaltungen vw WHERE vw.id = v.bevollmaechtigter_verwaltung_id)) AS bev_email
+       FROM vollmachten v
+       LEFT JOIN wohnungen w ON w.id = v.wohnung_id
+       LEFT JOIN stweg_events e ON e.id = v.termin_id
+      WHERE v.id = $1`, [id]);
+  return r.rows[0] || null;
+}
+async function vmPersonenMail(trigger, v, empfaenger) {
+  for (const p of empfaenger) {
+    const token = await vmMailSchluessel(p.email);
+    const ctx = vollmachtMail.kontext(v, {
+      siteUrl: SITE_URL, empfaengerName: p.name, heute: new Date(),
+      abmeldenUrl: `${SITE_URL}/api/vollmachten/mail-abmelden?t=${token}`,
+    });
+    const m = vollmachtMail.VORLAGEN.find((x) => x.source_type === trigger);
+    await vmMailSenden(trigger, ctx, p.email, renderTemplate(m.subject_template, ctx), renderTemplate(m.body_template, ctx));
+  }
+}
+// Vollmacht ist aktiv geworden: je Vollmacht genau einmal (aktiv_mail_am).
+async function vmAktivMails(id) {
+  try {
+    const c = await pool.query(
+      `UPDATE vollmachten SET aktiv_mail_am = NOW() WHERE id = $1 AND status = 'aktiv' AND aktiv_mail_am IS NULL RETURNING id`, [id]);
+    if (!c.rows.length) return;
+    const v = await vmMailZeile(id);
+    if (!v) return;
+    let kontakte = [];
+    if (v.wohnung_id) {
+      kontakte = (await pool.query(
+        `SELECT email, name, rolle FROM wohnungen_kontakte WHERE wohnung_id = $1 AND archiviert_am IS NULL AND email IS NOT NULL AND email <> ''`,
+        [v.wohnung_id])).rows;
+    }
+    const adr = [v.bev_email, ...kontakte.map((k) => k.email)];
+    const aus = await vmMailAbgemeldet(adr);
+    const ziel = vollmachtMail.empfaengerAktiv(v, { kontakte, bevollmaechtigterEmail: v.bev_email, aus });
+    await vmPersonenMail('vollmacht-bevollmaechtigt', v, ziel.bevollmaechtigt);
+    await vmPersonenMail('vollmacht-miteigentuemer', v, ziel.miteigentuemer);
+    // Verwaltung der STWEG: Firma bzw. Ausschuss (findVerwaltungForStweg), ohne Abmelde-Link
+    const verw = await findVerwaltungForStweg(v.stweg);
+    if (verw && verw.mailTo.length) {
+      const ctx = vollmachtMail.kontext(v, { siteUrl: SITE_URL, heute: new Date() });
+      const m = vollmachtMail.VORLAGEN.find((x) => x.source_type === 'vollmacht-eingegangen');
+      await vmMailSenden('vollmacht-eingegangen', ctx, verw.mailTo.join(', '),
+        renderTemplate(m.subject_template, ctx), renderTemplate(m.body_template, ctx));
+    }
+  } catch (e) { console.warn('[vollmachten-mail] aktiv', id, e.message); }
+}
+// Taeglich: Vollmachten, die in ABLAUF_VORLAUF_TAGE Tagen enden (einmal je Ablaufdatum).
+let vmAblaufTag = null;
+async function vmAblaufMails() {
+  const heute = new Date().toISOString().slice(0, 10);
+  if (vmAblaufTag === heute) return;
+  vmAblaufTag = heute;
+  try {
+    const r = await pool.query(
+      `SELECT id, status, to_char(gueltig_bis, 'YYYY-MM-DD') AS gueltig_bis, to_char(ablauf_gemeldet_fuer, 'YYYY-MM-DD') AS ablauf_gemeldet_fuer
+         FROM vollmachten
+        WHERE status = 'aktiv' AND gueltig_bis IS NOT NULL
+          AND gueltig_bis BETWEEN CURRENT_DATE AND CURRENT_DATE + $1::int`, [vollmachtMail.ABLAUF_VORLAUF_TAGE]);
+    for (const k of vollmachtMail.ablaufFaellig(r.rows, heute)) {
+      const c = await pool.query(
+        `UPDATE vollmachten SET ablauf_gemeldet_fuer = gueltig_bis WHERE id = $1 AND status = 'aktiv'
+            AND ablauf_gemeldet_fuer IS DISTINCT FROM gueltig_bis RETURNING id`, [k.id]);
+      if (!c.rows.length) continue;
+      const v = await vmMailZeile(k.id);
+      const aus = await vmMailAbgemeldet([v.bev_email, v.vollmachtgeber_email, ...(v.vollmachtgeber_liste || []).map((g) => g.email)]);
+      await vmPersonenMail('vollmacht-ablauf', v, vollmachtMail.empfaengerAblauf(v, { bevollmaechtigterEmail: v.bev_email, aus }));
+    }
+  } catch (e) { console.warn('[vollmachten-mail] ablauf', e.message); }
+}
+setInterval(vmAblaufMails, 60 * 60 * 1000);
+setTimeout(vmAblaufMails, 150 * 1000);
+
+// Abmelden per Link aus der Mail: GET zeigt die Seite, erst POST schaltet um
+// (Mail-Scanner rufen Links ab – ein GET darf nichts aendern).
+function vmMailSeite(res, titel, text, knopf, t) {
+  res.set('Cache-Control', 'no-store').type('html').send(
+    `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`
+    + `<title>${escapeHtml(titel)}</title></head><body style="font-family:system-ui,sans-serif;max-width:32rem;margin:3rem auto;padding:0 1rem">`
+    + `<h1 style="font-size:1.3rem">${escapeHtml(titel)}</h1><p>${escapeHtml(text)}</p>`
+    + (knopf ? `<form method="post" action="/api/vollmachten/mail-abmelden?t=${encodeURIComponent(t)}">`
+      + `<button style="padding:.6rem 1.2rem;font-size:1rem">${escapeHtml(knopf)}</button></form>` : '')
+    + `<p><a href="/vollmachten.html">Zu den Vollmachten</a></p></body></html>`);
+}
+async function vmMailEinstellungLesen(t) {
+  if (typeof t !== 'string' || t.length < 16 || t.length > 100) return null;
+  return (await pool.query('SELECT email, aus FROM vollmachten_mail_einstellung WHERE token = $1', [t])).rows[0] || null;
+}
+app.get('/api/vollmachten/mail-abmelden', async (req, res) => {
+  try {
+    const t = String(req.query.t || '');
+    const e = await vmMailEinstellungLesen(t);
+    if (!e) return vmMailSeite(res.status(404), 'Link ungültig', 'Dieser Link gehört zu keiner Adresse.', null, t);
+    if (e.aus) return vmMailSeite(res, 'Vollmachten-Mails sind aus', `An ${e.email} gehen keine Mails zu Vollmachten mehr.`, 'Wieder einschalten', t);
+    vmMailSeite(res, 'Mails zu Vollmachten abstellen?', `Es gehen keine Mails mehr zu Vollmachten an ${e.email}. Die Vollmachten selbst bleiben unverändert.`, 'Abstellen', t);
+  } catch (err) { res.status(500).type('text').send('Fehler'); }
+});
+app.post('/api/vollmachten/mail-abmelden', async (req, res) => {
+  try {
+    const t = String(req.query.t || '');
+    const e = await vmMailEinstellungLesen(t);
+    if (!e) return vmMailSeite(res.status(404), 'Link ungültig', 'Dieser Link gehört zu keiner Adresse.', null, t);
+    await pool.query('UPDATE vollmachten_mail_einstellung SET aus = $2, updated_at = NOW() WHERE token = $1', [t, !e.aus]);
+    if (e.aus) return vmMailSeite(res, 'Vollmachten-Mails sind wieder an', `An ${e.email} gehen wieder Mails zu Vollmachten.`, 'Wieder abstellen', t);
+    vmMailSeite(res, 'Erledigt', `An ${e.email} gehen keine Mails zu Vollmachten mehr.`, 'Wieder einschalten', t);
+  } catch (err) { res.status(500).type('text').send('Fehler'); }
+});
+// Dasselbe fuer die eingeloggte Person (App, Seite Vollmachten).
+app.get('/api/vollmachten/mail-einstellung', authMiddleware, async (req, res) => {
+  try {
+    const aus = await vmMailAbgemeldet([req.user.email]);
+    res.json({ aus: aus.has(String(req.user.email || '').toLowerCase()) });
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
+});
+app.put('/api/vollmachten/mail-einstellung', authMiddleware, async (req, res) => {
+  try {
+    const email = String(req.user.email || '').trim().toLowerCase();
+    if (!email) return res.status(400).json({ error: 'Kein Konto mit E-Mail' });
+    const aus = !!(req.body && req.body.aus);
+    await vmMailSchluessel(email);
+    await pool.query('UPDATE vollmachten_mail_einstellung SET aus = $2, updated_at = NOW() WHERE email = $1', [email, aus]);
+    res.json({ aus });
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
+});
+
+// Neuigkeiten fuer die App (V5, V6): klein, ohne Push-Dienst (Mails: lib/vollmacht-mail.js). Die App
 // (Basis HintergrundAbfrage, etwa alle 15 Minuten) vergleicht die IDs mit den
 // bekannten und meldet lokal: „bitte unterschreiben“, „Vollmacht ist aktiv/
 // widerrufen“, Verwaltung „neue aktive Vollmacht“, Ablauf in 30 Tagen und die
@@ -29269,6 +29432,7 @@ app.post('/api/vollmachten/:id/sign-digital', authMiddleware, async (req, res) =
            digital_signed_at=NOW(), updated_at=NOW() WHERE id=$1`,
         [id],
       );
+      vmAktivMails(id);
     }
     const updated = await pool.query('SELECT * FROM vollmachten WHERE id = $1', [id]);
     res.json({
@@ -29307,6 +29471,7 @@ app.post('/api/vollmachten/:id/activate-paper', authMiddleware, async (req, res)
          updated_at=NOW() WHERE id=$1 RETURNING *`,
       [id],
     );
+    vmAktivMails(id);
     res.json(vollmachtRechte.vmOhneNachweis(r.rows[0], groups));
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
@@ -29409,6 +29574,7 @@ app.post('/api/vollmachten/:id/upload-signed', authMiddleware, async (req, res) 
     } else {
       await pool.query(`UPDATE vollmachten SET status = $1, updated_at = NOW() WHERE id = $2`, [newStatus, id]);
     }
+    if (newStatus === 'aktiv') vmAktivMails(id);
     res.json({ ok: true, papier_pdf_path: ganzPapier ? relPath : null, eigene_pdf: relPath, status: newStatus, size_bytes: req.body.length,
                signatures_remaining: Math.max(0, counts.rows[0].total - counts.rows[0].signed) });
   } catch (err) { console.error('[vollmachten] upload:', err); res.status(500).json({ error: fehlerFuerClient(err) }); }
@@ -31028,6 +31194,24 @@ async function initDB() {
       ALTER TABLE vollmachten_vollmachtgeber ADD COLUMN IF NOT EXISTS signed_bestaetigung TEXT;
       CREATE INDEX IF NOT EXISTS idx_vmvg_vollmacht ON vollmachten_vollmachtgeber(vollmacht_id);
       CREATE INDEX IF NOT EXISTS idx_vmvg_email ON vollmachten_vollmachtgeber(LOWER(email));
+      -- Mails zu Vollmachten (lib/vollmacht-mail.js): aktiv_mail_am = die Mails
+      -- „neu aktiv“ sind raus (einmal je Vollmacht), ablauf_gemeldet_fuer = das
+      -- Ablaufdatum, fuer das die Erinnerung ging. Beim ersten Anlegen gelten
+      -- bestehende aktive Vollmachten als gemeldet (sonst ginge eine Flut raus).
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'vollmachten' AND column_name = 'aktiv_mail_am') THEN
+          ALTER TABLE vollmachten ADD COLUMN aktiv_mail_am TIMESTAMPTZ;
+          UPDATE vollmachten SET aktiv_mail_am = NOW() WHERE status <> 'entwurf';
+        END IF;
+      END $$;
+      ALTER TABLE vollmachten ADD COLUMN IF NOT EXISTS ablauf_gemeldet_fuer DATE;
+      -- Abmelden von den Vollmachten-Mails: je Adresse ein geheimer Link-Schluessel
+      CREATE TABLE IF NOT EXISTS vollmachten_mail_einstellung (
+        email TEXT PRIMARY KEY,
+        token TEXT NOT NULL UNIQUE,
+        aus BOOLEAN NOT NULL DEFAULT false,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
 
       -- ───── ISP / Anschluss-Verwaltung ─────
       -- Pro Wohnung ein Anschluss-Datensatz (Status, Switch-Port, Bandbreite,

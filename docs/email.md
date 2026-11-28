@@ -114,6 +114,7 @@ Adresse zu (`553 … not owned by user`).
 | Gateway | Postfach | Wofür (trigger in `email_log`) |
 |---|---|---|
 | `2fa` | `2fa@rosenweg4303.ch` | Karten-Bestätigungslinks und Quittungen, Login-/Reparatur-/Umfrage-Codes, „neues Gerät“/„Neue App-Anmeldung“ |
+| `vollmachten` | `vollmachten@rosenweg4303.ch` | Vollmachten: „Du wurdest bevollmächtigt“, „Neue Vollmacht für deine Wohnung“, „Vollmacht eingegangen“ (Verwaltung), „Vollmacht läuft ab“ (trigger `vollmacht-*`; solange das Postfach fehlt, geht alles über `noreply`) |
 | `noreply` | `noreply@rosenweg4303.ch` | alle übrigen Systemmails, bis sie einen eigenen Gateway-User bekommen |
 | `zev` | `zev@rosenweg9.ch` | Absender `@rosenweg9.ch` (echtes Postfach) |
 
