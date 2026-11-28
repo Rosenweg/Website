@@ -217,6 +217,7 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `GET /api/isp/noc/public/server` (Token) bzw. `/api/isp/noc/server` (Technik/Präsident) | Server im NOC: Proxmox-Knoten (CPU/RAM/Last/Uptime, HA-LRM), Quorum, HA, Ceph-Health mit Gründen, SSD-Abnutzung (100 − `wearout`), Gäste mit Autostart, die nicht laufen; PBS-Belegung, GC/Prüf-/Aufräum-Jobs, fehlgeschlagene Aufgaben (24 h), letzte Sicherung je Gast (> 36 h gelb). Nur lesend über `PVE_AUDIT_TOKEN` (PVEAuditor) und `PBS_AUDIT_TOKEN` (Audit), 30 s Cache (`api/routes/nocserver.js`, `api/lib/nocserver.js`) |
 | `GET /api/meg/einstellplaetze/verfuegbar` | freie Einstellplätze (ohne Personendaten) |
 | `GET /api/tv/playlist.m3u`, `/api/tv/epg.xml` | TV-Senderliste |
+
 | `GET /api/wetter/:station/history`, `GET /api/push/vapid-public-key`, `GET /api/nav/audience-map` | Wetter, Push-Schlüssel, Menü-Zuordnung |
 | `GET /api/stations/drucker/:rechner` | Standarddrucker eines Rechners (`{"rechner","bekannt","standard"}`), **nur aus dem internen Netz** (jede Adresse in `X-Forwarded-For` muss innen liegen, sonst 403), `Cache-Control: no-store`; gesperrte/entfernte Stationen gelten als unbekannt |
 
@@ -345,7 +346,7 @@ Kurzfassung (Details [`energie-api.md`](energie-api.md)):
 | Stationen | `/api/stations/admin/*` (darin `POST admin/windows`: Windows-Rechner von Hand eintragen; `POST admin/ad-abgleich`: Windows-Rechner jetzt aus dem AD lesen; `POST admin/:id/anschluss-uebernehmen`: Anschluss-Wächter — neuen Switch-Port/AP übernehmen und, falls der Wächter gesperrt hat, freigeben; `POST admin/:id/anschluss-vergessen`: nächsten Anschluss ohne Sperre lernen; `DELETE admin/:id/doppelt`: Meldung „doppelte Station“ erledigt) | T/P |
 | Scanner | `GET /api/scanner` (Geräte, wann zuletzt gesetzt, Protokoll), `POST /api/scanner/:id/passwort-drucken` (neues Passwort: Zettel auf DruckerR9, dann im AD; Passwort nie in Antwort, DB oder Log); Seite `scanner.html`, siehe `fileserver-lxc/scans/README.md` | T/P |
 | Sicherungen | `GET /api/sicherungen/pbs` (PBS-Übersicht, nur lesend), `GET /api/sicherungen/pcs`, `PUT /api/sicherungen/pcs/:id` (MAC, Adresse), `POST/DELETE /api/sicherungen/pcs/:id/vormerkung` (CT 135), `POST /api/sicherungen/pcs/:id/start` (`sichern` im Sicherungs-System); Seite `sicherungen.html` | T/P |
-| TV | `/api/tv/channels`, `stream-url`, `extern/token*` | angemeldet |
+| TV | `/api/tv/channels` (je Sender auch `tvg` = EPG-Schlüssel und `udpxy_url` = Direktweg im Haus), `stream-url`, `extern/token*`; für die App Rosenweg TV: `GET /api/tv/jetzt` (Jetzt/Danach aller Sender, Schlüssel `tvg`), `GET /api/tv/epg?kanal=<tvg>&von=&bis=` (Programm eines Senders, ISO-Zeit, Standard ab jetzt 24 h, höchstens 8 Tage; 400 bei falscher Zeit, 404 unbekannter Sender; gleicher Cache wie `epg.xml`, `api/lib/tv-epg.js`) | angemeldet |
 | Push | `/api/push/subscribe`, `unsubscribe`, `test` (5 / 10 Min.) | angemeldet |
 | Alarmpanel | `/api/alarmpanel/sensors`, `events` | lesen angemeldet; Sensoren anlegen, ändern, testen, Webhook ansehen T/P |
 | Doodle | `/api/doodle/*` | Doodle-Sitzung (Code) bzw. Mitglied; Einladungen 50 je Umfrage, 100 / Tag |

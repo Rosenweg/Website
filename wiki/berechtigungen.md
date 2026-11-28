@@ -108,7 +108,7 @@ hat dort keine Rechte, auch wenn er dort wohnt oder Eigentümer ist.
 | KI-Suche (30/Min.) | — | 👁 nur Sichtbares | 👁 | 👁 + Wohnungen 🅢 | 👁 erweitert | 👁 alles | 👁 alles |
 | Dashboard / Übersicht | — | 👁 eigene | 👁 eigene | 👁 + Freigaben 🅢 | 👁 eigene | 👁 alles | 👁 alles |
 | Push-Benachrichtigungen | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| TV-Senderliste/Stream | Playlist/EPG offen; Stream mit Token | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| TV-Senderliste/Stream | Playlist/EPG (XML) offen; EPG als JSON (`/api/tv/jetzt`, `/api/tv/epg`) für jedes Konto; Stream mit Token | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ### 2.2 Reparaturen, Waschküche, Zutritt
 
