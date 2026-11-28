@@ -29,6 +29,9 @@ const RECHTE_MIGRATIONEN = [
   // STWEG-Termine anlegen/aendern/loeschen: alle Ausschuesse und Verwaltungen, die API
   // bindet es an die eigene STWEG (lib/termine.js; Entscheid Stefan 28.11.2026)
   { name: '2026-11-28-stweg-termine-ausschuss-verwaltung-write', page: 'stweg-termine', access: 'write', gruppen: [...AUSSCHUESSE, ...VERWALTUNGEN] },
+  // STWEG-Mitteilungen (Rosenweg STWEG) schreiben: alle Ausschuesse und Verwaltungen, die API
+  // bindet es an die eigene STWEG (lib/stweg-app.js; Entscheid Stefan 28.11.2026, wie die Termine)
+  { name: '2026-11-28-stweg-mitteilungen-ausschuss-verwaltung-write', page: 'stweg-mitteilungen', access: 'write', gruppen: [...AUSSCHUESSE, ...VERWALTUNGEN] },
   // Vollmachten: die Ausschuss-Sicht (alle Vollmachten der eigenen STWEG) haengt
   // jetzt am Seitenrecht „vollmachten“; Vorgabe lesen, damit nichts wegfaellt
   // (Entscheid Stefan 28.11.2026, Fund R2). Abschalten: in der Rechteverwaltung auf none.
@@ -37,6 +40,14 @@ const RECHTE_MIGRATIONEN = [
   // seiner STWEG (lib/handwerker-rechte.js; Entscheid Stefan 28.11.2026).
   // Schreiben bleibt der Verwaltung der STWEG und Technik/Praesident vorbehalten.
   { name: '2026-11-28-handwerker-ausschuss-read', page: 'handwerker', access: 'read', gruppen: AUSSCHUESSE },
+  // Konto-Loeschungen: Ausschuss und Verwaltung stoppen und verlaengern fuer die eigene
+  // STWEG (Sicht in server.js); „Eintrag entfernen“ bleibt Technik, „Sofort loeschen“
+  // Technik/Praesident (lib/kontoloeschung.js; Entscheid Stefan 28.11.2026, E3b).
+  { name: '2026-11-28-loeschungen-ausschuss-verwaltung-write', page: 'loeschungen', access: 'write', gruppen: [...AUSSCHUESSE, ...VERWALTUNGEN].filter(g => /^stweg\d+-/.test(g)) },
+  // E-Mail-Archiv: die API prueft jetzt das Seitenrecht „email-archiv“; die
+  // Verwaltung liest die Mails ihrer STWEG(s) plus „haus“ (Entscheid Stefan
+  // 28.11.2026, Klaerung Mail-Archiv E2/F2). Der Ausschuss hat den Seed „read“.
+  { name: '2026-11-28-email-archiv-verwaltung-read', page: 'email-archiv', access: 'read', gruppen: [...VERWALTUNGEN, 'Verwaltung'] },
 ];
 
 const SQL_TABELLE = `

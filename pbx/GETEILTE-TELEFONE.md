@@ -151,6 +151,7 @@ Technik sie auf /smartphones gesetzt hat. Erster Eintrag also: Zeile auf /smartp
 | Rosenweg Mein Telefon | `ch.rosenweg4303.meintelefon` | leer = alle, die sich anmelden dürfen | aktiv (1.0.1) |
 | Rosenweg Reparatur | `ch.rosenweg4303.reparatur` | leer = alle, die sich anmelden dürfen | aktiv (1.0.0) |
 | Rosenweg Zutritt | `ch.rosenweg4303.zutritt` | `technik,präsident,praesident` | aktiv (1.0.0) |
+| Rosenweg Projekte | `ch.rosenweg4303.projekte` | `technik,präsident,praesident` + je STWEG `stwegN-eigentuemer`, `stwegN-ausschuss`, `stwegN-verwaltung` (Mieter sehen keine Projekte) | noch keine Zeile; nach dem ersten Release auf /smartphones anlegen |
 | Rosenweg Waschküche | `ch.rosenweg4303.waschkueche` | `technik,präsident,praesident,r9-bewohner,r9-eigentuemer,stweg3-ausschuss` | aktiv (1.0.0) |
 | Rosenweg Wetter | `ch.rosenweg4303.wetter` | alle Bewohner (die Werte sind öffentlich) | noch keine Zeile; nach dem ersten Release auf /smartphones anlegen |
 | Rosenweg Handwerker | `ch.rosenweg4303.handwerker` | alle Bewohner (nur die Notfall-Ansicht, siehe unten) | noch keine Zeile; nach dem ersten Release auf /smartphones anlegen |
@@ -174,6 +175,11 @@ Technik sie auf /smartphones gesetzt hat. Erster Eintrag also: Zeile auf /smartp
   Notfallnummer der Zuordnung, für die STWEG der Person. Die App legt die Nummern offline ab (mit „Stand vom“)
   und löscht sie beim Personenwechsel/Abmelden. Verwaltung und Ausschuss melden sich an geteilten Telefonen
   nicht an; sähen sie dort mehr, geht es trotzdem nur über diese eine Route.
+- **Projekte:** Auf geteilten Telefonen lesen und kommentieren, nach der Kartenanmeldung (Entscheid P11,
+  28.11.2026): kein Hochladen, Anlegen, Bearbeiten oder Löschen. `portal_pfade` `/api/projects` (nur GET),
+  `/api/projects/` (alles darunter; die Haupt-API lehnt jede Änderung am Projekt bei einem Anlage-Token ab,
+  nur Kommentare der Person gehen) und lesend `/api/documents/` für die Vorschau. Welche Projekte die Person
+  sieht, prüft die Haupt-API je Projekt (eigene STWEG und Kooperation).
 - **Zutritt:** Seit dem ersten Release (1.0.0) aktiv; die APK kam von selbst in die vorbereitete Zeile.
 
 ## Wartung per USB

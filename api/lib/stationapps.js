@@ -73,6 +73,9 @@ const FESTE_SEITEN = [
   { id: 'rosenweg-isp-mein-zugang', name: 'Mein Zugang', url: 'https://isp.rosenweg4303.ch/isp-mein-zugang.html', gruppe: 'Bewohner' },
   { id: 'rosenweg-pwa-reparatur', name: 'Schaden melden', url: 'https://pwa.rosenweg4303.ch/reparatur/', gruppe: 'Bewohner' },
   { id: 'rosenweg-pwa-doodle', name: 'Terminumfragen', url: 'https://pwa.rosenweg4303.ch/doodle/', gruppe: 'Bewohner' },
+  // Projekte (App Rosenweg Projekte, SEITE=rosenweg-projekte): nur mit dem
+  // Seitenrecht „projekte“ wie im Menue (nav.js, perm: 'projekte'); Mieter nicht.
+  { id: 'rosenweg-projekte', name: 'Projekte', url: `${SITE_URL}/projekte.html`, gruppe: 'Bewohner', rechte: 'projekte', rechte_art: 'seite' },
 ];
 
 // Seiten, die es nur im eigenen Haus gibt. Die Station kennt ihr Haus
@@ -92,7 +95,15 @@ function hausSeiten(stweg) {
   if (ZEV_STWEG.includes(stweg)) {
     raus.push({ id: 'rosenweg-haus-zev-rechnungen', name: 'ZEV-Rechnungen', url: `${basis}/pages/zev-meine-rechnungen.html` });
   }
-  return raus.map((a) => ({ ...a, beschreibung: 'Mein Haus', gruppe: 'Mein Haus', icon: gruppenSymbol('Mein Haus'), rechte: null, rechte_art: null }));
+  // Dokumente der STWEG (App Rosenweg Unterlagen, SEITE=rosenweg-dokumente):
+  // STWEG-/Eigentuemer-Inhalte, auf der Station nur nach Anmeldung und nur fuer
+  // Leute dieser STWEG (Mieter sehen dort den Ordner „bewohner“), wie die Web-Seite.
+  raus.push({
+    id: 'rosenweg-dokumente', name: 'Dokumente', url: `${basis}/#dokumente`,
+    rechte: [`stweg${stweg}-bewohner`, `stweg${stweg}-eigentuemer`, `stweg${stweg}-ausschuss`, `stweg${stweg}-verwaltung`, 'technik', 'praesident'].join(','),
+    rechte_art: 'gruppen',
+  });
+  return raus.map((a) => ({ ...a, beschreibung: 'Mein Haus', gruppe: 'Mein Haus', icon: gruppenSymbol('Mein Haus'), rechte: a.rechte || null, rechte_art: a.rechte_art || null }));
 }
 
 // Im Image liegt nav.js neben server.js; im Repo eine Ebene höher in js/.
@@ -186,7 +197,7 @@ function stationApps() {
   }];
   for (const f of FESTE_SEITEN) {
     if (!eigeneAdresse(f.url)) continue;
-    apps.push({ ...f, beschreibung: f.gruppe, icon: gruppenSymbol(f.gruppe), rechte: null, rechte_art: null });
+    apps.push({ ...f, beschreibung: f.gruppe, icon: gruppenSymbol(f.gruppe), rechte: f.rechte || null, rechte_art: f.rechte_art || null });
   }
 
   for (const gruppe of gruppen || []) {

@@ -20,14 +20,30 @@
     <div id="content" class="hidden">
       <h1 class="text-2xl font-bold text-gray-900 mb-1">🗑 Geplante Konto-Loeschungen</h1>
       <p class="text-sm text-gray-600 mb-6">
-        Authentik-Accounts werden 30 Tage nach Entfernen aus den Wohnungs-Kontakten geloescht.
+        Authentik-Accounts werden 30 Tage nach Entfernen aus den Wohnungs-Kontakten geloescht (Erinnerung 7 Tage vorher).
         Hier kannst du Loeschungen vorzeitig stoppen (cancellen) oder den Timer zurücksetzen.
       </p>
 
+      <!-- Nachlauf mit Fehlversuchen (Anlage, Mailbox, Karten) -->
+      <div id="nachlauf-box" class="hidden mb-6 bg-white rounded-lg shadow overflow-hidden border border-red-200">
+        <div class="px-4 py-3 border-b bg-red-50">
+          <h2 class="text-lg font-semibold text-red-900">Nach der Löschung noch offen</h2>
+          <p class="text-xs text-red-800">Diese Schritte nach einer Konto-Löschung sind <span id="nachlauf-ab">mehrmals</span> gescheitert. Sie werden weiter automatisch wiederholt; bitte prüfen.</p>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm">
+            <thead class="text-xs text-gray-500 uppercase border-b">
+              <tr><th class="px-3 py-2 text-left">Konto</th><th class="px-3 py-2 text-left">Bereich</th><th class="px-3 py-2 text-left">Offen</th><th class="px-3 py-2 text-left">Versuche</th><th class="px-3 py-2 text-left">Fehler</th><th class="px-3 py-2 text-left">Nächster Versuch</th><th class="px-3 py-2 text-right">Aktion</th></tr>
+            </thead>
+            <tbody id="nachlauf" class="divide-y divide-gray-100"></tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="bg-white rounded-lg shadow overflow-hidden">
         <div class="px-4 py-3 border-b flex justify-between items-center">
-          <h2 class="text-lg font-semibold">Liste</h2>
-          <button onclick="load()" class="text-xs text-blue-600 hover:underline">Neu laden</button>
+          <h2 class="text-lg font-semibold">Geplant</h2>
+          <button onclick="load(); loadNachlauf()" class="text-xs text-blue-600 hover:underline">Neu laden</button>
         </div>
         <div class="overflow-x-auto">
           <table class="min-w-full text-sm">
@@ -43,6 +59,30 @@
               </tr>
             </thead>
             <tbody id="tbody" class="divide-y divide-gray-100"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Konten mit weiteren Gruppen: nie automatisch gelöscht -->
+      <div class="mt-6 bg-white rounded-lg shadow overflow-hidden">
+        <div class="px-4 py-3 border-b">
+          <h2 class="text-lg font-semibold">Manuell zu prüfen</h2>
+          <p class="text-xs text-gray-500">Konten mit weiteren Gruppen (z. B. Ausschuss, Verwaltung). Sie werden nie automatisch gelöscht.</p>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm">
+            <thead class="text-xs text-gray-500 uppercase border-b">
+              <tr>
+                <th class="px-3 py-2 text-left">Name</th>
+                <th class="px-3 py-2 text-left">E-Mail</th>
+                <th class="px-3 py-2 text-left">STWEG</th>
+                <th class="px-3 py-2 text-left">Vorgemerkt</th>
+                <th class="px-3 py-2 text-left">Status</th>
+                <th class="px-3 py-2 text-left">In Kontakten?</th>
+                <th class="px-3 py-2 text-right">Aktion</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-manuell" class="divide-y divide-gray-100"></tbody>
           </table>
         </div>
       </div>
@@ -68,7 +108,9 @@
         <ul class="list-disc list-inside mt-2 space-y-1 text-xs">
           <li><strong>Cancellen:</strong> Loeschung wird gestoppt. Eintrag bleibt in der Liste (cancelled=true), Authentik-Account bleibt aktiv.</li>
           <li><strong>Timer +30 Tage:</strong> Reaktiviert die Loeschung, schiebt das Datum 30 Tage in die Zukunft. Reminder wird neu gesendet.</li>
-          <li><strong>Entfernen:</strong> Loescht den Eintrag aus der Liste komplett — kein automatischer Job mehr für diesen User.</li>
+          <li><strong>Entfernen</strong> (nur Technik): Loescht den Eintrag aus der Liste komplett — kein automatischer Job mehr für diesen User.</li>
+          <li><strong>Sofort löschen</strong> (nur Technik und Präsident): löscht das Konto jetzt, z. B. auf Wunsch der Person. Verlangt eine frische Anmeldung mit dem Konto, nicht mit der Karte.</li>
+          <li><strong>Nach der Löschung</strong> entfernt der Löschlauf auch die Daten auf der Telefonanlage, das Nextcloud-Konto, die zugeordnete Mailbox und die Karten. Was scheitert, wird automatisch wiederholt und erscheint oben, wenn es mehrmals nicht klappt.</li>
           <li>Jede dieser Aktionen steht im <strong>Verlauf</strong> (mit Name und Zeit). Ohne Schreibrecht „Konto-Löschungen“ ist die Liste nur zum Ansehen.</li>
         </ul>
       </div>
@@ -87,11 +129,57 @@
     // Befund W16: Aktionen nur mit Schreibrecht, Mail-Chain nur Technik/Präsident (wie die API)
     DARF_SCHREIBEN = AuthentikAuth.hasPermission('loeschungen', 'write');
     TECHNIK = (u.groups || []).some(g => ['technik', 'präsident', 'praesident'].includes(String(g).toLowerCase()));
+    // „Eintrag entfernen“ nur Technik, „Sofort löschen“ Technik und Präsident (wie die API)
+    NUR_TECHNIK = (u.groups || []).some(g => String(g).toLowerCase() === 'technik');
     await load();
+    await loadNachlauf();
     await loadVerlauf();
   });
-  let DARF_SCHREIBEN = false, TECHNIK = false;
-  const AKTION_TEXT = { 'gestoppt': '✕ Löschung gestoppt', 'timer-30-tage': '⏱ Timer +30 Tage', 'entfernt': '🗑 Eintrag entfernt' };
+  let DARF_SCHREIBEN = false, TECHNIK = false, NUR_TECHNIK = false;
+  const AKTION_TEXT = {
+    'gestoppt': '✕ Löschung gestoppt', 'timer-30-tage': '⏱ Timer +30 Tage', 'entfernt': '🗑 Eintrag entfernt',
+    'sofort-geloescht': '⚡ Sofort gelöscht', 'nachlauf-anlage': '☎ Telefonanlage', 'nachlauf-mailbox': '✉ Mailbox',
+    'nachlauf-karten': '🪪 Karten', 'aufraeumen': '🧹 Aufräumen',
+  };
+  const BEREICH_TEXT = { anlage: 'Telefonanlage', mailbox: 'Mailbox', karten: 'Karten' };
+
+  async function loadNachlauf() {
+    const box = document.getElementById('nachlauf-box');
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/admin/pending-deletions/nachlauf');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json();
+      const liste = d.eintraege || [];
+      document.getElementById('nachlauf-ab').textContent = `mindestens ${d.sichtbar_ab}-mal`;
+      box.classList.toggle('hidden', !liste.length);
+      const tb = document.getElementById('nachlauf');
+      tb.innerHTML = liste.map(n => `<tr>
+          <td class="px-3 py-2"><div class="font-medium">${esc(n.name || '?')}</div><div class="font-mono text-xs">${esc(n.email)}</div></td>
+          <td class="px-3 py-2">${esc(BEREICH_TEXT[n.bereich] || n.bereich)}</td>
+          <td class="px-3 py-2 text-xs">${esc((n.offen || []).join(', ') || '—')}</td>
+          <td class="px-3 py-2">${esc(n.versuche)}</td>
+          <td class="px-3 py-2 text-xs text-red-700">${esc(n.letzter_fehler || '')}</td>
+          <td class="px-3 py-2 text-xs whitespace-nowrap">${fmtDt(n.naechster_versuch)}</td>
+          <td class="px-3 py-2 text-right">${DARF_SCHREIBEN ? `<button data-nachlauf="${esc(n.id)}" class="text-xs border rounded px-2 py-1 bg-white hover:bg-gray-50">↻ Jetzt versuchen</button>` : ''}</td>
+        </tr>`).join('');
+      tb.querySelectorAll('button[data-nachlauf]').forEach(b => b.addEventListener('click', () => nachlaufJetzt(Number(b.dataset.nachlauf), b)));
+    } catch (e) {
+      box.classList.add('hidden');
+    }
+  }
+
+  async function nachlaufJetzt(id, btn) {
+    btn.disabled = true;
+    btn.textContent = '…';
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/admin/pending-deletions/nachlauf/${id}/jetzt`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+      if (!d.ok) alert('Noch nicht erledigt. Offen: ' + ((d.offen || []).join(', ') || '?'));
+    } catch (e) { alert('Fehler: ' + e.message); }
+    await loadNachlauf();
+    await loadVerlauf();
+  }
 
   async function loadVerlauf() {
     const tb = document.getElementById('verlauf');
@@ -116,13 +204,24 @@
       const r = await AuthentikAuth.apiFetch('/api/admin/pending-deletions');
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const { deletions } = await r.json();
-      const tbody = document.getElementById('tbody');
+      const geplant = deletions.filter(d => !d.manuell_pruefen);
+      const manuell = deletions.filter(d => d.manuell_pruefen);
+      zeilen(document.getElementById('tbody'), geplant, 'Keine geplanten Loeschungen.');
+      zeilen(document.getElementById('tbody-manuell'), manuell, 'Keine Konten zu prüfen.');
+    } catch (e) {
+      document.getElementById('tbody').innerHTML = `<tr><td colspan="7" class="text-red-600 py-3">Fehler: ${esc(e.message)}</td></tr>`;
+    }
+  }
+
+  function zeilen(tbody, deletions, leer) {
       if (deletions.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-8 text-gray-400 italic">Keine geplanten Loeschungen.</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-gray-400 italic">${esc(leer)}</td></tr>`;
         return;
       }
       tbody.innerHTML = deletions.map(d => {
-        const status = d.cancelled
+        const status = d.manuell_pruefen && !d.cancelled
+          ? `<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded" title="${esc(d.grund || '')}">manuell prüfen</span>`
+          : d.cancelled
           ? '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded">cancelled</span>'
           : d.reminder_sent
           ? '<span class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded">Reminder raus</span>'
@@ -136,7 +235,7 @@
           <td class="px-3 py-2 font-medium">${esc(d.name || '?')}</td>
           <td class="px-3 py-2 font-mono text-xs">${esc(d.email)}</td>
           <td class="px-3 py-2">${d.stweg ? 'STWEG ' + esc(d.stweg) : '—'}</td>
-          <td class="px-3 py-2 text-xs"><div>${fmtDt(d.scheduled_at)}</div><div class="${daysCls}">in ${esc(days)} Tagen</div></td>
+          <td class="px-3 py-2 text-xs">${d.manuell_pruefen ? fmtDt(d.created_at) : `<div>${fmtDt(d.scheduled_at)}</div><div class="${daysCls}">in ${esc(days)} Tagen</div>`}</td>
           <td class="px-3 py-2">${status}</td>
           <td class="px-3 py-2">${stillIn}</td>
           <td class="px-3 py-2 text-right whitespace-nowrap">
@@ -144,8 +243,9 @@
               <option value="">⋯ Aktion</option>
               ${TECHNIK ? '<option value="chain">📨 Mail-Chain anzeigen</option>' : ''}
               ${DARF_SCHREIBEN && !d.cancelled ? '<option value="cancel">✕ Loeschung cancellen</option>' : ''}
-              ${DARF_SCHREIBEN && d.cancelled ? '<option value="reactivate">⏱ Timer +30 Tage</option>' : ''}
-              ${DARF_SCHREIBEN ? '<option value="remove">🗑 Eintrag entfernen</option>' : ''}
+              ${DARF_SCHREIBEN && d.cancelled && !d.manuell_pruefen ? '<option value="reactivate">⏱ Timer +30 Tage</option>' : ''}
+              ${DARF_SCHREIBEN && TECHNIK ? '<option value="sofort">⚡ Sofort löschen</option>' : ''}
+              ${DARF_SCHREIBEN && NUR_TECHNIK ? '<option value="remove">🗑 Eintrag entfernen</option>' : ''}
             </select>` : '<span class="text-xs text-gray-400">nur ansehen</span>'}
           </td>
         </tr>`;
@@ -153,9 +253,6 @@
       // E-Mail nicht in Inline-Handler-String (esc schuetzt dort nicht vor ' im JS): data-Attribute + Listener
       tbody.querySelectorAll('select[data-id]').forEach(sel =>
         sel.addEventListener('change', () => handleAction(sel, Number(sel.dataset.id), sel.dataset.email)));
-    } catch (e) {
-      document.getElementById('tbody').innerHTML = `<tr><td colspan="7" class="text-red-600 py-3">Fehler: ${esc(e.message)}</td></tr>`;
-    }
   }
 
   function handleAction(sel, id, email) {
@@ -165,6 +262,25 @@
     if (action === 'cancel') return cancelDel(id);
     if (action === 'reactivate') return reactivate(id);
     if (action === 'remove') return removeDel(id, email);
+    if (action === 'sofort') return sofortDel(id, email);
+  }
+
+  async function sofortDel(id, email) {
+    if (!confirm(`Konto ${email} JETZT endgültig löschen?\nDas lässt sich nicht rückgängig machen. Danach werden auch Telefonanlage, Nextcloud-Konto, Mailbox und Karten bereinigt.`)) return;
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/admin/pending-deletions/${id}/sofort`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (r.status === 403 && d.reauth) {
+        if (confirm((d.error || 'Bitte neu anmelden.') + '\n\nJetzt neu anmelden? Danach „Sofort löschen“ nochmals wählen.')) {
+          AuthentikAuth.login('/loeschungen.html', { reauth: true });
+        }
+        return;
+      }
+      if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+      await load();
+      await loadNachlauf();
+      await loadVerlauf();
+    } catch (e) { alert('Fehler: ' + e.message); }
   }
 
   async function cancelDel(id) {

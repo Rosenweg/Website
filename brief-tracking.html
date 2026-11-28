@@ -26,11 +26,16 @@
         <div id="content" class="hidden">
             <div class="mb-6">
                 <h1 class="text-2xl font-bold text-gray-900">Brief-Tracking</h1>
-                <p class="text-sm text-gray-600 mt-1">Versendete A-Post-Plus-Briefe mit Swiss-Post-Tracking. Foto vom Couvert hochladen — KI liest Empfänger und Tracking-Nummer automatisch und benennt die Datei korrekt um.</p>
+                <p class="text-sm text-gray-600 mt-1">Versendete A-Post-Plus-Briefe mit Swiss-Post-Tracking. Foto vom Couvert hochladen — eine externe KI liest Empfänger und Tracking-Nummer und benennt die Datei. Sie sehen die Briefe Ihrer STWEG.</p>
             </div>
 
             <!-- Upload -->
             <div class="bg-white rounded-lg shadow p-4 mb-6">
+                <label class="block mb-3">
+                    <span class="text-sm font-medium text-gray-700">STWEG des Briefs</span>
+                    <select id="stweg-select" class="mt-1 block border rounded px-2 py-1.5 text-sm"></select>
+                </label>
+                <p id="hinweis-extern" class="text-xs text-amber-800 bg-amber-50 border-l-4 border-amber-400 p-2 rounded mb-3"></p>
                 <label class="block">
                     <span class="text-sm font-medium text-gray-700">Brief-Foto(s) hochladen</span>
                     <input type="file" id="upload-input" accept="image/jpeg,image/png" multiple
@@ -59,7 +64,9 @@
                                 <th class="px-4 py-2 text-left">Tracking</th>
                                 <th class="px-4 py-2 text-left">Datum</th>
                                 <th class="px-4 py-2 text-left">Foto</th>
+                                <th class="px-4 py-2 text-left">STWEG</th>
                                 <th class="px-4 py-2 text-left">Status</th>
+                                <th class="px-4 py-2 text-left">Löschen</th>
                             </tr>
                         </thead>
                         <tbody id="tbody" class="divide-y divide-gray-100"></tbody>
@@ -107,43 +114,111 @@
         await loadBriefe();
     });
 
+    let hinweisExtern = '';
+    let istAdmin = false;
+    const STWEG_NAME = n => Number(n) === 8 ? 'MEG' : 'STWEG ' + n;
+
+    function stwegZelle(b) {
+        if (b.stweg) return esc(STWEG_NAME(b.stweg));
+        if (!istAdmin) return '–';
+        const opts = (window._erfassStwegs || []).map(n => `<option value="${n}">${esc(STWEG_NAME(n))}</option>`).join('');
+        return `<select data-zuordnen="${esc(b.filename)}" class="border rounded px-1 py-0.5 text-xs"><option value="">ohne – zuordnen…</option>${opts}</select>`;
+    }
+
+    function loeschZelle(b) {
+        const a = b.loeschantrag;
+        if (!a) return `<button data-antrag="${esc(b.filename)}" class="text-xs text-red-600 hover:underline">Löschen beantragen</button>`;
+        const info = `<div class="text-xs text-gray-600">Antrag: ${esc(a.grund)}</div>`;
+        if (a.eigener_antrag) return info + '<div class="text-xs text-gray-400 italic">Eigener Antrag, wartet auf zweite Person</div>';
+        if (!a.darf_entscheiden) return info;
+        return info + `<button data-entscheid="${esc(b.filename)}" data-aktion="confirm" class="text-xs bg-red-600 text-white rounded px-2 py-0.5 mr-1">Bestätigen</button>`
+            + `<button data-entscheid="${esc(b.filename)}" data-aktion="reject" class="text-xs border rounded px-2 py-0.5">Ablehnen</button>`;
+    }
+
+    async function loeschAntrag(datei) {
+        const grund = (prompt('Warum soll dieser Brief gelöscht werden? Eine zweite Person muss bestätigen.') || '').trim();
+        if (!grund) return;
+        const r = await AuthentikAuth.apiFetch(`/api/briefe/${encodeURIComponent(datei)}/loeschantrag`, {
+            method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ grund }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) alert('Fehler: ' + (d.error || r.status));
+        await loadBriefe();
+    }
+
+    async function loeschEntscheid(datei, aktion) {
+        if (!confirm(aktion === 'confirm' ? 'Brief endgültig löschen?' : 'Löschantrag ablehnen?')) return;
+        const r = await AuthentikAuth.apiFetch(`/api/briefe/${encodeURIComponent(datei)}/loeschentscheid`, {
+            method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ aktion }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) alert('Fehler: ' + (d.error || r.status));
+        await loadBriefe();
+    }
+
+    async function stwegZuordnen(datei, stweg) {
+        if (!stweg) return;
+        const r = await AuthentikAuth.apiFetch(`/api/briefe/${encodeURIComponent(datei)}/stweg`, {
+            method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ stweg: Number(stweg) }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) alert('Fehler: ' + (d.error || r.status));
+        await loadBriefe();
+    }
+
     async function loadBriefe() {
         const tbody = document.getElementById('tbody');
-        tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">Lade…</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-6 text-center text-gray-400">Lade…</td></tr>';
         try {
             const r = await AuthentikAuth.apiFetch('/api/briefe');
             if (!r.ok) throw new Error('HTTP ' + r.status);
             const data = await r.json();
             const briefe = data.briefe || [];
+            hinweisExtern = data.hinweis_extern || '';
+            document.getElementById('hinweis-extern').textContent = hinweisExtern
+                ? hinweisExtern + (data.ocr_tageslimit ? ` Höchstens ${data.ocr_tageslimit} Erkennungen je Person und Tag.` : '') : '';
+            window._erfassStwegs = data.erfass_stwegs || [];
+            const sel = document.getElementById('stweg-select');
+            const vorher = sel.value;
+            sel.innerHTML = (data.erfass_stwegs || []).length > 1 ? '<option value="">– bitte wählen –</option>' : '';
+            sel.innerHTML += (data.erfass_stwegs || []).map(n => `<option value="${n}">${esc(STWEG_NAME(n))}</option>`).join('');
+            if (vorher) sel.value = vorher;
+            istAdmin = data.darf_zuordnen === true;
             document.getElementById('count').textContent = `${briefe.length} Briefe`;
             if (briefe.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">Noch keine Briefe erfasst.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-6 text-center text-gray-400">Noch keine Briefe erfasst.</td></tr>';
                 return;
             }
             tbody.innerHTML = briefe.map((b, idx) => {
                 const date = b.mtime ? new Date(b.mtime).toLocaleDateString('de-CH') : '–';
-                const photoUrl = `/api/documents/${data.dir}/${encodeURIComponent(b.filename)}`;
+                const photoUrl = `/api/briefe/${encodeURIComponent(b.filename)}/bild`;
                 const trackUrl = `https://service.post.ch/ekp-web/ui/entry/search/${encodeURIComponent(b.trackingDotted || '')}`;
                 return `<tr class="hover:bg-gray-50">
                     <td class="px-4 py-2 font-medium text-gray-900">${esc(b.name)}</td>
                     <td class="px-4 py-2 font-mono text-xs text-gray-700">${esc(b.trackingDotted)}</td>
                     <td class="px-4 py-2 text-gray-600">${esc(date)}</td>
                     <td class="px-4 py-2"><a href="#" data-foto="${esc(photoUrl)}" data-name="${esc(b.filename)}" class="text-blue-600 hover:underline">Anzeigen</a></td>
+                    <td class="px-4 py-2 text-gray-600">${stwegZelle(b)}</td>
                     <td class="px-4 py-2"><a href="${esc(trackUrl)}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 px-2 py-1 bg-yellow-400 hover:bg-yellow-500 text-yellow-900 rounded text-xs font-semibold">Swiss-Post-Status &nbsp;↗</a></td>
+                    <td class="px-4 py-2">${loeschZelle(b)}</td>
                 </tr>`;
             }).join('');
             tbody.querySelectorAll('a[data-foto]').forEach(a => a.addEventListener('click', ev => {
                 ev.preventDefault();
                 dateiOeffnen(a.dataset.foto, a.dataset.name);
             }));
+            tbody.querySelectorAll('button[data-antrag]').forEach(x => x.addEventListener('click', () => loeschAntrag(x.dataset.antrag)));
+            tbody.querySelectorAll('button[data-entscheid]').forEach(x => x.addEventListener('click', () => loeschEntscheid(x.dataset.entscheid, x.dataset.aktion)));
+            tbody.querySelectorAll('select[data-zuordnen]').forEach(x => x.addEventListener('change', () => stwegZuordnen(x.dataset.zuordnen, x.value)));
         } catch (e) {
-            tbody.innerHTML = `<tr><td colspan="5" class="px-4 py-6 text-center text-red-600">Fehler beim Laden: ${esc(e.message)}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7" class="px-4 py-6 text-center text-red-600">Fehler beim Laden: ${esc(e.message)}</td></tr>`;
         }
     }
 
     document.getElementById('upload-input').addEventListener('change', async e => {
         const files = Array.from(e.target.files || []);
         if (!files.length) return;
+        const stweg = document.getElementById('stweg-select').value;
+        if (!stweg) { alert('Bitte zuerst die STWEG des Briefs wählen.'); e.target.value = ''; return; }
+        // Klarer Hinweis vor dem Versand an den externen Dienst (wie bei den Vollmachten)
+        if (!confirm('Texterkennung starten?\n\n' + (hinweisExtern || 'Das Foto geht an einen externen Dienst (OpenRouter/Anthropic).') + '\n\nNur fortfahren, wenn das nötig ist.')) { e.target.value = ''; return; }
         const status = document.getElementById('upload-status');
         for (const f of files) {
             const row = document.createElement('div');
@@ -163,7 +238,7 @@
                 msg.textContent = '– sende an KI-Erkennung…';
                 const r = await AuthentikAuth.apiFetch('/api/briefe/upload', {
                     method: 'POST', headers: {'Content-Type':'application/json'},
-                    body: JSON.stringify({ bild_base64: b64, bild_filename: f.name }),
+                    body: JSON.stringify({ bild_base64: b64, bild_filename: f.name, stweg: Number(stweg), bestaetigt_extern: true }),
                 });
                 const data = await r.json().catch(() => ({}));
                 if (!r.ok) {

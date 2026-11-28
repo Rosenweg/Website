@@ -71,7 +71,7 @@ const BEREICHE = [
   ['mail-approval-config', 'Mail-Freigabe-Regeln'], ['verwaltung-mail-queue', 'Verwaltungs-Mails'],
   ['mail-templates', 'Mail-Vorlagen'], ['verteiler', 'Verteiler'], ['email', 'E-Mail-Versand'],
   ['kontakte', 'Kontakte'], ['verwaltungen', 'Hausverwaltungen'], ['stweg-modules', 'STWEG-Module'],
-  ['stweg-sections', 'STWEG-Seiten'], ['salz', 'Salz'], ['stweg', 'STWEG-Termine'], ['alarmpanel', 'Alarmanlage'],
+  ['salz', 'Salz'], ['stweg', 'STWEG-Termine und -Mitteilungen'], ['alarmpanel', 'Alarmanlage'],
   ['energie-admin', 'Energie-Erfassung'], ['internal', 'Abgleich'], ['wohnungen', 'Wohnungen'],
 ];
 const VERBEN = {

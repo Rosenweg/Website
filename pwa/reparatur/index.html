@@ -334,8 +334,17 @@
   let ortPrefill = null; // { name, stweg, kategorie }
 
   async function loadOrtPrefill() {
-    let code = null;
-    try { code = new URLSearchParams(location.search).get('ort'); } catch {}
+    let code = null, kat = null, text = null;
+    try {
+      const q = new URLSearchParams(location.search);
+      code = q.get('ort'); kat = q.get('kategorie'); text = q.get('text');
+    } catch {}
+    // Aus der App Rosenweg Internet: ?kategorie=netzwerk&text=… belegt Kategorie und Beschreibung vor.
+    if (!code && kat && /^[a-z]{2,20}$/.test(kat)) ortPrefill = { kategorie: kat };
+    if (text) {
+      const t = String(text).slice(0, 1000);
+      for (const id of ['beschreibung', 'pubBeschreibung']) { const el = $(id); if (el && !el.value) el.value = t; }
+    }
     if (!code) return;
     try {
       const r = await fetch('/api/melde-ort/' + encodeURIComponent(code));
