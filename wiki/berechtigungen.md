@@ -173,7 +173,8 @@ hat dort keine Rechte, auch wenn er dort wohnt oder Eigentümer ist.
 | Grundbuch: STWEG einer Parzelle zuordnen (protokolliert; Vorschlag aus Wertquoten, Anzahl und Adressen, nur nach Bestätigung übernommen) | — | — | — | — | — | ✅ | ✅ |
 | MEG-Einstellplätze | freie Plätze | 👁 nur MEG-Mitglieder, ohne Fremddaten | 👁 nur MEG-Mitglieder, ohne Fremddaten | ✅ nur MEG-Ausschuss | ✅ nur MEG-Verwaltung | ✅ | ✅ |
 | Projekte lesen (inkl. Kandidaten, Kontakte, Notizen, Kommentare) | öffentliche Projekte (eingeschränkt, siehe unten) | — (auch keine Titel, keine Projekt-Umfragen) | 👁 🅢 + Kooperation | 👁 🅢 + Kooperation (auch ohne Eigentümergruppe) | (R `projekte` lesen) 👁 🅢 + Kooperation | 👁 alle | 👁 alle |
-| Projekte kommentieren (nur Name sichtbar, keine E-Mail) | — | — | ✅ 🅢 + Kooperation | als Eigentümer | — | ✅ | ✅ |
+| Projekte kommentieren (nur Name sichtbar, keine E-Mail; eigene Kommentare 15 Minuten ändern/löschen) | — | — | ✅ 🅢 + Kooperation | ✅ 🅢 + Kooperation | ✅ 🅢 + Kooperation (P10, 28.11.2026) | ✅ | ✅ |
+| Projekt ganz löschen (mit Protokoll; sonst „archiviert“) | — | — | — | — | — | ✅ | ✅ |
 | Auslagen eines Projekts: E-Mail der einreichenden Person | — | — | — (nur Name) | — (nur Name) | 👁 🅢 | 👁 | 👁 |
 | Projekte bearbeiten (Kandidaten, Zeitplan, Anhänge, Budget, öffentlich) | — | — | — | ✅ 🅢 + Kooperation | (R `projekte` schreiben) 🅢 | ✅ | ✅ |
 | Projekt öffentlich schalten (mit Bestätigung), Anhang einzeln öffentlich markieren | — | — | — | ✅ 🅢 + Kooperation | (R `projekte` schreiben) 🅢 | ✅ | ✅ |

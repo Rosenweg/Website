@@ -1190,6 +1190,10 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
   if (energie.stweg_sicht.length && !permissions['energie-stweg']) permissions['energie-stweg'] = 'read';
   if (energie.technik && !permissions['zaehler-technik']) permissions['zaehler-technik'] = 'read';
 
+  // Abgeleitet (Rosenweg Projekte, Farbe): projekte-bearbeiten = write, wer irgendein
+  // Projekt anlegen oder bearbeiten darf (Ausschuss, Verwaltung mit projekte = schreiben, T/P)
+  if (projekteRechte.projekteBearbeitenRecht(groups, permissions['projekte'])) permissions['projekte-bearbeiten'] = 'write';
+
   // WhatsApp-Opt-In aus personen-Tabelle (via email lookup)
   let whatsappOptIn = false;
   try {
@@ -11686,6 +11690,8 @@ async function stwegTermineLaden(stweg) {
     title: e.title, description: e.description, start: e.start_date, end: e.end_date,
     location: e.location, category: e.category, all_day: e.all_day,
     id: e.id, source: 'stweg',
+    // Termin aus der Zeitachse eines Projekts (P7): Rosenweg Termine springt zurueck
+    ...(e.projekt_slug ? { projekt_slug: e.projekt_slug } : {}),
   }));
   // Wartungen als virtuelle Events einmischen (aktive Verträge mit naechster_termin
   // dieser STWEG oder ohne STWEG-Zuordnung, ab heute - 7 Tage bis +365)
@@ -13464,14 +13470,6 @@ app.post('/api/proxmox/ensure-user', authMiddleware, adminOnly, async (req, res)
 
 // ─── Projects API ──────────────────────────────────────────────────
 
-/** Middleware: require eigentuemer group */
-function requireEigentuemer(req, res, next) {
-  const groups = req.user?.groups || [];
-  if (isTechnik(groups) || isPraesident(groups)) return next();
-  if (groups.some(g => g.toLowerCase().includes('eigentuemer'))) return next();
-  res.status(403).json({ error: 'Nur für Eigentümer' });
-}
-
 /** Middleware: irgendein Projekt lesen (Eigentuemer, Technik/Praesident, Ausschuss,
  *  Verwaltung mit Recht projekte; lib/projekte-rechte.js projekteLesen). Welche
  *  Projekte genau: projektLesen je Projekt (Liste gefiltert, :slug -> requireProjektLesen). */
@@ -13513,6 +13511,8 @@ async function requireProjektBearbeiten(req, res, next) {
     const { rows: [p] } = await pool.query('SELECT id, stweg, status FROM projects WHERE slug = $1', [req.params.slug]);
     if (!p) return res.status(404).json({ error: 'Projekt nicht gefunden' });
     const groups = req.user?.groups || [];
+    // P11: auf geteilten Telefonen (Anlage-Token) nur lesen und kommentieren, nichts aendern
+    if (req.anlage) return res.status(403).json({ error: 'Auf einem geteilten Telefon kannst du Projekte nur lesen und kommentieren' });
     if (!projekteRechte.projektBearbeiten(groups, await projektePerm(req), p.stweg)) {
       return res.status(403).json({ error: p.stweg ? 'Nur Ausschuss oder Verwaltung dieser STWEG' : 'Nur Ausschuss, Technik oder Präsident' });
     }
@@ -13758,17 +13758,43 @@ app.put('/api/projects/:slug/budget', authMiddleware, requireProjektBearbeiten, 
 // GET /api/projects - List projects
 app.get('/api/projects', authMiddleware, requireProjekteLesen, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM projects ORDER BY created_at DESC');
+    // Kommentarzahl und Verbrauch gleich mit (die App fragt damit nach Neuigkeiten, P9)
+    const { rows } = await pool.query(
+      `SELECT p.*,
+              (SELECT COUNT(*)::int FROM project_comments c WHERE c.project_id = p.id) AS kommentare_anzahl,
+              (SELECT MAX(c.created_at) FROM project_comments c WHERE c.project_id = p.id) AS letzter_kommentar_am,
+              COALESCE((SELECT SUM(a.betrag_chf) FROM auslagen a WHERE a.projekt_slug = p.slug), 0)::float AS verbraucht_chf
+         FROM projects p ORDER BY p.created_at DESC`);
     // R1/R2: nur die Projekte, die das Konto lesen darf (lib/projekte-rechte.js projektLesen)
     const perm = await projektePerm(req);
     const groups = req.user?.groups || [];
-    res.json(projekteRechte.lesbareProjekte(groups, perm, rows)
-      .map(p => ({ ...p, darf_bearbeiten: projekteRechte.projektBearbeiten(groups, perm, p.stweg) })));
+    const lesbar = projekteRechte.projekteFiltern(projekteRechte.lesbareProjekte(groups, perm, rows), req.query);
+    res.json(lesbar.map(({ verbraucht_chf, ...p }) => {
+      const bearbeiten = projekteRechte.projektBearbeiten(groups, perm, p.stweg);
+      // Verbrauch (Summe) nur fuer die, die das Projekt bearbeiten: Budget-Warnung (P9)
+      return { ...p, darf_bearbeiten: bearbeiten, darf_kommentieren: projekteRechte.projektKommentieren(groups, perm, p.stweg), ...(bearbeiten ? { verbraucht_chf } : {}) };
+    }));
   } catch (err) {
     console.error('[projekte] liste', err.message);
     res.status(500).json({ error: 'Projekte konnten nicht geladen werden' });
   }
 });
+
+// Stabile Kennung der Anhaenge (Unterlagen, lib/unterlagen.js): die App springt damit
+// nach rosenweg://unterlagen/datei/<kennung> und verliert den Link beim Verschieben nicht (P6).
+// Ohne lib/unterlagen.js (aeltere Staende) bleibt es beim Pfad.
+let unterlagenLib = null;
+try { unterlagenLib = require('./lib/unterlagen'); } catch { /* nicht vorhanden */ }
+async function anhaengeMitKennung(zeilen) {
+  if (!unterlagenLib || !zeilen.length) return zeilen;
+  try {
+    const m = await unterlagenLib.kennungenFuer(pool, zeilen.map(a => a.doc_path));
+    return zeilen.map(a => ({ ...a, kennung: m.get(a.doc_path) || null }));
+  } catch (e) {
+    console.warn('[projekte] Kennungen:', e.message);
+    return zeilen;
+  }
+}
 
 // GET /api/projects/:slug - Get project with all data
 app.get('/api/projects/:slug', authMiddleware, requireProjekteLesen, requireProjektLesen, async (req, res) => {
@@ -13801,15 +13827,41 @@ app.get('/api/projects/:slug', authMiddleware, requireProjekteLesen, requireProj
       ...project,
       candidates: candidates.rows, timeline: timeline.rows,
       // D4: Kommentare nur mit Namen, ohne E-Mail (eigener = vom Konto selbst)
-      comments: comments.rows.map(k => projekteRechte.kommentarOhneEmail(k, req.user?.email)),
-      attachments: attachments.rows,
+      comments: comments.rows.map(k => ({
+        ...projekteRechte.kommentarOhneEmail(k, req.user?.email),
+        aenderbar: projekteRechte.kommentarEigenAenderbar(k, req.user?.email),
+      })),
+      attachments: await anhaengeMitKennung(attachments.rows),
       auslagen_stat: auslagenStat,
-      darf_kommentieren: projekteRechte.projekteKommentieren(req.user?.groups || []),
+      darf_kommentieren: projekteRechte.projektKommentieren(req.user?.groups || [], req.projektePerm, project.stweg),
       darf_bearbeiten: projekteRechte.projektBearbeiten(req.user?.groups || [], req.projektePerm, project.stweg),
     });
   } catch (err) {
     console.error('[projekte] ansicht', err.message);
     res.status(500).json({ error: 'Projekt konnte nicht geladen werden' });
+  }
+});
+
+// GET /api/projects/:slug/dokumente — die Dateien im Projektordner projekte/<slug>/ (L2),
+// ohne die ganze Ablage zu laden. Wer das Projekt lesen darf, darf sie sehen (gleiche Regel
+// wie projektDokRecht). ordner: '' (Projekt), 'timeline/<id>' oder 'kandidaten/<id>'.
+app.get('/api/projects/:slug/dokumente', authMiddleware, requireProjekteLesen, requireProjektLesen, async (req, res) => {
+  try {
+    const slug = req.projekt.slug;
+    const roh = await walkDocs(pathModule.join(DOCS_PATH, 'projekte', slug), `projekte/${slug}`);
+    const dateien = roh.filter(f => !f.path.endsWith('/.gitkeep')).map(f => {
+      const rest = f.path.slice(`projekte/${slug}/`.length).split('/');
+      const name = rest.pop();
+      return { path: f.path, name, size: f.size, ordner: rest.join('/') };
+    });
+    let kennungen = new Map();
+    if (unterlagenLib && dateien.length) {
+      try { kennungen = await unterlagenLib.kennungenFuer(pool, dateien.map(d => d.path)); } catch (e) { console.warn('[projekte] Kennungen:', e.message); }
+    }
+    res.json({ dokumente: dateien.map(d => ({ ...d, kennung: kennungen.get(d.path) || null })) });
+  } catch (err) {
+    console.error('[projekte] dokumente', err.message);
+    res.status(500).json({ error: 'Dokumente konnten nicht geladen werden' });
   }
 });
 
@@ -13923,6 +13975,40 @@ app.put('/api/projects/:slug', authMiddleware, requireProjektBearbeiten, async (
   } catch (err) { console.error('[projekt-bearbeiten]', err.message); res.status(500).json({ error: 'Projekt konnte nicht gespeichert werden' }); }
 });
 
+// DELETE /api/projects/:slug {bestaetigt} — ein ganzes Projekt loeschen (P12): nur
+// Technik/Praesident, mit Protokoll (admin_protokoll, Bereich 'projekte'). Alle anderen
+// archivieren (Status „archiviert“). Dateien im Ordner projekte/<slug>/ bleiben liegen.
+app.delete('/api/projects/:slug', authMiddleware, async (req, res) => {
+  try {
+    if (!projekteRechte.projektLoeschen(req.user?.groups || [])) {
+      return res.status(403).json({ error: 'Projekte löschen nur Technik oder Präsident (sonst archivieren)' });
+    }
+    if (req.anlage) return res.status(403).json({ error: 'Auf einem geteilten Telefon nicht möglich' });
+    if (req.body?.bestaetigt !== true && req.query.bestaetigt !== '1') {
+      return res.status(400).json({ error: 'Löschen bitte bestätigen (bestaetigt: true)', bestaetigung_noetig: true });
+    }
+    const { rows: [p] } = await pool.query('SELECT id, slug, title, stweg, status FROM projects WHERE slug = $1', [req.params.slug]);
+    if (!p) return res.status(404).json({ error: 'Projekt nicht gefunden' });
+    const zahl = async (tabelle) => (await pool.query(`SELECT COUNT(*)::int AS n FROM ${tabelle} WHERE project_id = $1`, [p.id])).rows[0].n;
+    const n = { zeitachse: await zahl('project_timeline'), kandidaten: await zahl('project_candidates'), kommentare: await zahl('project_comments') };
+    await adminProtokoll.eintragen(pool, null, req, {
+      bereich: 'projekte', aktion: 'geloescht', ziel: p.slug, alt: `${p.title} (${p.stweg ? 'STWEG ' + p.stweg : 'Kooperation'}, ${p.status})`,
+      detail: `Zeitachse ${n.zeitachse}, Kandidaten ${n.kandidaten}, Kommentare ${n.kommentare}`,
+    });
+    await pool.query('DELETE FROM stweg_events WHERE projekt_slug = $1', [p.slug]);
+    await pool.query('DELETE FROM project_attachments WHERE project_slug = $1', [p.slug]);
+    await pool.query('DELETE FROM project_comments WHERE project_id = $1', [p.id]);
+    await pool.query('DELETE FROM project_candidates WHERE project_id = $1', [p.id]);
+    await pool.query('DELETE FROM project_timeline WHERE project_id = $1', [p.id]);
+    await pool.query('DELETE FROM projects WHERE id = $1', [p.id]);
+    projektStwegsLeeren();
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[projekte] loeschen', err.message);
+    res.status(500).json({ error: 'Projekt konnte nicht gelöscht werden' });
+  }
+});
+
 // GET /api/projects-mini — kompakte Liste für Dropdowns. Nur Projekte, die das
 // Konto lesen darf (Regel „Projekte lesen nur Eigentuemer“, D2 28.11.2026):
 // Mieter bekommen eine leere Liste statt der Titel aller Projekte.
@@ -13940,28 +14026,35 @@ app.post('/api/projects/:slug/candidates', authMiddleware, requireProjektBearbei
     const { rows: [project] } = await pool.query('SELECT id FROM projects WHERE slug = $1', [req.params.slug]);
     if (!project) return res.status(404).json({ error: 'Projekt nicht gefunden' });
     const { name, kontakt, telefon, email, webseite, offerte_betrag, offerte_details, bewertung, status, notizen } = req.body;
+    if (!String(name || '').trim()) return res.status(400).json({ error: 'Name erforderlich' });
     const { rows: [row] } = await pool.query(
       `INSERT INTO project_candidates (project_id, name, kontakt, telefon, email, webseite, offerte_betrag, offerte_details, bewertung, status, notizen)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [project.id, name, kontakt, telefon, email, webseite, offerte_betrag, offerte_details, bewertung || null, status || 'angefragt', notizen]);
+      [project.id, String(name).trim(), kontakt, telefon, email, webseite, offerte_betrag, offerte_details, bewertung || null, status || 'angefragt', notizen]);
     res.json(row);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[projekte] kandidat-neu', err.message);
+    res.status(500).json({ error: 'Kandidat konnte nicht gespeichert werden' });
   }
 });
 
-// PUT /api/projects/:slug/candidates/:id - Update candidate
+// PUT /api/projects/:slug/candidates/:id - Update candidate. Teil-Update (L4): nur die
+// gesendeten Felder aendern sich, der Rest bleibt.
+const KANDIDAT_FELDER = ['name', 'kontakt', 'telefon', 'email', 'webseite', 'offerte_betrag', 'offerte_details', 'bewertung', 'status', 'notizen'];
 app.put('/api/projects/:slug/candidates/:id', authMiddleware, requireProjektBearbeiten, async (req, res) => {
   try {
-    const { name, kontakt, telefon, email, webseite, offerte_betrag, offerte_details, bewertung, status, notizen } = req.body;
+    const t = projekteRechte.teilUpdate(req.body, KANDIDAT_FELDER);
+    if (!t.sets.length) return res.status(400).json({ error: 'Keine Änderung angegeben' });
+    const n = t.werte.length;
     const { rows: [row] } = await pool.query(
-      `UPDATE project_candidates SET name=$1, kontakt=$2, telefon=$3, email=$4, webseite=$5, offerte_betrag=$6, offerte_details=$7, bewertung=$8, status=$9, notizen=$10, updated_at=NOW()
-       WHERE id=$11 AND project_id = (SELECT id FROM projects WHERE slug = $12) RETURNING *`,
-      [name, kontakt, telefon, email, webseite, offerte_betrag, offerte_details, bewertung || null, status, notizen, req.params.id, req.params.slug]);
+      `UPDATE project_candidates SET ${t.sets.join(', ')}, updated_at=NOW()
+       WHERE id=$${n + 1} AND project_id = (SELECT id FROM projects WHERE slug = $${n + 2}) RETURNING *`,
+      [...t.werte, req.params.id, req.params.slug]);
     if (!row) return res.status(404).json({ error: 'Kandidat nicht gefunden' });
     res.json(row);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[projekte] kandidat-aendern', err.message);
+    res.status(500).json({ error: 'Kandidat konnte nicht gespeichert werden' });
   }
 });
 
@@ -13972,72 +14065,146 @@ app.delete('/api/projects/:slug/candidates/:id', authMiddleware, requireProjektB
     await pool.query('DELETE FROM project_candidates WHERE id = $1 AND project_id = (SELECT id FROM projects WHERE slug = $2)', [req.params.id, req.params.slug]);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[projekte] kandidat-loeschen', err.message);
+    res.status(500).json({ error: 'Kandidat konnte nicht gelöscht werden' });
   }
 });
+
+// Zeitachse als Termin in Rosenweg Termine (P7): „als_termin“ legt einen Termin in
+// stweg_events an (projekt_slug und timeline_id verweisen zurueck), jede Aenderung am
+// Eintrag zieht ihn nach, Ausschalten oder Loeschen entfernt ihn.
+async function zeitachseTerminAbgleichen(projekt, eintrag, userId) {
+  if (eintrag.termin_id) {
+    if (!eintrag.als_termin) {
+      await pool.query('DELETE FROM stweg_events WHERE id = $1 AND timeline_id = $2', [eintrag.termin_id, eintrag.id]);
+      await pool.query('UPDATE project_timeline SET termin_id = NULL WHERE id = $1', [eintrag.id]);
+      return;
+    }
+    const t = projekteRechte.terminAusEintrag(projekt, eintrag);
+    const u = await pool.query(
+      `UPDATE stweg_events SET stweg=$2, title=$3, description=$4, start_date=$5, end_date=NULL, all_day=$6, location=$7, category=$8
+        WHERE id = $1 AND timeline_id = $9`,
+      [eintrag.termin_id, t.stweg, t.title, t.description, t.start_date, t.all_day, t.location, t.category, eintrag.id]);
+    if (u.rowCount > 0) return;
+    eintrag.termin_id = null; // Termin wurde in Rosenweg Termine geloescht: neu anlegen
+  }
+  if (!eintrag.als_termin) return;
+  const t = projekteRechte.terminAusEintrag(projekt, eintrag);
+  const { rows: [e] } = await pool.query(
+    `INSERT INTO stweg_events (stweg, title, description, start_date, all_day, location, category, created_by, projekt_slug, timeline_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+    [t.stweg, t.title, t.description, t.start_date, t.all_day, t.location, t.category, userId || null, projekt.slug, eintrag.id]);
+  await pool.query('UPDATE project_timeline SET termin_id = $1 WHERE id = $2', [e.id, eintrag.id]);
+  eintrag.termin_id = e.id;
+}
+const ZEITACHSE_FELDER = ['datum', 'titel', 'beschreibung', 'erledigt', 'uhrzeit', 'ort', 'als_termin'];
 
 // POST /api/projects/:slug/timeline - Add timeline entry
 app.post('/api/projects/:slug/timeline', authMiddleware, requireProjektBearbeiten, async (req, res) => {
   try {
-    const { rows: [project] } = await pool.query('SELECT id FROM projects WHERE slug = $1', [req.params.slug]);
+    const { rows: [project] } = await pool.query('SELECT id, slug, title, stweg FROM projects WHERE slug = $1', [req.params.slug]);
     if (!project) return res.status(404).json({ error: 'Projekt nicht gefunden' });
-    const { datum, titel, beschreibung, erledigt } = req.body;
+    const { datum, titel, beschreibung, erledigt, uhrzeit, ort, als_termin } = req.body;
+    if (!datum || !String(titel || '').trim()) return res.status(400).json({ error: 'Datum und Titel erforderlich' });
     const { rows: [row] } = await pool.query(
-      'INSERT INTO project_timeline (project_id, datum, titel, beschreibung, erledigt) VALUES ($1,$2,$3,$4,$5) RETURNING *',
-      [project.id, datum, titel, beschreibung, erledigt || false]);
+      'INSERT INTO project_timeline (project_id, datum, titel, beschreibung, erledigt, uhrzeit, ort, als_termin) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+      [project.id, datum, String(titel).trim(), beschreibung, erledigt || false, uhrzeit || null, ort || null, als_termin === true]);
+    await zeitachseTerminAbgleichen(project, row, req.user?.user_id || req.user?.id);
     res.json(row);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[projekte] zeitachse-neu', err.message);
+    res.status(500).json({ error: 'Eintrag konnte nicht gespeichert werden' });
   }
 });
 
-// PUT /api/projects/:slug/timeline/:id
+// PUT /api/projects/:slug/timeline/:id — Teil-Update (L4): „Abhaken“ aendert nur erledigt
 app.put('/api/projects/:slug/timeline/:id', authMiddleware, requireProjektBearbeiten, async (req, res) => {
   try {
-    const { datum, titel, beschreibung, erledigt } = req.body;
+    const t = projekteRechte.teilUpdate(req.body, ZEITACHSE_FELDER);
+    if (!t.sets.length) return res.status(400).json({ error: 'Keine Änderung angegeben' });
+    const n = t.werte.length;
     const { rows: [row] } = await pool.query(
-      'UPDATE project_timeline SET datum=$1, titel=$2, beschreibung=$3, erledigt=$4 WHERE id=$5 AND project_id = (SELECT id FROM projects WHERE slug = $6) RETURNING *',
-      [datum, titel, beschreibung, erledigt, req.params.id, req.params.slug]);
+      `UPDATE project_timeline SET ${t.sets.join(', ')} WHERE id=$${n + 1} AND project_id = (SELECT id FROM projects WHERE slug = $${n + 2}) RETURNING *`,
+      [...t.werte, req.params.id, req.params.slug]);
     if (!row) return res.status(404).json({ error: 'Eintrag nicht gefunden' });
+    const { rows: [project] } = await pool.query('SELECT id, slug, title, stweg FROM projects WHERE slug = $1', [req.params.slug]);
+    await zeitachseTerminAbgleichen(project, row, req.user?.user_id || req.user?.id);
     res.json(row);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[projekte] zeitachse-aendern', err.message);
+    res.status(500).json({ error: 'Eintrag konnte nicht gespeichert werden' });
   }
 });
 
-// DELETE /api/projects/:slug/timeline/:id
+// DELETE /api/projects/:slug/timeline/:id (der Termin in Rosenweg Termine verschwindet mit)
 app.delete('/api/projects/:slug/timeline/:id', authMiddleware, requireProjektBearbeiten, async (req, res) => {
   try {
-    await pool.query('DELETE FROM project_timeline WHERE id = $1 AND project_id = (SELECT id FROM projects WHERE slug = $2)', [req.params.id, req.params.slug]);
+    const id = parseInt(req.params.id, 10) || 0;
+    await pool.query('DELETE FROM stweg_events WHERE timeline_id = $1 AND projekt_slug = $2', [id, req.params.slug]);
+    await pool.query('DELETE FROM project_timeline WHERE id = $1 AND project_id = (SELECT id FROM projects WHERE slug = $2)', [id, req.params.slug]);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[projekte] zeitachse-loeschen', err.message);
+    res.status(500).json({ error: 'Eintrag konnte nicht gelöscht werden' });
   }
 });
 
-// POST /api/projects/:slug/comments - Eigentuemer (und T/P), nur bei Projekten, die sie lesen (F5)
-app.post('/api/projects/:slug/comments', authMiddleware, requireEigentuemer, requireProjektLesen, async (req, res) => {
+// POST /api/projects/:slug/comments — wer das Projekt lesen darf (P10: auch die
+// Verwaltung). Zurueck kommt nur der Name, nie die E-Mail (D4).
+app.post('/api/projects/:slug/comments', authMiddleware, requireProjekteLesen, requireProjektLesen, async (req, res) => {
   try {
-    const { rows: [project] } = await pool.query('SELECT id FROM projects WHERE slug = $1', [req.params.slug]);
-    if (!project) return res.status(404).json({ error: 'Projekt nicht gefunden' });
-    const { text } = req.body;
-    if (!text?.trim()) return res.status(400).json({ error: 'Text erforderlich' });
+    if (!projekteRechte.projektKommentieren(req.user?.groups || [], req.projektePerm, req.projekt.stweg)) {
+      return res.status(403).json({ error: 'Kein Zugriff auf dieses Projekt' });
+    }
+    const text = String(req.body?.text || '').trim();
+    if (!text) return res.status(400).json({ error: 'Text erforderlich' });
+    if (text.length > 4000) return res.status(400).json({ error: 'Der Kommentar ist zu lang (höchstens 4000 Zeichen)' });
     const { rows: [row] } = await pool.query(
       'INSERT INTO project_comments (project_id, user_name, user_email, text) VALUES ($1,$2,$3,$4) RETURNING *',
-      [project.id, req.user.name, req.user.email, text.trim()]);
-    res.json(projekteRechte.kommentarOhneEmail(row, req.user.email));
+      [req.projekt.id, req.user.name, req.user.email, text]);
+    res.json({ ...projekteRechte.kommentarOhneEmail(row, req.user.email), aenderbar: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[projekte] kommentar', err.message);
+    res.status(500).json({ error: 'Kommentar konnte nicht gespeichert werden' });
   }
 });
 
-// DELETE /api/projects/:slug/comments/:id - Ausschuss/Technik can delete
-app.delete('/api/projects/:slug/comments/:id', authMiddleware, requireProjektBearbeiten, async (req, res) => {
+// PUT /api/projects/:slug/comments/:id {text} — eigenen Kommentar ändern (15 Minuten, P10)
+app.put('/api/projects/:slug/comments/:id', authMiddleware, requireProjekteLesen, requireProjektLesen, async (req, res) => {
   try {
-    await pool.query('DELETE FROM project_comments WHERE id = $1 AND project_id = (SELECT id FROM projects WHERE slug = $2)', [req.params.id, req.params.slug]);
+    const text = String(req.body?.text || '').trim();
+    if (!text) return res.status(400).json({ error: 'Text erforderlich' });
+    if (text.length > 4000) return res.status(400).json({ error: 'Der Kommentar ist zu lang (höchstens 4000 Zeichen)' });
+    const { rows: [k] } = await pool.query('SELECT * FROM project_comments WHERE id = $1 AND project_id = $2', [parseInt(req.params.id, 10) || 0, req.projekt.id]);
+    if (!k) return res.status(404).json({ error: 'Kommentar nicht gefunden' });
+    if (!projekteRechte.kommentarEigenAenderbar(k, req.user?.email)) {
+      return res.status(403).json({ error: `Eigene Kommentare lassen sich ${projekteRechte.KOMMENTAR_FRIST_MIN} Minuten lang ändern` });
+    }
+    const { rows: [row] } = await pool.query('UPDATE project_comments SET text = $1, bearbeitet_am = NOW() WHERE id = $2 RETURNING *', [text, k.id]);
+    res.json({ ...projekteRechte.kommentarOhneEmail(row, req.user.email), aenderbar: true });
+  } catch (err) {
+    console.error('[projekte] kommentar-aendern', err.message);
+    res.status(500).json({ error: 'Kommentar konnte nicht geändert werden' });
+  }
+});
+
+// DELETE /api/projects/:slug/comments/:id — wer das Projekt bearbeitet (immer) oder
+// der Verfasser (15 Minuten, P10)
+app.delete('/api/projects/:slug/comments/:id', authMiddleware, requireProjekteLesen, requireProjektLesen, async (req, res) => {
+  try {
+    const groups = req.user?.groups || [];
+    const id = parseInt(req.params.id, 10) || 0;
+    const { rows: [k] } = await pool.query('SELECT * FROM project_comments WHERE id = $1 AND project_id = $2', [id, req.projekt.id]);
+    if (!k) return res.status(404).json({ error: 'Kommentar nicht gefunden' });
+    const bearbeiter = !req.anlage && projekteRechte.projektBearbeiten(groups, req.projektePerm, req.projekt.stweg);
+    if (!bearbeiter && !projekteRechte.kommentarEigenAenderbar(k, req.user?.email)) {
+      return res.status(403).json({ error: `Eigene Kommentare lassen sich ${projekteRechte.KOMMENTAR_FRIST_MIN} Minuten lang löschen` });
+    }
+    await pool.query('DELETE FROM project_comments WHERE id = $1', [k.id]);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[projekte] kommentar-loeschen', err.message);
+    res.status(500).json({ error: 'Kommentar konnte nicht gelöscht werden' });
   }
 });
 
@@ -31333,6 +31500,16 @@ async function initDB() {
       -- D1 (28.11.2026): nur ausdruecklich markierte Anhaenge sind oeffentlich;
       -- bestehende bleiben privat (DEFAULT false), auch bei oeffentlichen Projekten.
       ALTER TABLE project_attachments ADD COLUMN IF NOT EXISTS oeffentlich BOOLEAN NOT NULL DEFAULT false;
+
+      -- Rosenweg Projekte (28.11.2026): Kommentar geaendert (P10); Zeitachse mit Uhrzeit,
+      -- Ort und optional als Termin in Rosenweg Termine (P7, stweg_events verweist zurueck)
+      ALTER TABLE IF EXISTS project_comments ADD COLUMN IF NOT EXISTS bearbeitet_am TIMESTAMP;
+      ALTER TABLE IF EXISTS project_timeline ADD COLUMN IF NOT EXISTS uhrzeit VARCHAR(5);
+      ALTER TABLE IF EXISTS project_timeline ADD COLUMN IF NOT EXISTS ort VARCHAR(255);
+      ALTER TABLE IF EXISTS project_timeline ADD COLUMN IF NOT EXISTS als_termin BOOLEAN NOT NULL DEFAULT false;
+      ALTER TABLE IF EXISTS project_timeline ADD COLUMN IF NOT EXISTS termin_id INTEGER;
+      ALTER TABLE stweg_events ADD COLUMN IF NOT EXISTS projekt_slug VARCHAR(100);
+      ALTER TABLE stweg_events ADD COLUMN IF NOT EXISTS timeline_id INTEGER;
     `);
 
     await client.query(`

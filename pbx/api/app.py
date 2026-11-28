@@ -4196,6 +4196,17 @@ PORTAL_PFADE_STANDARD = {
                                    "GET /api/documents-kennung/", "GET /api/documents-fassungen",
                                    "GET /api/documents-fassungen/", "GET /api/documents-preview",
                                    "POST /api/documents-preview"],
+
+    # Rosenweg TV: Senderliste, Programm und Stream-Token (nur lesen; keine Ferien-Zugaenge
+    # /api/tv/extern*, Entscheid Stefan 28.11.2026)
+    "ch.rosenweg4303.tv": ["GET /api/tv/channels", "GET /api/tv/jetzt", "GET /api/tv/epg",
+                           "GET /api/tv/stream-url/"],
+    # Rosenweg Projekte: auf geteilten Telefonen lesen und kommentieren (Entscheid P11, 28.11.2026).
+    # Die Haupt-API prueft je Projekt, was die Person lesen darf, und lehnt jede Aenderung am
+    # Projekt (Anlegen, Zeitachse, Offerten, Budget, Anhaenge, Loeschen) bei Anlage-Token ab
+    # (requireProjektBearbeiten); Kommentare der Person gehen. Dateien nur lesen/Vorschau.
+    "ch.rosenweg4303.projekte": ["GET /api/projects", "GET,POST,PUT,DELETE /api/projects/", "GET /api/projects-rechte",
+                                 "GET /api/documents/", "GET /api/documents-kennung/", "POST /api/documents-preview"],
 }
 _PORTAL_PFAD = re.compile(r"/api/[A-Za-z0-9._~!$&'()*+,;=:@%/-]{1,1000}(\?[A-Za-z0-9._~!$&'()*+,;=:@%/?-]{0,1000})?")
 _PORTAL_KODIERT_VERBOTEN = re.compile(r"%(2e|2f|5c|00)", re.I)
