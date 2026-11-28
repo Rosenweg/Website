@@ -292,7 +292,8 @@
       <span class="text-[10px] text-slate-500 font-mono" data-el="runner-fehler"></span>
     </div>
     <div data-el="runner-liste" class="noc-stationen"><div class="text-xs text-slate-500 font-mono">lade…</div></div>
-    <div class="text-[10px] text-slate-500 font-mono mt-1 whitespace-pre-line" data-el="runner-fuss"></div>`;
+    <div class="text-[10px] text-slate-500 font-mono mt-1 whitespace-pre-line" data-el="runner-fuss"></div>
+    <div class="text-[10px] font-mono mt-1" data-el="runner-offen"></div>`;
 
   // Alter eines Lebenszeichens, kurz: 3 min, 2 h, 4 T.
   const fmtAlter = (min) => {
@@ -875,6 +876,18 @@
           + (w.trocken ? ' · Trockenlauf' : '')
           + (sch && sch.text ? ' · zuletzt: ' + sch.text + (sch.zeit ? ' (' + new Date(sch.zeit).toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' }) + ')' : '') : '')
           + stauZeile + relZeile + (cts ? '\n' + cts : '') + (queue ? '\nWarten: ' + queue : ''));
+        // alle offenen Laeufe der Organisation: wo laufen die Jobs, was wartet
+        const of = d.offen || [];
+        const sum = of.reduce((a, o) => ({ eigen: a.eigen + o.eigen, github: a.github + o.github, mac: a.mac + o.mac, wartend: a.wartend + o.wartend }), { eigen: 0, github: 0, mac: 0, wartend: 0 });
+        const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        const zeile = (o) => {
+          const name = o.repo ? esc(o.repo.replace(/^rosenweg-/, '')) + ' · ' + esc(o.workflow) + (o.pr ? ' #' + o.pr : o.branch ? ' (' + esc(o.branch) + ')' : '') : esc(o.status);
+          const wo = [o.eigen ? o.eigen + ' eigen' : '', o.github ? o.github + ' GitHub' : '', o.mac ? o.mac + ' macOS' : '', o.wartend ? '<span class="text-amber-400">' + o.wartend + ' wartend</span>' : ''].filter(Boolean).join(', ') || '—';
+          const link = o.url ? '<a class="hover:underline" target="_blank" rel="noopener" href="' + esc(o.url) + '">' + name + '</a>' : name;
+          return '<div class="flex justify-between gap-2 text-slate-400"><span class="truncate">' + link + '</span><span class="shrink-0">' + wo + ' · ' + o.fertig + '/' + o.gesamt + ' · ' + fmtDauer(o.alter_s) + '</span></div>';
+        };
+        el('runner-offen').innerHTML = '<div class="text-slate-300 mb-0.5">Offene Läufe: ' + of.length + ' · Jobs laufend ' + sum.eigen + ' eigen, ' + sum.github + ' GitHub, ' + sum.mac + ' macOS · wartend ' + sum.wartend + '</div>'
+          + of.slice(0, 25).map(zeile).join('') + (of.length > 25 ? '<div class="text-slate-500">… und ' + (of.length - 25) + ' weitere</div>' : '');
       }, 'runner');
     }
 
