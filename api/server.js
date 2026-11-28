@@ -17,7 +17,7 @@ const druckApi = require('./lib/druckapi'); // Druck-API CT 111 und Gotenberg (D
 const { STWEG_GROUPS, parseStweg, getUserStwegs, stwegFolderName, folderStwegNr, isTechnik, isPraesident, getAusschussStwegs, isAusschussForAny, canSeeVerwaltungKontakte,
   VERWALTUNG_GROUPS, istVerwaltungUebergang, verwaltungStwegs, isVerwaltungFor, isVerwaltungForAny, verwaltetAlleStwegs, istVerwaltungsGruppenName, getStwegsMitVerwaltung } = require('./lib/groups');
 const { nummernKanal, darfEchteNummernSehen, istTechnikOderPraesident, interneNummerFinden, nummernAusgeben, nummernAusBodyEntfernen, interneNummernLaden, interneNummernCacheLeeren, interneNummernPruefen, nummernSicht } = require('./lib/nummernsicht');
-const { zevAliasAddress, zevGotoTargets, zevDarfRechnungSehen, zevStwegFuerEmpfaenger, zevAliasAusFormular, zevAktuellerBewohner, zevWechselMelden } = require('./lib/zev');
+const { zevAliasAddress, zevGotoTargets, zevDarfRechnungSehen, zevStwegFuerEmpfaenger, zevAliasAusFormular, zevAktuellerBewohner, zevWechselMelden, zevAdminFuerStweg, zevRechte, zevAdminDarfPdf, zevMitIso, zevStatistik } = require('./lib/zev');
 const reklMelder = require('./lib/reklamation-melder');
 const vollmachtRechte = require('./lib/vollmacht-rechte');
 const projekteRechte = require('./lib/projekte-rechte');
@@ -108,7 +108,7 @@ for (const methode of ['get', 'post', 'put', 'delete', 'patch', 'use']) {
 // pool, energyPool, auditCtx -> lib/db.js. Frueh geladen, pool.query wird dort
 // fuer Audit gewrappt. initDB() bleibt unten im Bootstrap und nutzt diesen pool.
 const { pool, energyPool, auditCtx } = require('./lib/db');
-const { haeuserAusAuswahl } = require('./lib/haeuser');
+const { haeuserAusAuswahl, STWEG_HAEUSER } = require('./lib/haeuser');
 const benutzername = require('./lib/benutzername');
 const zlibModul = require('zlib');
 
@@ -6211,7 +6211,7 @@ async function buildZevAliasMap() {
   return { map, complete };
 }
 
-// Re-Mail an den Bewohner (saubere Mail von zev@, via SMTP2GO). Auch OHNE PDF (W4): dann
+// Re-Mail an den Bewohner (saubere Mail von zev@, ueber Mailcow mit dem Gateway-User zev, docs/email.md). Auch OHNE PDF (W4): dann
 // nur Hinweis + Online-Link. Gibt {ok, error} zurueck — Aufrufer trackt remail_status.
 async function sendZevRemail(rec) {
   if (!rec.bewohner_email) return { ok: false, error: 'keine Bewohner-Mail' };
@@ -8509,7 +8509,28 @@ async function processZevDaily() {
   try { await checkZevPollerHealth(); } catch (e) { console.warn('[zev-health]', e.message); }
 }
 
-app.get('/api/zev/config/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
+// L6: Konfiguration und Wohnungen (Namen, Mails) nur fuer Ausschuss/Verwaltung
+// GENAU DIESER STWEG und Technik/Praesident (lib/zev.js zevAdminFuerStweg).
+// requireStwegAccess allein liess jede Gruppe der STWEG durch (z. B. den
+// Ausschuss von STWEG 5, der in Haus 9 wohnt).
+function requireZevAdmin(req, res, next) {
+  const stweg = parseStweg(req.params.stweg);
+  if (!stweg) return res.status(400).json({ error: 'Ungültige STWEG-Nummer' });
+  if (!zevAdminFuerStweg(req.user?.groups || [], stweg)) {
+    return res.status(403).json({ error: 'Nur Ausschuss und Verwaltung dieser STWEG' });
+  }
+  next();
+}
+
+// Stufe des Seitenrechts `wohnungsverwaltung` (none/read/write) fuer die App-Rechte.
+async function zevZugriff(user) {
+  const g = user?.groups || [];
+  if (isTechnik(g) || isPraesident(g)) return 'write';
+  try { return (await getUserPermissions(g))['wohnungsverwaltung'] || 'none'; }
+  catch { return 'none'; }
+}
+
+app.get('/api/zev/config/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, requireZevAdmin, async (req, res) => {
   try { res.json({ config: await loadZevConfig(parseInt(req.params.stweg)) }); }
   catch (e) { console.error('[zev-config-get]', e); res.status(500).json({ error: 'Fehler' }); }
 });
@@ -8540,7 +8561,7 @@ function requireStwegWrite(req, res, next) {
 // dieser STWEG, T/P) und Alias-Felder (nur T/P). Der Server prueft trotzdem selbst.
 function zevSeitenRechte(user, stweg) {
   const g = user?.groups || [];
-  return { schreiben: stwegSchreibErlaubt(g, stweg), alias: isTechnik(g) || isPraesident(g) };
+  return { lesen: zevAdminFuerStweg(g, stweg), schreiben: stwegSchreibErlaubt(g, stweg), alias: isTechnik(g) || isPraesident(g) };
 }
 
 app.put('/api/zev/config/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, async (req, res) => {
@@ -8573,7 +8594,7 @@ app.put('/api/zev/config/:stweg', authMiddleware, requirePermission('wohnungsver
   } catch (e) { console.error('[zev-config-put]', e); res.status(500).json({ error: 'Fehler beim Speichern' }); }
 });
 
-app.get('/api/zev/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
+app.get('/api/zev/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, requireZevAdmin, async (req, res) => {
   try {
     const stweg = parseInt(req.params.stweg);
     const cfg = await loadZevConfig(stweg);
@@ -8634,32 +8655,129 @@ async function zevSichtbareRechnungen(user, rows) {
   }));
 }
 
+// Alle Rechnungen, die der User als Bewohner sehen darf (Liste, Statistik, Neuigkeiten).
+async function zevMeineRechnungen(user) {
+  const email = String(user?.email || '').toLowerCase();
+  if (!email) return [];
+  const memberWohnungen = await getZevMemberWohnungen(user);
+  const r = await pool.query(
+    `SELECT id, wohnung_id, bewohner_email, betreff, absender, empfangen_am, pdf_filename, pdf_size,
+            rechnungsnummer, rechnungsdatum, zeitraum_von, zeitraum_bis, objekt, betrag_chf, positionen,
+            bezahlt, bezahlt_am,
+            (pdf_data IS NOT NULL) AS has_pdf
+       FROM zev_rechnungen zr
+      WHERE LOWER(bewohner_email) = $1
+         OR wohnung_id = ANY($2::int[])
+      ORDER BY empfangen_am DESC NULLS LAST, id DESC`, [email, memberWohnungen]);
+  return zevSichtbareRechnungen(user, r.rows);
+}
+
+// L1: Welche STWEGs haben einen ZEV, und was darf der User dort (Rosenweg ZEV).
+// Bewohner sehen nur aktive ZEVs; Admins zusaetzlich offene Zuordnungen und den
+// Zustand des Archiv-Pollers (L10); Technik/Praesident auch inaktive Konfigurationen
+// und STWEGs ohne Konfiguration (einrichtbar).
+app.get('/api/zev/uebersicht', authMiddleware, async (req, res) => {
+  try {
+    const g = req.user?.groups || [];
+    const tp = isTechnik(g) || isPraesident(g);
+    const zugriff = await zevZugriff(req.user);
+    const cfgs = (await pool.query('SELECT stweg, aktiv FROM zev_config ORDER BY stweg')).rows;
+    const zevs = cfgs
+      .map(c => ({ stweg: Number(c.stweg), aktiv: c.aktiv === true, haeuser: STWEG_HAEUSER[c.stweg] || [], rechte: zevRechte(g, c.stweg, zugriff) }))
+      .filter(z => z.aktiv || z.rechte.lesen);
+    const adminStwegs = zevs.filter(z => z.rechte.lesen).map(z => z.stweg);
+    let unzugeordnet = {};
+    let ohneStweg = null;
+    let poller = null;
+    if (adminStwegs.length || tp) {
+      const u = await pool.query(
+        `SELECT stweg, COUNT(*)::int AS n FROM zev_rechnungen
+          WHERE COALESCE(zuordnung, 'unzugeordnet') = 'unzugeordnet' GROUP BY stweg`);
+      for (const x of u.rows) {
+        if (x.stweg == null) { if (tp) ohneStweg = x.n; }
+        else if (adminStwegs.includes(Number(x.stweg))) unzugeordnet[x.stweg] = x.n;
+      }
+      const ps = (await pool.query("SELECT last_ok_at, last_error FROM imap_state WHERE mailbox = 'ZEV'").catch(() => ({ rows: [] }))).rows[0];
+      poller = { letzter_abruf: ps?.last_ok_at || null, fehler: tp ? (ps?.last_error || null) : (ps?.last_error ? 'Fehler beim Abruf – Technik ist informiert' : null) };
+    }
+    const bewohner = (await getZevMemberWohnungen(req.user)).length > 0;
+    res.json({
+      zevs: zevs.map(z => ({ ...z, unzugeordnet: z.rechte.lesen ? (unzugeordnet[z.stweg] || 0) : undefined })),
+      bewohner,
+      admin: adminStwegs.length > 0,
+      unzugeordnet_ohne_stweg: ohneStweg,
+      poller,
+      einrichtbar: tp ? Object.keys(STWEG_HAEUSER).map(Number).filter(n => !cfgs.some(c => Number(c.stweg) === n)) : [],
+    });
+  } catch (e) { console.error('[zev-uebersicht]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
+// L3: Verbrauch je Jahr aus den eigenen Rechnungen (Regel in lib/zev.js zevStatistik).
+app.get('/api/zev/meine-statistik', authMiddleware, async (req, res) => {
+  try { res.json({ jahre: zevStatistik(await zevMeineRechnungen(req.user)), regel: 'Solar = Tarifposition mit „solar“ im Namen; Jahr = Beginn des Abrechnungszeitraums' }); }
+  catch (e) { console.error('[zev-meine-statistik]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
+// L8: Benachrichtigungen ueber den Basis-Weg (HintergrundAbfrage der App, etwa alle
+// 15 Minuten): klein und ohne Positionen. Die App vergleicht die IDs mit den
+// bekannten und meldet „Neue ZEV-Rechnung“ bzw. (Admins) „Rechnung wartet auf
+// Zuordnung“. Keine Mail, kein Push-Dienst.
+app.get('/api/zev/neuigkeiten', authMiddleware, async (req, res) => {
+  try {
+    const g = req.user?.groups || [];
+    const tp = isTechnik(g) || isPraesident(g);
+    const eigene = (await zevMeineRechnungen(req.user))
+      .map(zevMitIso)
+      .map(r => ({ id: r.id, objekt: r.objekt || r.betreff || null, betrag_chf: r.betrag_chf, zeitraum_von_iso: r.zeitraum_von_iso, zeitraum_bis_iso: r.zeitraum_bis_iso, bezahlt: r.bezahlt === true }));
+    let unzugeordnet = [];
+    const zugriff = await zevZugriff(req.user);
+    const stwegs = [...new Set([...getAusschussStwegs(g), ...verwaltungStwegs(g)])].filter(n => zevRechte(g, n, zugriff).lesen);
+    if (tp || stwegs.length) {
+      unzugeordnet = (await pool.query(
+        `SELECT id, stweg, empfangen_am FROM zev_rechnungen
+          WHERE COALESCE(zuordnung, 'unzugeordnet') = 'unzugeordnet'
+            AND ($1::boolean OR stweg = ANY($2::int[]))
+          ORDER BY id DESC LIMIT 200`, [tp, stwegs])).rows;
+    }
+    res.json({ rechnungen: eigene, unzugeordnet });
+  } catch (e) { console.error('[zev-neuigkeiten]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
+// L9: Wechselmeldungen an den Messdienst (Axova) mit Status in der Freigabe-Outbox.
+app.get('/api/zev/wechsel/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireZevAdmin, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT p.kontakt_id, p.wohnung_id, w.bezeichnung, k.name, k.rolle, k.gueltig_ab,
+              p.alias_address, p.processed_at, q.status AS outbox_status, q.sent_at
+         FROM zev_wechsel_processed p
+         LEFT JOIN wohnungen w ON w.id = p.wohnung_id
+         LEFT JOIN wohnungen_kontakte k ON k.id = p.kontakt_id
+         LEFT JOIN verwaltung_mail_queue q ON q.id = p.outbox_queue_id
+        WHERE p.stweg = $1 AND p.outbox_queue_id IS NOT NULL
+        ORDER BY p.processed_at DESC LIMIT 100`, [parseStweg(req.params.stweg)]);
+    res.json({ wechsel: r.rows });
+  } catch (e) { console.error('[zev-wechsel]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
 app.get('/api/zev/meine-rechnungen', authMiddleware, async (req, res) => {
   try {
-    const email = String(req.user?.email || '').toLowerCase();
-    if (!email) return res.json({ rechnungen: [] });
-    const memberWohnungen = await getZevMemberWohnungen(req.user);
-    const r = await pool.query(
-      `SELECT id, wohnung_id, bewohner_email, betreff, absender, empfangen_am, pdf_filename, pdf_size,
-              rechnungsnummer, rechnungsdatum, zeitraum_von, zeitraum_bis, objekt, betrag_chf, positionen,
-              bezahlt, bezahlt_am,
-              (pdf_data IS NOT NULL) AS has_pdf
-         FROM zev_rechnungen zr
-        WHERE LOWER(bewohner_email) = $1
-           OR wohnung_id = ANY($2::int[])
-        ORDER BY empfangen_am DESC NULLS LAST, id DESC`, [email, memberWohnungen]);
-    const sichtbar = await zevSichtbareRechnungen(req.user, r.rows);
-    res.json({ rechnungen: sichtbar.map(({ bewohner_email, ...rest }) => rest) });
+    const sichtbar = await zevMeineRechnungen(req.user);
+    res.json({ rechnungen: sichtbar.map(({ bewohner_email, ...rest }) => zevMitIso(rest)) });
   } catch (e) { console.error('[zev-meine-rechnungen]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 
 app.get('/api/zev/rechnung/:id/pdf', authMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const r = await pool.query('SELECT wohnung_id, bewohner_email, pdf_filename, pdf_data FROM zev_rechnungen WHERE id = $1', [id]);
+    const r = await pool.query('SELECT stweg, zuordnung, wohnung_id, bewohner_email, pdf_filename, pdf_data FROM zev_rechnungen WHERE id = $1', [id]);
     if (!r.rows.length || !r.rows[0].pdf_data) return res.status(404).json({ error: 'Nicht gefunden' });
     const row = r.rows[0];
-    if (!(await zevSichtbareRechnungen(req.user, [row])).length) return res.status(403).json({ error: 'Kein Zugriff' });
+    // Bewohner-Sicht; sonst (L5) Ausschuss/Verwaltung der STWEG nur fuer
+    // unzugeordnete und Allgemeinzaehler-Rechnungen. Wohnungsrechnungen bleiben privat.
+    const eigene = (await zevSichtbareRechnungen(req.user, [row])).length > 0;
+    if (!eigene && !zevAdminDarfPdf(req.user?.groups || [], row, await zevZugriff(req.user))) {
+      return res.status(403).json({ error: 'Kein Zugriff' });
+    }
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${String(row.pdf_filename || 'rechnung.pdf').replace(/[^\w.\-]/g, '_')}"`);
     res.send(row.pdf_data);
@@ -8698,12 +8816,12 @@ app.get('/api/zev/unzugeordnet', authMiddleware, requirePermission('wohnungsverw
     const r = await pool.query(
       `SELECT id, stweg, wohnung_id, alias_address, betreff, absender, empfangen_am,
               rechnungsnummer, rechnungsdatum, zeitraum_von, zeitraum_bis, objekt, betrag_chf,
-              zuordnung, parse_ok, (pdf_data IS NOT NULL) AS has_pdf
+              zuordnung, parse_ok, remail_status, (pdf_data IS NOT NULL) AS has_pdf
          FROM zev_rechnungen
         WHERE COALESCE(zuordnung, 'unzugeordnet') = 'unzugeordnet'
           AND ($1::boolean OR stweg = ANY($2::int[]))
         ORDER BY empfangen_am DESC NULLS LAST, id DESC LIMIT 200`, [alle, zevStwegs]);
-    res.json({ rechnungen: r.rows });
+    res.json({ rechnungen: r.rows.map(zevMitIso) });
   } catch (e) { console.error('[zev-unzugeordnet]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 
@@ -8714,12 +8832,13 @@ app.get('/api/zev/rechnungen/:stweg', authMiddleware, requirePermission('wohnung
   try {
     const stweg = parseStweg(req.params.stweg);
     const g = req.user?.groups || [];
-    if (!(isTechnik(g) || isPraesident(g) || getAusschussStwegs(g).has(stweg) || isVerwaltungFor(g, stweg))) {
+    if (!zevAdminFuerStweg(g, stweg)) {
       return res.status(403).json({ error: 'Nur Ausschuss und Verwaltung dieser STWEG' });
     }
     const r = await pool.query(
       `SELECT zr.id, zr.wohnung_id, w.bezeichnung, zr.bewohner_name, zr.zuordnung, zr.empfangen_am,
-              zr.rechnungsnummer, zr.zeitraum_von, zr.zeitraum_bis, zr.betrag_chf, zr.bezahlt
+              zr.rechnungsnummer, zr.rechnungsdatum, zr.zeitraum_von, zr.zeitraum_bis, zr.betrag_chf, zr.bezahlt,
+              zr.remail_status, (zr.pdf_data IS NOT NULL) AS has_pdf
          FROM zev_rechnungen zr LEFT JOIN wohnungen w ON w.id = zr.wohnung_id
         WHERE zr.stweg = $1 AND COALESCE(zr.zuordnung, 'unzugeordnet') <> 'unzugeordnet'
         ORDER BY zr.empfangen_am DESC NULLS LAST, zr.id DESC LIMIT 100`, [stweg]);
@@ -8732,7 +8851,7 @@ app.get('/api/zev/rechnungen/:stweg', authMiddleware, requirePermission('wohnung
         [r.rows.map(x => `zev-rechnung #${x.id}`)]);
       letzte = new Map(p.rows.map(x => [x.ziel, x]));
     }
-    res.json({ rechnungen: r.rows.map(x => ({ ...x, letzte_aenderung: letzte.get(`zev-rechnung #${x.id}`) || null })) });
+    res.json({ rechnungen: r.rows.map(x => zevMitIso({ ...x, letzte_aenderung: letzte.get(`zev-rechnung #${x.id}`) || null })) });
   } catch (e) { console.error('[zev-rechnungen-stweg]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 

@@ -257,9 +257,14 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `POST/PUT/DELETE /api/wohnungen/:stweg…`, `POST …/import`, `POST …/kontakte/:kid/archive` | Recht `wohnungsverwaltung:write` + `requireStwegWrite` (A🅢, T/P, Verwaltung mit Gruppe der STWEG) → sonst 403 „Schreiben nur für den Ausschuss dieser STWEG“ |
 | `GET /api/wohnungen/:stweg/:id/historie` | T/P, Verwaltung, Ausschuss (mit Zugang zur STWEG) |
 | `GET /api/wohnungen/eigentuemer-uebersicht` | Recht `wohnungsverwaltung:read` |
-| `GET/PUT /api/zev/config/:stweg`, `POST /api/zev/sync/:stweg` | wie Wohnungen (PUT/POST mit `requireStwegWrite`) |
-| `GET /api/zev/unzugeordnet`, `POST /api/zev/rechnung/:id/zuordnen` | Recht `wohnungsverwaltung`; Zuordnen nur A🅢 für unzugeordnete, Umhängen nur T/P (409) |
-| `GET /api/zev/meine-rechnungen`, `…/rechnung/:id/pdf`, `POST …/bezahlt` | angemeldet, eigene |
+| `GET/PUT /api/zev/config/:stweg`, `GET /api/zev/wohnungen/:stweg`, `POST /api/zev/sync/:stweg` | Recht `wohnungsverwaltung` + Ausschuss/Verwaltung **dieser** STWEG oder T/P (`requireZevAdmin`, `lib/zev.js` `zevAdminFuerStweg`; eine andere Gruppe der STWEG reicht seit 28.11.2026 nicht mehr). PUT/POST zusätzlich `requireStwegWrite`; Alias-Domain/-Prefix nur T/P. `sync` = Aliase in Mailcow abgleichen (keine smart-me-Schnittstelle) |
+| `GET /api/zev/unzugeordnet`, `GET /api/zev/rechnungen/:stweg`, `POST /api/zev/rechnung/:id/zuordnen` | Recht `wohnungsverwaltung`; Zuordnen und Umhängen (protokolliert) A🅢 und Verwaltung der STWEG der Rechnung, Rechnungen ohne STWEG nur T/P; Listen mit `remail_status`, `has_pdf` |
+| `GET /api/zev/meine-rechnungen`, `POST …/rechnung/:id/bezahlt` | angemeldet, eigene (`zevDarfRechnungSehen`); Datumsfelder zusätzlich als `rechnungsdatum_iso`, `zeitraum_von_iso`, `zeitraum_bis_iso` (yyyy-mm-dd), auch in den Admin-Listen |
+| `GET /api/zev/rechnung/:id/pdf` | eigene; dazu Ausschuss/Verwaltung der STWEG (mit `wohnungsverwaltung:read`) und T/P für **unzugeordnete und Allgemeinzähler**-Rechnungen; Wohnungsrechnungen anderer nie |
+| `GET /api/zev/uebersicht` | angemeldet: `{zevs:[{stweg, aktiv, haeuser, rechte:{lesen, schreiben, alias}, unzugeordnet}], bewohner, admin, unzugeordnet_ohne_stweg (T/P), poller:{letzter_abruf, fehler}, einrichtbar (T/P)}`; inaktive ZEVs nur mit Leserecht |
+| `GET /api/zev/meine-statistik` | angemeldet: je Jahr `{jahr, anzahl, kwh, solar_kwh, netz_kwh, solar_anteil, chf, rp_kwh_solar, rp_kwh_netz}` aus den eigenen Rechnungen (Solar = Position mit „solar“ im Namen) |
+| `GET /api/zev/neuigkeiten` | angemeldet, für die Hintergrundabfrage der App: eigene Rechnungen (`id, objekt, betrag_chf, zeitraum_*_iso, bezahlt`) und für Admins unzugeordnete (`id, stweg, empfangen_am`) |
+| `GET /api/zev/wechsel/:stweg` | wie `config`: Meldungen an den Messdienst mit Status in der Freigabe-Outbox |
 | `GET /api/unterschriftenliste/:stweg.pdf` | Recht `wohnungsverwaltung:read` + `requireStwegWrite` |
 | `GET/PUT /api/unterschriftenliste/:hash/rueckläufe…` | lesen mit Zugang zur STWEG, schreiben mit `stwegSchreibErlaubt` |
 | `GET /api/stweg/:nr/kontakte`, `GET /api/kontakte/:stweg` | Gruppe dieser STWEG oder T/P; `PUT /api/kontakte` nur T/P |

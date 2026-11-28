@@ -519,7 +519,7 @@ E-Mail-Adressen ist nur hier sichtbar.
 
 | Vorgang | Wo | Hinweis |
 |---|---|---|
-| ZEV-Rechnung auf eine andere Wohnung umhängen, Rechnungen ohne STWEG zuordnen | `stweg3/pages/zev-smartme.html` | Ausschuss bekommt „Umhängen nur durch Technik“ |
+| ZEV-Rechnungen ohne STWEG zuordnen | `stweg3/pages/zev-smartme.html`, App Rosenweg ZEV | Umhängen dürfen seit 27.11.2026 auch Ausschuss und Verwaltung der STWEG (protokolliert) |
 | ZEV Alias-Domain / Alias-Prefix ändern | dito | bestimmt, welche Mailcow-Aliase überschrieben bzw. deaktiviert werden |
 | Auto-Zuweisung „Alle STWEG (Standard)“ | `reklamationen.html` → ⚙️ | gilt für alle STWEGs ohne eigene Regel |
 | Melde-Orte ohne STWEG („Allgemein / keiner“) | `melde-orte.html` | |

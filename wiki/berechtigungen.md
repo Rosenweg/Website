@@ -144,8 +144,8 @@ hat dort keine Rechte, auch wenn er dort wohnt oder Eigentümer ist.
 | Benutzerkonto löschen | — | — | — | — | — | ✅ | ✅ |
 | Vorgemerkte Löschungen (`loeschungen`) | — | — | — | — | — | ✅ | ✅ |
 | ZEV: eigene Rechnungen, PDF, „bezahlt“ | — | ✅ eigene | ✅ eigene + Wohnungen | ✅ eigene | ✅ eigene | ✅ | ✅ |
-| ZEV-Konfiguration und Abgleich | — | — | — | ✅ 🅢 | (R) 🅢 | ✅ | ✅ |
-| ZEV: unzugeordnete Rechnungen zuordnen | — | — | — | ✅ 🅢, nur unzugeordnete | (R `wohnungsverwaltung` schreiben) 🅢, nur unzugeordnete | ✅ auch umhängen | ✅ |
+| ZEV-Konfiguration, Wohnungen/Aliase ansehen und abgleichen (nur Ausschuss/Verwaltung **dieser** STWEG, seit 28.11.2026) | — | — | — | ✅ 🅢 | (R) 🅢 | ✅ | ✅ |
+| ZEV: Rechnungen zuordnen und umhängen (protokolliert); PDF unzugeordneter und Allgemeinzähler-Rechnungen | — | — | — | ✅ 🅢 | (R `wohnungsverwaltung` schreiben) 🅢 | ✅ auch ohne STWEG | ✅ |
 | Unterschriftenliste erzeugen / Rückläufe erfassen | — | — | — | ✅ 🅢 | (R) 🅢 | ✅ | ✅ |
 | Echtheitsprüfung Unterschriftenliste (30 / 10 Min.) | 👁 | 👁 | 👁 | 👁 | 👁 | 👁 | 👁 |
 | STWEG-Seiten (Module, Inhalte, Abschnitte) | 👁 | 👁 | 👁 | ✅ 🅢 | — | ✅ | ✅ |

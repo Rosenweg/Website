@@ -188,8 +188,8 @@ const WERKZEUGE_VERWALTUNG = [
   },
   {
     name: 'zev_abgleich', rolle: 'ausschuss', pfad: 'zev', methode: 'POST', frei: true, nurLesen: false,
-    titel: 'ZEV mit smart-me abgleichen',
-    beschreibung: 'Rechnungen und Zählerstände einer STWEG von smart-me holen. Frei — nur lesend gegenüber smart-me, idempotent.',
+    titel: 'ZEV-Aliase mit Mailcow abgleichen',
+    beschreibung: 'Legt die Mail-Aliase zev.<bewohner>@… einer STWEG in Mailcow an bzw. biegt sie auf den aktuellen Bewohner um (wie der tägliche Lauf). Holt nichts von smart-me (dafür gibt es keine Schnittstelle). Idempotent.',
     eingabe: { stweg: STWEG },
     async lauf(api, a) { return api('POST', `/api/zev/sync/${a.stweg}`); },
   },
