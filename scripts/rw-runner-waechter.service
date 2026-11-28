@@ -1,0 +1,12 @@
+[Unit]
+Description=Runner-Waechter: GitHub-Runner nach Warteschlange zu- und abschalten
+Documentation=file:/usr/local/bin/rw-runner-waechter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/rw-runner-waechter
+Nice=15
+IOSchedulingClass=idle
+TimeoutStartSec=3min

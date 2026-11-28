@@ -228,7 +228,8 @@ test('Verwaltung STWEG 3 darf an Verteiler von STWEG 3 senden, nicht an STWEG 5'
 
 test('Server: Verwaltungs-Absender nur für die STWEG des Verteilers, Ordner lesen', () => {
   const s = lies('api/server.js');
-  assert.match(s, /isActiveVerwaltungEmail\(senderEmailLower, list\.stweg\)/);
+  // F1: Absenderpruefung je Verteiler wie das Rspamd-Gate (lib/verteiler-gate.js)
+  assert.match(s, /verteilerGate\.absenderErlaubt\(eintrag, senderEmail\)/);
   assert.match(s, /\$1::int IS NULL OR v\.stweg IS NULL OR v\.stweg = \$1::int/);
   const doc = s.slice(s.indexOf('function isDocPathAllowed'), s.indexOf('function isDocPathAllowed') + 1200);
   assert.match(doc, /getStwegsMitVerwaltung\(groups\)/);

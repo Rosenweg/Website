@@ -17,10 +17,15 @@ test('lesen: Eigentümer und T/P wie bisher, Verwaltung nur mit Recht', () => {
   assert.equal(pr.projekteLesen(['stweg5-bewohner'], 'read'), false); // Recht allein reicht nicht
 });
 
-test('kommentieren: nur Eigentümer und T/P, die Verwaltung liest nur', () => {
-  assert.equal(pr.projekteKommentieren(['stweg5-eigentuemer']), true);
-  assert.equal(pr.projekteKommentieren(['praesident']), true);
-  assert.equal(pr.projekteKommentieren(['stweg3-verwaltung']), false);
+test('kommentieren: wer das Projekt liest, auch die Verwaltung (P10)', () => {
+  assert.equal(pr.projektKommentieren(['stweg5-eigentuemer'], undefined, 5), true);
+  assert.equal(pr.projektKommentieren(['stweg5-eigentuemer'], undefined, 3), false);
+  assert.equal(pr.projektKommentieren(['praesident'], undefined, 3), true);
+  assert.equal(pr.projektKommentieren(['stweg3-verwaltung'], 'read', 3), true);
+  assert.equal(pr.projektKommentieren(['stweg3-verwaltung'], 'read', 5), false);
+  assert.equal(pr.projektKommentieren(['stweg3-verwaltung'], undefined, 3), false);
+  assert.equal(pr.projektKommentieren(['stweg3-bewohner'], 'read', 3), false); // Mieter nie
+  assert.equal(pr.projektKommentieren(['stweg3-ausschuss'], undefined, 3), true); // R2
 });
 
 test('Auslagen eines Projekts: Verwaltung STWEG 3 sieht nur STWEG 3', () => {
@@ -32,12 +37,13 @@ test('Auslagen eines Projekts: Verwaltung STWEG 3 sieht nur STWEG 3', () => {
   assert.equal(sichtErlaubt(s, null), false);
 });
 
-test('server.js: Lese-Routen nutzen requireProjekteLesen, Kommentieren bleibt Eigentümer', () => {
+test('server.js: Lese-Routen nutzen requireProjekteLesen, Kommentieren folgt dem Lesen', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   assert.ok(src.includes("app.get('/api/projects', authMiddleware, requireProjekteLesen,"));
   assert.ok(src.includes("app.get('/api/projects/:slug', authMiddleware, requireProjekteLesen,"));
   assert.ok(src.includes("app.get('/api/projects/:slug/auslagen', authMiddleware, requireProjekteLesen,"));
-  assert.ok(src.includes("app.post('/api/projects/:slug/comments', authMiddleware, requireEigentuemer,"));
+  assert.ok(src.includes("app.post('/api/projects/:slug/comments', authMiddleware, requireProjekteLesen, requireProjektLesen,"));
+  assert.ok(!src.includes('requireEigentuemer'));
 });
 
 test('projekte.html: ohne Kommentarrecht kein Kommentarfeld', () => {
@@ -73,7 +79,7 @@ test('Auswahl „Neues Projekt“ und Kürzel', () => {
 test('server.js: Bearbeiten-Routen nach STWEG, Anlegen-Route, Spalte stweg, Recht Verwaltung', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   assert.doesNotMatch(src, /app\.(put|post|delete)\('\/api\/projects\/:slug[^']*', authMiddleware, requireAusschussOrTechnik/);
-  assert.equal((src.match(/'\/api\/projects\/:slug[^']*', authMiddleware, requireProjektBearbeiten,/g) || []).length, 13); // + Anhang öffentlich (D1)
+  assert.equal((src.match(/'\/api\/projects\/:slug[^']*', authMiddleware, requireProjektBearbeiten,/g) || []).length, 12); // + Anhang öffentlich (D1); Kommentar löschen: eigener oder Bearbeiter (P10)
   assert.ok(src.includes("app.post('/api/projects', authMiddleware, async"));
   assert.match(src, /ALTER TABLE projects ADD COLUMN IF NOT EXISTS stweg INTEGER;/);
   assert.match(src, /\['projekte', 'write'\]/);
@@ -187,10 +193,10 @@ test('server.js: Projekt-Routen nach den neuen Regeln', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   assert.ok(src.includes("app.get('/api/projects/:slug', authMiddleware, requireProjekteLesen, requireProjektLesen,"));
   assert.ok(src.includes("app.get('/api/projects/:slug/auslagen', authMiddleware, requireProjekteLesen, requireProjektLesen,"));
-  assert.ok(src.includes("app.post('/api/projects/:slug/comments', authMiddleware, requireEigentuemer, requireProjektLesen,"));
+  assert.ok(src.includes("app.post('/api/projects/:slug/comments', authMiddleware, requireProjekteLesen, requireProjektLesen,"));
   assert.match(src, /projekteRechte\.lesbareProjekte\(groups, perm, rows\)/);                 // Liste
   assert.match(src, /projekteRechte\.lesbareProjekte\(req\.user\?\.groups \|\| \[\], perm, r\.rows\)/); // projects-mini
-  assert.match(src, /comments: comments\.rows\.map\(k => projekteRechte\.kommentarOhneEmail\(/);
+  assert.match(src, /\.\.\.projekteRechte\.kommentarOhneEmail\(k, req\.user\?\.email\),/);
   assert.match(src, /projekteRechte\.auslageEmailSehen\(groups, a\.stweg\)/);
   // öffentlich: nur markierte Anhänge, Einschalten mit Bestätigung, Spalte mit Vorgabe false
   assert.match(src, /AND doc_path = \$2 AND oeffentlich = true/);
@@ -205,4 +211,82 @@ test('doodle.js: Projekt-Umfragen und Projektliste nur für Leser des Projekts',
   assert.equal((src.match(/conds\.push\(projektBedingung\(await lesbareProjektSlugs\(/g) || []).length, 2); // /polls und /next
   assert.match(src, /slugs\.includes\(poll\.project_slug\)/);  // Einzelansicht/Abstimmen
   assert.match(src, /Dieses Projekt darfst du nicht lesen/);   // Anlegen
+});
+
+// ─── Rosenweg Projekte (App, Entscheide Stefan 28.11.2026) ───
+test('eigene Kommentare: 15 Minuten, nur der Verfasser (P10)', () => {
+  const jetzt = Date.parse('2026-11-28T12:00:00Z');
+  const k = { user_email: 'Anna@Example.ch', created_at: '2026-11-28T11:50:00Z' };
+  assert.equal(pr.kommentarEigenAenderbar(k, 'anna@example.ch', jetzt), true);
+  assert.equal(pr.kommentarEigenAenderbar(k, 'ben@example.ch', jetzt), false);
+  assert.equal(pr.kommentarEigenAenderbar({ ...k, created_at: '2026-11-28T11:40:00Z' }, 'anna@example.ch', jetzt), false);
+  assert.equal(pr.kommentarEigenAenderbar(k, '', jetzt), false);
+  assert.equal(pr.kommentarEigenAenderbar(null, 'anna@example.ch', jetzt), false);
+});
+
+test('Projekt löschen: nur Technik und Präsident (P12)', () => {
+  assert.equal(pr.projektLoeschen(['technik']), true);
+  assert.equal(pr.projektLoeschen(['praesident']), true);
+  assert.equal(pr.projektLoeschen(['stweg3-ausschuss']), false);
+  assert.equal(pr.projektLoeschen(['stweg3-verwaltung']), false);
+  assert.equal(pr.projektLoeschen(['stweg3-eigentuemer']), false);
+});
+
+test('abgeleitetes Recht projekte-bearbeiten: blau nur mit Schreibrecht (P1, P2)', () => {
+  assert.equal(pr.projekteBearbeitenRecht(['technik'], undefined), 'write');
+  assert.equal(pr.projekteBearbeitenRecht(['stweg3-ausschuss'], undefined), 'write');
+  assert.equal(pr.projekteBearbeitenRecht(['stweg3-verwaltung'], 'write'), 'write');
+  assert.equal(pr.projekteBearbeitenRecht(['stweg3-verwaltung'], 'read'), undefined); // P2: rot
+  assert.equal(pr.projekteBearbeitenRecht(['stweg3-eigentuemer'], 'write'), undefined);
+  assert.equal(pr.projekteBearbeitenRecht(['stweg3-bewohner'], undefined), undefined);
+});
+
+test('Liste filtern nach STWEG und Status (L1)', () => {
+  const l = [{ stweg: 3, status: 'aktiv' }, { stweg: null, status: 'geplant' }, { stweg: 5, status: 'archiviert' }];
+  assert.equal(pr.projekteFiltern(l, {}).length, 3);
+  assert.deepEqual(pr.projekteFiltern(l, { stweg: '3' }), [l[0]]);
+  assert.deepEqual(pr.projekteFiltern(l, { stweg: 'allgemein' }), [l[1]]);
+  assert.deepEqual(pr.projekteFiltern(l, { status: 'aktiv,geplant' }), [l[0], l[1]]);
+});
+
+test('Teil-Update: nur gesendete Felder, leer = NULL (L4)', () => {
+  const t = pr.teilUpdate({ erledigt: true, beschreibung: '', fremd: 1 }, ['datum', 'titel', 'beschreibung', 'erledigt'], 1);
+  assert.deepEqual(t.sets, ['beschreibung = $1', 'erledigt = $2']);
+  assert.deepEqual(t.werte, [null, true]);
+  assert.deepEqual(pr.teilUpdate({}, ['datum']).sets, []);
+  assert.deepEqual(pr.teilUpdate({ a: 1 }, ['a'], 4).sets, ['a = $4']);
+});
+
+test('Zeitachse als Termin: STWEG, Kooperation = MEG, ganztägig ohne Uhrzeit (P7)', () => {
+  const p = { slug: 'dach', title: 'Dachsanierung', stweg: 3 };
+  const t = pr.terminAusEintrag(p, { datum: '2026-12-03T00:00:00.000Z', titel: 'Begehung', uhrzeit: '17:30', ort: 'Haus 9' });
+  assert.equal(t.stweg, 3);
+  assert.equal(t.start_date, '2026-12-03 17:30:00');
+  assert.equal(t.all_day, false);
+  assert.equal(t.location, 'Haus 9');
+  assert.match(t.title, /Dachsanierung: Begehung/);
+  assert.match(t.description, /projekt\/dach/);
+  const k = pr.terminAusEintrag({ ...p, stweg: null }, { datum: '2026-12-03', titel: 'Sitzung' });
+  assert.equal(k.stweg, pr.TERMIN_KOOPERATION);
+  assert.equal(k.all_day, true);
+  assert.equal(k.start_date, '2026-12-03 00:00:00');
+});
+
+test('server.js: Anlage-Token (geteilte Telefone) ändern nichts, löschen nur T/P mit Protokoll', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(src, /if \(req\.anlage\) return res\.status\(403\)\.json\(\{ error: 'Auf einem geteilten Telefon kannst du Projekte nur lesen und kommentieren/);
+  assert.ok(src.includes("app.delete('/api/projects/:slug', authMiddleware,"));
+  assert.ok(src.includes("bereich: 'projekte', aktion: 'geloescht'"));
+  assert.ok(src.includes("permissions['projekte-bearbeiten'] = 'write'"));
+  // keine Datenbank-Meldungen mehr an den Client (L10)
+  const a = src.indexOf('// POST /api/projects/:slug/candidates');
+  const b = src.indexOf('// POST /api/projects/:slug/attachments');
+  assert.ok(!/error: err\.message/.test(src.slice(a, b)));
+});
+
+test('server.js: Projekt-Dateien und Anhänge mit stabiler Kennung aus lib/unterlagen.js (P6)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.ok(src.includes("app.get('/api/projects/:slug/dokumente', authMiddleware, requireProjekteLesen, requireProjektLesen,"));
+  assert.match(src, /unterlagenLib\.kennungenFuer\(pool, zeilen\.map\(a => a\.doc_path\)\)/);
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'lib', 'unterlagen.js')));
 });

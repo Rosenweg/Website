@@ -131,6 +131,18 @@ class ImAuftragTest(unittest.TestCase):
         self.assertFalse(pbx._portal_erlaubt(regeln, t, "GET", "/api/tv/extern/tokens"))
         self.assertFalse(pbx._portal_erlaubt(regeln, "ch.rosenweg4303.salz", "GET", "/api/tv/channels"))
 
+    def test_portal_pfade_fuer_projekte(self):
+        regeln = pbx.PORTAL_PFADE_STANDARD
+        p = "ch.rosenweg4303.projekte"
+        self.assertTrue(pbx._portal_erlaubt(regeln, p, "GET", "/api/projects"))
+        self.assertTrue(pbx._portal_erlaubt(regeln, p, "GET", "/api/projects/dach"))
+        self.assertTrue(pbx._portal_erlaubt(regeln, p, "POST", "/api/projects/dach/comments"))
+        self.assertTrue(pbx._portal_erlaubt(regeln, p, "GET", "/api/documents/projekte/dach/offerte.pdf"))
+        # Projekt anlegen und fremde Apps: nein (die Haupt-API sperrt Aenderungen am Projekt zusaetzlich)
+        self.assertFalse(pbx._portal_erlaubt(regeln, p, "POST", "/api/projects"))
+        self.assertFalse(pbx._portal_erlaubt(regeln, p, "PUT", "/api/documents/projekte/dach/x.pdf"))
+        self.assertFalse(pbx._portal_erlaubt(regeln, "ch.rosenweg4303.zev", "GET", "/api/projects"))
+
 
 if __name__ == "__main__":
     unittest.main()

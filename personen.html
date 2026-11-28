@@ -42,7 +42,7 @@
                class="flex-1 min-w-[200px] border rounded px-3 py-1.5 text-sm">
         <span id="stat" class="text-xs text-gray-500"></span>
         <button onclick="loadList()" class="text-sm text-blue-600 hover:underline">Neu laden</button>
-        <button data-excel-export data-excel-source="#personen-table" data-excel-name="personen-{date}.xlsx" data-excel-sheet="Personen" class="text-sm inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded hover:bg-emerald-700">⬇ Excel</button>
+        <button type="button" id="btn-excel" onclick="personenExport()" class="text-sm inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded hover:bg-emerald-700">⬇ Excel</button>
       </div>
 
       <div class="bg-white rounded-lg shadow overflow-hidden">
@@ -152,6 +152,23 @@
   let LIST = [];
   let TELEFONE = []; // weitere Nummern (zusätzlich zu Festnetz+Mobile)
   let NUMMERN_GESPERRT = false; // echte Nummern verborgen (lib/nummernsicht.js)
+  let FELDER = { geburtsdatum: false, notiz: false }; // vom Server (GET /api/personen -> felder)
+
+  // Excel-Export: erst beim Server anmelden (Protokoll; nur Ausschuss/Verwaltung
+  // und Technik/Präsident, POST /api/objekte/export), dann im Browser erzeugen
+  async function personenExport() {
+    const btn = document.getElementById('btn-excel');
+    btn.disabled = true;
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/objekte/export', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ art: 'personen', format: 'xlsx', anzahl: LIST.length }),
+      });
+      if (!r.ok) { alert((await r.json().catch(() => ({}))).error || ('Export nicht erlaubt (' + r.status + ')')); return; }
+      await RosenwegExcel.fromTable('#personen-table', 'personen-{date}.xlsx', 'Personen');
+    } catch (e) { alert('Excel-Export fehlgeschlagen: ' + e.message); }
+    finally { btn.disabled = false; }
+  }
 
   const TELEFON_TYPEN = [
     { key: 'mobile2', label: 'Mobile (zweite)' },
@@ -198,6 +215,9 @@
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const data = await r.json();
       LIST = data.personen || [];
+      // Geburtsdatum nur Technik/Präsident, Notiz nur Ausschuss und Technik/Präsident
+      // (Server: felder, api/lib/personen-rechte.js); verborgene Felder nicht zeigen
+      if (data.felder) FELDER = data.felder;
       document.getElementById('stat').textContent = `${LIST.length} Personen`;
       render();
     } catch (e) {
@@ -248,6 +268,8 @@
     document.getElementById('m-telefon').value = p.telefon || '';
     document.getElementById('m-mobile').value = p.mobile || '';
     document.getElementById('m-geb').value = p.geburtsdatum ? String(p.geburtsdatum).slice(0,10) : '';
+    document.getElementById('m-geb').closest('label').classList.toggle('hidden', !FELDER.geburtsdatum);
+    document.getElementById('m-notiz').closest('label').classList.toggle('hidden', !FELDER.notiz);
     document.getElementById('m-adresse').value = p.adresse || '';
     document.getElementById('m-notiz').value = p.notiz || '';
     TELEFONE = Array.isArray(p.telefone) ? p.telefone.slice() : [];
@@ -287,6 +309,8 @@
       notiz: document.getElementById('m-notiz').value.trim() || null,
     };
     if (id && NUMMERN_GESPERRT) { delete payload.telefon; delete payload.mobile; delete payload.telefone; }
+    if (!FELDER.geburtsdatum) delete payload.geburtsdatum;
+    if (!FELDER.notiz) delete payload.notiz;
     try {
       const url = id ? `/api/personen/${id}` : '/api/personen';
       const r = await AuthentikAuth.apiFetch(url, {

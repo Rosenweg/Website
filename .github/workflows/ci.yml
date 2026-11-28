@@ -10,9 +10,17 @@ permissions:
   contents: read
 
 jobs:
+  # Runner-Wahl (Rosenweg/rosenweg-basis, runner-wahl.yml): privat immer eigene,
+  # oeffentlich eigene wenn frei oder zuschaltbar, Forks nie. macOS bleibt bei GitHub.
+  wahl:
+    uses: Rosenweg/rosenweg-basis/.github/workflows/runner-wahl.yml@main
+    secrets:
+      PAKETE_APP_ID: ${{ secrets.PAKETE_APP_ID }}
+      PAKETE_APP_KEY: ${{ secrets.PAKETE_APP_KEY }}
+
   syntax-check:
-    # eigene Runner (CT 140/145), Fork-PRs auf GitHub-Runnern
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Linux","rosenweg"]') || 'ubuntu-latest' }}
+    runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    needs: wahl
     steps:
       - uses: actions/checkout@v4
 
@@ -58,6 +66,12 @@ jobs:
           "$RUNNER_TEMP/pbx/bin/pip" install --quiet -r pbx/api/requirements.txt
           cd pbx/api && "$RUNNER_TEMP/pbx/bin/python" -m unittest test_karten_verwalter test_apps_stand test_fernwartung test_nextcloud_zugang test_hintergrund -v
 
+      # PHP fehlt auf den eigenen Runnern (Debian ohne php-cli)
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+
       - name: Z-Push-Sicht je Konto (PHP, Befund F1-7)
         run: |
           php -l zpush/sicht.php
@@ -66,8 +80,8 @@ jobs:
 
   kerberos-pruefer:
     # Prueft Kerberos-Tickets der Agent-Anmeldung (api/kerberos-pruefer, Protokoll v2)
-    # eigene Runner (CT 140/145), Fork-PRs auf GitHub-Runnern
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Linux","rosenweg"]') || 'ubuntu-latest' }}
+    runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    needs: wahl
     defaults:
       run:
         working-directory: api/kerberos-pruefer
@@ -83,8 +97,8 @@ jobs:
   adb-zentrale:
     # Endpunkt des adb-Tunnels der geteilten Telefone (pbx/adb-zentrale): Format, vet, Tests
     # mit echtem WireGuard-Handshake (Netzstapel im Prozess, kein Root noetig), Skripte
-    # eigene Runner (CT 140/145), Fork-PRs auf GitHub-Runnern
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Linux","rosenweg"]') || 'ubuntu-latest' }}
+    runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    needs: wahl
     defaults:
       run:
         working-directory: pbx/adb-zentrale
@@ -101,8 +115,8 @@ jobs:
 
   edge-plugin:
     # Eigenes Traefik-Plugin (edge-traefik/plugins/echteip): Format, vet, Tests
-    # eigene Runner (CT 140/145), Fork-PRs auf GitHub-Runnern
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Linux","rosenweg"]') || 'ubuntu-latest' }}
+    runs-on: ${{ fromJSON(needs.wahl.outputs.linux) }}
+    needs: wahl
     defaults:
       run:
         working-directory: edge-traefik/plugins/echteip

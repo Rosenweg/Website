@@ -136,7 +136,7 @@
             currentHash = hash;
             $('snapshot-meta').textContent = 'Lade…';
             const r = await AuthentikAuth.apiFetch(`/api/unterschriftenliste/${hash}/rueckläufe`);
-            if (!r.ok) { $('snapshot-meta').textContent = 'Fehler beim Laden'; return; }
+            if (!r.ok) { $('snapshot-meta').textContent = (await r.json().catch(() => ({}))).error || 'Fehler beim Laden'; return; }
             const d = await r.json();
             const s = d.snapshot;
             $('snapshot-meta').textContent = `STWEG ${s.stweg} · ${escapeHtml(s.anlass_titel)} · Generiert ${new Date(s.generated_at).toLocaleString('de-CH', { timeZone: 'Europe/Zurich' })} · Hash ${s.hash}`;
@@ -225,7 +225,7 @@
                 headers: {'Content-Type':'application/json'},
                 body: JSON.stringify({ retourniert_am: retDate, vote, notiz }),
             });
-            if (!r.ok) { alert('Speichern fehlgeschlagen'); return; }
+            if (!r.ok) { alert((await r.json().catch(() => ({}))).error || 'Speichern fehlgeschlagen'); return; }
             // Lokal aktualisieren + Stats neu
             const b = currentBriefe.find(x => x.brief_idx == idx);
             if (b) { b.retourniert_am = retDate; b.vote = vote; b.notiz = notiz; }

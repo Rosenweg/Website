@@ -207,7 +207,11 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `GET /api/public/ausschuss`, `/api/public/technik`, `/api/verwaltungen/public` | öffentliche Kontakte |
 | `GET /api/stweg/:stweg/wohnungen` | ohne Anmeldung nur `anzahl` (`eingeschraenkt: true`); Belegung, Besonderheiten, Wertquote je Wohnung nur mit Anmeldung als Mitglied der STWEG, ihre Verwaltung, T/P (F1, 28.11.2026) |
 | `GET /api/stweg/:stweg/overview` | Zahlen zur STWEG (ohne Namen) |
-| `GET /api/stweg-modules`, `/api/stweg-sections/:stweg` | Inhalte der STWEG-Seiten (öffentlich; der Editor weist darauf hin). `/api/stweg-content` ist seit 28.11.2026 entfernt |
+| `GET /api/stweg-modules` | aktive Module je STWEG (bekannt: nur `waschkueche`; `seiten-editor` entfällt) |
+| `GET /api/stweg/meine` | Gemeinschaften des Kontos (Rolle, `darf`, Module, `dokZugang`) für Rosenweg STWEG; `kooperation.schreiben` |
+| `GET /api/stweg/:nr/mitteilungen` | Mitteilungen (Markdown `text` und gerendertes `html`); `nr` 0 = Kooperation; ohne Anmeldung nur `oeffentlich`; `?wichtig=1`; Schreibende sehen mit `?alle=1` auch abgelaufene |
+| `GET /api/stweg-bilder/:id` | Bild einer Mitteilung (Sicht wie die Mitteilung) |
+| `GET /api/stweg/:nr/kontakte.pdf`, `/wohnungen.pdf`, `GET /api/meg/einstellplaetze.pdf` | PDF mit Vermerk „vertraulich“ (Einstellplätze nur Verwalter der MEG) |
 | `GET /api/verteiler/by-stweg/:stweg` | Namen und Adressen der Verteiler einer STWEG |
 | `GET /api/calendar` | Termine (503, wenn `GOOGLE_CALENDAR_ICS_URL` fehlt) |
 | `GET /api/public/project/:slug`, `…/document/:path` | öffentlich geschaltete Projekte: Kandidaten nur `id, name, webseite, status`, nur als öffentlich markierte Anhänge (`oeffentlich`) |
@@ -247,8 +251,8 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `GET /api/admin/groups`, `PUT /api/admin/groups/:pk/add_user|remove_user` | Recht `bewohner-verwaltung`; Nicht-T/P nur eigene Bewohner-/Eigentümer-Gruppen; Gruppen-IDs nur als UUID |
 | `GET/PUT /api/admin/pending-deletions…`, `GET /api/admin/mail-chain` | T/P |
 | `GET/PUT /api/permissions`, `GET /api/permissions/pages` | Recht `rechteverwaltung` |
-| `GET /api/personen`, `/api/personen/:id` | Recht `wohnungsverwaltung:read`, nur eigene STWEG(s) |
-| `PUT /api/personen/:id`, `POST /api/personen`, `POST /api/personen/merge`, `GET /api/personen-dedup/kandidaten` | Recht `wohnungsverwaltung:write`; geschützte Personen nur T/P (409) |
+| `GET /api/personen`, `/api/personen/:id` | Recht `wohnungsverwaltung:read`, nur eigene STWEG(s); `geburtsdatum` nur T/P, `notiz` nur Ausschuss und T/P (Antwort `felder`) |
+| `PUT /api/personen/:id`, `POST /api/personen`, `POST /api/personen/merge`, `GET /api/personen-dedup/kandidaten` | Recht `wohnungsverwaltung:write`; ändern/zusammenführen Ausschuss und Verwaltung nur eigene STWEG, geschützte Personen nur T/P (409); Zusammenführen hängt alle Verweise um (Antwort `umgehaengt`); protokolliert |
 | `GET /api/users` | T/P; `GET /api/users/:id` nur eigene Zeile oder T/P |
 
 ### 4.4 STWEG-Verwaltung (`wohnungen`, `zev`, `unterschriftenliste`, `verwaltungen`, `stweg*`)
@@ -256,7 +260,9 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | Route | Wer |
 |---|---|
 | `GET /api/wohnungen/:stweg`, `…/:id`, `…/stats` | Recht `wohnungsverwaltung:read` + Gruppe dieser STWEG (T/P immer) |
-| `POST/PUT/DELETE /api/wohnungen/:stweg…`, `POST …/import`, `POST …/kontakte/:kid/archive` | Recht `wohnungsverwaltung:write` + `requireStwegWrite` (A🅢, T/P, Verwaltung mit Gruppe der STWEG) → sonst 403 „Schreiben nur für den Ausschuss dieser STWEG“ |
+| `POST/PUT /api/wohnungen/:stweg…`, `POST …/kontakte/:kid/archive` | Recht `wohnungsverwaltung:write` + `requireStwegWrite` (A🅢, T/P, Verwaltung mit Gruppe der STWEG) → sonst 403 „Schreiben nur für den Ausschuss dieser STWEG“; protokolliert (`admin_protokoll`, Bereich `objekte`) |
+| `DELETE /api/wohnungen/:stweg/:id`, `POST …/import` | nur T/P, protokolliert |
+| `POST /api/objekte/export` | Export vorher anmelden: `{ art: wohnungen\|eigentuemer\|personen, stweg?, format?, anzahl? }`; mit `stweg` Ausschuss/Verwaltung dieser STWEG oder T/P, sonst Ausschuss/Verwaltung/T/P; protokolliert |
 | `GET /api/wohnungen/:stweg/:id/historie` | T/P, Verwaltung, Ausschuss (mit Zugang zur STWEG) |
 | `GET /api/wohnungen/eigentuemer-uebersicht` | Recht `wohnungsverwaltung:read` |
 | `GET/PUT /api/zev/config/:stweg`, `GET /api/zev/wohnungen/:stweg`, `POST /api/zev/sync/:stweg` | Recht `wohnungsverwaltung` + Ausschuss/Verwaltung **dieser** STWEG oder T/P (`requireZevAdmin`, `lib/zev.js` `zevAdminFuerStweg`; eine andere Gruppe der STWEG reicht seit 28.11.2026 nicht mehr). PUT/POST zusätzlich `requireStwegWrite`; Alias-Domain/-Prefix nur T/P. `sync` = Aliase in Mailcow abgleichen (keine smart-me-Schnittstelle) |
@@ -268,16 +274,17 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `GET /api/zev/neuigkeiten` | angemeldet, für die Hintergrundabfrage der App: eigene Rechnungen (`id, objekt, betrag_chf, zeitraum_*_iso, bezahlt`) und für Admins unzugeordnete (`id, stweg, empfangen_am`) |
 | `GET /api/zev/wechsel/:stweg` | wie `config`: Meldungen an den Messdienst mit Status in der Freigabe-Outbox |
 | `GET /api/unterschriftenliste/:stweg.pdf` | Recht `wohnungsverwaltung:read` + `requireStwegWrite` |
-| `GET/PUT /api/unterschriftenliste/:hash/rueckläufe…` | lesen mit Zugang zur STWEG, schreiben mit `stwegSchreibErlaubt` |
+| `GET/PUT /api/unterschriftenliste/:hash/rueckläufe…` | lesen und schreiben nur Ausschuss/Verwaltung dieser STWEG und T/P (`zevAdminFuerStweg` bzw. `stwegSchreibErlaubt`); schreiben protokolliert; Listen 10 Jahre aufbewahrt |
 | `GET /api/stweg/:nr/kontakte`, `GET /api/kontakte/:stweg` | Gruppe dieser STWEG oder T/P; `PUT /api/kontakte` nur T/P |
-| `GET/POST/PUT/DELETE /api/verwaltungen…` | Ausschuss/T/P; Ausschuss liest eigene + STWEG-übergreifende, ändert nur eigene |
+| `GET/POST/PUT/DELETE /api/verwaltungen…` | Ausschuss/T/P; Ausschuss liest eigene + STWEG-übergreifende, ändert nur eigene; die Hausverwaltung (`stwegN-verwaltung`) liest ihren eigenen Eintrag ohne Plattform-Passwort und Notizen und ändert nur Kontaktpersonen und Kontaktdaten (PUT, `…/kontakte`); anlegen/löschen nicht |
 | `GET /api/verwaltungen/kontakte` | angemeldet, gefiltert nach Sichtbarkeitsstufe und STWEG |
-| `POST /api/stweg-modules`, `/api/stweg-sections/:stweg/:section` | A🅢 oder T/P; Inhalte nur, wenn das Modul Seiten-Editor aktiv ist; `GET /api/stweg-sections-rechte` liefert die STWEGs, die das Konto speichern darf |
+| `POST /api/stweg-modules` | A🅢 oder T/P; nur bekannte Module (`waschkueche`) |
+| `POST/PUT/DELETE /api/stweg/:nr/mitteilungen[/:id]`, `POST /api/stweg/:nr/bilder` | Technik/Präsident; sonst Seitenrecht `stweg-mitteilungen` = write UND Ausschuss oder Verwaltung dieser STWEG; Kooperation (nr 0) nur T/P. Löschen blendet aus; `GET …/:id/verlauf` zeigt die Fassungen. Die alten Abschnitte (`stweg_sections`) werden beim Start als Mitteilungen übernommen |
 | `GET /api/stweg/:nr/kontakte` | Mitglieder der STWEG (auch Mieter), ihre Verwaltung, T/P alle; nur Kontakte, die schon gelten (`gueltig_ab` leer oder erreicht) |
 | `GET /api/stweg/:stweg/events` | Gruppe dieser STWEG; `POST`, `PUT /:id`, `DELETE /:id`: T/P oder Recht `stweg-termine` schreiben + Ausschuss/Verwaltung dieser STWEG (`lib/termine.js`), Fehler am Feld `{error, feld}` |
 | `GET /api/termine?stweg=` | Rosenweg Termine: Termine der eigenen STWEG(s) in einer Liste (`stwegs` je Termin), `stwegs` mit `schreiben` und `kalender` (Nextcloud-Kalender aus `TERMINE_NEXTCLOUD_KALENDER`, sonst null); `stweg=3,5` oder `alle` (T/P alle, sonst nur sichtbare → 403) |
 | `GET/POST /api/meg/einstellplaetze` | lesen nur MEG (Mitglieder, MEG-Ausschuss, MEG-Verwaltung, T/P; fremde Plätze ohne Personendaten), sonst 403; schreiben MEG-Ausschuss, MEG-Verwaltung oder T/P; `/rechte` liefert `verwalten`, `sehen` |
-| `/api/grundbuch/*` | angemeldet; Namen/Adressen nur Ausschuss/T/P oder wer erfasst hat; verifizieren Ausschuss/T/P; OCR 30 / Std. |
+| `/api/grundbuch/*` | angemeldet; erfassen/OCR nur Eigentümer, Ausschuss, T/P (keine Mieter), STWEG-gebunden (`grundbuch_anteile.stweg`); Namen/Adressen nur Ausschuss der STWEG, T/P oder wer erfasst hat; verifizieren Ausschuss der STWEG/T/P; OCR nur mit `parzelle`, `sub_id`, `bestaetigt_extern: true`, nicht per PAT/MCP, 30 / Std.; `PUT /parzellen/:p/stweg` nur T/P; `GET /parzellen/vorschlag` nur T/P, nur lesen (Parzelle, Vorschlag, Sicherheit, Zahlen; keine Namen) |
 | `/api/vollmachten*` | angemeldet: eigene; Ausschuss und Verwaltung sehen ihre STWEG nur mit Recht `vollmachten` (Ausschuss Vorgabe lesen); T/P alle; für andere erfassen T/P und Verwaltung mit `vollmachten` = schreiben; Admin-Upload für alle Geber nur T/P mit `?als=admin`. Erfassen/Signieren/Hochladen als Geber nur Eigentümer bzw. Wohnungs-Verwalter der Wohnung oder STWEG (ohne Objekt 403); Liste mit `darf_erteilen`, je Zeile `darf_widerrufen`, `darf_papier_aktivieren`, `darf_ki_pruefen`. `signed_ip`, `signed_user_agent`, `signed_authentik_sub` (und `digital_signed_*`) nur für T/P, auch auf dem PDF |
 | `POST /api/vollmachten/:id/sign-digital` | nur frisch angemeldet (Website/App, ≤ `STUFE_FRISCH_MIN` Min.), nie mit PAT, MCP (`X-Rosenweg-Kanal: mcp`), Karte oder Anlage-Token: sonst 403 `{reauth, fehler:'frisch'}` |
 | `POST /api/vollmachten/:id/verify-ai` `{bestaetigt_extern:true}` | KI-Prüfung (PDF an OpenRouter/Anthropic): nur T/P und Verwaltung der STWEG mit Recht `vollmachten`, nicht per PAT/MCP; ohne Bestätigung 400 `bestaetigung_noetig` |
@@ -304,6 +311,8 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `GET/POST/PUT/DELETE /api/auslagen…`, Belege, Positionen, `scan-beleg` | Recht `auslagen:read`; sehen: Ersteller, A🅢, T/P (Entwürfe nur Ersteller und T/P); Status ändern A🅢/T/P, keine Selbstgenehmigung; „ausbezahlt“ T/P/Verwaltung bzw. Ersteller („erhalten“); Scan 30 / Std. |
 | `PUT/DELETE /api/auslagen-stundensatz` | Recht `auslagen-stundensatz:write` |
 | `/api/projects…` | lesen je Projekt (`projektLesen`, 28.11.2026): Eigentümer der STWEG des Projekts, Ausschuss der STWEG (auch ohne Eigentümergruppe), Verwaltung der STWEG mit Recht `projekte`, Projekte ohne STWEG (Kooperation) jeder Eigentümer/Ausschuss/jede Verwaltung mit Recht, T/P alle; `GET /api/projects` liefert nur lesbare (mit `darf_bearbeiten`), `/:slug` sonst 403; Kommentare ohne `user_email` (dafür `eigener`); `/:slug/auslagen` mit `user_email` nur für T/P und Verwaltung der STWEG; `GET /api/projects-mini` und `/api/doodle/projects` nur lesbare; Doodle-Umfragen mit `project_slug` nur für Leser des Projekts, Ersteller und Eingeladene; `PUT /:slug/public` `{public_access, bestaetigt}` (einschalten nur mit `bestaetigt:true`), `PUT /:slug/attachments/:id/public` `{oeffentlich, bestaetigt}`; kommentieren: Eigentümer (lesbare Projekte); anlegen (`POST /api/projects`) und bearbeiten: T/P, Ausschuss der STWEG des Projekts, Verwaltung der STWEG mit `projekte` = schreiben; Projekte der ganzen Kooperation (`stweg` leer) jeder Ausschuss bzw. eine Verwaltung aller STWEGs (`lib/projekte-rechte.js`) |
+| `/api/handwerker*`, `/api/handwerker-events`, `/api/handwerker-notfall` | Recht `handwerker`, dazu STWEG-gebunden (`api/lib/handwerker-rechte.js`): Verwaltung liest/schreibt Verträge, Einsätze, Zuordnungen ihrer STWEG, Ausschuss liest; Stammdaten ändert die Verwaltung bei Firmen ihrer STWEG und des gemeinsamen Stamms (protokolliert), archivieren nur eigene; „alle STWEG“-Verträge/Zuordnungen, Event-Typen und hartes Löschen nur T/P; `PUT /api/handwerker/:id/zuweisungen` für Zuordnungen an Firmen des gemeinsamen Stamms |
+| `/api/projects…` | lesen je Projekt (`projektLesen`, 28.11.2026): Eigentümer der STWEG des Projekts, Ausschuss der STWEG (auch ohne Eigentümergruppe), Verwaltung der STWEG mit Recht `projekte`, Projekte ohne STWEG (Kooperation) jeder Eigentümer/Ausschuss/jede Verwaltung mit Recht, T/P alle; `GET /api/projects` liefert nur lesbare (mit `darf_bearbeiten`), `/:slug` sonst 403; Kommentare ohne `user_email` (dafür `eigener`); `/:slug/auslagen` mit `user_email` nur für T/P und Verwaltung der STWEG; `GET /api/projects-mini` und `/api/doodle/projects` nur lesbare; Doodle-Umfragen mit `project_slug` nur für Leser des Projekts, Ersteller und Eingeladene; `PUT /:slug/public` `{public_access, bestaetigt}` (einschalten nur mit `bestaetigt:true`), `PUT /:slug/attachments/:id/public` `{oeffentlich, bestaetigt}`; kommentieren: wer das Projekt lesen darf, auch die Verwaltung (`PUT/DELETE /:slug/comments/:id` für eigene Kommentare 15 Minuten, `DELETE` sonst Bearbeiter); `DELETE /api/projects/:slug` nur T/P mit `bestaetigt` und Protokoll (`admin_protokoll`, Bereich `projekte`); `PUT` auf Zeitachse und Kandidaten ändert nur die gesendeten Felder; Zeitachse mit `als_termin` legt einen Termin in Rosenweg Termine an (`stweg_events.projekt_slug`); auf geteilten Telefonen (Anlage-Token) nur lesen und kommentieren; `/api/auth/me` liefert abgeleitet `projekte-bearbeiten` = write (Farbe blau in der App Rosenweg Projekte); anlegen (`POST /api/projects`) und bearbeiten: T/P, Ausschuss der STWEG des Projekts, Verwaltung der STWEG mit `projekte` = schreiben; Projekte der ganzen Kooperation (`stweg` leer) jeder Ausschuss bzw. eine Verwaltung aller STWEGs (`lib/projekte-rechte.js`) |
 | `/api/handwerker*`, `/api/handwerker-events`, `/api/handwerker-notfall` | Recht `handwerker` |
 | `GET /api/dashboard`, `POST /api/ki-search` (30 / Min.), `GET /api/telefonbuch` | angemeldet, Inhalt nach Rolle gefiltert |
 
@@ -315,14 +324,18 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `/api/verwaltung-mail-queue*` | T/P; `POST …/:id/freigeben` nach Freigabe-Regel (`mail_approval_config`), schon freigegeben → 409 |
 | `GET /api/verwaltung-mail-queue/zur-freigabe?seit=` | angemeldet; nur Mails, die die Person jetzt freigeben kann (Gruppe der Regel, noch nicht selbst freigegeben), mit Vorschau; `seit` (ISO) = neu eingestellt oder bearbeitet seitdem; Antwort `{mails, anzahl, jetzt}` (Rosenweg Mail-Freigabe) |
 | `/api/mail-templates`, `/api/mail-approval-config` | T/P |
-| `/api/mail-empfänger` | Recht `mail-empfänger` |
+| `/api/mail-empfänger` | Recht `mail-empfänger`; `GET` für Ausschuss/Verwaltung nur Einträge ihrer STWEG(s) und STWEG-übergreifende (`stweg` NULL), fremde `?stweg=` → 403 |
 | `/api/verteiler*`, `POST /api/verteiler/send`, `POST /api/email/send`, `/api/email/log`, `/api/dmarc/reports`, `/api/email/quota` | T/P |
 | `GET /api/verteiler`, `POST /api/verteiler/send` (nur `verteiler_id`) | zusätzlich Verwaltung mit Recht `email-verteiler`: nur aktive Verteiler ihrer STWEG(s), ohne Mitgliederliste (`lib/verteiler-verwaltung.js`) |
+| `POST /api/verteiler/send` mit `Idempotency-Key` (Kopf oder Feld `idempotency_key`, 8–128 Zeichen) | dieselbe Rundmail geht höchstens einmal hinaus (24 h je Konto): Wiederholung → gespeicherte Antwort mit `Idempotent-Replayed: true`; läuft noch/unterbrochen → 409; anderer Inhalt → 422. Ging nichts hinaus, ist der Schlüssel wieder frei |
+| `POST /api/verwaltung-mail-queue/:id/freigeben` | zusätzlich: nicht durch Ersteller oder letzte Bearbeitende (Konto-ID, auch T/P) → 403 `vier_augen` |
 | `GET /api/email-log` | T/P |
-| `/api/email-archive*` | Ausschuss (jede STWEG) oder T/P; Löschen nach 4-Augen-Prinzip, höchstens ein offener Antrag je Mail |
+| `/api/email-archive*` | Recht `email-archiv` + Ausschuss/Verwaltung (eigene STWEG + `haus`) oder T/P; Lesen, Anhang, Suche, Export protokolliert (`/protokoll` nur T/P); Löschen nach 4-Augen (andere Konto-ID, gleiche STWEG oder T/P), höchstens ein offener Antrag je Mail; nach 10 Jahren anonymisiert |
 | `GET /api/documents`, `GET /api/documents/:path` | angemeldet; `allgemein`, `scans`, eigene STWEG, `projekte` für Eigentümer; gesperrte Unterordner nur T/P |
 | `POST/PUT/DELETE /api/documents…`, `POST /api/documents/move` | Ausschuss (eigene STWEG, `allgemein`, `projekte`) oder T/P |
+| `GET /api/documents-ordner?path=`, `-suche?q=`, `-neu?seit=&ordner=`, `-rechte`, `-kennung/:id`, `-fassungen?path=`, `-fassungen/:id/datei` | angemeldet, Rechte wie `GET /api/documents` (Pfad für Pfad); nur lesend. Für die App Rosenweg Unterlagen: eine Ordnerebene mit Datum, Typ, ETag, Kennung und `schreiben` je Eintrag; Suche nach Name und Pfad; neue Dateien seit einer Zeit (per mtime, also auch Samba/Nextcloud); wo man schreiben darf; stabile Kennung → Datei; frühere Fassungen (beim Ersetzen, 30 Tage). `alles=1` (auch Druckertreiber, `.DS_Store`, `desktop.ini`) nur T/P. Code: `api/lib/unterlagen.js` |
 | `GET /api/briefe`, `POST /api/briefe/upload` | Ausschuss oder T/P |
+| `GET /api/briefe`, `GET /api/briefe/:datei/bild`, `POST /api/briefe/upload`, `POST /api/briefe/:datei/loeschantrag`, `…/loeschentscheid` | Ausschuss (eigene STWEG) oder T/P; Upload nur mit `stweg` und `bestaetigt_extern: true`, nicht per PAT/MCP, Tageslimit je Konto; `PUT /api/briefe/:datei/stweg` nur T/P |
 
 ### 4.8 Energie
 

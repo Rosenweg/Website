@@ -101,6 +101,17 @@ http:
         certResolver: cf
         domains:
           - main: pwa.rosenweg4303.ch
+    # speedtest.rosenweg4303.ch -> LibreSpeed (CT 146, 100.64.2.64) fuer die Rosenweg-Internet-App.
+    # NUR intern: Name existiert nur im internen DNS (nicht in Cloudflare) + ipAllowList 100.64.0.0/10.
+    speedtest-rw4303:
+      entryPoints: [websecure]
+      rule: Host(`speedtest.rosenweg4303.ch`)
+      service: speedtest-lxc-svc
+      middlewares: [speedtest-nur-intern]
+      tls:
+        certResolver: cf
+        domains:
+          - main: speedtest.rosenweg4303.ch
     # access.rosenweg4303.ch -> www-Frontend (Zutrittsverwaltung + PWA). "/" -> /access.html.
     access-root-rw4303:
       entryPoints: [websecure]
@@ -249,6 +260,13 @@ http:
       middlewares: [authentik-fwd, heizung4303-to-view]
       tls: { certResolver: cf }
   middlewares:
+    speedtest-nur-intern:
+      ipAllowList:
+        sourceRange:
+          - 100.64.0.0/10
+          - 10.0.0.0/8
+          - 172.16.0.0/12
+          - 192.168.0.0/16
     # Catch-all auf heizung.rosenweg9.ch -> direkt in die View (statt Editor).
     # Regex hostunabhaengig: Host() matcht ohne Gross-/Kleinschreibung, die Regex
     # nicht -> "HEIZUNG.rosenweg9.ch" lief frueher ungefiltert zu ioBroker durch.
@@ -296,6 +314,11 @@ http:
         passHostHeader: true
         servers:
           - url: http://100.64.2.41
+    speedtest-lxc-svc:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: http://100.64.2.64
     pwa-lxc-svc:
       loadBalancer:
         passHostHeader: true

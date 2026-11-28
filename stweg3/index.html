@@ -116,7 +116,7 @@
             })();
             </script>
 
-            <!-- STWEG-Inhaltsabschnitte (Modul "seiten-editor") — server-sanitisiertes HTML -->
+            <!-- STWEG-Mitteilungen (Rosenweg STWEG) — server-sanitisiertes HTML -->
             <style>
               .stweg-richtext table { border-collapse: collapse; width: 100%; margin: .5rem 0; }
               .stweg-richtext td, .stweg-richtext th { border: 1px solid #d1d5db; padding: .4rem .6rem; }
@@ -132,32 +132,28 @@
             </style>
             <div id="stweg-sections" class="space-y-6 mb-8"></div>
             <script>
+            // Mitteilungen der STWEG (Rosenweg STWEG): Markdown, vom Server zu sanitisiertem HTML gerendert.
+            // Ohne Anmeldung nur oeffentliche; angemeldet je nach Sichtbarkeit auch Bewohner-/Eigentuemer-Mitteilungen.
             (function() {
                 const N = 3;
-                const SECTIONS = [
-                    { key: 'willkommen', title: 'Willkommen' },
-                    { key: 'aktuelles',  title: 'Aktuelles' },
-                    { key: 'termine',    title: 'Termine' },
-                    { key: 'infos',      title: 'Wichtige Infos' },
-                ];
-                fetch('/api/stweg-modules').then(r => r.ok ? r.json() : {}).catch(() => ({})).then(m => {
-                    if (!((m[N] || []).includes('seiten-editor'))) return;
-                    fetch('/api/stweg-sections/' + N).then(r => r.ok ? r.json() : {}).catch(() => ({})).then(data => {
-                        const wrap = document.getElementById('stweg-sections');
-                        SECTIONS.forEach(s => {
-                            const html = ((data[s.key] && data[s.key].html) || '').trim();
-                            if (!html) return;
-                            const card = document.createElement('div');
-                            card.className = 'bg-white rounded-lg shadow p-6';
-                            const h = document.createElement('h2');
-                            h.className = 'text-2xl font-bold text-gray-800 mb-3';
-                            h.textContent = s.title;
-                            const body = document.createElement('div');
-                            body.className = 'stweg-richtext text-gray-700 leading-relaxed';
-                            body.innerHTML = html; // serverseitig sanitisiert (sanitize-html)
-                            card.appendChild(h); card.appendChild(body);
-                            wrap.appendChild(card);
+                const holen = (url) => (window.AuthentikAuth && AuthentikAuth.apiFetch ? AuthentikAuth.apiFetch(url) : fetch(url));
+                holen('/api/stweg/' + N + '/mitteilungen').then(r => r.ok ? r.json() : { mitteilungen: [] }).catch(() => ({ mitteilungen: [] })).then(data => {
+                    const wrap = document.getElementById('stweg-sections');
+                    (data.mitteilungen || []).forEach(m => {
+                        const card = document.createElement('div');
+                        card.className = 'bg-white rounded-lg shadow p-6';
+                        const h = document.createElement('h2');
+                        h.className = 'text-2xl font-bold text-gray-800 mb-3';
+                        h.textContent = (m.wichtig ? '❗ ' : '') + m.titel;
+                        const body = document.createElement('div');
+                        body.className = 'stweg-richtext text-gray-700 leading-relaxed';
+                        body.innerHTML = m.html; // serverseitig aus Markdown gerendert und sanitisiert (sanitize-html)
+                        // Bilder nicht oeffentlicher Mitteilungen brauchen die Anmeldung: mit Token nachladen
+                        body.querySelectorAll('img[src^="/api/stweg-bilder/"]').forEach(img => {
+                            holen(img.getAttribute('src')).then(r => r.ok ? r.blob() : null).then(b => { if (b) img.src = URL.createObjectURL(b); }).catch(() => {});
                         });
+                        card.appendChild(h); card.appendChild(body);
+                        wrap.appendChild(card);
                     });
                 });
             })();
@@ -721,7 +717,7 @@
                         });
                         if (!prot.length) { box.innerHTML = ''; return; }
                         const dated = prot.filter(f => dateOf(f)).sort((a, b) => dateOf(b) - dateOf(a));
-                        const f = dated[0] || prot.sort((a, b) => (b.modified || 0) - (a.modified || 0))[0];
+                        const f = dated[0] || prot.sort((a, b) => String(b.geaendert || '').localeCompare(String(a.geaendert || '')))[0];
                         const d = dateOf(f);
                         const dateStr = d ? new Date(d).toLocaleDateString('de-CH', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
                         const title = dateStr ? 'Sitzung vom ' + esc(dateStr) : esc(f.path.split('/').pop());
@@ -759,12 +755,13 @@
             png: '&#128247;', jpg: '&#128247;', jpeg: '&#128247;', txt: '&#128196;',
         };
 
-        fetch('/api/documents', { headers: { Authorization: 'Bearer ' + token } })
+        // Die API liefert das Aenderungsdatum als geaendert (ISO); ?path= laedt nur stweg3
+        fetch('/api/documents?path=stweg3', { headers: { Authorization: 'Bearer ' + token } })
             .then(r => r.json())
             .then(files => {
                 const stweg3 = (files || [])
-                    .filter(f => f.path.startsWith('stweg3/') && !f.path.includes('/.') && !f.path.endsWith('/'))
-                    .sort((a, b) => (b.modified || 0) - (a.modified || 0))
+                    .filter(f => f.path.startsWith('stweg3/') && !f.path.includes('/.') && !f.path.endsWith('/') && !f.ordner)
+                    .sort((a, b) => String(b.geaendert || '').localeCompare(String(a.geaendert || '')))
                     .slice(0, 8);
 
                 const el = document.getElementById('docs-widget');

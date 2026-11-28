@@ -179,8 +179,11 @@ class HintergrundTest(_Basis):
 
 
 class _Ok:
-    def __init__(self, ok=True, status=200):
-        self.ok, self.status_code = ok, status
+    def __init__(self, ok=True, status=200, daten=None):
+        self.ok, self.status_code, self._daten = ok, status, daten or {}
+
+    def json(self):
+        return self._daten
 
 
 class PersonLoeschenTest(_Basis):
@@ -326,6 +329,54 @@ class PersonLoeschenTest(_Basis):
         self.assertTrue(d["ok"], d)
         self.assertTrue(self.pjsip_m.called)
         self.assertIsNone(self.eins("SELECT 1 FROM telefon_nextcloud"))
+
+    def loeschen_mit(self, body):
+        return self.c.post("/api/pbx/person/loeschen", json=body, headers={"X-PBX-Secret": "pbx-geheim"})
+
+    def test_nextcloud_konto_nur_wenn_verlangt(self):
+        """Ohne schritte (aeltere Haupt-API) wie bisher; das Nextcloud-Konto nur auf Verlangen."""
+        self.loeschen(ANNA)
+        self.assertNotIn("http://nc-token.test/konto-loeschen", [c.args[0] for c in self.nc_m.call_args_list])
+        self.nc_m.reset_mock()
+        self.nc_m.return_value = _Ok(daten={"geloescht": ["anna"]})
+        d = self.loeschen_mit({"email": ANNA, "schritte": ["nextcloud_konto"]}).get_json()
+        self.assertTrue(d["ok"], d)
+        self.assertEqual(list(d["schritte"]), ["nextcloud_konto"])
+        self.assertEqual(d["schritte"]["nextcloud_konto"]["konten"], 1)
+        self.assertEqual(self.nc_m.call_args.args, ("http://nc-token.test/konto-loeschen",))
+        self.assertEqual(self.nc_m.call_args.kwargs["json"], {"email": ANNA})
+
+    def test_nextcloud_konto_fehlt_oder_admin(self):
+        self.nc_m.return_value = _Ok(False, 404)
+        d = self.loeschen_mit({"email": ANNA, "schritte": ["nextcloud_konto"]}).get_json()
+        self.assertTrue(d["ok"], d)                          # kein Konto = erledigt
+        self.nc_m.return_value = _Ok(False, 409)
+        d = self.loeschen_mit({"email": ANNA, "schritte": ["nextcloud_konto"]}).get_json()
+        self.assertFalse(d["ok"])                            # Admin: bleibt offen
+        self.assertIn("409", d["schritte"]["nextcloud_konto"]["fehler"])
+
+    def test_wiederholung_nur_offene_schritte_mit_frueheren_nummern(self):
+        """Der Nachlauf der Haupt-API wiederholt nur, was scheiterte. Die Nummer ist dann schon
+        freigegeben; die Anrufe werden trotzdem ueber die mitgegebene Nummer anonymisiert."""
+        conn = db.connect()
+        try:
+            conn.execute("DELETE FROM personen_nummern WHERE email = ?", (ANNA,))
+            conn.commit()
+        finally:
+            conn.close()
+        d = self.loeschen_mit({"email": ANNA, "schritte": ["anrufe"], "nummern": ["301011", "x; drop"]}).get_json()
+        self.assertTrue(d["ok"], d)
+        self.assertEqual(list(d["schritte"]), ["anrufe"])
+        self.assertEqual(d["nummern"], ["301011"])
+        a = self.eins("SELECT * FROM calls WHERE uniqueid = 'u1'")
+        self.assertEqual((a["ziel_person"], a["dialed"]), ("gelöscht", "gelöscht"))
+        # andere Schritte liefen nicht
+        self.assertIsNotNone(self.eins("SELECT 1 FROM telefon_pin WHERE email = ?", ANNA))
+
+    def test_schritte_ungueltig(self):
+        self.assertEqual(self.loeschen_mit({"email": ANNA, "schritte": ["rm -rf"]}).status_code, 400)
+        self.assertEqual(self.loeschen_mit({"email": ANNA, "schritte": []}).status_code, 400)
+        self.assertEqual(self.loeschen_mit({"email": ANNA, "schritte": "sip"}).status_code, 400)
 
     def test_unbekannte_person_alles_ok(self):
         d = self.loeschen("niemand@example.org").get_json()

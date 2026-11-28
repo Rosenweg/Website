@@ -43,6 +43,12 @@ test('apps-register.json ist gueltig und kennt die bisherigen Apps', () => {
   assert.ok(!daten.apps.termine.technik);
   assert.equal(daten.apps.termine.logo, '/img/apps/rosenweg-termine.png?v=20261128');
   assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.termine.logo.split('?')[0])));
+  // Rosenweg Vollmachten (Flutter, 28.11.2026)
+  assert.equal(daten.apps.vollmachten.paket, 'ch.rosenweg4303.vollmachten');
+  assert.equal(daten.apps.vollmachten.repo, 'Rosenweg/rosenweg-vollmachten');
+  assert.ok(!daten.apps.vollmachten.technik);
+  assert.equal(daten.apps.vollmachten.logo, '/img/apps/rosenweg-vollmachten.png?v=20261128');
+  assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.vollmachten.logo.split('?')[0])));
   // Rosenweg ZEV (Flutter, 28.11.2026)
   assert.equal(daten.apps.zev.paket, 'ch.rosenweg4303.zev');
   assert.equal(daten.apps.zev.repo, 'Rosenweg/rosenweg-zev');
@@ -54,6 +60,30 @@ test('apps-register.json ist gueltig und kennt die bisherigen Apps', () => {
   assert.equal(daten.apps.wetter.repo, 'Rosenweg/rosenweg-wetter');
   assert.ok(!daten.apps.wetter.technik);
   assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.wetter.logo.split('?')[0])));
+  // Rosenweg Energie (Flutter, 28.11.2026)
+  assert.equal(daten.apps.energie.paket, 'ch.rosenweg4303.energie');
+  assert.equal(daten.apps.energie.repo, 'Rosenweg/rosenweg-energie');
+  assert.ok(!daten.apps.energie.technik);
+  assert.equal(daten.apps.energie.logo, '/img/apps/rosenweg-energie.png?v=20261128');
+  assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.energie.logo.split('?')[0])));
+  // Rosenweg Unterlagen (Flutter, 28.11.2026)
+  assert.equal(daten.apps.unterlagen.paket, 'ch.rosenweg4303.unterlagen');
+  assert.equal(daten.apps.unterlagen.repo, 'Rosenweg/rosenweg-unterlagen');
+  assert.ok(!daten.apps.unterlagen.technik);
+  assert.equal(daten.apps.unterlagen.logo, '/img/apps/rosenweg-unterlagen.png?v=20261128');
+  assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.unterlagen.logo.split('?')[0])));
+  // Rosenweg Projekte (Flutter, 28.11.2026)
+  assert.equal(daten.apps.projekte.paket, 'ch.rosenweg4303.projekte');
+  assert.equal(daten.apps.projekte.repo, 'Rosenweg/rosenweg-projekte');
+  assert.ok(!daten.apps.projekte.technik);
+  assert.equal(daten.apps.projekte.logo, '/img/apps/rosenweg-projekte.png?v=20261128');
+  assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.projekte.logo.split('?')[0])));
+  // Rosenweg Internet: nur Bewohner, keine Verwaltung (Welle 4), also nie 'technik'
+  assert.equal(daten.apps.internet.paket, 'ch.rosenweg4303.internet');
+  assert.equal(daten.apps.internet.repo, 'Rosenweg/rosenweg-internet');
+  assert.ok(!daten.apps.internet.technik);
+  assert.equal(daten.apps.internet.logo, '/img/apps/rosenweg-internet.png?v=20261128');
+  assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.internet.logo.split('?')[0])));
 });
 
 test('pruefen findet Fehler', () => {

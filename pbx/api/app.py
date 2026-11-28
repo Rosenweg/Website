@@ -2347,6 +2347,17 @@ _APP_PAKET = re.compile(r"[a-z][a-z0-9_]*(\.[a-z0-9_]+){1,6}")
 _APP_REPO = re.compile(r"Rosenweg/[A-Za-z0-9._-]{1,100}")
 
 
+_APP_LOGO_PFAD = re.compile(r"/[A-Za-z0-9/_.-]+(\?v=[A-Za-z0-9]{1,20})?")
+
+
+def _apps_logos(logos):
+    """Symbole der Gruppenfarben aus dem Register: nur {blau, gruen} mit gueltigem Pfad."""
+    if not isinstance(logos, dict):
+        return {}
+    return {f: p for f, p in logos.items()
+            if f in ("blau", "gruen") and isinstance(p, str) and _APP_LOGO_PFAD.fullmatch(p)}
+
+
 def _apps_register_uebernehmen(d, quelle):
     """Register pruefen und die vier Namen neu binden (atomar je Name). True = uebernommen."""
     global APPS_REGISTER, APPS_KATALOG_REPOS, APPS_KATALOG_INFO, APPS_OEFFENTLICH_OHNE, APPS_AUFGEGEBEN
@@ -2367,7 +2378,7 @@ def _apps_register_uebernehmen(d, quelle):
             if not _APP_PAKET.fullmatch(paket) or not _APP_REPO.fullmatch(e["repo"]):
                 raise ValueError(f"katalog.{paket}")
             repos[e["repo"]] = paket
-            i = {f: v for f, v in e.items() if f in ("logo", "name", "text", "fuer", "technik")}
+            i = {f: v for f, v in e.items() if f in ("logo", "logos", "name", "text", "fuer", "technik")}
             if i:
                 info[paket] = i
             if e.get("nicht_oeffentlich"):
@@ -2597,7 +2608,7 @@ def _apps_liste(rows, apps, karten, nur_anzeige):
     reihe = {r["paket"]: i for i, r in enumerate(rows)}
     liste = []
 
-    def eintrag(paket, name, text, fuer, logo, downloads, technik, version, stand, nur=False):
+    def eintrag(paket, name, text, fuer, logo, downloads, technik, version, stand, nur=False, logos=None):
         gruppen = []
         if not nur and any(d["plattform"] == "android" for d in downloads) and not technik:
             gruppen.append("handy")
@@ -2608,7 +2619,7 @@ def _apps_liste(rows, apps, karten, nur_anzeige):
         if technik:
             gruppen.append("technik")
         return {"paket": paket, "name": name, "text": text or "", "fuer": fuer or "",
-                "logo": logo or "/logo-rosenweg.png", "gruppen": gruppen, "geteilte_telefone": paket in im_katalog,
+                "logo": logo or "/logo-rosenweg.png", "logos": _apps_logos(logos), "gruppen": gruppen, "geteilte_telefone": paket in im_katalog,
                 "nur_anzeige": nur, "version": version or "", "stand": stand or "", "downloads": downloads}
 
     for app_id, e in sorted(APPS_REGISTER.items(), key=lambda x: x[1]["reihenfolge"]):
@@ -2617,7 +2628,7 @@ def _apps_liste(rows, apps, karten, nur_anzeige):
             continue
         haupt = max(k["downloads"], key=lambda d: d["stand"] or "")
         liste.append(eintrag(e["paket"], e["name"], e["text"], e["fuer"], e["logo"], k["downloads"],
-                             bool(e.get("technik")), haupt["version"], haupt["stand"]))
+                             bool(e.get("technik")), haupt["version"], haupt["stand"], logos=e.get("logos")))
     for a in apps:
         if a["paket"] in karte_nach_paket:
             continue
@@ -2625,12 +2636,13 @@ def _apps_liste(rows, apps, karten, nur_anzeige):
         dl = {"plattform": "android", "titel": "Android", "version": a["version_name"], "groesse": a["groesse"],
               "sha256": a["sha256"], "stand": a["stand"], "url": a["url"], "notiz": a["notiz"]}
         liste.append(eintrag(a["paket"], info.get("name") or a["name"], info.get("text"), info.get("fuer"),
-                             info.get("logo"), [dl], bool(info.get("technik")), a["version_name"], a["stand"]))
+                             info.get("logo"), [dl], bool(info.get("technik")), a["version_name"], a["stand"],
+                             logos=info.get("logos")))
     for r in nur_anzeige:
         info = APPS_KATALOG_INFO.get(r["paket"], {})
         liste.append(eintrag(r["paket"], info.get("name") or r["name"], info.get("text"), info.get("fuer"),
                              info.get("logo"), [], bool(info.get("technik")), r["version_name"], r["updated_at"],
-                             nur=True))
+                             nur=True, logos=info.get("logos")))
     # Register-Apps vorne (nach 'reihenfolge'), danach die Katalog-Apps in der Reihenfolge der Telefone
     n = sum(1 for x in liste if x["paket"] in karte_nach_paket)
     return liste[:n] + sorted(liste[n:], key=lambda x: reihe.get(x["paket"], 10**6))
@@ -3637,6 +3649,21 @@ def _loeschen_nextcloud(conn, email, k):
     return {"widerrufen": exts}
 
 
+def _loeschen_nextcloud_konto(conn, email, k):
+    """Das Nextcloud-Konto selbst loeschen (nicht nur die App-Passwoerter): nc-token auf CT 104,
+    POST /konto-loeschen. Kein Konto mit dieser E-Mail -> erledigt. Admin-Konten loescht nc-token
+    nie (409 -> Schritt bleibt offen, die Technik sieht ihn auf der Loeschungen-Seite)."""
+    if not NC_TOKEN_URL:
+        raise RuntimeError("nc-token nicht eingerichtet")
+    r = requests.post(f"{NC_TOKEN_URL}/konto-loeschen", json={"email": email},
+                      headers={"X-NC-Token-Secret": NC_TOKEN_SECRET}, timeout=120)
+    if r.status_code == 404:
+        return {"konten": 0}
+    if r.status_code != 200:
+        raise RuntimeError(f"nc-token HTTP {r.status_code}")
+    return {"konten": len((r.json() or {}).get("geloescht") or [])}
+
+
 def _loeschen_sip(conn, email, k):
     person = conn.execute("DELETE FROM telefon_sip_person WHERE lower(email) = ?", (email,)).rowcount
     privat = conn.execute("DELETE FROM telefon_sip_privat WHERE lower(email) = ?", (email,)).rowcount
@@ -3715,6 +3742,7 @@ def _loeschen_log(conn, email, k):
 PERSON_LOESCHEN_SCHRITTE = (
     ("sitzungen", _loeschen_sitzungen),     # abmelden (_telefon_abmelden)
     ("nextcloud", _loeschen_nextcloud),     # App-Passwoerter widerrufen (nc-token /widerrufen)
+    ("nextcloud_konto", _loeschen_nextcloud_konto),  # Nextcloud-Konto loeschen (nc-token /konto-loeschen)
     ("sip", _loeschen_sip),                 # SIP-Zugaenge weg, pjsip_phones.conf neu + reload
     ("combox", _loeschen_combox),           # persoenliche Sprachnachrichten (VM_PERSON_DIR)
     ("nummern", _loeschen_nummern),         # Nummer freigeben, Website melden
@@ -3722,26 +3750,42 @@ PERSON_LOESCHEN_SCHRITTE = (
     ("anrufe", _loeschen_calls),            # anonymisieren
     ("protokoll", _loeschen_log),           # anonymisieren
 )
+# Ohne Angabe von schritte (aeltere Haupt-API): wie bisher, ohne das Nextcloud-Konto. Die
+# Haupt-API verlangt nextcloud_konto nur, wenn kein anderes Konto mit der Adresse besteht.
+PERSON_LOESCHEN_STANDARD = tuple(n for n, _ in PERSON_LOESCHEN_SCHRITTE if n != "nextcloud_konto")
 
 
 @app.post("/api/pbx/person/loeschen")
 def pbx_person_loeschen():
     """Haupt-API (X-PBX-Secret) nach dem Loeschen eines Kontos (Loeschungen, processAuthentiKDeletions
     -> lokalesKontoNachLoeschung): alles Persoenliche der Person auf der Anlage, ueber die
-    bestehenden Ablaeufe (siehe PERSON_LOESCHEN_SCHRITTE). {email} ->
-    {ok (alle Schritte ok), hintergrund, schritte: {name: {ok, ..., fehler?}}}"""
+    bestehenden Ablaeufe (siehe PERSON_LOESCHEN_SCHRITTE). {email, schritte?, nummern?} ->
+    {ok (alle Schritte ok), hintergrund, nummern, schritte: {name: {ok, ..., fehler?}}}
+    schritte: nur diese (Wiederholung durch den Nachlauf der Haupt-API); nummern: Nummern
+    aus einem frueheren Versuch (dann schon freigegeben, Anrufe trotzdem anonymisieren)."""
     err = require_agi()
     if err:
         return err
-    email = str((request.get_json(silent=True) or {}).get("email") or "").strip().lower()
+    body = request.get_json(silent=True) or {}
+    email = str(body.get("email") or "").strip().lower()
     if not email or "@" not in email or len(email) > 320:
         return jsonify({"error": "email fehlt"}), 400
+    namen = {n for n, _ in PERSON_LOESCHEN_SCHRITTE}
+    verlangt = body.get("schritte")
+    if verlangt is None:
+        verlangt = PERSON_LOESCHEN_STANDARD
+    elif not isinstance(verlangt, list) or not verlangt or any(not isinstance(s, str) or s not in namen for s in verlangt):
+        return jsonify({"error": "schritte ungueltig"}), 400
+    frueher = [str(n) for n in (body.get("nummern") or []) if re.fullmatch(r"\d{2,15}", str(n))] \
+        if isinstance(body.get("nummern"), list) else []
     conn = db.connect()
     try:
-        k = {"nummern": [r["nummer"] for r in conn.execute(
-            "SELECT nummer FROM personen_nummern WHERE lower(email) = ? ORDER BY nummer", (email,))]}
+        k = {"nummern": sorted({r["nummer"] for r in conn.execute(
+            "SELECT nummer FROM personen_nummern WHERE lower(email) = ? ORDER BY nummer", (email,))} | set(frueher))}
         schritte = {}
         for name, schritt in PERSON_LOESCHEN_SCHRITTE:
+            if name not in verlangt:
+                continue
             try:
                 schritte[name] = {"ok": True, **schritt(conn, email, k)}
             except Exception as e:  # noqa: BLE001 - weiter mit dem Rest, Schritt einzeln melden
@@ -3754,7 +3798,8 @@ def pbx_person_loeschen():
                     {n: ("ok" if s["ok"] else "FEHLER") for n, s in schritte.items()})
     return jsonify({"ok": all(s["ok"] for s in schritte.values()),
                     "hintergrund": bool(schritte.get("daten", {}).get("hintergrund")),
-                    "schritte": schritte, "reihenfolge": [n for n, _ in PERSON_LOESCHEN_SCHRITTE]})
+                    "nummern": k["nummern"], "schritte": schritte,
+                    "reihenfolge": [n for n, _ in PERSON_LOESCHEN_SCHRITTE if n in verlangt]})
 
 
 @app.delete("/api/telefon/ich/hintergrund")
@@ -4121,6 +4166,16 @@ PORTAL_KOERPER_MAX = 256 * 1024
 # Binder: die Antwort geht als Bundle an die App (Transaktionen bis ~1 MB)
 PORTAL_ANTWORT_MAX = 512 * 1024
 PORTAL_METHODEN = ("GET", "POST", "PUT", "DELETE")
+# Dateien (PDF, Bilder) stueckweise: die App haengt "portal_bereich=<von>-<bis>"
+# an den Pfad. Die Anlage nimmt ihn weg, fragt die Haupt-API mit "Range:
+# bytes=<von>-<bis>" und gibt das Stueck als JSON zurueck:
+#   {"binaer": {"typ", "daten" (base64), "von", "bis", "gesamt", "etag"}}
+# So bleibt der Weg ueber Rosenweg Geraet reiner JSON-Text (Binder ~1 MB).
+# Ein Stueck hoechstens 320 KB (base64 ~430 KB < PORTAL_ANTWORT_MAX), eine
+# Datei hoechstens 20 MB (64 Stuecke; Geraet erlaubt 120 Anfragen je Minute).
+PORTAL_BINAER_TEIL = 320 * 1024
+PORTAL_BINAER_MAX = 20 * 1024 * 1024
+_PORTAL_BEREICH = re.compile(r"(^|&)portal_bereich=(\d{1,9})-(\d{1,9})(?=&|$)")
 PORTAL_PFADE_STANDARD = {
     "*": ["GET /api/auth/me", "GET /api/me"],
     "ch.rosenweg4303.salz": ["/api/salz/"],
@@ -4145,6 +4200,25 @@ PORTAL_PFADE_STANDARD = {
     # Rosenweg Wetter: nur der oeffentliche Verlauf der Wetterstation (live kommt per MQTT
     # mit dem oeffentlichen Lese-Benutzer, nicht ueber das Portal)
     "ch.rosenweg4303.wetter": ["GET /api/wetter/"],
+    # Rosenweg Unterlagen: auf geteilten Telefonen nur lesen und Vorschau (Entscheid E10
+    # 28.11.2026) – kein Hochladen, Loeschen, Verschieben. Dateien stueckweise (portal_bereich).
+    # Die Haupt-API prueft je Pfad, was die Person lesen darf.
+    "ch.rosenweg4303.unterlagen": ["GET /api/documents", "GET /api/documents/", "GET /api/documents-ordner",
+                                   "GET /api/documents-suche", "GET /api/documents-neu", "GET /api/documents-rechte",
+                                   "GET /api/documents-kennung/", "GET /api/documents-fassungen",
+                                   "GET /api/documents-fassungen/", "GET /api/documents-preview",
+                                   "POST /api/documents-preview"],
+
+    # Rosenweg TV: Senderliste, Programm und Stream-Token (nur lesen; keine Ferien-Zugaenge
+    # /api/tv/extern*, Entscheid Stefan 28.11.2026)
+    "ch.rosenweg4303.tv": ["GET /api/tv/channels", "GET /api/tv/jetzt", "GET /api/tv/epg",
+                           "GET /api/tv/stream-url/"],
+    # Rosenweg Projekte: auf geteilten Telefonen lesen und kommentieren (Entscheid P11, 28.11.2026).
+    # Die Haupt-API prueft je Projekt, was die Person lesen darf, und lehnt jede Aenderung am
+    # Projekt (Anlegen, Zeitachse, Offerten, Budget, Anhaenge, Loeschen) bei Anlage-Token ab
+    # (requireProjektBearbeiten); Kommentare der Person gehen. Dateien nur lesen/Vorschau.
+    "ch.rosenweg4303.projekte": ["GET /api/projects", "GET,POST,PUT,DELETE /api/projects/", "GET /api/projects-rechte",
+                                 "GET /api/documents/", "GET /api/documents-kennung/", "POST /api/documents-preview"],
 }
 _PORTAL_PFAD = re.compile(r"/api/[A-Za-z0-9._~!$&'()*+,;=:@%/-]{1,1000}(\?[A-Za-z0-9._~!$&'()*+,;=:@%/?-]{0,1000})?")
 _PORTAL_KODIERT_VERBOTEN = re.compile(r"%(2e|2f|5c|00)", re.I)
@@ -4183,6 +4257,23 @@ def _portal_erlaubt(regeln, paket, methode, pfad):
         if (muster.endswith("/") and weg.startswith(muster)) or weg == muster:
             return True
     return False
+
+
+def _portal_bereich(pfad):
+    """portal_bereich=<von>-<bis> aus dem Pfad: (pfad ohne ihn, (von, bis)) oder (pfad, None).
+    Ungueltig (bis < von, zu gross) -> (pfad, False)."""
+    if "?" not in pfad:
+        return pfad, None
+    weg, frage = pfad.split("?", 1)
+    m = _PORTAL_BEREICH.search(frage)
+    if not m:
+        return pfad, None
+    von, bis = int(m.group(2)), int(m.group(3))
+    if bis < von or bis - von + 1 > PORTAL_BINAER_TEIL or bis >= PORTAL_BINAER_MAX:
+        return pfad, False
+    rest = (frage[:m.start()] + frage[m.end():]).strip("&")
+    rest = re.sub(r"&{2,}", "&", rest)
+    return (f"{weg}?{rest}" if rest else weg), (von, bis)
 
 
 def _portal_pfad_normal(pfad):
@@ -4232,6 +4323,10 @@ def telefon_portal():
         return jsonify({"error": "paket ungueltig"}), 400
     if koerper is not None and (not isinstance(koerper, str) or len(koerper.encode()) > PORTAL_KOERPER_MAX):
         return jsonify({"error": "Anfrage zu gross"}), 413
+    pfad, bereich = _portal_bereich(pfad)
+    if bereich is False:
+        return jsonify({"error": f"Bereich ungueltig (je Stueck hoechstens {PORTAL_BINAER_TEIL // 1024} KB, "
+                                 f"je Datei hoechstens {PORTAL_BINAER_MAX // (1024 * 1024)} MB)"}), 413
     conn = db.connect()
     try:
         s = conn.execute("SELECT user_id, email, name, seit FROM telefon_sitzungen WHERE ext = ?", (ext,)).fetchone()
@@ -4247,17 +4342,40 @@ def telefon_portal():
             "Accept": "application/json", "X-Rosenweg-Telefon": ext}
     if koerper is not None:
         kopf["Content-Type"] = "application/json"
+    if bereich:
+        kopf["Range"] = f"bytes={bereich[0]}-{bereich[1]}"
+        kopf["Accept"] = "*/*"
+    grenze = PORTAL_BINAER_TEIL if bereich else PORTAL_ANTWORT_MAX
     try:
         r = requests.request(methode, f"{MAIN_API_BASE}{pfad}", headers=kopf,
                              data=koerper.encode() if koerper is not None else None,
-                             timeout=20, allow_redirects=False, stream=True)
+                             timeout=60 if bereich else 20, allow_redirects=False, stream=True)
         try:
-            roh = r.raw.read(PORTAL_ANTWORT_MAX + 1, decode_content=True)
+            roh = r.raw.read(grenze + 1, decode_content=True)
         finally:
             r.close()
     except requests.RequestException as e:
         app.logger.warning("portal %s: Haupt-API nicht erreichbar (%s)", ext, type(e).__name__)
         return jsonify({"error": "Keine Verbindung zum Portal"}), 502
+    if bereich and r.status_code in (200, 206) and "json" not in (r.headers.get("Content-Type") or ""):
+        # Stueck einer Datei: 206 mit Content-Range; 200 = der Server kennt Range nicht
+        # (dann muss die ganze Datei in ein Stueck passen)
+        if len(roh) > grenze:
+            return jsonify({"error": "Antwort zu gross fuer das Telefon", "zu_gross": True}), 502
+        gesamt = len(roh)
+        m = re.match(r"bytes (\d+)-(\d+)/(\d+)", r.headers.get("Content-Range") or "")
+        if r.status_code == 206 and m:
+            gesamt = int(m.group(3))
+        if gesamt > PORTAL_BINAER_MAX:
+            return jsonify({"error": f"Datei zu gross fuer das Telefon (hoechstens {PORTAL_BINAER_MAX // (1024 * 1024)} MB)",
+                            "zu_gross": True}), 413
+        von = int(m.group(1)) if (r.status_code == 206 and m) else 0
+        teil = {"typ": (r.headers.get("Content-Type") or "application/octet-stream").split(";")[0].strip(),
+                "daten": base64.b64encode(roh).decode(), "von": von, "bis": von + len(roh) - 1,
+                "gesamt": gesamt, "etag": r.headers.get("ETag") or "",
+                "name": r.headers.get("Content-Disposition") or ""}
+        return jsonify({"status": r.status_code, "json": json.dumps({"binaer": teil}, separators=(",", ":")),
+                        "sitzung": _portal_sitzung_marke(ext, s)})
     if len(roh) > PORTAL_ANTWORT_MAX:
         return jsonify({"error": "Antwort zu gross fuer das Telefon"}), 502
     if methode != "GET" or r.status_code >= 400:

@@ -65,7 +65,7 @@
         const karten = d.karten || [];
         const mitKarte = new Set(karten.map(k => k.paket));
         const l = karten.map(k => ({
-            paket: k.paket, name: k.name, text: k.text, fuer: k.fuer, logo: k.logo, downloads: k.downloads,
+            paket: k.paket, name: k.name, text: k.text, fuer: k.fuer, logo: k.logo, logos: k.logos, downloads: k.downloads,
             gruppen: [k.downloads.some(x => x.plattform === 'android') ? 'handy' : null,
                       k.downloads.some(x => x.plattform !== 'android') ? 'computer' : null].filter(Boolean),
             version: (k.downloads[0] || {}).version, stand: (k.downloads[0] || {}).stand,
@@ -102,17 +102,30 @@
             .sort((x, y) => REIHE.indexOf(x.plattform) - REIHE.indexOf(y.plattform));
 
         const oben = el('div', 'oben');
-        const logo = el('img');
-        logo.src = sichererPfad(app.logo);
-        logo.alt = 'Logo ' + app.name;
-        logo.width = 56; logo.height = 56;
-        logo.loading = 'lazy';
-        logo.onerror = () => { logo.onerror = null; logo.src = '/logo-rosenweg.png'; };
+        // Symbol je Gruppenfarbe nebeneinander: rot = Standard, blau = Verwaltung/Ausschuss, grün = Technik
+        const logos = el('div', 'logos');
+        const symbol = (pfad, farbe, hinweis) => {
+            const img = el('img');
+            img.src = sichererPfad(pfad);
+            img.alt = `Logo ${app.name}, ${farbe}`;
+            img.title = `${farbe}: ${hinweis}`;
+            img.width = 56; img.height = 56;
+            img.loading = 'lazy';
+            img.onerror = () => { img.onerror = null; img.src = '/logo-rosenweg.png'; };
+            logos.append(img);
+        };
+        symbol(app.logo, 'Rot', 'Standard');
+        const mehrfarbig = app.logos || {};
+        if (mehrfarbig.blau) symbol(mehrfarbig.blau, 'Blau', 'wenn du in der Verwaltung oder im Ausschuss bist');
+        if (mehrfarbig.gruen) symbol(mehrfarbig.gruen, 'Grün', 'wenn du zur Technik gehörst');
+        if (logos.children.length > 1) logos.setAttribute('aria-label', 'Symbol je nach Gruppe: rot, blau, grün');
+        logos.classList.toggle('mehrere', logos.children.length > 1);
         const kopf = el('div');
         kopf.append(el('h3', '', app.name));
         if (app.text) kopf.append(el('p', 'satz', app.text));
         if (app.fuer) kopf.append(el('p', 'fuer', app.fuer));
-        oben.append(logo, kopf);
+        oben.classList.toggle('mehrfarbig', logos.children.length > 1);
+        oben.append(logos, kopf);
         k.append(oben);
 
         const gruppen = app.gruppen || [];

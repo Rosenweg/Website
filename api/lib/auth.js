@@ -332,6 +332,8 @@ const MANAGED_PAGES = [
   { id: 'echtheitspruefung', label: 'Echtheitsprüfung' },
   // STWEG-Termine schreiben; die API bindet es an die eigene STWEG (lib/termine.js)
   { id: 'stweg-termine', label: 'STWEG-Termine' },
+  // Mitteilungen der STWEG schreiben (Rosenweg STWEG); die API bindet es an die eigene STWEG (lib/stweg-app.js)
+  { id: 'stweg-mitteilungen', label: 'STWEG-Mitteilungen' },
 ];
 
 // Spalten der Rechteverwaltung: MANAGED_PAGES plus jeder weitere Schluessel aus

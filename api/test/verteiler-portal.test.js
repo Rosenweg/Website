@@ -52,8 +52,12 @@ test('server.js + Seite: Name wirkt, Senden braucht schreiben, Archiv-Eintrag', 
   const i = src.indexOf("app.post('/api/verteiler/send'");
   const block = src.slice(i, src.indexOf('\napp.', i + 10));
   assert.match(block, /portalDarfSendenRecht\(perm\)/);
-  assert.match(block, /from: \{ name: absName, address: MAIL_FROM \}/);
-  assert.match(block, /INSERT INTO email_archive/);
+  // Versand selbst in verteilerRundmailSenden (L11: Route kuemmert sich um Idempotenz)
+  const j = src.indexOf('async function verteilerRundmailSenden(req)');
+  const versand = src.slice(j, src.indexOf('\n}\n', j));
+  assert.match(versand, /from: \{ name: absName, address: MAIL_FROM \}/);
+  assert.match(versand, /INSERT INTO email_archive/);
+  assert.match(block, /await verteilerRundmailSenden\(req\)/);
   assert.match(src, /\['email-verteiler', 'write'\], \['bewohner-verwaltung', 'read'\]/);
   const html = fs.readFileSync(path.join(__dirname, '..', '..', 'email-verteiler.html'), 'utf8');
   assert.match(html, /id="nurAnsichtHinweis"/);

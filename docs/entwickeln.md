@@ -66,6 +66,14 @@ Einzelheiten: [`docs/infrastruktur.md`](infrastruktur.md) und
 App-Releases an `/apps`: Abschnitt „Seite /apps und App-Releases“ in
 [`pbx/README.md`](../pbx/README.md).
 
+## CI-Änderungen über viele Repos (Regel)
+
+Nie in einem Zug 40 Pull Requests anlegen oder neu starten: Jeder PR startet die Prüfung auf
+unseren vier Runnern, am 28.11.2026 stauten 45 PRs die Releases stundenlang. Mehrere Repos nur mit
+`scripts/rw-massen-pr.sh` (höchstens 6 gleichzeitig, nur wenn weniger als 15 Jobs warten und weniger als 2
+Releases laufen), Einzelheiten in [runner-waechter.md](runner-waechter.md#massenänderungen-gestaffelt).
+Agenten halten sich daran, auch wenn der Auftrag „alle Repos“ lautet.
+
 ## Sicherheit
 
 Das Repository ist **öffentlich**. Nie Geheimnisse, Tokens, Passwörter oder

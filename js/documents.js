@@ -222,15 +222,20 @@ const RosenwegDocs = {
     return path.split('/').pop();
   },
 
-  /** Sanitize filename: replace spaces/special chars with hyphens, lowercase */
+  /** Dateiname wie die API (api/lib/unterlagen.js, Entscheid E15 28.11.2026):
+   *  Umlaute und Leerzeichen bleiben, nur gefaehrliche Zeichen werden ersetzt,
+   *  die Endung klein. Die API bereinigt ohnehin selbst. */
   sanitizeFileName(name) {
-    return name
-      .replace(/ä/gi, 'ae').replace(/ö/gi, 'oe').replace(/ü/gi, 'ue').replace(/ß/g, 'ss')
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // Remove remaining accents
-      .replace(/[^a-zA-Z0-9._-]/g, '-')                // Replace special chars with hyphens
-      .replace(/-+/g, '-')                              // Collapse multiple hyphens
-      .replace(/^-|-$/g, '')                            // Trim leading/trailing hyphens
-      .toLowerCase();
+    let s = String(name || '').normalize('NFC')
+      .replace(/[\\/:*?"<>|%#\u0000-\u001f\u007f]/g, '-')
+      .replace(/\s+/g, ' ')
+      .replace(/-{2,}/g, '-')
+      .trim()
+      .replace(/^[.\s-]+/, '')
+      .replace(/[.\s]+$/, '');
+    const i = s.lastIndexOf('.');
+    if (i > 0) s = s.slice(0, i + 1) + s.slice(i + 1).toLowerCase();
+    return s;
   },
 
   getIcon(ext) {

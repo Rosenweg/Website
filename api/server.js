@@ -11,6 +11,7 @@ const sanitizeHtml = require('sanitize-html');
 
 // ─── Ausgelagerte Module (inkrementeller Router-Split) ───────────────
 const { escapeHtml, createSemaphore, normalizePhone, safeId, geheimnisGleich, fehlerFuerClient, hatSteuerzeichen } = require('./lib/utils');
+const stwegAppLib = require('./lib/stweg-app'); // Rosenweg STWEG: Rollen, Mitteilungen, Druck
 const druckApi = require('./lib/druckapi'); // Druck-API CT 111 und Gotenberg (Druck per Mail, Scanner-Zettel)
 
 // STWEG-Gruppen-Mapping + pure Klassifizierer -> lib/groups.js
@@ -22,7 +23,10 @@ const { zevAliasAddress, zevGotoTargets, zevDarfRechnungSehen, zevStwegFuerEmpfa
 const reklMelder = require('./lib/reklamation-melder');
 const vollmachtRechte = require('./lib/vollmacht-rechte');
 const vollmachtApp = require('./lib/vollmacht-app');
+const vollmachtMail = require('./lib/vollmacht-mail');
 const projekteRechte = require('./lib/projekte-rechte');
+const hwRechteLib = require('./lib/handwerker-rechte');
+const personenRechte = require('./lib/personen-rechte');
 const stwegOeffentlich = require('./lib/stweg-oeffentlich');
 const rechteSchluessel = require('./lib/rechte-schluessel');
 const rechteMigrationen = require('./lib/rechte-migrationen');
@@ -32,9 +36,14 @@ const { waschAdminErlaubt, waschRaumAenderbar } = require('./lib/wasch-admin');
 const waschRegeln = require('./lib/wasch-regeln');
 const adminProtokoll = require('./lib/admin-protokoll');
 const ispZugang = require('./lib/isp-zugang');
+const ispStoerung = require('./lib/isp-stoerung');
 const { taeglichUm } = require('./lib/tageszeit');
 const papierkorb = require('./lib/papierkorb');
+const unterlagen = require('./lib/unterlagen');
 const verteilerVerwaltung = require('./lib/verteiler-verwaltung');
+const verteilerGate = require('./lib/verteiler-gate');
+const vierAugen = require('./lib/vier-augen');
+const { gatewaysLesen } = require('./lib/mailgateway');
 
 const app = express();
 
@@ -51,6 +60,9 @@ app.use('/api/scan-upload', ausweisVorBody('application/octet-stream', geheimVor
 app.use('/api/vollmachten/:id/upload-signed', ausweisVorBody('application/pdf', (req, res, next) => authMiddleware(req, res, next)), express.raw({ type: 'application/pdf', limit: '20mb' }));
 // PBX-Voicemail-Upload: Asterisk-AGI laedt das WAV als Raw-Body hoch
 app.use('/api/pbx/voicemail', ausweisVorBody('audio/wav', (req, res, next) => requirePbxSecret(req, res, next)), express.raw({ type: 'audio/wav', limit: '50mb' }));
+// Brief-Foto als Base64 (bis 15 MB Bild = rund 20 MB JSON); sonst griffe die
+// 15-MB-Grenze in routes/briefe.js nie (globale Grenze unten 10 MB).
+app.use('/api/briefe/upload', ausweisVorBody('application/json', (req, res, next) => authMiddleware(req, res, next)), express.json({ limit: '21mb' }));
 app.use(express.json({ limit: '10mb' }));
 // Bestätigungslinks aus der Karten-Mail (api/lib/kartenadmin.js) sind Formular-POSTs
 // auf derselben Seite, geschützt durch das einmalige Token im Pfad. Wegen
@@ -293,6 +305,8 @@ const { authentikAPI, tokenCache, validateAuthentikToken, authentikPasswordLogin
 const { authMiddleware, adminOnly, requirePermission, requireUserLogin } = require('./middleware/auth');
 // Admin-Aktionen mit der Karte: Protokoll, Quittung, Bestaetigung per E-Mail (lib/kartenadmin.js)
 const kartenAdmin = require('./lib/kartenadmin');
+// Schreibende Objekt-/Personen-Routen: Kartenvermerk (Karte wie Schluessel, nur protokollieren)
+const objSchreibend = [kartenAdmin.mitKarteProtokollieren];
 const { FRISCH_MIN: STUFE_FRISCH_MIN, passwortWechselErlaubt, signierenErlaubt } = require('./lib/stufen');
 // Web-Push (VAPID) -> lib/webpush.js (Opt-in-Benachrichtigungen fuer PWAs)
 const webpushLib = require('./lib/webpush');
@@ -698,8 +712,10 @@ function canViewKontakteHistory(req, res, next) {
 
 /** Check if a document path is allowed for a user */
 // ctx (docRechteKontext): Projekte + Seitenrecht „projekte“ fuer projekte/<slug>/ (P1).
+// archiv/ (Mail-Anhaenge) und Brief-Fotos nur ueber ihre Route, auch fuer
+// Technik/Praesident (Zugriffsprotokoll, STWEG-Sicht; docNurEigeneRoute).
 function isDocPathAllowed(filePath, groups, ctx = {}) {
-  if (isTechnik(groups) || isPraesident(groups)) return true;
+  if (isTechnik(groups) || isPraesident(groups)) return !docNurEigeneRoute(filePath);
   // Belege/Fotos/PDFs mit eigener Route und eigener Rechtepruefung nicht
   // zusaetzlich ueber die allgemeine Dokumenten-API fuer alle freigeben.
   const sperre = docSperrOrdner(filePath);
@@ -725,12 +741,13 @@ function isDocPathAllowed(filePath, groups, ctx = {}) {
 // Reklamationsfotos, Unterschriftenlisten-PDFs, Anzeigen, Deckblaetter der
 // Druckauftraege mit Namen/Adressen): lesen/schreiben
 // ueber die Dokumenten-API nur Technik/Praesident – sonst lesbar fuer alle
-// bzw. faelschbar. Brief-Fotos (Empfaengeradressen) lesen nur Ausschuss.
+// bzw. faelschbar. Brief-Fotos (Empfaengeradressen) ebenso: der Ausschuss sieht
+// sie ueber /api/briefe nur fuer seine STWEG (Entscheid Stefan 28.11.2026).
 // Grundbuch-Auszuege (allgemein/grundbuch-bilder, Namen+Adressen) nur ueber
 // /api/grundbuch/.../bild mit dessen Rechtepruefung.
 // Pruefung segmentweise, case-insensitiv, leere/'.'-Segmente uebersprungen.
-const DOC_SPERR_ORDNER = new Set(['auslagen', 'anzeigen', 'reklamationen', 'unterschriftenlisten', 'grundbuch-bilder', 'druckauftraege']);
-const DOC_AUSSCHUSS_ORDNER = new Set(['fotos_von_versendeten_briefen']);
+const DOC_SPERR_ORDNER = new Set(['auslagen', 'anzeigen', 'reklamationen', 'unterschriftenlisten', 'grundbuch-bilder', 'druckauftraege', 'fotos_von_versendeten_briefen']);
+const DOC_AUSSCHUSS_ORDNER = new Set();
 function docSperrOrdner(filePath) {
   const seg = String(filePath).toLowerCase().split('/').filter(x => x && x !== '.');
   const oben = seg.slice(0, Math.max(0, seg.length - 1)).slice(0, 2);
@@ -739,8 +756,20 @@ function docSperrOrdner(filePath) {
   return null;
 }
 
+// Ordner, die nur ihre eigene Route aendert – auch Technik/Praesident nicht
+// ueber die Dokumenten-API (kein Loeschen am Vier-Augen-Weg und am Protokoll
+// vorbei): archiv/ (E-Mail-Archiv-Anhaenge, oberste Ebene) und die Brief-Fotos.
+// Liefert 'archiv' | 'briefe' | null.
+function docNurEigeneRoute(filePath) {
+  const seg = String(filePath).toLowerCase().split('/').filter(x => x && x !== '.');
+  if (seg[0] === 'archiv') return 'archiv';
+  if (seg.slice(0, 2).includes('fotos_von_versendeten_briefen')) return 'briefe';
+  return null;
+}
+
 /** Check if user can write to a document path */
 function canWriteDocPath(filePath, groups, ctx = {}) {
+  if (docNurEigeneRoute(filePath)) return false;
   if (isTechnik(groups) || isPraesident(groups)) return true;
   // Pfad ohne '/' ist ein Eintrag der obersten Ebene (z. B. ganzer Ordner
   // 'stweg5') – nicht als 'allgemein' werten, sonst ganze STWEG-Ordner
@@ -760,6 +789,20 @@ function canWriteDocPath(filePath, groups, ctx = {}) {
   const stwegs = getAusschussStwegs(groups);
   const nr = folderStwegNr(folder);
   return nr !== null && stwegs.has(nr);
+}
+
+// Darf das Konto irgendwo in der Ablage schreiben? (Entscheid E2 28.11.2026:
+// Farbe der App „Rosenweg Unterlagen“ blau nur dann.) Gleiche Regel wie
+// canWriteDocPath: Technik/Praesident ueberall, Ausschuss in allgemein und
+// seiner STWEG. Die Verwaltung bleibt in Unterlagen rot (Entscheid Stefan
+// 28.11.2026): ihr Schreibrecht in Projektordnern ueber „projekte“ zaehlt hier
+// nicht (projektePermWert bleibt fuer den Aufruf in /api/auth/me).
+// /api/auth/me liefert daraus den abgeleiteten Schluessel dokumente: 'write'
+// (sonst fehlt er; Lesen haengt am Pfad, nicht an einem Seitenrecht – L6).
+function docSchreibtIrgendwo(groups, projektePermWert) {
+  const g = groups || [];
+  if (isTechnik(g) || isPraesident(g)) return true;
+  return g.some(x => String(x).toLowerCase().endsWith('-ausschuss'));
 }
 
 // getAusschussStwegs, isAusschussForAny -> lib/groups.js
@@ -998,6 +1041,15 @@ app.post('/api/ki-search', authMiddleware, async (req, res) => {
     for (const v of verwaltungen) hits.push({ typ: 'Verwaltung', titel: v.firma_name, sub: (v.stweg ? 'STWEG ' + v.stweg : 'allgemein') + (v.email ? ' · ' + v.email : ''), url: '/verwaltung-admin.html', meta: v });
     for (const w of wohnungen) hits.push({ typ: 'Wohnung', titel: w.bezeichnung + ' (STWEG ' + w.stweg + ')', sub: [w.eigentuemer_name && 'Eig: ' + w.eigentuemer_name, w.mieter_name && 'Mt: ' + w.mieter_name].filter(Boolean).join(' · '), url: '/objektverwaltung.html', meta: w });
     for (const p of projekte) hits.push({ typ: 'Projekt', titel: p.titel, sub: p.status, url: '/projekte.html?slug=' + encodeURIComponent(p.slug), meta: p });
+    // Dokumente der Ablage nach Name und Pfad (L13; dieselbe Suche wie
+    // /api/documents-suche und die App Rosenweg Unterlagen, kein Volltext),
+    // nur was die Person lesen darf
+    try {
+      const dr = unterlagen.suchen(await docVerzeichnis.holen(), q, await docDarf(req), { grenze: 5 });
+      for (const t of dr.treffer) {
+        hits.push({ typ: t.art === 'ordner' ? 'Ordner' : 'Dokument', titel: t.name, sub: t.ordner || 'Ablage', url: '/#dokumente', meta: { pfad: t.pfad, geaendert: t.geaendert } });
+      }
+    } catch (e) { console.warn('[ki-search] Dokumente:', e.message); }
 
     // Ohne Treffer: direkt zurück
     if (hits.length === 0) return res.json({ q, hits: [], answer: 'Keine Treffer für „' + q + '".' });
@@ -1145,6 +1197,9 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
   if (meters.length > 0 && !permissions['energie-monitor']) {
     permissions['energie-monitor'] = 'read';
   }
+  // Abgeleitet (L6): dokumente = write, wenn das Konto irgendwo in der Ablage
+  // schreiben darf (docSchreibtIrgendwo). Kein Seitenrecht in MANAGED_PAGES.
+  if (docSchreibtIrgendwo(groups, permissions['projekte'])) permissions['dokumente'] = 'write';
 
   // Rechte fuer die Energie-App (L4): dieselben Pruefungen wie die Routen
   // (routes/energie-lesen.js energieRechte). Abgeleitete Schluessel, nicht in der
@@ -1155,6 +1210,10 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
   try { energie = await energieLesen.energieRechte(req); } catch (e) { console.error('[auth/me] energie:', e.message); }
   if (energie.stweg_sicht.length && !permissions['energie-stweg']) permissions['energie-stweg'] = 'read';
   if (energie.technik && !permissions['zaehler-technik']) permissions['zaehler-technik'] = 'read';
+
+  // Abgeleitet (Rosenweg Projekte, Farbe): projekte-bearbeiten = write, wer irgendein
+  // Projekt anlegen oder bearbeiten darf (Ausschuss, Verwaltung mit projekte = schreiben, T/P)
+  if (projekteRechte.projekteBearbeitenRecht(groups, permissions['projekte'])) permissions['projekte-bearbeiten'] = 'write';
 
   // WhatsApp-Opt-In aus personen-Tabelle (via email lookup)
   let whatsappOptIn = false;
@@ -4242,9 +4301,14 @@ async function alleEmails(email) {
     return [e, ...r.rows.map(x => x.a)];
   } catch { return [e]; }
 }
-async function unifiUserByEmail(email) {
+// streng: nicht erreichbar bzw. Fehler -> wirft (statt „kein Benutzer“), fuer die Konto-Loeschung
+async function unifiUserByEmail(email, { streng = false } = {}) {
   const kandidaten = await alleEmails(email); if (!kandidaten.length) return null;
-  const users = (await unifiAccessRaw('GET', '/users')).body?.data || [];
+  const antwort = await unifiAccessRaw('GET', '/users');
+  if (streng && antwort.error !== 'not_configured' && !accessOk(antwort)) {
+    throw new Error(antwort.status ? `UniFi Access HTTP ${antwort.status}` : 'UniFi Access nicht erreichbar');
+  }
+  const users = antwort.body?.data || [];
   for (const e of kandidaten) {
     const u = users.find(u => (u.email || u.user_email || '').toLowerCase().trim() === e);
     if (u) return u;
@@ -4816,32 +4880,16 @@ app.get('/api/verteiler/by-stweg/:stweg', async (req, res) => {
 });
 
 const verteilerSendLog = new Map(); // userId → [timestamps]
-app.post('/api/verteiler/send', authMiddleware, async (req, res) => {
-  // T/P (isAdmin) wie bisher; die Verwaltung nur an aktive Verteiler ihrer
-  // STWEG(s), nur per verteiler_id (Befund V2, lib/verteiler-verwaltung.js).
-  if (!req.user?.isAdmin) {
-    const vid = parseInt(req.body?.verteiler_id, 10);
-    if (!Number.isFinite(vid) || (Array.isArray(req.body?.recipients) && req.body.recipients.length)) {
-      return res.status(403).json({ error: 'Admin-Rechte erforderlich' });
-    }
-    try {
-      const { rows: [vt] } = await pool.query('SELECT id, stweg, active FROM email_verteiler WHERE id = $1', [vid]);
-      const perm = await verteilerPortalPerm(req);
-      // V10: Senden verlangt „email-verteiler“ = schreiben (lesen zeigt nur die Liste).
-      if (!verteilerVerwaltung.portalDarfSendenRecht(perm)) {
-        return res.status(403).json({ error: 'Senden braucht das Recht „E-Mail-Verteiler“ = schreiben' });
-      }
-      if (!vt || !verteilerVerwaltung.portalDarfSenden(req.user?.groups || [], perm, vt)) {
-        return res.status(403).json({ error: 'Nur an Verteiler der eigenen STWEG' });
-      }
-    } catch (e) { return res.status(500).json({ error: 'Fehler' }); }
-  }
+// Versand einer Portal-Rundmail (ohne Rechtepruefung, die macht die Route).
+// -> { status, body, gesendet } (gesendet = Mail ging mindestens an einen Empfaenger).
+async function verteilerRundmailSenden(req) {
+  const antwort = (status, body) => ({ status, body, gesendet: false });
   // Rate limit: max 10 sends per 10 minutes per user
   const uid = req.user.user_id || req.user.id;
   const now = Date.now();
   const log = (verteilerSendLog.get(uid) || []).filter(t => now - t < 600000);
   if (log.length >= 10) {
-    return res.status(429).json({ error: 'Zu viele Emails — bitte 10 Minuten warten' });
+    return antwort(429, { error: 'Zu viele Emails — bitte 10 Minuten warten' });
   }
   log.push(now);
   verteilerSendLog.set(uid, log);
@@ -4852,34 +4900,34 @@ app.post('/api/verteiler/send', authMiddleware, async (req, res) => {
   const absName = verteilerVerwaltung.absenderName(req.body.sender_name, req.user?.name);
   let verteilerAdresse = null;
   if (!subject || !body) {
-    return res.status(400).json({ error: 'Betreff und Text erforderlich' });
+    return antwort(400, { error: 'Betreff und Text erforderlich' });
   }
   // Das Frontend schickt nur verteiler_id (keine expliziten Empfänger) — also hier
   // aus dem Verteiler auflösen. resolveVerteilerRecipients liefert die Mitglieder-Mails.
   if (recipients.length === 0 && verteiler_id) {
     try {
       const { rows: [vt] } = await pool.query('SELECT * FROM email_verteiler WHERE id = $1', [parseInt(verteiler_id)]);
-      if (!vt) return res.status(404).json({ error: 'Verteiler nicht gefunden' });
+      if (!vt) return antwort(404, { error: 'Verteiler nicht gefunden' });
       verteilerAdresse = vt.email_address || null;
       recipients = await resolveVerteilerRecipients(vt);
     } catch (e) {
       console.error('resolveVerteilerRecipients failed:', e.message);
-      return res.status(500).json({ error: 'Empfänger konnten nicht aufgelöst werden' });
+      return antwort(500, { error: 'Empfänger konnten nicht aufgelöst werden' });
     }
   }
   if (!recipients.length) {
-    return res.status(400).json({ error: 'Verteiler hat keine Empfänger' });
+    return antwort(400, { error: 'Verteiler hat keine Empfänger' });
   }
 
   // Validate all recipients are valid email addresses
   const emailRegex = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/;
   const validRecipients = recipients.filter(r => typeof r === 'string' && emailRegex.test(r));
   if (validRecipients.length === 0) {
-    return res.status(400).json({ error: 'Keine gültigen E-Mail-Adressen im Verteiler' });
+    return antwort(400, { error: 'Keine gültigen E-Mail-Adressen im Verteiler' });
   }
 
+  let sent = 0;
   try {
-    let sent = 0;
     let failed = [];
     let gateway = null;
     let messageId = null;
@@ -4932,15 +4980,75 @@ app.post('/api/verteiler/send', authMiddleware, async (req, res) => {
         `INSERT INTO email_archive (from_email, from_name, to_addresses, subject, text_body, html_body, message_id, email_date)
          VALUES ($1, $2, $3, $4, $5, $6, $7, NOW()) ON CONFLICT (message_id) DO NOTHING`,
         [a.from_email, a.from_name, a.to_addresses, a.subject, a.text_body, a.html_body, a.message_id],
-      ).catch(e => console.error('[verteiler-direct] Archivieren fehlgeschlagen:', e.message));
+      ).then(() => require('./routes/email-archive').stwegZuordnen())
+        .catch(e => console.error('[verteiler-direct] Archivieren fehlgeschlagen:', e.message));
     }
 
-    res.json({ success: true, sent, failed: failed.length });
+    return { status: 200, body: { success: true, sent, failed: failed.length }, gesendet: sent > 0 };
   } catch (err) {
     console.error('Email send error:', err);
-    res.status(500).json({ error: 'Fehler beim E-Mail-Versand' });
+    return { status: 500, body: { error: 'Fehler beim E-Mail-Versand' }, gesendet: sent > 0 };
   }
+}
+
+app.post('/api/verteiler/send', authMiddleware, async (req, res) => {
+  // T/P (isAdmin) wie bisher; die Verwaltung nur an aktive Verteiler ihrer
+  // STWEG(s), nur per verteiler_id (Befund V2, lib/verteiler-verwaltung.js).
+  if (!req.user?.isAdmin) {
+    const vid = parseInt(req.body?.verteiler_id, 10);
+    if (!Number.isFinite(vid) || (Array.isArray(req.body?.recipients) && req.body.recipients.length)) {
+      return res.status(403).json({ error: 'Admin-Rechte erforderlich' });
+    }
+    try {
+      const { rows: [vt] } = await pool.query('SELECT id, stweg, active FROM email_verteiler WHERE id = $1', [vid]);
+      const perm = await verteilerPortalPerm(req);
+      // V10: Senden verlangt „email-verteiler“ = schreiben (lesen zeigt nur die Liste).
+      if (!verteilerVerwaltung.portalDarfSendenRecht(perm)) {
+        return res.status(403).json({ error: 'Senden braucht das Recht „E-Mail-Verteiler“ = schreiben' });
+      }
+      if (!vt || !verteilerVerwaltung.portalDarfSenden(req.user?.groups || [], perm, vt)) {
+        return res.status(403).json({ error: 'Nur an Verteiler der eigenen STWEG' });
+      }
+    } catch (e) { return res.status(500).json({ error: 'Fehler' }); }
+  }
+  // L11: Idempotenz. Mit Idempotency-Key (Kopf oder Feld idempotency_key) geht
+  // dieselbe Rundmail hoechstens einmal hinaus: eine Wiederholung (z. B. nach
+  // Netzabbruch in der App) bekommt die gespeicherte Antwort zurueck. Ohne
+  // Schluessel wie bisher.
+  const schluessel = verteilerVerwaltung.idempotenzSchluessel(req.get('Idempotency-Key') ?? req.body?.idempotency_key);
+  if (schluessel === false) return res.status(400).json({ error: 'Ungültiger Idempotency-Key (8–128 Zeichen: A–Z, a–z, 0–9, . _ : -)' });
+  const konto = String(req.user.user_id || req.user.id || req.user.email || '');
+  if (schluessel) {
+    const fp = verteilerVerwaltung.sendeFingerabdruck(req.body);
+    try {
+      await pool.query(`DELETE FROM verteiler_send_idempotenz WHERE created_at < NOW() - INTERVAL '24 hours'`);
+      const neu = await pool.query(
+        `INSERT INTO verteiler_send_idempotenz (konto, schluessel, fingerabdruck) VALUES ($1, $2, $3)
+         ON CONFLICT (konto, schluessel) DO NOTHING RETURNING schluessel`, [konto, schluessel, fp]);
+      if (!neu.rowCount) {
+        const { rows: [alt] } = await pool.query(
+          'SELECT fingerabdruck, status_code, antwort FROM verteiler_send_idempotenz WHERE konto = $1 AND schluessel = $2', [konto, schluessel]);
+        if (alt && alt.fingerabdruck !== fp) return res.status(422).json({ error: 'Dieser Idempotency-Key gehört zu einer anderen Rundmail' });
+        if (alt && alt.antwort) { res.set('Idempotent-Replayed', 'true'); return res.status(alt.status_code || 200).json(alt.antwort); }
+        return res.status(409).json({ error: 'Diese Rundmail wird schon gesendet oder der Versand wurde unterbrochen – bitte im Protokoll prüfen, nicht erneut senden' });
+      }
+    } catch (e) {
+      console.error('[verteiler-send] Idempotenz:', e.message);
+      return res.status(500).json({ error: 'Fehler' });
+    }
+  }
+  const out = await verteilerRundmailSenden(req);
+  if (schluessel) {
+    // Ging nichts hinaus, darf derselbe Schluessel erneut versuchen; sonst Antwort merken.
+    const q = out.gesendet
+      ? pool.query('UPDATE verteiler_send_idempotenz SET status_code = $3, antwort = $4::jsonb WHERE konto = $1 AND schluessel = $2',
+          [konto, schluessel, out.status, JSON.stringify(out.body)])
+      : pool.query('DELETE FROM verteiler_send_idempotenz WHERE konto = $1 AND schluessel = $2', [konto, schluessel]);
+    await q.catch(e => console.error('[verteiler-send] Idempotenz speichern:', e.message));
+  }
+  res.status(out.status).json(out.body);
 });
+
 
 // ═══════════════════════════════════════════════════════════════════
 // ENERGIE/ZÄHLER (replaces n8n zähler webhooks)
@@ -5079,43 +5187,34 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
   const senderEmail = parsed.from?.value?.[0]?.address || '';
   const senderName = parsed.from?.value?.[0]?.name || senderEmail;
 
-  // Sender-Validierung: wenn allowed_sender_groups gesetzt, muss Sender Mitglied sein
-  const allowedGroups = Array.isArray(list.allowed_sender_groups) ? list.allowed_sender_groups : [];
-  if (allowedGroups.length > 0 && senderEmail) {
-    const senderEmailLower = senderEmail.toLowerCase();
+  // Sender-Validierung (F1): an gesperrte Verteiler (external_allowed=false) nur
+  // erlaubte Absender, mit denselben Regeln wie das Rspamd-Gate beim nativen
+  // Fanout (lib/verteiler-gate.js): STWEG-gebunden, Technik/Präsident an alle,
+  // Verwaltung nur fuer ihre STWEG.
+  if (verteilerGate.istGesperrt(list, VERTEILER_DOMAIN)) {
     let allowed = false;
-    // Exemption: die aktive(n) Verwaltung(en) und ihre Kontakt-Emails duerfen
-    // an die geschuetzten Verteiler IHRER STWEG schreiben (Vertrag fuer diese
-    // STWEG oder STWEG-uebergreifend), ohne explizit in einer Authentik-Gruppe
-    // zu sein. Diese Adressen sind extern (Drittfirma). Frueher: an JEDEN Verteiler.
-    if (await isActiveVerwaltungEmail(senderEmailLower, list.stweg)) {
-      allowed = true;
-      console.log(`[Verteiler] Sender ${senderEmail} als aktive Verwaltung erkannt — erlaubt`);
+    let pruefFehler = null;
+    try {
+      const alle = (await pool.query('SELECT * FROM email_verteiler WHERE active = true')).rows;
+      const eintrag = (await verteilerGateLaden(alle)).find(x => x.id === list.id);
+      allowed = verteilerGate.absenderErlaubt(eintrag, senderEmail);
+    } catch (err) {
+      pruefFehler = err;
+      console.error('[Verteiler] Absenderpruefung fehlgeschlagen:', err.message);
     }
-    if (!allowed && AUTHENTIK_API_TOKEN) {
-      try {
-        const akData = await authentikAPI('GET', `/core/users/?email=${encodeURIComponent(senderEmailLower)}`);
-        const user = akData.results?.find(u => u.email?.toLowerCase() === senderEmailLower);
-        if (user) {
-          const userGroupNames = (user.groups_obj || []).map(g => g.name.toLowerCase());
-          allowed = allowedGroups.some(g => userGroupNames.includes(g.toLowerCase()))
-            // Hausverwaltung dieser STWEG (stwegN-verwaltung) – nur fuer ihre Verteiler
-            || verteilerVerwaltung.verwaltungsGruppeDarfSenden(userGroupNames, list);
-        }
-      } catch (err) { console.error('[Verteiler] Sender-Auth-Check fehler:', err.message); }
-    }
+    if (pruefFehler) throw pruefFehler; // nicht verschieben, beim naechsten Abruf erneut
     if (!allowed) {
-      console.log(`[Verteiler] Sender ${senderEmail} nicht in erlaubten Gruppen [${allowedGroups.join(',')}] für ${toAddress} — abgelehnt`);
+      console.log(`[Verteiler] Sender ${senderEmail} für ${toAddress} nicht erlaubt — abgelehnt`);
       // Höflicher Bounce an Sender
       try {
-        await loggedSendMail({
+        if (senderEmail) await loggedSendMail({
           from: `"Rosenweg Verteiler" <noreply@${VERTEILER_DOMAIN}>`,
           to: senderEmail,
           subject: `Rückläufer: Versand an ${toAddress} nicht erlaubt`,
-          text: `Hallo,\n\nIhre Email an ${toAddress} (Betreff: "${parsed.subject}") wurde nicht zugestellt — Sie sind nicht in einer der für diesen Verteiler erlaubten Gruppen (${allowedGroups.join(', ')}).\n\nBitte wenden Sie sich an den Ausschuss falls Sie hier publizieren möchten.\n\nRosenweg Verteiler`,
+          text: `Hallo,\n\nIhre Email an ${toAddress} (Betreff: "${parsed.subject}") wurde nicht zugestellt — an diesen Verteiler dürfen nur berechtigte Absender schreiben (in der Regel Personen und die Verwaltung derselben STWEG).\n\nBitte wenden Sie sich an den Ausschuss falls Sie hier publizieren möchten.\n\nRosenweg Verteiler`,
         }, 'verteiler-bounce-not-allowed');
       } catch (e) { console.error('[Verteiler] Bounce-Mail fehler:', e.message); }
-      return { success: true, action: 'rejected', reason: 'sender not in allowed_sender_groups' };
+      return { success: true, action: 'rejected', reason: 'sender not allowed' };
     }
   }
 
@@ -6013,6 +6112,8 @@ async function archiveEmail(rawSource, messageId) {
     [fromEmail, fromName, toAddresses, subject, parsed.text || '', parsed.html || '', messageId, emailDate]
   );
   const archiveId = result.rows[0].id;
+  // STWEG aus der Verteiler-Adresse (sonst 'haus'), siehe routes/email-archive.js
+  await require('./routes/email-archive').stwegZuordnen();
 
   // Save attachments to document storage
   const attachmentsMeta = [];
@@ -6528,10 +6629,11 @@ function wohnungSort(a, b) {
   return pa.floor - pb.floor || pa.num - pb.num;
 }
 
-app.get('/api/stweg/:nr/kontakte', authMiddleware, async (req, res) => {
-  try {
-    const nr = parseInt(req.params.nr);
-    if (!nr || nr < 1 || nr > 8) return res.status(404).json({ error: 'STWEG nicht gefunden' });
+// Kontaktliste einer STWEG (Name, Mail, Nummer nach Sicht); Fehler als { status, error } geworfen.
+// Genutzt vom JSON-Endpunkt und vom PDF (Rosenweg STWEG).
+async function stwegKontakteLaden(req, nr) {
+  {
+    if (!nr || nr < 1 || nr > 8) throw { status: 404, error: 'STWEG nicht gefunden' };
 
     // Check access: user must be in this STWEG's groups or Technik
     const stwegGroups = STWEG_GROUPS[nr];
@@ -6540,7 +6642,7 @@ app.get('/api/stweg/:nr/kontakte', authMiddleware, async (req, res) => {
     const hasAccess = allUserGroups.some(g => g === 'technik' || g === 'präsident' || g === 'praesident') ||
                       allUserGroups.some(g => accessGroups.includes(g)) ||
                       isVerwaltungFor(allUserGroups, nr);
-    if (!hasAccess) return res.status(403).json({ error: 'Kein Zugriff auf diese STWEG' });
+    if (!hasAccess) throw { status: 403, error: 'Kein Zugriff auf diese STWEG' };
 
     // Load apartments + contacts from Verwaltungs-DB
     const wRes = await pool.query('SELECT * FROM wohnungen WHERE stweg = $1', [nr]);
@@ -6602,12 +6704,54 @@ app.get('/api/stweg/:nr/kontakte', authMiddleware, async (req, res) => {
     for (const w of wohnungen) w.bewohner = w.bewohner.map(mitSicht);
     ausschuss = ausschuss.map(mitSicht);
 
-    res.json({ stweg: nr, wohnungen, ausschuss });
+    return { stweg: nr, wohnungen, ausschuss };
+  }
+}
+
+app.get('/api/stweg/:nr/kontakte', authMiddleware, async (req, res) => {
+  try {
+    res.json(await stwegKontakteLaden(req, parseInt(req.params.nr)));
   } catch (err) {
+    if (err && err.status) return res.status(err.status).json({ error: err.error });
     console.error('Kontakte error:', err);
     res.status(500).json({ error: 'Fehler beim Laden der Kontakte' });
   }
 });
+
+// PDF fuer Kontaktliste, Wohnungsliste und MEG-Einstellplaetze (Rosenweg STWEG, Entscheid 10):
+// vom Server (Gotenberg), mit Vermerk „vertraulich, erstellt fuer <Name> am <Datum>“.
+async function stwegPdfSenden(req, res, html, name) {
+  try {
+    const pdf = await druckApi.htmlZuPdf(html, { semaphore: gotenbergSemaphore });
+    res.set('Content-Type', 'application/pdf').set('Content-Disposition', `inline; filename="${name}"`).set('Cache-Control', 'no-store').send(pdf);
+  } catch (e) {
+    console.error('[stweg-pdf]', e.message);
+    res.status(502).json({ error: 'PDF konnte nicht erstellt werden' });
+  }
+}
+const pdfFuer = (req) => req.user?.name || req.user?.email || 'unbekannt';
+
+app.get('/api/stweg/:nr/kontakte.pdf', authMiddleware, async (req, res) => {
+  try {
+    const d = await stwegKontakteLaden(req, parseInt(req.params.nr));
+    await stwegPdfSenden(req, res, stwegAppLib.kontaktlisteHtml(d, pdfFuer(req)), `kontaktliste-stweg${d.stweg}.pdf`);
+  } catch (err) {
+    if (err && err.status) return res.status(err.status).json({ error: err.error });
+    res.status(500).json({ error: 'Fehler beim Laden der Kontakte' });
+  }
+});
+
+app.get('/api/stweg/:stweg/wohnungen.pdf', authMiddleware, async (req, res) => {
+  try {
+    const stweg = parseInt(req.params.stweg, 10);
+    if (!stweg || stweg < 1 || stweg > 8) return res.status(400).json({ error: 'Ungueltige STWEG' });
+    if (!stwegOeffentlich.stwegMitglied(req.user.groups || [], stweg)) return res.status(403).json({ error: 'Kein Zugriff auf diese STWEG' });
+    const r = await pool.query('SELECT bezeichnung, stockwerk, zimmer, flaeche_m2, typ, besonderheiten, bewohnt_von, wertquote_zaehler, wertquote_nenner FROM wohnungen WHERE stweg = $1', [stweg]);
+    r.rows.sort((a, b) => wohnungSort(a.bezeichnung, b.bezeichnung));
+    await stwegPdfSenden(req, res, stwegAppLib.wohnungslisteHtml(stweg, r.rows, pdfFuer(req)), `wohnungsliste-stweg${stweg}.pdf`);
+  } catch (err) { res.status(500).json({ error: 'Fehler' }); }
+});
+
 
 // ─── Wohnungsverwaltung ─────────────────────────────────────────────
 
@@ -6958,7 +7102,9 @@ function benutzernameRueckfrage(email, name, grund) {
 
 // Sync kontakte with email to Authentik as users and assign STWEG groups
 // bewohntVon: 'eigentuemer' means self-occupied → Eigentümer/Verwalter also get bewohner group
-async function syncKontakteToAuthentik(stweg, kontakte, bewohntVon) {
+// req (optional): wer speichert – Konten und Gruppen, die ueber einen Kontakt
+// entstehen, stehen dann im admin_protokoll (Bereich 'objekte', Befund F6/E5).
+async function syncKontakteToAuthentik(stweg, kontakte, bewohntVon, req = null) {
   if (!AUTHENTIK_API_TOKEN || !kontakte || !Array.isArray(kontakte)) return;
   // Authentik-Zugang: automatisch für Eigentümer/Verwalter, opt-in für Mieter/Bewohner.
   const withEmail = kontakte.filter(k => {
@@ -7015,6 +7161,7 @@ async function syncKontakteToAuthentik(stweg, kontakte, bewohntVon) {
             is_active: true,
           });
           console.log(`[Authentik] Created user: ${finalUsername} (${email})`);
+          if (req) await objProtokoll(req, 'objekte', 'konto-angelegt', email, [`STWEG ${stweg}`, `über Kontakt (${k.rolle})`, finalUsername]);
         } catch (err) {
           console.error(`[Authentik] Failed to create user ${email}:`, err.message);
           continue;
@@ -7058,6 +7205,7 @@ async function syncKontakteToAuthentik(stweg, kontakte, bewohntVon) {
               try {
                 await authentikAPI('POST', `/core/groups/${group.pk}/add_user/`, { pk: user.pk });
                 console.log(`[Authentik] Added ${email} to group ${targetGroupName}`);
+                if (req) await objProtokoll(req, 'objekte', 'gruppe-gesetzt', email, [`STWEG ${stweg}`, `über Kontakt (${k.rolle})`, targetGroupName]);
               } catch (err) {
                 console.error(`[Authentik] Failed to add ${email} to ${targetGroupName}:`, err.message);
               }
@@ -7100,6 +7248,9 @@ async function authentikKontoPerEmail(email) {
   return (usersData.results || []).find(u => u.email?.toLowerCase() === String(email).toLowerCase()) || null;
 }
 
+// Konto-Loeschung vollstaendig: Frist, Rechte, Nachlauf mit Wiederholung, Aufraeumlauf
+const kontoLoeschung = require('./lib/kontoloeschung');
+
 // Track removed kontakte for delayed Authentik user deletion
 async function trackRemovedKontakte(wohnungId, stweg, oldKontakte, newKontakte) {
   if (!AUTHENTIK_API_TOKEN) return;
@@ -7120,28 +7271,33 @@ async function trackRemovedKontakte(wohnungId, stweg, oldKontakte, newKontakte) 
     );
     if (parseInt(stillExists.rows[0].cnt) > 0) continue; // Still assigned elsewhere
 
-    // Nur reine Bewohner-/Eigentuemer-Konten dieser STWEG vormerken
-    // (Pruefung beim Loeschen wird wiederholt). Fehler -> nicht vormerken.
+    // Nur reine Bewohner-/Eigentuemer-Konten dieser STWEG automatisch loeschen
+    // (Pruefung beim Loeschen wird wiederholt). Konten mit weiteren Gruppen kommen
+    // in die Liste „manuell zu pruefen“ (Entscheid E3d). Fehler -> nicht vormerken.
+    let manuell = false;
     try {
       const konto = await authentikKontoPerEmail(email);
       if (!konto) continue;
       if (!kontoAutoLoeschbar(konto, stweg)) {
-        console.warn(`[Authentik] ${email} nicht zur Loeschung vorgemerkt: Konto hat Gruppen ausserhalb Bewohner/Eigentuemer STWEG ${stweg}`);
-        continue;
+        console.warn(`[Authentik] ${email} manuell zu pruefen: Konto hat Gruppen ausserhalb Bewohner/Eigentuemer STWEG ${stweg}`);
+        manuell = true;
       }
     } catch (e) {
       console.error(`[Authentik] Pruefung vor Loesch-Vormerkung fehlgeschlagen (${email}):`, e.message);
       continue;
     }
 
-    // Schedule for deletion in 30 days
+    // Frist 30 Tage (lib/kontoloeschung.js FRIST_TAGE); manuell zu pruefende Konten
+    // loescht der Lauf nie, das Datum ist dort nur der Zeitpunkt der Vormerkung + Frist.
+    await kontoLoeschung.bereit(pool);
     await pool.query(
-      `INSERT INTO authentik_pending_deletions (email, name, stweg, scheduled_at, reminder_sent)
-       VALUES ($1, $2, $3, NOW() + INTERVAL '30 days', false)
-       ON CONFLICT (email) DO UPDATE SET scheduled_at = NOW() + INTERVAL '30 days', cancelled = false, reminder_sent = false`,
-      [email, k.name || '', stweg]
+      `INSERT INTO authentik_pending_deletions (email, name, stweg, scheduled_at, reminder_sent, manuell_pruefen, grund)
+       VALUES ($1, $2, $3, NOW() + make_interval(days => $5::int), false, $4::boolean, CASE WHEN $4::boolean THEN 'Konto hat weitere Gruppen' END)
+       ON CONFLICT (email) DO UPDATE SET scheduled_at = NOW() + make_interval(days => $5::int), cancelled = false, reminder_sent = false,
+         manuell_pruefen = EXCLUDED.manuell_pruefen, grund = EXCLUDED.grund, stweg = EXCLUDED.stweg`,
+      [email, k.name || '', stweg, manuell, kontoLoeschung.FRIST_TAGE]
     );
-    console.log(`[Authentik] Scheduled deletion for ${email} in 30 days`);
+    console.log(`[Authentik] ${manuell ? 'Manuell zu pruefen' : 'Scheduled deletion in 30 days'}: ${email}`);
   }
 }
 
@@ -7192,7 +7348,8 @@ const loeschungenSchreiben = [requirePermission('loeschungen', 'write'), kartenA
 async function loeschVormerkung(req, res) {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) { res.status(400).json({ error: 'Ungültige ID' }); return null; }
-  const r = await pool.query('SELECT id, email, name, stweg, scheduled_at, cancelled FROM authentik_pending_deletions WHERE id = $1', [id]);
+  await kontoLoeschung.bereit(pool);
+  const r = await pool.query('SELECT id, email, name, stweg, scheduled_at, cancelled, manuell_pruefen FROM authentik_pending_deletions WHERE id = $1', [id]);
   const row = r.rows[0];
   if (!row || !stwegSichtLib.sichtErlaubt(stwegSichtLib.stwegSicht(req.user?.groups || []), row.stweg)) {
     res.status(404).json({ error: 'Nicht gefunden' });
@@ -7208,10 +7365,12 @@ const datumText = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
 
 app.get('/api/admin/pending-deletions', authMiddleware, ...loeschungenLesen, async (req, res) => {
   try {
+    await kontoLoeschung.bereit(pool);
     const params = [];
     const sicht = stwegSichtLib.sichtSql(stwegSichtLib.stwegSicht(req.user?.groups || []), 'd.stweg', params);
     const r = await pool.query(
       `SELECT d.id, d.email, d.name, d.stweg, d.scheduled_at, d.reminder_sent, d.cancelled, d.created_at,
+              d.manuell_pruefen, d.grund,
               EXTRACT(DAY FROM (d.scheduled_at - NOW()))::int AS days_until,
               EXISTS(SELECT 1 FROM wohnungen_kontakte wk WHERE LOWER(wk.email) = LOWER(d.email)) AS still_in_kontakte
          FROM authentik_pending_deletions d
@@ -7266,6 +7425,9 @@ app.put('/api/admin/pending-deletions/:id/reactivate', authMiddleware, ...loesch
 });
 
 app.delete('/api/admin/pending-deletions/:id', authMiddleware, ...loeschungenSchreiben, async (req, res) => {
+  // Stoppen und verlaengern duerfen auch Ausschuss/Verwaltung der eigenen STWEG,
+  // „Eintrag entfernen“ nur Technik (Entscheid E3b)
+  if (!kontoLoeschung.darfEntfernen(req.user?.groups)) return res.status(403).json({ error: 'Eintrag entfernen darf nur Technik' });
   try {
     const row = await loeschVormerkung(req, res);
     if (!row) return;
@@ -7273,6 +7435,67 @@ app.delete('/api/admin/pending-deletions/:id', authMiddleware, ...loeschungenSch
     await loeschProtokoll(req, 'entfernt', row, `${row.cancelled ? 'gestoppt' : 'geplant'} ${datumText(row.scheduled_at)}`, 'aus der Liste entfernt');
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Sofort loeschen (Recht auf Loeschung, Entscheid E3c): nur Technik/Praesident, nur mit
+// frischer Konto-Anmeldung (keine Karte, kein persoenliches Token), mit Protokoll. Gilt
+// auch fuer Eintraege „manuell zu pruefen“; Technik-/Praesident-/Superuser-Konten nie.
+app.post('/api/admin/pending-deletions/:id/sofort', authMiddleware, ...loeschungenSchreiben, async (req, res) => {
+  const pr = kontoLoeschung.sofortLoeschenPruefen({
+    groups: req.user?.groups, auth: req.auth, pat: !!req.pat, kanal: req.headers['x-rosenweg-kanal'],
+  });
+  if (!pr.ok) return res.status(pr.status).json({ error: pr.fehler, ...(pr.reauth ? { reauth: true, fehler: 'frisch' } : {}) });
+  try {
+    const row = await loeschVormerkung(req, res);
+    if (!row) return;
+    const user = await authentikKontoPerEmail(row.email);
+    if (kontoLoeschung.sofortGeschuetzt(user)) {
+      return res.status(409).json({ error: 'Konten von Technik oder Präsident nur über die Konten-Verwaltung löschen' });
+    }
+    if (user) await authentikAPI('DELETE', `/core/users/${user.pk}/`);
+    await pool.query('DELETE FROM authentik_pending_deletions WHERE id = $1', [row.id]);
+    await loeschProtokoll(req, 'sofort-geloescht', row,
+      `${row.manuell_pruefen ? 'manuell zu prüfen' : row.cancelled ? 'gestoppt' : 'geplant'} ${datumText(row.scheduled_at)}`,
+      user ? 'Konto sofort gelöscht' : 'kein Konto mehr in Authentik');
+    console.log(`[Authentik] Sofort geloescht durch ${req.user.email}: Vormerkung #${row.id}`);
+    await lokalesKontoNachLoeschung(row.email, { name: row.name, stweg: row.stweg });
+    res.json({ ok: true, konto: !!user });
+  } catch (err) {
+    console.error('[Authentik] Sofort loeschen:', err.message);
+    res.status(500).json({ error: 'Löschen fehlgeschlagen' });
+  }
+});
+
+// Nachlauf (Anlage, Mailbox, Karten) mit mindestens NACHLAUF_SICHTBAR_AB Fehlversuchen
+app.get('/api/admin/pending-deletions/nachlauf', authMiddleware, ...loeschungenLesen, async (req, res) => {
+  try {
+    await kontoLoeschung.bereit(pool);
+    const params = [kontoLoeschung.NACHLAUF_SICHTBAR_AB];
+    const sicht = stwegSichtLib.sichtSql(stwegSichtLib.stwegSicht(req.user?.groups || []), 'n.stweg', params);
+    const r = await pool.query(
+      `SELECT n.id, n.email, n.name, n.stweg, n.bereich, n.offen, n.versuche, n.letzter_fehler,
+              n.naechster_versuch, n.erstellt_at
+         FROM konto_loeschung_nachlauf n
+        WHERE n.erledigt_at IS NULL AND n.versuche >= $1 AND ${sicht}
+        ORDER BY n.erstellt_at ASC`, params);
+    res.json({ sichtbar_ab: kontoLoeschung.NACHLAUF_SICHTBAR_AB, eintraege: r.rows });
+  } catch (err) { res.status(500).json({ error: 'Nachlauf konnte nicht geladen werden' }); }
+});
+
+// Nachlauf jetzt erneut versuchen (statt auf den Backoff zu warten)
+app.post('/api/admin/pending-deletions/nachlauf/:id/jetzt', authMiddleware, ...loeschungenSchreiben, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige ID' });
+  try {
+    await kontoLoeschung.bereit(pool);
+    const r = await pool.query('SELECT * FROM konto_loeschung_nachlauf WHERE id = $1 AND erledigt_at IS NULL', [id]);
+    const row = r.rows[0];
+    if (!row || !stwegSichtLib.sichtErlaubt(stwegSichtLib.stwegSicht(req.user?.groups || []), row.stweg)) {
+      return res.status(404).json({ error: 'Nicht gefunden' });
+    }
+    const erg = await nachlaufEinmal(row, req);
+    res.json({ ok: erg.ok, offen: erg.offen });
+  } catch (err) { res.status(500).json({ error: 'Nachlauf fehlgeschlagen' }); }
 });
 
 // Cancel pending deletion if contact is re-added
@@ -7290,7 +7513,7 @@ async function cancelPendingDeletion(email) {
 // abgewiesen) und alle Zugaenge der Zeile beenden – Sitzungen (30 Tage gleitend) und
 // PATs galten sonst weiter. Gibt es noch ein anderes Authentik-Konto mit dieser
 // E-Mail, bleibt die Zeile aktiv (dessen naechster Login bindet sie neu).
-async function lokalesKontoNachLoeschung(email) {
+async function lokalesKontoNachLoeschung(email, { name = null, stweg = null } = {}) {
   const e = String(email || '').toLowerCase().trim();
   if (!e) return;
   try {
@@ -7312,14 +7535,131 @@ async function lokalesKontoNachLoeschung(email) {
       const n = await vpnSperrenFuerEmail(e, 'Konto gelöscht');
       if (n) console.log(`[Authentik] ${n} VPN-Zugang/-Zugaenge von ${e} gesperrt`);
     }
-    // Anlage: Hintergrundbild der geteilten Telefone usw. (lib/pbxperson.js)
-    const pbx = await require('./lib/pbxperson').personLoeschen({ url: PBX_API_URL, secret: PBX_SHARED_SECRET, email: e });
-    if (!pbx.ok) console.warn(`[Authentik] Anlage-Daten nach Loeschung nicht entfernt: ${pbx.grund}`);
     console.log(`[Authentik] Lokales Konto ${e} nach Loeschung: ${ids.length} Zeile(n)${nochKonto ? '' : ' deaktiviert'}, Sitzungen/PATs beendet`);
+    // Nachlauf (lib/kontoloeschung.js): Anlage (inkl. Nextcloud-Konto), Mailbox, Karten.
+    // Nur wenn kein anderes Konto mit dieser Adresse besteht – sonst gehoeren die Daten
+    // dem verbleibenden Konto. Gescheiterte Schritte wiederholt nachlaufFaellige().
+    if (!nochKonto) await nachlaufAnlegen(e, { name, stweg });
+    else console.warn('[Authentik] Nachlauf ausgelassen: weiteres Konto mit derselben Adresse');
   } catch (err) {
     console.error(`[Authentik] Lokales Konto ${e} nach Loeschung nicht bereinigt:`, err.message);
   }
 }
+
+// ─── Nachlauf nach der Konto-Loeschung (Punkte 2 und 4) ──────────────────
+// Je Bereich eine Zeile in konto_loeschung_nachlauf. Sofort ein Versuch; was scheitert,
+// bleibt vorgemerkt und wird mit Backoff wiederholt (15 min … 24 h). Jedes Ergebnis steht
+// im admin_protokoll (Bereich 'loeschungen'); ab NACHLAUF_SICHTBAR_AB Fehlversuchen auf
+// der Seite loeschungen.html.
+const NACHLAUF_SYSTEM = { user: { email: 'system', name: 'Löschlauf' }, auth: { art: 'system' } };
+
+async function nachlaufAnlegen(email, { name = null, stweg = null } = {}) {
+  await kontoLoeschung.bereit(pool);
+  for (const bereich of kontoLoeschung.BEREICHE) {
+    try {
+      const offen = bereich === 'anlage' ? kontoLoeschung.ANLAGE_SCHRITTE : [];
+      const r = await pool.query(kontoLoeschung.SQL_NACHLAUF_ANLEGEN, [email, bereich, name || null, stweg || null, JSON.stringify(offen)]);
+      await nachlaufEinmal(r.rows[0], NACHLAUF_SYSTEM);
+    } catch (err) {
+      console.error(`[Nachlauf] ${bereich} nicht angelegt:`, err.message);
+    }
+  }
+}
+
+// Mailcow-Mailboxen, die der Person zugeordnet sind (persoenliche, nicht geteilte)
+async function nachlaufMailbox(email) {
+  const r = await pool.query(
+    `SELECT mr.*, r.domain FROM mailbox_requests mr LEFT JOIN isp_mail_relays r ON r.id = mr.relay_id
+      WHERE LOWER(mr.assigned_user_email) = $1 AND mr.status = 'approved'`, [email]);
+  const geloescht = [];
+  for (const mr of r.rows) {
+    if (!mr.domain) throw new Error(`Mailbox #${mr.id} ohne Domain`);
+    await mailboxAnfrageLoeschen(mr, 'Konto-Löschung');
+    geloescht.push(mr.id);
+  }
+  return { geloescht };
+}
+
+// Rosenweg-Karten (NFC in UniFi Access) entziehen und Zusatzadressen entfernen
+async function nachlaufKarten(email) {
+  const u = await unifiUserByEmail(email, { streng: true });
+  let entzogen = 0;
+  const fehler = [];
+  for (const c of (u?.nfc_cards || [])) {
+    const token = c.token || c.id;
+    if (!token) continue;
+    const r = await unifiAccessRaw('PUT', `/users/${encodeURIComponent(u.id)}/nfc_cards/delete`, { token });
+    const gut = accessOk(r) && (!r.body?.code || r.body.code === 'SUCCESS');
+    await kartenProtokollieren('entziehen', { nfcId: null, displayId: c.display_id || null, email, name: null,
+      durch: 'Konto-Löschung', erfolg: gut, detail: gut ? 'Konto gelöscht' : `${r.status} ${r.body?.msg || ''}` }).catch(() => {});
+    if (gut) entzogen++; else fehler.push(r.status);
+  }
+  if (entzogen) accessKartenCacheLeeren();
+  if (fehler.length) throw new Error(`Karten nicht entzogen (HTTP ${fehler.join(', ')})`);
+  const a = await pool.query('DELETE FROM person_email_alias WHERE LOWER(haupt_email) = $1', [email]);
+  return { entzogen, aliase: a.rowCount };
+}
+
+const nachlaufDeps = {
+  anlage: ({ email, schritte, nummern }) => require('./lib/pbxperson').personLoeschen({
+    url: PBX_API_URL, secret: PBX_SHARED_SECRET, email, schritte, nummern }),
+  mailbox: nachlaufMailbox,
+  karten: nachlaufKarten,
+};
+
+/** Einen Nachlauf-Eintrag ausfuehren, Zustand speichern, protokollieren. */
+async function nachlaufEinmal(row, req) {
+  const erg = await kontoLoeschung.nachlaufAusfuehren(row, nachlaufDeps);
+  const z = kontoLoeschung.naechsterZustand(row, erg);
+  await pool.query(
+    `UPDATE konto_loeschung_nachlauf SET offen = $2::jsonb, kontext = $3::jsonb, versuche = $4, letzter_fehler = $5,
+            naechster_versuch = $6, erledigt_at = $7 WHERE id = $1`,
+    [row.id, JSON.stringify(z.offen), JSON.stringify(z.kontext || {}), z.versuche, z.letzter_fehler, z.naechster_versuch, z.erledigt_at]);
+  const t = kontoLoeschung.protokollText(row, erg, z);
+  await adminProtokoll.eintragen(pool, null, req || NACHLAUF_SYSTEM, {
+    bereich: 'loeschungen', aktion: t.aktion, ziel: row.email, alt: t.alt, neu: t.neu,
+    detail: [row.name, row.stweg ? `STWEG ${row.stweg}` : null, t.fehler].filter(Boolean).join(' · ') || null,
+  }).catch(e => console.error('[Nachlauf] Protokoll:', e.message));
+  if (!erg.ok) console.warn(`[Nachlauf] #${row.id} ${row.bereich}: Versuch ${z.versuche} fehlgeschlagen`);
+  return erg;
+}
+
+let nachlaufLaeuft = false;
+async function nachlaufFaellige() {
+  if (nachlaufLaeuft) return;
+  nachlaufLaeuft = true;
+  try {
+    await kontoLoeschung.bereit(pool);
+    const r = await pool.query(
+      `SELECT * FROM konto_loeschung_nachlauf
+        WHERE erledigt_at IS NULL AND (naechster_versuch IS NULL OR naechster_versuch <= NOW())
+        ORDER BY naechster_versuch NULLS FIRST LIMIT 50`);
+    for (const row of r.rows) await nachlaufEinmal(row, NACHLAUF_SYSTEM).catch(e => console.error('[Nachlauf]', e.message));
+  } catch (err) {
+    console.error('[Nachlauf] Lauf:', err.message);
+  } finally { nachlaufLaeuft = false; }
+}
+setInterval(nachlaufFaellige, 15 * 60 * 1000);
+setTimeout(nachlaufFaellige, 90 * 1000);
+
+// Aufraeumlauf (Punkt 3): Personen-Stammdaten und archivierte Kontakte 3 Monate nach
+// Auszug bzw. Loeschung loeschen/anonymisieren (lib/kontoloeschung.js aufraeumen)
+async function personenAufraeumen() {
+  try {
+    const r = await kontoLoeschung.aufraeumen(pool);
+    if (r.personen_geloescht || r.personen_anonymisiert || r.kontakte || r.nachlauf) {
+      console.log(`[Aufraeumen] Personen: ${r.personen_geloescht} geloescht, ${r.personen_anonymisiert} anonymisiert; Kontakte: ${r.kontakte}; Nachlauf: ${r.nachlauf}`);
+      await adminProtokoll.eintragen(pool, null, NACHLAUF_SYSTEM, {
+        bereich: 'loeschungen', aktion: 'aufraeumen', ziel: 'Personen und archivierte Kontakte',
+        neu: `${r.personen_geloescht} Person(en) gelöscht, ${r.personen_anonymisiert} anonymisiert, ${r.kontakte} Kontakt(e) anonymisiert`,
+        detail: `nach ${kontoLoeschung.AUFBEWAHRUNG_MONATE} Monaten`,
+      }).catch(() => {});
+    }
+  } catch (err) {
+    console.error('[Aufraeumen]', err.message);
+  }
+}
+taeglichUm(2, 30, personenAufraeumen, { name: 'Personen-Aufraeumen' });
 
 // Eine Vormerkung gilt nur, solange die Adresse an keiner Wohnung mehr aktiv ist.
 // trackRemovedKontakte laeuft ausserhalb der Speicher-Transaktion: wurde diese danach
@@ -7336,13 +7676,14 @@ async function nochAktiverKontakt(row) {
 async function processAuthentiKDeletions() {
   if (!AUTHENTIK_API_TOKEN) return;
   try {
+    await kontoLoeschung.bereit(pool);
     // 1. Send reminders (7 days before deletion, i.e. scheduled_at - 7 days <= NOW)
     // Drucker-Aliasse (druckerr<N>+name@…) ueberspringen — die sind keine
     // echten User-Accounts und der Reminder wuerde via Print-Notification
     // an Admins zurueckschlagen.
     const reminders = await pool.query(
       `SELECT * FROM authentik_pending_deletions
-       WHERE cancelled = false AND reminder_sent = false
+       WHERE cancelled = false AND reminder_sent = false AND NOT manuell_pruefen
        AND scheduled_at - INTERVAL '7 days' <= NOW()
        AND scheduled_at > NOW()
        AND email !~* '^druckerr\\d+\\+'`
@@ -7383,7 +7724,7 @@ async function processAuthentiKDeletions() {
     // 2. Delete users past their scheduled date — Drucker-Aliasse ebenfalls auslassen
     const deletions = await pool.query(
       `SELECT * FROM authentik_pending_deletions
-       WHERE cancelled = false AND scheduled_at <= NOW()
+       WHERE cancelled = false AND scheduled_at <= NOW() AND NOT manuell_pruefen
        AND email !~* '^druckerr\\d+\\+'`
     );
     for (const row of deletions.rows) {
@@ -7393,17 +7734,17 @@ async function processAuthentiKDeletions() {
         const user = await authentikKontoPerEmail(row.email);
         // Gruppen koennen sich seit der Vormerkung geaendert haben: nur reine
         // Bewohner-/Eigentuemer-Konten der vorgemerkten STWEG loeschen, sonst
-        // Vormerkung stornieren (bleibt in loeschungen.html sichtbar).
+        // Liste „manuell zu pruefen“ (bleibt in loeschungen.html sichtbar).
         if (user && !kontoAutoLoeschbar(user, row.stweg)) {
           console.warn(`[Authentik] Loeschung ${row.email} abgebrochen: Konto nicht nur Bewohner/Eigentuemer STWEG ${row.stweg}`);
-          await pool.query('UPDATE authentik_pending_deletions SET cancelled = true WHERE id = $1', [row.id]);
+          await pool.query(`UPDATE authentik_pending_deletions SET manuell_pruefen = true, grund = 'Konto hat weitere Gruppen' WHERE id = $1`, [row.id]);
           continue;
         }
         if (user) {
           // Hard delete per DSG/DSGVO requirements
           await authentikAPI('DELETE', `/core/users/${user.pk}/`);
           console.log(`[Authentik] Deleted user ${row.email} (pk: ${user.pk})`);
-          await lokalesKontoNachLoeschung(row.email);
+          await lokalesKontoNachLoeschung(row.email, { name: row.name, stweg: row.stweg });
         }
         await pool.query('DELETE FROM authentik_pending_deletions WHERE id = $1', [row.id]);
       } catch (err) {
@@ -8120,8 +8461,18 @@ app.get('/api/verwaltungen/kontakte', authMiddleware, async (req, res) => {
 // Sonst liest jeder Ausschuss die Plattform-Passwoerter aller STWEGs.
 function verwaltungLesbar(groups, stweg) {
   if (isTechnik(groups) || isPraesident(groups)) return true;
-  return stweg == null || getAusschussStwegs(groups).has(Number(stweg));
+  if (verwaltungEigenerEintrag(groups, stweg)) return true;
+  return isAusschussForAny(groups) && (stweg == null || getAusschussStwegs(groups).has(Number(stweg)));
 }
+// Die Hausverwaltung pflegt ihren EIGENEN Eintrag (Entscheid Stefan 28.11.2026, E4 B):
+// Eintraege der STWEG, die sie verwaltet (stwegN-verwaltung), nicht die
+// STWEG-uebergreifenden. Sie aendert Kontaktpersonen und Kontaktdaten der Firma
+// (VERWALTUNG_SELBST_FELDER), nie Vertrag, Plattform-Zugang, Sichtbarkeit oder
+// Notizen, und sieht weder das Plattform-Passwort noch die Notizen des Ausschusses.
+function verwaltungEigenerEintrag(groups, stweg) {
+  return stweg != null && stweg !== '' && isVerwaltungFor(groups, Number(stweg));
+}
+const VERWALTUNG_SELBST_FELDER = ['adresse', 'telefon', 'email', 'website', 'oeffnungszeiten'];
 function verwaltungAenderbar(groups, stweg) {
   if (isTechnik(groups) || isPraesident(groups)) return true;
   return stweg != null && getAusschussStwegs(groups).has(Number(stweg));
@@ -8144,12 +8495,25 @@ function verwaltungUrl(v) {
 // STWEG-uebergreifende Eintraege (stweg NULL) ohne Passwort.
 function verwaltungFuerLeser(groups, v) {
   const darf = verwaltungAenderbar(groups, v.stweg);
-  if (darf) return { ...v, darf_aendern: true };
-  return { ...v, plattform_pass: null, plattform_pass_verborgen: !!v.plattform_pass, darf_aendern: false };
+  if (darf) return { ...v, darf_aendern: true, darf_kontakte: true };
+  const selbst = verwaltungEigenerEintrag(groups, v.stweg);
+  const out = { ...v, plattform_pass: null, plattform_pass_verborgen: !!v.plattform_pass, darf_aendern: false, darf_kontakte: selbst };
+  if (selbst) { out.notizen = null; out.darf_kontaktdaten = true; }
+  return out;
 }
+// Middleware: Liste/Kontakte der Hausverwaltungen – Ausschuss, Technik/Praesident
+// und die Hausverwaltung selbst (nur ihr eigener Eintrag, siehe oben).
+function requireVerwaltungenZugang(req, res, next) {
+  const g = req.user?.groups || [];
+  if (isTechnik(g) || isPraesident(g) || isAusschussForAny(g) || isVerwaltungForAny(g)) return next();
+  res.status(403).json({ error: 'Nur für Ausschuss, Verwaltung und Technik' });
+}
+// Darf Kontaktpersonen dieses Eintrags anlegen/aendern/loeschen?
+const verwaltungKontakteAenderbar = (groups, stweg) => verwaltungAenderbar(groups, stweg) || verwaltungEigenerEintrag(groups, stweg);
+const verwaltungProtokoll = (req, aktion, id, teile) => objProtokoll(req, 'verwaltungen', aktion, `Verwaltung ${id}`, teile);
 
 // Admin-View: alle Felder; Login-Passwort nur fuer Aenderungsberechtigte
-app.get('/api/verwaltungen', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+app.get('/api/verwaltungen', authMiddleware, requireVerwaltungenZugang, async (req, res) => {
   try {
     const g = req.user?.groups || [];
     const { rows: alleVerw } = await pool.query(`SELECT * FROM verwaltungen ORDER BY stweg NULLS FIRST, aktiv DESC, firma_name`);
@@ -8206,13 +8570,24 @@ async function maybeResendForVerwaltung(v) {
 }
 
 // Update
-app.put('/api/verwaltungen/:id', authMiddleware, requireAusschussOrTechnik, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
+app.put('/api/verwaltungen/:id', authMiddleware, requireVerwaltungenZugang, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const b = req.body || {};
     const g = req.user?.groups || [];
     const alt = await pool.query('SELECT stweg FROM verwaltungen WHERE id = $1', [id]);
     if (alt.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    // Die Hausverwaltung selbst: nur Kontaktdaten der Firma, alles andere bleibt
+    if (!verwaltungAenderbar(g, alt.rows[0].stweg) && verwaltungEigenerEintrag(g, alt.rows[0].stweg)) {
+      const website = verwaltungUrl(b.website);
+      if (website === undefined) return res.status(400).json({ error: 'Ungültige URL (nur http/https)' });
+      const r = await pool.query(
+        `UPDATE verwaltungen SET adresse = $1, telefon = $2, email = $3, website = $4, oeffnungszeiten = $5, updated_at = NOW()
+          WHERE id = $6 RETURNING *`,
+        [b.adresse || null, normalizePhone(b.telefon), b.email || null, website, b.oeffnungszeiten || null, id]);
+      await verwaltungProtokoll(req, 'kontaktdaten-geaendert', id, [`STWEG ${alt.rows[0].stweg}`, 'durch die Verwaltung selbst']);
+      return res.json(verwaltungFuerLeser(g, r.rows[0]));
+    }
     if (!verwaltungAenderbar(g, alt.rows[0].stweg) || !verwaltungAenderbar(g, b.stweg || null)) {
       return res.status(403).json({ error: 'Nur für die eigene STWEG' });
     }
@@ -8235,6 +8610,7 @@ app.put('/api/verwaltungen/:id', authMiddleware, requireAusschussOrTechnik, kart
         b.dokument_pfad || null, b.notizen || null, b.aktiv === false ? false : true, sichtbar, id]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const updated = r.rows[0];
+    await verwaltungProtokoll(req, 'geaendert', id, [updated.stweg ? `STWEG ${updated.stweg}` : 'übergreifend']);
     // Wenn die Verwaltung jetzt wirksam ist, offene Auslagen nachreichen
     const resent = await maybeResendForVerwaltung(updated);
     res.json({ ...updated, _nachgereicht: resent });
@@ -8254,44 +8630,47 @@ app.delete('/api/verwaltungen/:id', authMiddleware, requireAusschussOrTechnik, k
 });
 
 // Kontakt-Add
-app.post('/api/verwaltungen/:id/kontakte', authMiddleware, requireAusschussOrTechnik, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
+app.post('/api/verwaltungen/:id/kontakte', authMiddleware, requireVerwaltungenZugang, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   try {
     const verwId = parseInt(req.params.id);
     const b = req.body || {};
     const v = await pool.query('SELECT stweg FROM verwaltungen WHERE id = $1', [verwId]);
     if (v.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
-    if (!verwaltungAenderbar(req.user?.groups || [], v.rows[0].stweg)) return res.status(403).json({ error: 'Nur für die eigene STWEG' });
+    if (!verwaltungKontakteAenderbar(req.user?.groups || [], v.rows[0].stweg)) return res.status(403).json({ error: 'Nur für die eigene STWEG' });
     const r = await pool.query(
       `INSERT INTO verwaltungs_kontakte (verwaltung_id, name, funktion, email, telefon, sort_order, cc_default)
        VALUES ($1, $2, $3, $4, $5, COALESCE($6, 0), COALESCE($7, false)) RETURNING *`,
       [verwId, b.name, b.funktion || null, b.email || null, normalizePhone(b.telefon), b.sort_order || 0, !!b.cc_default]
     );
+    await verwaltungProtokoll(req, 'kontakt-angelegt', verwId, [`Kontakt ${r.rows[0].id}`, b.name]);
     res.json(r.rows[0]);
   } catch (err) { console.error('[verwaltungs-kontakt-post]', err.message); res.status(500).json({ error: 'Fehler' }); }
 });
 
 // Kontakt-Update
-app.put('/api/verwaltungen/kontakte/:kid', authMiddleware, requireAusschussOrTechnik, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
+app.put('/api/verwaltungen/kontakte/:kid', authMiddleware, requireVerwaltungenZugang, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   try {
     const b = req.body || {};
-    const v = await pool.query('SELECT v.stweg FROM verwaltungs_kontakte k JOIN verwaltungen v ON v.id = k.verwaltung_id WHERE k.id = $1', [parseInt(req.params.kid)]);
+    const v = await pool.query('SELECT v.id, v.stweg FROM verwaltungs_kontakte k JOIN verwaltungen v ON v.id = k.verwaltung_id WHERE k.id = $1', [parseInt(req.params.kid)]);
     if (v.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
-    if (!verwaltungAenderbar(req.user?.groups || [], v.rows[0].stweg)) return res.status(403).json({ error: 'Nur für die eigene STWEG' });
+    if (!verwaltungKontakteAenderbar(req.user?.groups || [], v.rows[0].stweg)) return res.status(403).json({ error: 'Nur für die eigene STWEG' });
     const r = await pool.query(
       `UPDATE verwaltungs_kontakte SET name=$1, funktion=$2, email=$3, telefon=$4, sort_order=$5, cc_default=$6
        WHERE id = $7 RETURNING *`,
       [b.name, b.funktion || null, b.email || null, normalizePhone(b.telefon), b.sort_order || 0, !!b.cc_default, parseInt(req.params.kid)]
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    await verwaltungProtokoll(req, 'kontakt-geaendert', v.rows[0].id, [`Kontakt ${req.params.kid}`, b.name]);
     res.json(r.rows[0]);
   } catch (err) { console.error('[verwaltungs-kontakt-put]', err.message); res.status(500).json({ error: 'Fehler' }); }
 });
 
 // Kontakt-Delete
-app.delete('/api/verwaltungen/kontakte/:kid', authMiddleware, requireAusschussOrTechnik, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
+app.delete('/api/verwaltungen/kontakte/:kid', authMiddleware, requireVerwaltungenZugang, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   try {
-    const v = await pool.query('SELECT v.stweg FROM verwaltungs_kontakte k JOIN verwaltungen v ON v.id = k.verwaltung_id WHERE k.id = $1', [parseInt(req.params.kid)]);
-    if (v.rows.length && !verwaltungAenderbar(req.user?.groups || [], v.rows[0].stweg)) return res.status(403).json({ error: 'Nur für die eigene STWEG' });
+    const v = await pool.query('SELECT v.id, v.stweg FROM verwaltungs_kontakte k JOIN verwaltungen v ON v.id = k.verwaltung_id WHERE k.id = $1', [parseInt(req.params.kid)]);
+    if (v.rows.length && !verwaltungKontakteAenderbar(req.user?.groups || [], v.rows[0].stweg)) return res.status(403).json({ error: 'Nur für die eigene STWEG' });
+    if (v.rows.length) await verwaltungProtokoll(req, 'kontakt-geloescht', v.rows[0].id, [`Kontakt ${req.params.kid}`]);
     await pool.query('DELETE FROM verwaltungs_kontakte WHERE id = $1', [parseInt(req.params.kid)]);
     res.json({ deleted: true });
   } catch (err) { console.error('[verwaltungs-kontakt-delete]', err.message); res.status(500).json({ error: 'Fehler' }); }
@@ -9829,6 +10208,22 @@ app.get('/api/unterschriftenliste/snapshot/:hash.pdf', async (req, res) => {
   }
 });
 
+// Aufbewahrung 10 Jahre (lib/unterschriftenliste-frist.js): taeglich abgelaufene
+// Listen samt Ruecklaeufen und PDF loeschen, mit Eintrag im admin_protokoll.
+const ulFrist = require('./lib/unterschriftenliste-frist');
+taeglichUm(4, 20, async () => {
+  try {
+    const n = await ulFrist.ulAbgelaufeneLoeschen(pool, { fs, docsPath: DOCS_PATH });
+    if (n.listen) {
+      console.log(`[Unterschriftenliste] ${n.listen} Liste(n) nach ${ulFrist.UL_AUFBEWAHRUNG_JAHRE} Jahren geloescht (${n.ruecklaeufe} Ruecklaeufe, ${n.pdfs} PDF)`);
+      await adminProtokoll.eintragen(pool, null, { user: { email: 'system', name: 'Aufräumlauf' }, auth: { art: 'zeitplan' } }, {
+        bereich: 'objekte', aktion: 'unterschriftenlisten-frist', ziel: `${n.listen} Listen`,
+        detail: `nach ${ulFrist.UL_AUFBEWAHRUNG_JAHRE} Jahren gelöscht · ${n.ruecklaeufe} Rückläufe · ${n.pdfs} PDF`,
+      });
+    }
+  } catch (e) { console.error('[Unterschriftenliste] Aufraeumen:', e.message); }
+}, { name: 'Unterschriftenlisten-Frist' });
+
 // STWEG-Zugriff wie requireStwegAccess, fuer Routen ohne :stweg-Parameter
 // (Ruecklaeufe/Historie haengen am Snapshot-Hash bzw. Query-Parameter).
 function ulStwegErlaubt(groups, stweg) {
@@ -9840,7 +10235,9 @@ function ulStwegErlaubt(groups, stweg) {
   return Object.values(m).some(g => lower.includes(g.toLowerCase()));
 }
 
-// GET /api/unterschriftenliste/:hash/rueckläufe — Liste aller Briefe + Rücklauf-Status
+// GET /api/unterschriftenliste/:hash/rueckläufe — Liste aller Briefe + Rücklauf-Status.
+// Ja/Nein mit Name sehen nur Ausschuss und Verwaltung DIESER STWEG sowie
+// Technik/Praesident (Entscheid Stefan 28.11.2026, E2/F4; zevAdminFuerStweg).
 app.get(encodeURI('/api/unterschriftenliste/:hash/rueckläufe'), authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
   try {
     const hash = req.params.hash.toUpperCase();
@@ -9849,7 +10246,7 @@ app.get(encodeURI('/api/unterschriftenliste/:hash/rueckläufe'), authMiddleware,
       [hash]
     );
     if (snap.rows.length === 0) return res.status(404).json({ error: 'Snapshot nicht gefunden' });
-    if (!ulStwegErlaubt(req.user?.groups || [], snap.rows[0].stweg)) return res.status(403).json({ error: 'Kein Zugriff auf diese STWEG' });
+    if (!zevAdminFuerStweg(req.user?.groups || [], snap.rows[0].stweg)) return res.status(403).json({ error: 'Rückläufe sehen nur Ausschuss und Verwaltung dieser STWEG' });
     const briefe = await pool.query(`
       SELECT brief_idx, brief_typ, einheit, empfaenger_name, empfaenger_adresse,
              retourniert_am, vote, notiz, erfasst_von, updated_at
@@ -9873,7 +10270,7 @@ app.get(encodeURI('/api/unterschriftenliste/:hash/rueckläufe'), authMiddleware,
 });
 
 // PUT /api/unterschriftenliste/:hash/rueckläufe/:idx — Rücklauf-Eintrag aktualisieren
-app.put(encodeURI('/api/unterschriftenliste/:hash/rueckläufe/:idx'), authMiddleware, requirePermission('wohnungsverwaltung', 'write'), async (req, res) => {
+app.put(encodeURI('/api/unterschriftenliste/:hash/rueckläufe/:idx'), authMiddleware, requirePermission('wohnungsverwaltung', 'write'), ...objSchreibend, async (req, res) => {
   try {
     const hash = req.params.hash.toUpperCase();
     const idx = parseInt(req.params.idx);
@@ -9884,6 +10281,7 @@ app.put(encodeURI('/api/unterschriftenliste/:hash/rueckläufe/:idx'), authMiddle
     const { retourniert_am, vote, notiz } = req.body || {};
     const validVote = ['ja', 'nein', 'enthaltung', null].includes(vote) ? vote : null;
     const me = req.user?.email || req.user?.name || 'unknown';
+    const vorher = await pool.query('SELECT vote, retourniert_am FROM unterschriftenliste_rueckläufe WHERE snapshot_hash = $1 AND brief_idx = $2', [hash, idx]);
     const r = await pool.query(`
       UPDATE unterschriftenliste_rueckläufe
       SET retourniert_am = $1, vote = $2, notiz = $3, erfasst_von = $4, updated_at = NOW()
@@ -9891,6 +10289,13 @@ app.put(encodeURI('/api/unterschriftenliste/:hash/rueckläufe/:idx'), authMiddle
       RETURNING *
     `, [retourniert_am || null, validVote, notiz || null, me, hash, idx]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Brief nicht gefunden' });
+    const alt = vorher.rows[0] || {};
+    await adminProtokoll.eintragen(pool, null, req, {
+      bereich: 'objekte', aktion: 'ruecklauf-erfasst', ziel: `Unterschriftenliste ${hash} · Brief ${idx}`,
+      alt: [alt.retourniert_am ? 'retourniert' : 'offen', alt.vote].filter(Boolean).join(' '),
+      neu: [r.rows[0].retourniert_am ? 'retourniert' : 'offen', r.rows[0].vote].filter(Boolean).join(' '),
+      detail: `STWEG ${snap.rows[0].stweg}`,
+    }).catch(e => console.error('[objekte] Protokoll:', e.message));
     res.json(r.rows[0]);
   } catch (err) {
     console.error('[UL-Ruecklauf-PUT]', err.message);
@@ -9992,6 +10397,11 @@ app.get('/api/unterschriftenliste/:stweg.pdf', authMiddleware, requirePermission
         );
       } catch (e) { console.error('[Unterschriftenliste] PDF save error:', e.message); }
     }
+    // Gespeicherte Liste (nicht die Vorschau): Protokoll, mit der Karte auch Kartenvermerk
+    if (opts._hash) {
+      kartenAdmin.vermerken(req, res, { lesend: true, text: 'Unterschriftenliste erzeugt' });
+      await objProtokoll(req, 'objekte', 'unterschriftenliste-erzeugt', `STWEG ${stweg}`, [opts._hash, opts.anlass_titel, opts.datum]);
+    }
     res.setHeader('Content-Type', 'application/pdf');
     const inline = req.query.preview === '1';
     const fname = `unterschriftenliste-${stwegFolderName(stweg)}-${opts.datum}-${opts._hash || ''}.pdf`;
@@ -10001,6 +10411,47 @@ app.get('/api/unterschriftenliste/:stweg.pdf', authMiddleware, requirePermission
     console.error('[Unterschriftenliste] error:', err.message);
     res.status(500).json({ error: 'PDF-Erstellung fehlgeschlagen' });
   }
+});
+
+// ─── Protokoll der Objekt- und Personenverwaltung (Befund F3/L4/L10) ─────
+// Jede Aenderung an Wohnungen, Kontakten, Import, Export, Unterschriftenlisten,
+// Ruecklaeufen und Personen steht im admin_protokoll (Bereich 'objekte' bzw.
+// 'personen'); mit der Karte zusaetzlich im Kartenprotokoll
+// (kartenAdmin.mitKarteProtokollieren – nur protokollieren, nie sperren).
+// Ein Fehler beim Eintragen bricht die Aktion nicht ab (nur Log).
+async function objProtokoll(req, bereich, aktion, ziel, teile, db = null) {
+  try {
+    const detail = (Array.isArray(teile) ? teile : [teile]).filter(x => x !== undefined && x !== null && x !== '').join(' · ') || null;
+    await adminProtokoll.eintragen(pool, db, req, { bereich, aktion, ziel, detail });
+  } catch (e) { console.error(`[${bereich}] Protokoll:`, e.message); }
+}
+const kontakteKurz = (kontakte) => {
+  const n = {};
+  for (const k of (Array.isArray(kontakte) ? kontakte : [])) if (k && k.rolle) n[k.rolle] = (n[k.rolle] || 0) + 1;
+  const t = Object.entries(n).map(([r, c]) => `${c} ${r}`).join(', ');
+  return t ? `Kontakte: ${t}` : null;
+};
+
+// POST /api/objekte/export — Export (XLSX/CSV) vor dem Erzeugen im Browser
+// anmelden (Entscheid Stefan 28.11.2026, E7): nur Ausschuss/Verwaltung DIESER
+// STWEG und Technik/Praesident, mit Protokolleintrag. Ohne stweg (Eigentuemer-
+// Uebersicht, Personen ueber die eigene Sicht): Technik/Praesident, Ausschuss
+// oder Verwaltung irgendeiner STWEG. Body: { art, stweg?, format?, anzahl? }
+const OBJ_EXPORT_ARTEN = { wohnungen: 'objekte', eigentuemer: 'objekte', personen: 'personen' };
+app.post('/api/objekte/export', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), ...objSchreibend, async (req, res) => {
+  const b = req.body || {};
+  const bereich = OBJ_EXPORT_ARTEN[b.art];
+  if (!bereich) return res.status(400).json({ error: 'art: wohnungen, eigentuemer oder personen' });
+  const g = req.user?.groups || [];
+  const stweg = b.stweg === undefined || b.stweg === null || b.stweg === '' ? null : parseStweg(b.stweg);
+  if (b.stweg && !stweg) return res.status(400).json({ error: 'Ungültige STWEG-Nummer' });
+  const darf = stweg ? zevAdminFuerStweg(g, stweg)
+    : (isTechnik(g) || isPraesident(g) || isAusschussForAny(g) || isVerwaltungForAny(g));
+  if (!darf) return res.status(403).json({ error: 'Export nur für Ausschuss und Verwaltung dieser STWEG sowie Technik/Präsident' });
+  const format = ['xlsx', 'csv'].includes(b.format) ? b.format : null;
+  const anzahl = Number.isFinite(Number(b.anzahl)) ? Math.max(0, Math.floor(Number(b.anzahl))) : null;
+  await objProtokoll(req, bereich, 'export', stweg ? `STWEG ${stweg}` : 'eigene Sicht', [b.art, format, anzahl !== null ? `${anzahl} Zeilen` : null]);
+  res.json({ ok: true });
 });
 
 // GET /api/wohnungen/:stweg - List all apartments for a STWEG (admin, with kontakte)
@@ -10145,7 +10596,7 @@ app.get('/api/wohnungen/:stweg/:id/historie', authMiddleware, requireStwegAccess
 });
 
 // POST /api/wohnungen/:stweg/:id/kontakte/:kid/archive - Einzelnen Kontakt archivieren
-app.post('/api/wohnungen/:stweg/:id/kontakte/:kid/archive', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, async (req, res) => {
+app.post('/api/wohnungen/:stweg/:id/kontakte/:kid/archive', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, ...objSchreibend, async (req, res) => {
   try {
     const stweg = parseStweg(req.params.stweg);
     const wId = parseInt(req.params.id, 10);
@@ -10164,6 +10615,7 @@ app.post('/api/wohnungen/:stweg/:id/kontakte/:kid/archive', authMiddleware, requ
       [kId, wId, stweg]
     );
     if (r.rowCount === 0) return res.status(404).json({ error: 'Kontakt nicht gefunden oder bereits archiviert' });
+    await objProtokoll(req, 'objekte', 'kontakt-archiviert', `STWEG ${stweg} · ${info.bezeichnung}`, [`Kontakt ${kId}`, info.rolle, info.name]);
     res.json({ ok: true });
     recordObjektChange(stweg, `${info.rolle === 'eigentuemer' ? 'Eigentümer' : 'Mieter'} "${info.name}" aus Wohnung "${info.bezeichnung}" archiviert (Wegzug)`, req.user.email).catch(() => {});
   } catch (err) {
@@ -10254,7 +10706,7 @@ async function adminKontaktePersonenAbgleichen(client, wohnungId, bisher, stweg)
 }
 
 // POST /api/wohnungen/:stweg - Create apartment
-app.post('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, async (req, res) => {
+app.post('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, ...objSchreibend, async (req, res) => {
   const client = await pool.connect();
   try {
     const stweg = parseStweg(req.params.stweg);
@@ -10273,9 +10725,10 @@ app.post('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsver
     await saveKontakte(client, result.rows[0].id, b.kontakte, stweg);
     await client.query('COMMIT');
     const wohnung = await loadWohnungMitKontakte(result.rows[0].id);
+    await objProtokoll(req, 'objekte', 'wohnung-angelegt', `STWEG ${stweg} · ${wohnung.bezeichnung}`, [`Wohnung ${wohnung.id}`, kontakteKurz(wohnung.kontakte)]);
     res.status(201).json(wohnung);
     // Sync kontakte to Authentik in background (don't block response)
-    syncKontakteToAuthentik(stweg, b.kontakte, b.bewohnt_von).catch(() => {});
+    syncKontakteToAuthentik(stweg, b.kontakte, b.bewohnt_von, req).catch(() => {});
     // Verwaltung informieren
     recordObjektChange(stweg, `Neue Wohnung "${wohnung.bezeichnung}" angelegt`, req.user.email).catch(() => {});
   } catch (err) {
@@ -10290,7 +10743,7 @@ app.post('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsver
 });
 
 // PUT /api/wohnungen/:stweg/:id - Update apartment
-app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, async (req, res) => {
+app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, ...objSchreibend, async (req, res) => {
   const client = await pool.connect();
   try {
     const stweg = parseStweg(req.params.stweg);
@@ -10330,9 +10783,18 @@ app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
     }
     await client.query('COMMIT');
     const wohnung = await loadWohnungMitKontakte(result.rows[0].id);
+    {
+      const ch = oldRow ? computeWohnungChanges(oldRow, result.rows[0], oldKontakte, wohnung.kontakte || []) : { felder: [] };
+      const teile = [`Wohnung ${wohnung.id}`];
+      if (ch.felder.length) teile.push(`Felder: ${ch.felder.map(f => f.label).join(', ')}`);
+      if (ch.eigentuemer) teile.push('Eigentümer geändert');
+      if (ch.mieter) teile.push('Mieter geändert');
+      teile.push(kontakteKurz(wohnung.kontakte));
+      await objProtokoll(req, 'objekte', 'wohnung-geaendert', `STWEG ${stweg} · ${wohnung.bezeichnung}`, teile);
+    }
     res.json(wohnung);
     // Sync kontakte to Authentik in background
-    syncKontakteToAuthentik(parseStweg(req.params.stweg), b.kontakte, b.bewohnt_von).catch(() => {});
+    syncKontakteToAuthentik(parseStweg(req.params.stweg), b.kontakte, b.bewohnt_von, req).catch(() => {});
     // Verwaltung informieren — aber NUR wenn verwaltungs-relevante Felder
     // sich aenderten. Interne Felder (bezeichnung, notizen, besonderheiten)
     // sind fuer die Verwaltung uninteressant.
@@ -10354,13 +10816,17 @@ app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
 });
 
 // DELETE /api/wohnungen/:stweg/:id - Delete apartment
-app.delete('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, async (req, res) => {
+// Loescht die Wohnung samt Kontakten und Historie: nur Technik/Praesident
+// (Entscheid Stefan 28.11.2026, E6). Der Ausschuss archiviert die Kontakte.
+app.delete('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireTechnikOrPraesident, ...objSchreibend, async (req, res) => {
   try {
     const stweg = parseStweg(req.params.stweg);
     const w = await pool.query('SELECT bezeichnung FROM wohnungen WHERE id = $1 AND stweg = $2', [req.params.id, stweg]);
     const bez = w.rows[0]?.bezeichnung || `#${req.params.id}`;
+    const kontakteVorher = await pool.query('SELECT rolle FROM wohnungen_kontakte WHERE wohnung_id = $1', [req.params.id]).catch(() => ({ rows: [] }));
     const result = await pool.query('DELETE FROM wohnungen WHERE id = $1 AND stweg = $2 RETURNING id', [req.params.id, stweg]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Wohnung nicht gefunden' });
+    await objProtokoll(req, 'objekte', 'wohnung-geloescht', `STWEG ${stweg} · ${bez}`, [`Wohnung ${req.params.id}`, kontakteKurz(kontakteVorher.rows)]);
     res.json({ success: true });
     recordObjektChange(stweg, `Wohnung "${bez}" geloescht`, req.user.email).catch(() => {});
   } catch (err) {
@@ -10370,7 +10836,8 @@ app.delete('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnu
 });
 
 // POST /api/wohnungen/:stweg/import - Import from kontakte.json format
-app.post('/api/wohnungen/:stweg/import', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, async (req, res) => {
+// Nur Technik/Praesident (Entscheid Stefan 28.11.2026, E7), mit Protokoll.
+app.post('/api/wohnungen/:stweg/import', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireTechnikOrPraesident, ...objSchreibend, async (req, res) => {
   const client = await pool.connect();
   try {
     const stweg = parseStweg(req.params.stweg);
@@ -10414,6 +10881,7 @@ app.post('/api/wohnungen/:stweg/import', authMiddleware, requirePermission('wohn
       }
     }
     await client.query('COMMIT');
+    await objProtokoll(req, 'objekte', 'import', `STWEG ${stweg}`, [`${imported} Wohnungen`]);
     res.json({ success: true, imported });
     // Sync all imported kontakte to Authentik in background
     const allKontakte = [];
@@ -10424,7 +10892,7 @@ app.post('/api/wohnungen/:stweg/import', authMiddleware, requirePermission('wohn
         if (u.mieter?.email) allKontakte.push({ rolle: 'mieter', name: u.mieter.name, email: u.mieter.email });
       }
     }
-    if (allKontakte.length > 0) syncKontakteToAuthentik(stweg, allKontakte).catch(() => {});
+    if (allKontakte.length > 0) syncKontakteToAuthentik(stweg, allKontakte, undefined, req).catch(() => {});
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Wohnungen import error:', err);
@@ -10507,31 +10975,97 @@ app.get('/api/verteiler', authMiddleware, async (req, res) => {
 });
 
 // Get single Verteiler
+// Erlaubte Absender je gesperrtem Verteiler (Befund F1, lib/verteiler-gate.js).
+// Wirft, wenn Authentik oder Mailcow nicht antworten: eine Teilliste wuerde
+// berechtigte Absender abweisen, deshalb lieber gar keine neue Liste.
+async function verteilerGateLaden(verteilerZeilen) {
+  const { allGroups, allUsers } = await fetchAuthentikGroupsUsers();
+  const gruppe = (name) => resolveGroupEmailsFromData(String(name || ''), allGroups, allUsers);
+
+  const mb = await mailcowApi('GET', '/get/mailbox/all');
+  const postfaecher = (Array.isArray(mb) ? mb : [])
+    .map(x => String(x.username || '').toLowerCase())
+    .filter(u => u.endsWith(`@${VERTEILER_DOMAIN.toLowerCase()}`));
+  let mailcowDomains = [];
+  const dm = await mailcowApi('GET', '/get/domain/all');
+  mailcowDomains = (Array.isArray(dm) ? dm : []).map(x => String(x.domain_name || x.domain || '').toLowerCase()).filter(Boolean);
+  if (!mailcowDomains.length) throw new Error('Mailcow lieferte keine Domains');
+
+  const gateways = Object.values(gatewaysLesen()).map(g => g.user);
+  // Funktionsadressen von Technik/Präsident (z. B. technik@, praesident@): Verteiler
+  // ohne STWEG, deren Gruppen nur Technik/Präsident sind.
+  const funktion = new Set(['technik', 'präsident', 'praesident']);
+  const funktionsAdressen = verteilerZeilen
+    .filter(v => !parseInt(v.stweg, 10) && v.active !== false)
+    .filter(v => { const g = (v.group_names?.length ? v.group_names : (v.group_name ? [v.group_name] : [])).map(x => String(x).toLowerCase());
+                   return g.length > 0 && g.every(x => funktion.has(x)); })
+    .map(v => v.email_address);
+  const zusatz = String(process.env.VERTEILER_GATE_ALLE_LISTEN || '').split(',').map(s => s.trim()).filter(Boolean);
+
+  const pq = await pool.query(
+    `SELECT DISTINCT w.stweg, LOWER(TRIM(x.e)) AS email
+       FROM wohnungen_kontakte k
+       JOIN wohnungen w ON w.id = k.wohnung_id
+       LEFT JOIN personen p ON p.id = k.person_id
+       CROSS JOIN LATERAL (VALUES (k.email), (p.email)) AS x(e)
+      WHERE k.archiviert_am IS NULL AND w.stweg IS NOT NULL
+        AND x.e LIKE '%@%' AND LOWER(x.e) NOT LIKE 'druckerr%'`);
+  const personenJeStweg = new Map();
+  for (const r of pq.rows) {
+    const n = Number(r.stweg);
+    if (!personenJeStweg.has(n)) personenJeStweg.set(n, []);
+    personenJeStweg.get(n).push(r.email);
+  }
+
+  const vq = await pool.query(
+    `SELECT v.id, v.stweg, LOWER(TRIM(a.addr)) AS addr FROM verwaltungen v
+       CROSS JOIN LATERAL (
+         SELECT v.email AS addr
+         UNION ALL SELECT k.email FROM verwaltungs_kontakte k WHERE k.verwaltung_id = v.id
+       ) a
+      WHERE v.aktiv = true AND (v.vertrag_von IS NULL OR v.vertrag_von <= CURRENT_DATE)
+        AND (v.vertrag_bis IS NULL OR v.vertrag_bis >= CURRENT_DATE)
+        AND a.addr LIKE '%@%'`);
+  const jeVerwaltung = new Map();
+  for (const r of vq.rows) {
+    if (!jeVerwaltung.has(r.id)) jeVerwaltung.set(r.id, { stweg: r.stweg == null ? null : Number(r.stweg), adressen: [] });
+    jeVerwaltung.get(r.id).adressen.push(r.addr);
+  }
+
+  return verteilerGate.gateEintraege({
+    verteiler: verteilerZeilen, verteilerDomain: VERTEILER_DOMAIN, gruppe, personenJeStweg,
+    verwaltungen: [...jeVerwaltung.values()],
+    systemAdressen: [...postfaecher, ...gateways, MAIL_FROM, ...funktionsAdressen, ...zusatz],
+    eigeneDomains: mailcowDomains,
+  });
+}
+
 // GET /api/verteiler/mailcow-gate — Config fuer das rspamd-Pull-Script auf CT 240.
 // MUSS vor '/api/verteiler/:id' stehen, sonst matcht :id="mailcow-gate" (→ 401).
-// Liefert gated Aliase (external_allowed=false) + erlaubte Absender (alle Mailcow-Domains
-// + aktive Verwaltungs-Domains als Domains, Objektverwaltung als Einzel-Adressen).
+// version 2 (F1): `verteiler` = je gesperrtem Verteiler (external_allowed=false)
+// die erlaubten Absender-Adressen und -Domains (lib/verteiler-gate.js). Das
+// Skript baut daraus je Verteiler eine eigene rspamd-Regel.
+// ÜBERGANG: gated_aliases/allowed_domains/allowed_emails (alte, globale Liste) nur
+// fuer das alte Skript, bis mailcow-verteiler-gate.py auf CT 240 erneuert ist.
+// Danach die drei Felder und die beiden Abfragen unten entfernen.
 app.get('/api/verteiler/mailcow-gate', requireTrackerSecret, async (req, res) => {
   try {
-    const { rows } = await pool.query(
-      `SELECT email_address FROM email_verteiler WHERE active = true AND external_allowed = false`
-    );
-    const gated_aliases = rows
-      .map(r => String(r.email_address || '').toLowerCase())
-      .filter(a => a.endsWith(`@${VERTEILER_DOMAIN}`));
-    // Ohne Mailcow-Domains keine Teilliste ausliefern: das Gate-Skript uebernimmt die
-    // Liste ungeprueft, und rspamd wiese dann interne Absender (noreply@, technik@ …) ab.
-    // Bei Fehler 503 -> das Skript bricht ab und behaelt die bisherige Liste.
-    let mailcowDomains = [];
+    const { rows } = await pool.query(`SELECT * FROM email_verteiler WHERE active = true`);
+    let verteiler;
+    try {
+      verteiler = await verteilerGateLaden(rows);
+    } catch (e) {
+      // Bei Fehler 503 -> das Skript bricht ab und behaelt die bisherige Liste.
+      console.warn('[mailcow-gate]', e.message);
+      return res.status(503).json({ error: 'Gate-Daten nicht vollstaendig abrufbar' });
+    }
+    const gated_aliases = verteiler.map(v => v.address).sort();
+    // ÜBERGANG (altes Skript): globale Listen wie bisher.
+    const mailcowDomains = [];
     try {
       const d = await mailcowApi('GET', '/get/domain/all');
-      mailcowDomains = (Array.isArray(d) ? d : [])
-        .map(x => String(x.domain_name || x.domain || '').toLowerCase()).filter(Boolean);
-    } catch (e) {
-      console.warn('[mailcow-gate] domain/all:', e.message);
-      return res.status(503).json({ error: 'Mailcow-Domains nicht abrufbar' });
-    }
-    if (!mailcowDomains.length) return res.status(503).json({ error: 'Mailcow lieferte keine Domains' });
+      (Array.isArray(d) ? d : []).forEach(x => { const n = String(x.domain_name || x.domain || '').toLowerCase(); if (n) mailcowDomains.push(n); });
+    } catch { return res.status(503).json({ error: 'Mailcow-Domains nicht abrufbar' }); }
     mailcowDomains.push(VERTEILER_DOMAIN.toLowerCase());
     const vq = await pool.query(
       `SELECT DISTINCT LOWER(SPLIT_PART(addr, '@', 2)) AS domain FROM (
@@ -10544,17 +11078,13 @@ app.get('/api/verteiler/mailcow-gate', requireTrackerSecret, async (req, res) =>
             AND (v.vertrag_bis IS NULL OR v.vertrag_bis >= CURRENT_DATE) AND k.email IS NOT NULL AND k.email <> ''
        ) s WHERE addr LIKE '%@%'`
     );
-    const verwaltungDomains = vq.rows.map(r => r.domain).filter(Boolean);
-    const allowed_domains = [...new Set([...mailcowDomains, ...verwaltungDomains])].sort();
-    const eq = await pool.query(
-      `SELECT DISTINCT LOWER(email) AS email FROM (
-         SELECT email FROM personen WHERE email IS NOT NULL AND email <> ''
-         UNION ALL
-         SELECT email FROM wohnungen_kontakte WHERE email IS NOT NULL AND email <> ''
-       ) s WHERE email LIKE '%@%'`
-    );
-    const allowed_emails = eq.rows.map(r => r.email).filter(Boolean).sort();
-    res.json({ gated_aliases: gated_aliases.sort(), allowed_domains, allowed_emails, generated_at: new Date().toISOString() });
+    const allowed_domains = [...new Set([...mailcowDomains, ...vq.rows.map(r => r.domain).filter(Boolean)])].sort();
+    const allowed_emails = [...new Set(verteiler.flatMap(v => v.emails))].sort();
+    res.json({
+      version: 2, verteiler,
+      gated_aliases, allowed_domains, allowed_emails,
+      generated_at: new Date().toISOString(),
+    });
   } catch (err) {
     console.error('[mailcow-gate]', err.message);
     res.status(500).json({ error: 'Fehler' });
@@ -10677,18 +11207,19 @@ app.post('/api/verteiler', authMiddleware, adminOnly, async (req, res) => {
 
 // Update Verteiler
 app.put('/api/verteiler/:id', authMiddleware, adminOnly, async (req, res) => {
-  const { stweg, name, email_address, members, active, reply_to, subject_prefix, group_name, group_names, allowed_sender_groups,
-          whatsapp_group_id, whatsapp_group_name, external_allowed } = req.body;
   try {
-    const groups = group_names?.length ? group_names : (group_name ? [group_name] : []);
-    const allowedSenders = Array.isArray(allowed_sender_groups) ? allowed_sender_groups : [];
+    // L4: fehlende Felder behalten ihren Wert (frueher: members geleert, active=true, stweg=null).
+    const alt = (await pool.query('SELECT * FROM email_verteiler WHERE id = $1', [req.params.id])).rows[0];
+    if (!alt) return res.status(404).json({ error: 'Nicht gefunden' });
+    const n = verteilerVerwaltung.verteilerAenderung(alt, req.body || {});
+    if (!n.name || !n.email_address) return res.status(400).json({ error: 'Name und Email-Adresse erforderlich' });
     const result = await pool.query(
       `UPDATE email_verteiler SET stweg=$1, name=$2, email_address=$3, members=$4, active=$5,
               reply_to=$6, subject_prefix=$7, group_name=$8, group_names=$9, allowed_sender_groups=$10,
               whatsapp_group_id=$11, whatsapp_group_name=$12, external_allowed=$13
        WHERE id=$14 RETURNING *`,
-      [stweg, name, email_address, JSON.stringify(members || []), active !== false, reply_to || 'sender', subject_prefix || null, groups[0] || null, JSON.stringify(groups), JSON.stringify(allowedSenders),
-       whatsapp_group_id || null, whatsapp_group_name || null, external_allowed === true,
+      [n.stweg, n.name, n.email_address, JSON.stringify(n.members), n.active, n.reply_to, n.subject_prefix, n.group_name, JSON.stringify(n.group_names), JSON.stringify(n.allowed_sender_groups),
+       n.whatsapp_group_id, n.whatsapp_group_name, n.external_allowed,
        req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
@@ -11226,6 +11757,8 @@ async function stwegTermineLaden(stweg) {
     title: e.title, description: e.description, start: e.start_date, end: e.end_date,
     location: e.location, category: e.category, all_day: e.all_day,
     id: e.id, source: 'stweg',
+    // Termin aus der Zeitachse eines Projekts (P7): Rosenweg Termine springt zurueck
+    ...(e.projekt_slug ? { projekt_slug: e.projekt_slug } : {}),
   }));
   // Wartungen als virtuelle Events einmischen (aktive Verträge mit naechster_termin
   // dieser STWEG oder ohne STWEG-Zuordnung, ab heute - 7 Tage bis +365)
@@ -11990,7 +12523,6 @@ app.get('/api/benutzer/:login/einstellungen', stationsRouter.stationAuth, async 
 // ═══════════════════════════════════════════════════════════════════
 
 const DOCS_PATH = process.env.DOCS_PATH || '/documents';
-const IGNORED_FILES = new Set(['README.md', 'LICENSE', '.gitignore', '.gitkeep', '.gitattributes']);
 
 /** Resolve user path safely within DOCS_PATH, returns null if path escapes */
 function safeDocPath(userPath) {
@@ -12001,42 +12533,53 @@ function safeDocPath(userPath) {
   return resolved;
 }
 
-/** Recursively walk directory and collect files.
- *  For empty subdirectories, emit a .gitkeep entry so the frontend can register them. */
-async function walkDocs(dir, prefix = '') {
-  const results = [];
-  let entries;
-  try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return results; }
-  for (const entry of entries) {
-    if (entry.name.startsWith('.')) continue; // skip .recycle, .git-backup, etc.
-    const relPath = prefix ? `${prefix}/${entry.name}` : entry.name;
-    const fullPath = pathModule.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      const subResults = await walkDocs(fullPath, relPath);
-      if (subResults.length === 0) {
-        // Empty directory: emit a .gitkeep so frontend registers the subfolder
-        results.push({ path: `${relPath}/.gitkeep`, size: 0, url: `/api/documents/${relPath}/.gitkeep` });
-      } else {
-        results.push(...subResults);
-      }
-    } else {
-      if (IGNORED_FILES.has(entry.name)) continue;
-      try {
-        const stat = await fs.stat(fullPath);
-        results.push({ path: relPath, size: stat.size, url: `/api/documents/${relPath}` });
-      } catch { /* skip unreadable files */ }
-    }
-  }
-  return results;
+// Verzeichnis der Ablage (lib/unterlagen.js): hoechstens alle 30 s neu
+// gelesen; jede Schreib-Route leert es (docVerzeichnis.leeren()).
+const docVerzeichnis = unterlagen.verzeichnisSpeicher(fs, DOCS_PATH);
+
+// Rechte einer Anfrage als Funktionen fuer lib/unterlagen.js
+async function docDarf(req) {
+  const groups = req.user?.groups || [];
+  const ctx = await docRechteKontext(req);
+  return {
+    lesen: (p) => isDocPathAllowed(p, groups, ctx),
+    schreiben: (p) => canWriteDocPath(p, groups, ctx),
+    technik: isTechnik(groups) || isPraesident(groups),
+  };
+}
+function docPfadOk(p) {
+  return typeof p === 'string' && !p.includes('..') && !p.startsWith('/') && !/[%\\]/.test(p) && !/\0/.test(p);
+}
+function docPfadAusAnfrage(wert) {
+  return String(wert || '').replace(/^\/+|\/+$/g, '');
 }
 
 // GET /api/documents - List available documents (filtered by user's STWEGs)
+// Flach wie bisher (Web, MCP): {path, size, url} und neu geaendert (ISO),
+// typ; leere Ordner als <ordner>/.gitkeep. ?path=<ordner> nur darunter (L2).
 app.get('/api/documents', authMiddleware, async (req, res) => {
   try {
-    const allDocs = await walkDocs(DOCS_PATH);
+    const verz = await docVerzeichnis.holen();
     const ctx = await docRechteKontext(req);
     const groups = req.user?.groups || [];
-    const docs = allDocs.filter(f => isDocPathAllowed(f.path, groups, ctx));
+    const unter = docPfadAusAnfrage(req.query.path);
+    if (unter && !docPfadOk(unter)) return res.status(400).json({ error: 'Ungültiger Pfad' });
+    const vorne = unter ? unter + '/' : '';
+    const docs = [];
+    for (const d of verz.dateien) {
+      if (vorne && !d.pfad.startsWith(vorne)) continue;
+      if (!isDocPathAllowed(d.pfad, groups, ctx)) continue;
+      docs.push({ path: d.pfad, size: d.groesse, url: `/api/documents/${d.pfad}`, geaendert: new Date(d.geaendert).toISOString(), typ: unterlagen.dateiTyp(d.pfad) });
+    }
+    // leere Ordner (ohne Dateien und ohne Unterordner) wie bisher als <ordner>/.gitkeep
+    const belegt = new Set();
+    for (const d of verz.dateien) { let p = d.pfad; while (p.includes('/')) { p = p.slice(0, p.lastIndexOf('/')); belegt.add(p); } }
+    for (const o of verz.ordner.keys()) { if (o.includes('/')) belegt.add(o.slice(0, o.lastIndexOf('/'))); }
+    for (const o of verz.ordner.keys()) {
+      if (belegt.has(o) || (vorne && !o.startsWith(vorne))) continue;
+      const pfad = `${o}/.gitkeep`;
+      if (isDocPathAllowed(pfad, groups, ctx)) docs.push({ path: pfad, size: 0, url: `/api/documents/${pfad}`, ordner: true });
+    }
     res.json(docs);
   } catch (err) {
     console.error('Documents list error:', err.message);
@@ -12044,15 +12587,245 @@ app.get('/api/documents', authMiddleware, async (req, res) => {
   }
 });
 
+// ─── Unterlagen (App „Rosenweg Unterlagen“, lib/unterlagen.js) ───────
+// Alle nur lesend; Rechte wie GET /api/documents. alles=1 (auch
+// Druckertreiber, .DS_Store, desktop.ini) gilt nur fuer Technik/Praesident.
+
+// GET /api/documents-ordner?path=<ordner> — eine Ebene (L1, L2, L3, L5)
+app.get('/api/documents-ordner', authMiddleware, async (req, res) => {
+  try {
+    const pfad = docPfadAusAnfrage(req.query.path);
+    if (pfad && !docPfadOk(pfad)) return res.status(400).json({ error: 'Ungültiger Pfad' });
+    const darf = await docDarf(req);
+    const alles = darf.technik && req.query.alles === '1';
+    const verz = await docVerzeichnis.holen();
+    const inhalt = unterlagen.ordnerInhalt(verz, pfad, darf, { alles });
+    // Leer und (nicht vorhanden oder nicht lesbar): immer 404, damit sich
+    // fremde Ordnernamen nicht erraten lassen
+    if (pfad && !inhalt.ordner.length && !inhalt.dateien.length && (!verz.ordner.has(pfad) || !darf.lesen(`${pfad}/x`))) {
+      return res.status(404).json({ error: 'Ordner nicht gefunden' });
+    }
+    let ids = new Map();
+    try { ids = await unterlagen.kennungenFuer(pool, inhalt.dateien.map(d => d.pfad)); } catch (e) { console.warn('[DOCS] Kennungen:', e.message); }
+    const nc = process.env.NEXTCLOUD_URL_PUBLIC || unterlagen.NEXTCLOUD_STANDARD;
+    const projekt = (p) => { const t = p.split('/'); return t[0] === 'projekte' && t[1] ? t[1] : null; };
+    for (const o of inhalt.ordner) {
+      if (!pfad && unterlagen.BEREICHE[o.name]) o.titel = unterlagen.BEREICHE[o.name];
+      if (o.schreiben) o.nextcloud = unterlagen.nextcloudLink(o.pfad, nc, { ordner: true });
+      o.projekt = projekt(o.pfad);
+    }
+    for (const d of inhalt.dateien) {
+      d.id = ids.get(d.pfad) || null;
+      d.schreiben = darf.schreiben(d.pfad);
+      if (d.schreiben) d.nextcloud = unterlagen.nextcloudLink(d.pfad, nc);
+      d.projekt = projekt(d.pfad);
+    }
+    inhalt.projekt = pfad ? projekt(pfad + '/x') : null;
+    if (inhalt.darf.schreiben) inhalt.nextcloud = unterlagen.nextcloudLink(pfad, nc, { ordner: true });
+    if (inhalt.darf.schreiben && /^(stweg[1-8]|meg)$/.test(pfad)) inhalt.vorlage = unterlagen.NUMMERN_VORLAGE;
+    inhalt.stand = new Date(verz.stand).toISOString();
+    res.json(inhalt);
+  } catch (err) {
+    console.error('[DOCS] Ordner:', err.message);
+    res.status(500).json({ error: 'Ordner konnte nicht geladen werden' });
+  }
+});
+
+// GET /api/documents-suche?q=…[&path=<ordner>] — Name und Pfad (L4, E11)
+app.get('/api/documents-suche', authMiddleware, async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim().slice(0, 200);
+    const pfad = docPfadAusAnfrage(req.query.path);
+    if (pfad && !docPfadOk(pfad)) return res.status(400).json({ error: 'Ungültiger Pfad' });
+    const darf = await docDarf(req);
+    const verz = await docVerzeichnis.holen();
+    const r = unterlagen.suchen(verz, q, darf, { pfad, alles: darf.technik && req.query.alles === '1' });
+    let ids = new Map();
+    try { ids = await unterlagen.kennungenFuer(pool, r.treffer.filter(t => t.art === 'datei').map(t => t.pfad)); } catch (e) { console.warn('[DOCS] Kennungen:', e.message); }
+    for (const t of r.treffer) if (t.art === 'datei') t.id = ids.get(t.pfad) || null;
+    res.json({ q, ...r, art: 'name' });
+  } catch (err) {
+    console.error('[DOCS] Suche:', err.message);
+    res.status(500).json({ error: 'Suche fehlgeschlagen' });
+  }
+});
+
+// GET /api/documents-neu?seit=<ISO|ms>[&ordner=a&ordner=b | ordner=a,b] — neue
+// und geaenderte Dateien (L1, L11). Faengt per mtime auch Samba/Nextcloud.
+// Ohne seit: nur der Stand (fuer den ersten, stillen Abgleich).
+app.get('/api/documents-neu', authMiddleware, async (req, res) => {
+  try {
+    const seit = unterlagen.seitLesen(req.query.seit);
+    const roh = [].concat(req.query.ordner || []).flatMap(o => String(o).split(','));
+    const ordner = roh.map(docPfadAusAnfrage).filter(Boolean).slice(0, 50);
+    if (ordner.some(o => !docPfadOk(o))) return res.status(400).json({ error: 'Ungültiger Pfad' });
+    const verz = await docVerzeichnis.holen();
+    if (seit === null) return res.json({ dateien: [], mehr: false, stand: new Date(verz.stand).toISOString() });
+    const darf = await docDarf(req);
+    const r = unterlagen.neuSeit(verz, seit, darf, { ordner });
+    let ids = new Map();
+    try { ids = await unterlagen.kennungenFuer(pool, r.dateien.map(d => d.pfad)); } catch (e) { console.warn('[DOCS] Kennungen:', e.message); }
+    for (const d of r.dateien) d.id = ids.get(d.pfad) || null;
+    res.json(r);
+  } catch (err) {
+    console.error('[DOCS] Neu:', err.message);
+    res.status(500).json({ error: 'Neue Dokumente konnten nicht geladen werden' });
+  }
+});
+
+// GET /api/documents-rechte — wo darf ich schreiben (L3)? Fuer Menues und
+// Ziel-Auswahl; die Schreib-Routen pruefen trotzdem jeden Pfad selbst.
+app.get('/api/documents-rechte', authMiddleware, async (req, res) => {
+  try {
+    const groups = req.user?.groups || [];
+    const ctx = await docRechteKontext(req);
+    const technik = isTechnik(groups) || isPraesident(groups);
+    const ziele = [];
+    if (technik) {
+      ziele.push('');
+    } else {
+      if (canWriteDocPath('allgemein/x', groups, ctx)) ziele.push('allgemein');
+      for (let n = 1; n <= 8; n++) {
+        const f = stwegFolderName(n);
+        if (canWriteDocPath(`${f}/x`, groups, ctx)) ziele.push(f);
+      }
+      for (const slug of (ctx.projekte ? ctx.projekte.keys() : [])) {
+        if (canWriteDocPath(`projekte/${slug}/x`, groups, ctx)) ziele.push(`projekte/${slug}`);
+      }
+    }
+    res.json({
+      schreiben: technik || ziele.length > 0,
+      ziele,                       // '' = ueberall (Technik/Praesident)
+      technik,
+      papierkorb_tage: papierkorb.TAGE,
+      namensschema: unterlagen.NAMENSSCHEMA,
+      vorlage: unterlagen.NUMMERN_VORLAGE,
+      ausgeblendet: unterlagen.AUSGEBLENDET_ORDNER,
+      endungen: [...DOC_UPLOAD_EXTS],
+    });
+  } catch (err) {
+    console.error('[DOCS] Rechte:', err.message);
+    res.status(500).json({ error: 'Rechte konnten nicht geladen werden' });
+  }
+});
+
+// GET /api/documents-kennung/:id — stabile Kennung -> Datei (L5, E9).
+// 404, wenn unbekannt, weg oder nicht lesbar (verraet keinen Pfad).
+app.get('/api/documents-kennung/:id', authMiddleware, async (req, res) => {
+  try {
+    const pfad = await unterlagen.pfadZuKennung(pool, req.params.id);
+    const darf = pfad ? await docDarf(req) : null;
+    if (!pfad || !darf.lesen(pfad)) return res.status(404).json({ error: 'Dokument nicht gefunden' });
+    const voll = safeDocPath(pfad);
+    const st = voll ? await fs.stat(voll).catch(() => null) : null;
+    if (!st || !st.isFile()) return res.status(404).json({ error: 'Dokument nicht gefunden', weg: true });
+    res.json({ id: req.params.id, ...unterlagen.dateiEintrag({ pfad, groesse: st.size, geaendert: st.mtimeMs }), schreiben: darf.schreiben(pfad) });
+  } catch (err) {
+    console.error('[DOCS] Kennung:', err.message);
+    res.status(500).json({ error: 'Dokument konnte nicht gefunden werden' });
+  }
+});
+
+// GET /api/documents-fassungen?path=<datei> — fruehere Fassungen (E14): beim
+// Ersetzen in den Papierkorb gelegt, 30 Tage. Sehen darf sie, wer die Datei
+// lesen darf; zurueckholen (documents-papierkorb/:id/wiederherstellen) nur,
+// wer dort schreiben darf.
+app.get('/api/documents-fassungen', authMiddleware, async (req, res) => {
+  try {
+    const pfad = docPfadAusAnfrage(req.query.path);
+    if (!pfad || !docPfadOk(pfad)) return res.status(400).json({ error: 'Ungültiger Pfad' });
+    const darf = await docDarf(req);
+    if (!darf.lesen(pfad)) return res.status(403).json({ error: 'Kein Zugriff auf dieses Dokument' });
+    const liste = await papierkorb.fassungen(papierkorbDeps(), pfad);
+    res.json({
+      fassungen: liste.map(e => ({ id: e.id, groesse: e.groesse, ersetzt_am: e.geloescht_am, ersetzt_von: e.geloescht_name || null, endgueltig_am: e.endgueltig_am })),
+      wiederherstellen: darf.schreiben(pfad),
+      tage: papierkorb.TAGE,
+    });
+  } catch (err) {
+    console.error('[DOCS] Fassungen:', err.message);
+    res.status(500).json({ error: 'Frühere Fassungen konnten nicht geladen werden' });
+  }
+});
+
+// GET /api/documents-fassungen/:id/datei — eine fruehere Fassung herunterladen
+app.get('/api/documents-fassungen/:id/datei', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige ID' });
+    const e = await papierkorb.eintrag(papierkorbDeps(), id);
+    const darf = e ? await docDarf(req) : null;
+    if (!e || e.grund !== 'ersetzt' || !darf.lesen(e.pfad)) return res.status(404).json({ error: 'Fassung nicht gefunden' });
+    const voll = pathModule.join(DOCS_PATH, e.ablage);
+    const st = await fs.stat(voll);
+    const name = e.pfad.split('/').pop().replace(/["\r\n\\]/g, '_');
+    res.setHeader('Content-Type', DOC_INHALTSTYPEN[unterlagen.endung(name)] || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${name.replace(/[^\x20-\x7E]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(name)}`);
+    res.setHeader('Content-Length', st.size);
+    const strom = fsSync.createReadStream(voll);
+    strom.on('error', (er) => { if (!res.headersSent) res.status(500).json({ error: 'Fassung konnte nicht geladen werden' }); else res.destroy(); console.error('[DOCS] Fassung:', er.message); });
+    strom.pipe(res);
+  } catch (err) {
+    if (err.code === 'ENOENT') return res.status(404).json({ error: 'Fassung nicht gefunden' });
+    console.error('[DOCS] Fassung:', err.message);
+    res.status(500).json({ error: 'Fassung konnte nicht geladen werden' });
+  }
+});
+
+// Content-Type je Endung (Download, fruehere Fassungen)
+const DOC_INHALTSTYPEN = {
+  pdf: 'application/pdf',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  xls: 'application/vnd.ms-excel',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  doc: 'application/msword',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  svg: 'image/svg+xml',
+  txt: 'text/plain',
+  csv: 'text/csv',
+  eml: 'message/rfc822',
+  webp: 'image/webp',
+  odt: 'application/vnd.oasis.opendocument.text',
+  ods: 'application/vnd.oasis.opendocument.spreadsheet',
+  zip: 'application/zip',
+};
+
+// Erlaubte Endungen beim Hochladen und Umbenennen
+const DOC_UPLOAD_EXTS = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'txt', 'csv', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp', 'dotx', 'zip', 'tiff', 'tif', 'bmp']);
+
 // POST /api/documents-preview - Convert Office document to PDF for viewing
 const DOC_CONVERTER_URL = process.env.DOC_CONVERTER_URL || 'http://doc-converter:3000';
 const OFFICE_EXTS = new Set(['docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp', 'dotx']);
 const previewCache = new Map(); // path → { pdf: Buffer, expires: number }
 const PREVIEW_CACHE_TTL = 30 * 60 * 1000; // 30 min
 
-app.post('/api/documents-preview', authMiddleware, async (req, res) => {
+// Vorschau-PDF senden, auf Wunsch nur einen Bereich (Range): die geteilten
+// Telefone holen es ueber die Anlage stueckweise (portal_bereich).
+function vorschauSenden(req, res, pdf) {
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'inline; filename="preview.pdf"');
+  res.setHeader('Accept-Ranges', 'bytes');
+  const b = unterlagen.bereichLesen(req.headers.range, pdf.length);
+  if (b === 'ungueltig') {
+    res.setHeader('Content-Range', `bytes */${pdf.length}`);
+    return res.status(416).json({ error: 'Bereich ungültig' });
+  }
+  if (!b) return res.send(pdf);
+  res.status(206).setHeader('Content-Range', `bytes ${b.von}-${b.bis}/${pdf.length}`);
+  return res.send(pdf.subarray(b.von, b.bis + 1));
+}
+
+// POST mit {path} (Web) oder GET ?path= (App: Herunterladen mit Fortschritt,
+// stueckweise ueber den Portal-Weg der geteilten Telefone)
+app.post('/api/documents-preview', authMiddleware, (req, res) => dokumentVorschau(req, res, req.body?.path));
+app.get('/api/documents-preview', authMiddleware, (req, res) => dokumentVorschau(req, res, typeof req.query.path === 'string' ? req.query.path : ''));
+
+async function dokumentVorschau(req, res, filePath) {
   try {
-    const filePath = req.body?.path;
     if (!filePath || filePath.includes('..') || filePath.startsWith('/') || /[%\\]/.test(filePath) || /\0/.test(filePath)) {
       return res.status(400).json({ error: 'Ungültiger Pfad' });
     }
@@ -12067,19 +12840,19 @@ app.post('/api/documents-preview', authMiddleware, async (req, res) => {
       return res.status(403).json({ error: 'Kein Zugriff auf dieses Dokument' });
     }
 
-    // Check cache
+    // Zwischenspeicher je Fassung (L12): Pfad + Groesse + Aenderungszeit, damit
+    // ein Ersetzen ueber Samba/Nextcloud nicht 30 min die alte Vorschau zeigt
     const now = Date.now();
-    const cached = previewCache.get(filePath);
+    const vollVorschau = safeDocPath(filePath);
+    if (!vollVorschau) return res.status(400).json({ error: 'Ungültiger Pfad' });
+    const stVorschau = await fs.stat(vollVorschau);
+    const cacheKey = `${filePath}|${stVorschau.size}|${Math.floor(stVorschau.mtimeMs)}`;
+    const cached = previewCache.get(cacheKey);
     if (cached && cached.expires > now) {
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `inline; filename="preview.pdf"`);
-      return res.send(cached.pdf);
+      return vorschauSenden(req, res, cached.pdf);
     }
 
-    // Read from local filesystem
-    const fullPath = safeDocPath(filePath);
-    if (!fullPath) return res.status(400).json({ error: 'Ungültiger Pfad' });
-    const docBuffer = await fs.readFile(fullPath);
+    const docBuffer = await fs.readFile(vollVorschau);
 
     // Send to Gotenberg for conversion
     const fileName = filePath.split('/').pop();
@@ -12102,10 +12875,9 @@ app.post('/api/documents-preview', authMiddleware, async (req, res) => {
     // Cache the result (skip if too large — prevent OOM)
     if (pdfBuffer.length > 10 * 1024 * 1024) {
       // Don't cache files > 10MB, just serve directly
-      res.setHeader('Content-Type', 'application/pdf');
-      return res.send(pdfBuffer);
+      return vorschauSenden(req, res, pdfBuffer);
     }
-    previewCache.set(filePath, { pdf: pdfBuffer, expires: now + PREVIEW_CACHE_TTL });
+    previewCache.set(cacheKey, { pdf: pdfBuffer, expires: now + PREVIEW_CACHE_TTL });
     if (previewCache.size > 50) {
       for (const [k, v] of previewCache) {
         if (v.expires < now) previewCache.delete(k);
@@ -12119,15 +12891,13 @@ app.post('/api/documents-preview', authMiddleware, async (req, res) => {
       }
     }
 
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="preview.pdf"`);
-    res.send(pdfBuffer);
+    vorschauSenden(req, res, pdfBuffer);
   } catch (err) {
     if (err.code === 'ENOENT') return res.status(404).json({ error: 'Dokument nicht gefunden' });
     console.error('Document preview error:', err.message);
     res.status(500).json({ error: 'Vorschau konnte nicht erstellt werden' });
   }
-});
+}
 
 // GET /api/documents/:path(*) - Download a document
 app.get('/api/documents/:path(*)', authMiddleware, async (req, res) => {
@@ -12150,31 +12920,32 @@ app.get('/api/documents/:path(*)', authMiddleware, async (req, res) => {
     // wuerde asynchron mit EISDIR scheitern und ohne Handler den Prozess beenden.
     if (!stat.isFile()) return res.status(404).json({ error: 'Dokument nicht gefunden' });
     const ext = filePath.split('.').pop().toLowerCase();
-    const contentTypes = {
-      pdf: 'application/pdf',
-      xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      xls: 'application/vnd.ms-excel',
-      docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      doc: 'application/msword',
-      pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      png: 'image/png',
-      jpg: 'image/jpeg',
-      jpeg: 'image/jpeg',
-      gif: 'image/gif',
-      svg: 'image/svg+xml',
-      txt: 'text/plain',
-      csv: 'text/csv',
-      zip: 'application/zip',
-    };
     const fileName = filePath.split('/').pop();
 
     const safeFileName = fileName.replace(/["\r\n\\]/g, '_');
     const safeAscii = safeFileName.replace(/[^\x20-\x7E]/g, '_');
-    res.setHeader('Content-Type', contentTypes[ext] || 'application/octet-stream');
+    res.setHeader('Content-Type', DOC_INHALTSTYPEN[ext] || 'application/octet-stream');
     res.setHeader('Content-Disposition', `inline; filename="${safeAscii}"; filename*=UTF-8''${encodeURIComponent(safeFileName)}`);
-    res.setHeader('Content-Length', stat.size);
+    // ETag (L9) und Bereiche (Range): grosse PDFs und die geteilten Telefone
+    // (Portal-Weg der Anlage, stueckweise) holen Teile.
+    const etag = unterlagen.etagVon(stat.size, stat.mtimeMs);
+    res.setHeader('ETag', etag);
+    res.setHeader('Accept-Ranges', 'bytes');
+    const bereich = unterlagen.bereichLesen(req.headers.range, stat.size);
+    if (bereich === 'ungueltig') {
+      res.setHeader('Content-Range', `bytes */${stat.size}`);
+      return res.status(416).json({ error: 'Bereich ungültig' });
+    }
+    if (bereich && req.headers['if-range'] && req.headers['if-range'] !== etag) {
+      // Datei hat sich geaendert: ganz statt Teil
+    } else if (bereich) {
+      res.status(206);
+      res.setHeader('Content-Range', `bytes ${bereich.von}-${bereich.bis}/${stat.size}`);
+    }
+    const teil = bereich && res.statusCode === 206 ? bereich : null;
+    res.setHeader('Content-Length', teil ? teil.bis - teil.von + 1 : stat.size);
 
-    const strom = fsSync.createReadStream(fullPath);
+    const strom = fsSync.createReadStream(fullPath, teil ? { start: teil.von, end: teil.bis } : undefined);
     strom.on('error', (e) => {
       console.error('Document stream error:', e.message);
       if (!res.headersSent) res.status(500).json({ error: 'Dokument konnte nicht geladen werden' });
@@ -12224,6 +12995,7 @@ app.post('/api/scan-upload', async (req, res) => {
 
     await fs.mkdir(pathModule.dirname(fullPath), { recursive: true });
     await fs.writeFile(fullPath, req.body);
+    docVerzeichnis.leeren();
 
     console.log(`[SCAN] Uploaded: ${filePath}`);
     res.json({ success: true, path: filePath });
@@ -12241,12 +13013,8 @@ app.post('/api/documents/folder', authMiddleware, canManageDocs, async (req, res
     if (parent.includes('..') || /[%\\]/.test(parent) || /\0/.test(parent)) {
       return res.status(400).json({ error: 'Ungültiger Pfad' });
     }
-    const safeName = name
-      .replace(/ä/gi, 'ae').replace(/ö/gi, 'oe').replace(/ü/gi, 'ue').replace(/ß/g, 'ss')
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-zA-Z0-9._-]/g, '-')
-      .replace(/-+/g, '-').replace(/^-|-$/g, '')
-      .toLowerCase();
+    // Umlaute und Leerzeichen erlaubt (E15); nie ein Punkt-Ordner (.papierkorb)
+    const safeName = unterlagen.ordnernameBereinigen(name);
     if (!safeName) return res.status(400).json({ error: 'Ungültiger Ordnername' });
 
     const folderPath = `${parent}/${safeName}`;
@@ -12259,6 +13027,7 @@ app.post('/api/documents/folder', authMiddleware, canManageDocs, async (req, res
     if (!fullPath) return res.status(400).json({ error: 'Ungültiger Pfad' });
 
     await fs.mkdir(fullPath, { recursive: true });
+    docVerzeichnis.leeren();
     res.json({ success: true, path: folderPath });
   } catch (err) {
     console.error('[DOCS] Create folder error:', err.message);
@@ -12274,16 +13043,12 @@ app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, re
       return res.status(400).json({ error: 'Ungültiger Pfad' });
     }
     const parts = rawPath.split('/');
-    const fileName = parts.pop()
-      .replace(/ä/gi, 'ae').replace(/ö/gi, 'oe').replace(/ü/gi, 'ue').replace(/ß/g, 'ss')
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-zA-Z0-9._-]/g, '-')
-      .replace(/-+/g, '-').replace(/^-|-$/g, '')
-      .toLowerCase();
+    // Lesbare Namen mit Umlauten und Leerzeichen (E15, lib/unterlagen.js);
+    // nur gefaehrliche Zeichen werden ersetzt, die Endung klein.
+    const fileName = unterlagen.dateinameBereinigen(parts.pop()) || '';
 
-    const ALLOWED_UPLOAD_EXTS = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'txt', 'csv', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp', 'dotx', 'zip', 'tiff', 'tif', 'bmp']);
-    const uploadExt = fileName.split('.').pop();
-    if (!uploadExt || !ALLOWED_UPLOAD_EXTS.has(uploadExt)) {
+    const uploadExt = unterlagen.endung(fileName);
+    if (!uploadExt || !DOC_UPLOAD_EXTS.has(uploadExt)) {
       return res.status(400).json({ error: `Dateityp .${uploadExt} nicht erlaubt` });
     }
 
@@ -12304,6 +13069,15 @@ app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, re
       const da = await fs.stat(fullPath).then(() => true, () => false);
       if (da) return res.status(412).json({ error: 'Datei mit diesem Namen gibt es schon', path: filePath, vorhanden: true });
     }
+    // L9: „If-Match: <etag>“ beim Ersetzen – hat inzwischen jemand anders die
+    // Datei geaendert (auch ueber Samba/Nextcloud), 412 statt still ueberschreiben.
+    const wennGleich = String(req.headers['if-match'] || '').trim();
+    if (wennGleich && wennGleich !== '*') {
+      const st = await fs.stat(fullPath).catch(() => null);
+      if (!st || unterlagen.etagVon(st.size, st.mtimeMs) !== wennGleich) {
+        return res.status(412).json({ error: 'Die Datei wurde inzwischen geändert. Bitte neu laden und nochmals versuchen.', path: filePath, geaendert: true });
+      }
+    }
 
     // Überschreiben: die bisherige Fassung kommt in den Papierkorb (30 Tage zurückholbar)
     let ersetzt = null;
@@ -12318,7 +13092,10 @@ app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, re
     await fs.writeFile(fullPath, req.body);
 
     previewCache.delete(filePath);
-    res.json({ success: true, path: filePath, ersetzt: !!ersetzt });
+    docVerzeichnis.leeren();
+    let kennung = null;
+    try { kennung = (await unterlagen.kennungenFuer(pool, [filePath])).get(filePath) || null; } catch (e) { console.warn('[DOCS] Kennung:', e.message); }
+    res.json({ success: true, path: filePath, ersetzt: !!ersetzt, id: kennung, name: fileName });
   } catch (err) {
     console.error('Document upload error:', err.message);
     res.status(500).json({ error: 'Dokument konnte nicht hochgeladen werden' });
@@ -12346,6 +13123,7 @@ app.delete('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req,
     await adminProtokoll.eintragen(pool, null, req, { bereich: 'dokumente', aktion: 'geloescht', ziel: filePath, detail: `Papierkorb #${e.id}` })
       .catch(er => console.warn('[DOCS] Protokoll:', er.message));
     previewCache.delete(filePath);
+    docVerzeichnis.leeren();
     res.json({ success: true, papierkorb: true, id: e.id, tage: papierkorb.TAGE });
   } catch (err) {
     if (err.code === 'ENOENT') return res.status(404).json({ error: 'Dokument nicht gefunden' });
@@ -12382,6 +13160,7 @@ app.post('/api/documents-papierkorb/:id/wiederherstellen', authMiddleware, canMa
     await adminProtokoll.eintragen(pool, null, req, { bereich: 'dokumente', aktion: 'wiederhergestellt', ziel: r.pfad, detail: r.umbenannt ? `ursprünglich ${r.eintrag.pfad}` : null })
       .catch(e => console.warn('[DOCS] Protokoll:', e.message));
     previewCache.delete(r.pfad);
+    docVerzeichnis.leeren();
     res.json({ success: true, path: r.pfad, umbenannt: r.umbenannt });
   } catch (err) {
     if (err.code === 'ENOENT') return res.status(404).json({ error: 'Die Datei im Papierkorb fehlt' });
@@ -12419,7 +13198,7 @@ app.post('/api/documents/move', authMiddleware, canManageDocs, async (req, res) 
     // Upload-Liste oder unveraendert, kein Ueberschreiben bestehender Dateien.
     const quelle = await fs.lstat(fromPath);
     if (!quelle.isFile()) return res.status(400).json({ error: 'Nur Dateien können verschoben werden' });
-    const MOVE_EXTS = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'txt', 'csv', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp', 'dotx', 'zip', 'tiff', 'tif', 'bmp']);
+    const MOVE_EXTS = DOC_UPLOAD_EXTS;
     const extVon = (p) => { const n = String(p).split('/').pop(); return n.includes('.') ? n.split('.').pop().toLowerCase() : ''; };
     const zielExt = extVon(to);
     // Gleiche Endung (auch gleiche leere Endung) bleibt erlaubt, sonst liessen
@@ -12433,6 +13212,9 @@ app.post('/api/documents/move', authMiddleware, canManageDocs, async (req, res) 
     await fs.rename(fromPath, toPath);
 
     previewCache.delete(from);
+    docVerzeichnis.leeren();
+    // Kennung und Projekt-Verknuepfungen ziehen mit (L5)
+    await unterlagen.verschoben(pool, from, to).catch(e => console.warn('[DOCS] Kennung nachfuehren:', e.message));
     res.json({ success: true, from, to });
   } catch (err) {
     if (err.code === 'ENOENT') return res.status(404).json({ error: 'Quelldatei nicht gefunden' });
@@ -12442,187 +13224,10 @@ app.post('/api/documents/move', authMiddleware, canManageDocs, async (req, res) 
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// BRIEFE TRACKING — Versendete Briefe, Empfänger via OpenRouter Vision
+// BRIEFE TRACKING -> routes/briefe.js (STWEG-Sicht, Vier-Augen-Loeschen,
+// Hinweis + Tageslimit fuer die externe Texterkennung)
 // ═══════════════════════════════════════════════════════════════════
-
-const BRIEFE_DIR = 'allgemein/fotos_von_versendeten_briefen';
-// WebStamp-Tracking-Format: 98.01.018499.705XXXXX (8-stellige laufende Nr, beginnt mit 705)
-const TRACKING_PREFIX_DOTTED = '98.01.018499.705';
-const TRACKING_PREFIX_PLAIN = '9801018499705';
-
-function parseBriefFilename(filename) {
-  const m = filename.match(/^(.+)-(\d{5})\.(jpe?g|png)$/i);
-  if (!m) return null;
-  const nameSlug = m[1];
-  const tracking5 = m[2];
-  const display = nameSlug
-    .replace(/-und-/g, ' & ')
-    .replace(/-/g, ' ')
-    .replace(/\b\w/g, c => c.toUpperCase());
-  return {
-    filename,
-    name: display,
-    nameSlug,
-    tracking5,
-    trackingDotted: `${TRACKING_PREFIX_DOTTED}${tracking5}`,
-    trackingPlain: `${TRACKING_PREFIX_PLAIN}${tracking5}`,
-  };
-}
-
-function nameToSlug(name) {
-  return String(name)
-    .replace(/&/g, ' und ')
-    .replace(/ä/gi, 'ae').replace(/ö/gi, 'oe').replace(/ü/gi, 'ue').replace(/ß/g, 'ss')
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-zA-Z0-9]+/g, '-')
-    .replace(/-+/g, '-').replace(/^-|-$/g, '')
-    .toLowerCase();
-}
-
-// GET /api/briefe — Alle Brief-Fotos im Ordner mit geparsten Tracking-Nummern
-app.get('/api/briefe', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
-  try {
-    const dir = pathModule.join(DOCS_PATH, BRIEFE_DIR);
-    let files;
-    try { files = await fs.readdir(dir); }
-    catch (e) {
-      if (e.code === 'ENOENT') return res.json({ briefe: [], dir: BRIEFE_DIR });
-      throw e;
-    }
-    const briefe = [];
-    for (const f of files) {
-      const parsed = parseBriefFilename(f);
-      if (!parsed) continue;
-      try {
-        const stat = await fs.stat(pathModule.join(dir, f));
-        briefe.push({ ...parsed, mtime: stat.mtime.toISOString(), size: stat.size });
-      } catch {}
-    }
-    briefe.sort((a, b) => b.tracking5.localeCompare(a.tracking5));
-    res.json({ briefe, dir: BRIEFE_DIR });
-  } catch (err) {
-    console.error('[Briefe-List]', err.message);
-    res.status(500).json({ error: 'Liste konnte nicht geladen werden' });
-  }
-});
-
-// POST /api/briefe/upload — Foto hochladen, OCR via Haiku 4.5, umbenennen, ablegen
-// Body: { bild_base64, bild_filename }
-// Absender der Briefe als Hinweis fuer die Texterkennung (Name, Adresse). Steht
-// in der Umgebung, nicht im Code: das Repo ist oeffentlich (Befund W28).
-const BRIEF_ABSENDER = String(process.env.BRIEF_ABSENDER || '').replace(/[`$\\]/g, '').slice(0, 200);
-app.post('/api/briefe/upload', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
-  try {
-    const { bild_base64, bild_filename } = req.body || {};
-    if (!bild_base64) return res.status(400).json({ error: 'bild_base64 fehlt' });
-
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: 'OPENROUTER_API_KEY nicht konfiguriert' });
-
-    const ext = (bild_filename || 'jpeg').split('.').pop().toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (!['jpg', 'jpeg', 'png'].includes(ext)) return res.status(400).json({ error: 'Nur JPG/PNG erlaubt' });
-    const buf = Buffer.from(bild_base64, 'base64');
-    if (buf.length > 15 * 1024 * 1024) return res.status(400).json({ error: 'Datei zu gross (>15MB)' });
-    const mime = ext === 'png' ? 'image/png' : 'image/jpeg';
-    const dataUrl = `data:${mime};base64,${bild_base64}`;
-
-    const systemPrompt = `Du extrahierst Empfänger und Tracking aus dem Foto eines Schweizer WebStamp-Couverts (A-Post Plus).
-Antworte AUSSCHLIESSLICH mit gueltigem JSON, keine Markdown-Codebloecke, kein erklaerender Text.
-
-Schema:
-{
-  "tracking": string|null,    // Volle Tracking-Nr unter dem Barcode, Format "98.01.018499.705XXXXX". 8 Ziffern beginnend mit 705.
-  "empfänger": string|null,  // Vollstaendiger Empfänger-Name (Person ODER Firma), z.B. "Max Muster" oder "Anna Beispiel & Beat Beispiel" oder "Muster Immobilien AG"
-  "strasse": string|null,
-  "plz": string|null,
-  "ort": string|null
-}
-
-WICHTIG: Der Empfänger ist NICHT der Absender (Absenderzeile ueber dem Adressfeld bzw. oben links${BRIEF_ABSENDER ? ': ' + BRIEF_ABSENDER : ''}). Lies das Empfänger-Adressfeld.
-Wenn ein Feld nicht erkennbar ist, setze null.`;
-
-    const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://www.rosenweg4303.ch',
-        'X-Title': 'Rosenweg Brief-Tracking-OCR',
-      },
-      signal: AbortSignal.timeout(45_000),
-      body: JSON.stringify({
-        model: 'anthropic/claude-haiku-4.5',
-        max_tokens: 512,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: [
-            { type: 'text', text: 'Extrahiere Empfänger und Tracking aus diesem Brief-Foto.' },
-            { type: 'image_url', image_url: { url: dataUrl } },
-          ]},
-        ],
-      }),
-    });
-
-    if (!orRes.ok) {
-      const errText = await orRes.text().catch(() => '');
-      console.error('[Briefe-OCR] OpenRouter error', orRes.status, errText.slice(0, 300));
-      return res.status(502).json({ error: `OCR-Service-Fehler (HTTP ${orRes.status})` });
-    }
-    const orJson = await orRes.json();
-    const content = orJson.choices?.[0]?.message?.content || '';
-    let jsonText = content.trim();
-    const fence = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (fence) jsonText = fence[1].trim();
-    let parsed;
-    try { parsed = JSON.parse(jsonText); }
-    catch (e) {
-      console.error('[Briefe-OCR] JSON-Parse fehlgeschlagen:', jsonText.slice(0, 300));
-      return res.status(502).json({ error: 'OCR-Antwort ist kein gueltiges JSON', raw: content });
-    }
-
-    const trackDigits = String(parsed.tracking || '').replace(/\D/g, '');
-    const tail8 = trackDigits.slice(-8);
-    if (!/^705\d{5}$/.test(tail8)) {
-      return res.status(422).json({ error: 'Tracking-Nr nicht erkannt oder Format unerwartet', ocr: parsed });
-    }
-    const tracking5 = tail8.slice(-5);
-
-    if (!parsed.empfänger || typeof parsed.empfänger !== 'string') {
-      return res.status(422).json({ error: 'Empfänger nicht erkannt', ocr: parsed });
-    }
-    const nameSlug = nameToSlug(parsed.empfänger);
-    if (!nameSlug) return res.status(422).json({ error: 'Empfänger nicht in Dateiname konvertierbar' });
-
-    const newFilename = `${nameSlug}-${tracking5}.jpeg`;
-    const dir = pathModule.join(DOCS_PATH, BRIEFE_DIR);
-    await fs.mkdir(dir, { recursive: true });
-    const newPath = pathModule.join(dir, newFilename);
-    try {
-      await fs.access(newPath);
-      return res.status(409).json({
-        error: `Datei existiert bereits: ${newFilename}`,
-        filename: newFilename, ocr: parsed,
-      });
-    } catch {}
-
-    await fs.writeFile(newPath, buf);
-    res.json({
-      success: true,
-      filename: newFilename,
-      tracking5,
-      trackingDotted: `${TRACKING_PREFIX_DOTTED}${tracking5}`,
-      trackingPlain: `${TRACKING_PREFIX_PLAIN}${tracking5}`,
-      empfänger: parsed.empfänger,
-      strasse: parsed.strasse,
-      plz: parsed.plz,
-      ort: parsed.ort,
-      model: orJson.model,
-    });
-  } catch (err) {
-    console.error('[Briefe-Upload]', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+app.use('/api/briefe', require('./routes/briefe'));
 
 // ─── Proxmox VE Management ──────────────────────────────────────────
 
@@ -12755,14 +13360,6 @@ app.post('/api/proxmox/ensure-user', authMiddleware, adminOnly, async (req, res)
 
 // ─── Projects API ──────────────────────────────────────────────────
 
-/** Middleware: require eigentuemer group */
-function requireEigentuemer(req, res, next) {
-  const groups = req.user?.groups || [];
-  if (isTechnik(groups) || isPraesident(groups)) return next();
-  if (groups.some(g => g.toLowerCase().includes('eigentuemer'))) return next();
-  res.status(403).json({ error: 'Nur für Eigentümer' });
-}
-
 /** Middleware: irgendein Projekt lesen (Eigentuemer, Technik/Praesident, Ausschuss,
  *  Verwaltung mit Recht projekte; lib/projekte-rechte.js projekteLesen). Welche
  *  Projekte genau: projektLesen je Projekt (Liste gefiltert, :slug -> requireProjektLesen). */
@@ -12804,6 +13401,8 @@ async function requireProjektBearbeiten(req, res, next) {
     const { rows: [p] } = await pool.query('SELECT id, stweg, status FROM projects WHERE slug = $1', [req.params.slug]);
     if (!p) return res.status(404).json({ error: 'Projekt nicht gefunden' });
     const groups = req.user?.groups || [];
+    // P11: auf geteilten Telefonen (Anlage-Token) nur lesen und kommentieren, nichts aendern
+    if (req.anlage) return res.status(403).json({ error: 'Auf einem geteilten Telefon kannst du Projekte nur lesen und kommentieren' });
     if (!projekteRechte.projektBearbeiten(groups, await projektePerm(req), p.stweg)) {
       return res.status(403).json({ error: p.stweg ? 'Nur Ausschuss oder Verwaltung dieser STWEG' : 'Nur Ausschuss, Technik oder Präsident' });
     }
@@ -13049,17 +13648,43 @@ app.put('/api/projects/:slug/budget', authMiddleware, requireProjektBearbeiten, 
 // GET /api/projects - List projects
 app.get('/api/projects', authMiddleware, requireProjekteLesen, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM projects ORDER BY created_at DESC');
+    // Kommentarzahl und Verbrauch gleich mit (die App fragt damit nach Neuigkeiten, P9)
+    const { rows } = await pool.query(
+      `SELECT p.*,
+              (SELECT COUNT(*)::int FROM project_comments c WHERE c.project_id = p.id) AS kommentare_anzahl,
+              (SELECT MAX(c.created_at) FROM project_comments c WHERE c.project_id = p.id) AS letzter_kommentar_am,
+              COALESCE((SELECT SUM(a.betrag_chf) FROM auslagen a WHERE a.projekt_slug = p.slug), 0)::float AS verbraucht_chf
+         FROM projects p ORDER BY p.created_at DESC`);
     // R1/R2: nur die Projekte, die das Konto lesen darf (lib/projekte-rechte.js projektLesen)
     const perm = await projektePerm(req);
     const groups = req.user?.groups || [];
-    res.json(projekteRechte.lesbareProjekte(groups, perm, rows)
-      .map(p => ({ ...p, darf_bearbeiten: projekteRechte.projektBearbeiten(groups, perm, p.stweg) })));
+    const lesbar = projekteRechte.projekteFiltern(projekteRechte.lesbareProjekte(groups, perm, rows), req.query);
+    res.json(lesbar.map(({ verbraucht_chf, ...p }) => {
+      const bearbeiten = projekteRechte.projektBearbeiten(groups, perm, p.stweg);
+      // Verbrauch (Summe) nur fuer die, die das Projekt bearbeiten: Budget-Warnung (P9)
+      return { ...p, darf_bearbeiten: bearbeiten, darf_kommentieren: projekteRechte.projektKommentieren(groups, perm, p.stweg), ...(bearbeiten ? { verbraucht_chf } : {}) };
+    }));
   } catch (err) {
     console.error('[projekte] liste', err.message);
     res.status(500).json({ error: 'Projekte konnten nicht geladen werden' });
   }
 });
+
+// Stabile Kennung der Anhaenge (Unterlagen, lib/unterlagen.js): die App springt damit
+// nach rosenweg://unterlagen/datei/<kennung> und verliert den Link beim Verschieben nicht (P6).
+// Ohne lib/unterlagen.js (aeltere Staende) bleibt es beim Pfad.
+let unterlagenLib = null;
+try { unterlagenLib = require('./lib/unterlagen'); } catch { /* nicht vorhanden */ }
+async function anhaengeMitKennung(zeilen) {
+  if (!unterlagenLib || !zeilen.length) return zeilen;
+  try {
+    const m = await unterlagenLib.kennungenFuer(pool, zeilen.map(a => a.doc_path));
+    return zeilen.map(a => ({ ...a, kennung: m.get(a.doc_path) || null }));
+  } catch (e) {
+    console.warn('[projekte] Kennungen:', e.message);
+    return zeilen;
+  }
+}
 
 // GET /api/projects/:slug - Get project with all data
 app.get('/api/projects/:slug', authMiddleware, requireProjekteLesen, requireProjektLesen, async (req, res) => {
@@ -13092,15 +13717,41 @@ app.get('/api/projects/:slug', authMiddleware, requireProjekteLesen, requireProj
       ...project,
       candidates: candidates.rows, timeline: timeline.rows,
       // D4: Kommentare nur mit Namen, ohne E-Mail (eigener = vom Konto selbst)
-      comments: comments.rows.map(k => projekteRechte.kommentarOhneEmail(k, req.user?.email)),
-      attachments: attachments.rows,
+      comments: comments.rows.map(k => ({
+        ...projekteRechte.kommentarOhneEmail(k, req.user?.email),
+        aenderbar: projekteRechte.kommentarEigenAenderbar(k, req.user?.email),
+      })),
+      attachments: await anhaengeMitKennung(attachments.rows),
       auslagen_stat: auslagenStat,
-      darf_kommentieren: projekteRechte.projekteKommentieren(req.user?.groups || []),
+      darf_kommentieren: projekteRechte.projektKommentieren(req.user?.groups || [], req.projektePerm, project.stweg),
       darf_bearbeiten: projekteRechte.projektBearbeiten(req.user?.groups || [], req.projektePerm, project.stweg),
     });
   } catch (err) {
     console.error('[projekte] ansicht', err.message);
     res.status(500).json({ error: 'Projekt konnte nicht geladen werden' });
+  }
+});
+
+// GET /api/projects/:slug/dokumente — die Dateien im Projektordner projekte/<slug>/ (L2),
+// ohne die ganze Ablage zu laden. Wer das Projekt lesen darf, darf sie sehen (gleiche Regel
+// wie projektDokRecht). ordner: '' (Projekt), 'timeline/<id>' oder 'kandidaten/<id>'.
+app.get('/api/projects/:slug/dokumente', authMiddleware, requireProjekteLesen, requireProjektLesen, async (req, res) => {
+  try {
+    const slug = req.projekt.slug;
+    const roh = await walkDocs(pathModule.join(DOCS_PATH, 'projekte', slug), `projekte/${slug}`);
+    const dateien = roh.filter(f => !f.path.endsWith('/.gitkeep')).map(f => {
+      const rest = f.path.slice(`projekte/${slug}/`.length).split('/');
+      const name = rest.pop();
+      return { path: f.path, name, size: f.size, ordner: rest.join('/') };
+    });
+    let kennungen = new Map();
+    if (unterlagenLib && dateien.length) {
+      try { kennungen = await unterlagenLib.kennungenFuer(pool, dateien.map(d => d.path)); } catch (e) { console.warn('[projekte] Kennungen:', e.message); }
+    }
+    res.json({ dokumente: dateien.map(d => ({ ...d, kennung: kennungen.get(d.path) || null })) });
+  } catch (err) {
+    console.error('[projekte] dokumente', err.message);
+    res.status(500).json({ error: 'Dokumente konnten nicht geladen werden' });
   }
 });
 
@@ -13214,6 +13865,40 @@ app.put('/api/projects/:slug', authMiddleware, requireProjektBearbeiten, async (
   } catch (err) { console.error('[projekt-bearbeiten]', err.message); res.status(500).json({ error: 'Projekt konnte nicht gespeichert werden' }); }
 });
 
+// DELETE /api/projects/:slug {bestaetigt} — ein ganzes Projekt loeschen (P12): nur
+// Technik/Praesident, mit Protokoll (admin_protokoll, Bereich 'projekte'). Alle anderen
+// archivieren (Status „archiviert“). Dateien im Ordner projekte/<slug>/ bleiben liegen.
+app.delete('/api/projects/:slug', authMiddleware, async (req, res) => {
+  try {
+    if (!projekteRechte.projektLoeschen(req.user?.groups || [])) {
+      return res.status(403).json({ error: 'Projekte löschen nur Technik oder Präsident (sonst archivieren)' });
+    }
+    if (req.anlage) return res.status(403).json({ error: 'Auf einem geteilten Telefon nicht möglich' });
+    if (req.body?.bestaetigt !== true && req.query.bestaetigt !== '1') {
+      return res.status(400).json({ error: 'Löschen bitte bestätigen (bestaetigt: true)', bestaetigung_noetig: true });
+    }
+    const { rows: [p] } = await pool.query('SELECT id, slug, title, stweg, status FROM projects WHERE slug = $1', [req.params.slug]);
+    if (!p) return res.status(404).json({ error: 'Projekt nicht gefunden' });
+    const zahl = async (tabelle) => (await pool.query(`SELECT COUNT(*)::int AS n FROM ${tabelle} WHERE project_id = $1`, [p.id])).rows[0].n;
+    const n = { zeitachse: await zahl('project_timeline'), kandidaten: await zahl('project_candidates'), kommentare: await zahl('project_comments') };
+    await adminProtokoll.eintragen(pool, null, req, {
+      bereich: 'projekte', aktion: 'geloescht', ziel: p.slug, alt: `${p.title} (${p.stweg ? 'STWEG ' + p.stweg : 'Kooperation'}, ${p.status})`,
+      detail: `Zeitachse ${n.zeitachse}, Kandidaten ${n.kandidaten}, Kommentare ${n.kommentare}`,
+    });
+    await pool.query('DELETE FROM stweg_events WHERE projekt_slug = $1', [p.slug]);
+    await pool.query('DELETE FROM project_attachments WHERE project_slug = $1', [p.slug]);
+    await pool.query('DELETE FROM project_comments WHERE project_id = $1', [p.id]);
+    await pool.query('DELETE FROM project_candidates WHERE project_id = $1', [p.id]);
+    await pool.query('DELETE FROM project_timeline WHERE project_id = $1', [p.id]);
+    await pool.query('DELETE FROM projects WHERE id = $1', [p.id]);
+    projektStwegsLeeren();
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[projekte] loeschen', err.message);
+    res.status(500).json({ error: 'Projekt konnte nicht gelöscht werden' });
+  }
+});
+
 // GET /api/projects-mini — kompakte Liste für Dropdowns. Nur Projekte, die das
 // Konto lesen darf (Regel „Projekte lesen nur Eigentuemer“, D2 28.11.2026):
 // Mieter bekommen eine leere Liste statt der Titel aller Projekte.
@@ -13231,28 +13916,35 @@ app.post('/api/projects/:slug/candidates', authMiddleware, requireProjektBearbei
     const { rows: [project] } = await pool.query('SELECT id FROM projects WHERE slug = $1', [req.params.slug]);
     if (!project) return res.status(404).json({ error: 'Projekt nicht gefunden' });
     const { name, kontakt, telefon, email, webseite, offerte_betrag, offerte_details, bewertung, status, notizen } = req.body;
+    if (!String(name || '').trim()) return res.status(400).json({ error: 'Name erforderlich' });
     const { rows: [row] } = await pool.query(
       `INSERT INTO project_candidates (project_id, name, kontakt, telefon, email, webseite, offerte_betrag, offerte_details, bewertung, status, notizen)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [project.id, name, kontakt, telefon, email, webseite, offerte_betrag, offerte_details, bewertung || null, status || 'angefragt', notizen]);
+      [project.id, String(name).trim(), kontakt, telefon, email, webseite, offerte_betrag, offerte_details, bewertung || null, status || 'angefragt', notizen]);
     res.json(row);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[projekte] kandidat-neu', err.message);
+    res.status(500).json({ error: 'Kandidat konnte nicht gespeichert werden' });
   }
 });
 
-// PUT /api/projects/:slug/candidates/:id - Update candidate
+// PUT /api/projects/:slug/candidates/:id - Update candidate. Teil-Update (L4): nur die
+// gesendeten Felder aendern sich, der Rest bleibt.
+const KANDIDAT_FELDER = ['name', 'kontakt', 'telefon', 'email', 'webseite', 'offerte_betrag', 'offerte_details', 'bewertung', 'status', 'notizen'];
 app.put('/api/projects/:slug/candidates/:id', authMiddleware, requireProjektBearbeiten, async (req, res) => {
   try {
-    const { name, kontakt, telefon, email, webseite, offerte_betrag, offerte_details, bewertung, status, notizen } = req.body;
+    const t = projekteRechte.teilUpdate(req.body, KANDIDAT_FELDER);
+    if (!t.sets.length) return res.status(400).json({ error: 'Keine Änderung angegeben' });
+    const n = t.werte.length;
     const { rows: [row] } = await pool.query(
-      `UPDATE project_candidates SET name=$1, kontakt=$2, telefon=$3, email=$4, webseite=$5, offerte_betrag=$6, offerte_details=$7, bewertung=$8, status=$9, notizen=$10, updated_at=NOW()
-       WHERE id=$11 AND project_id = (SELECT id FROM projects WHERE slug = $12) RETURNING *`,
-      [name, kontakt, telefon, email, webseite, offerte_betrag, offerte_details, bewertung || null, status, notizen, req.params.id, req.params.slug]);
+      `UPDATE project_candidates SET ${t.sets.join(', ')}, updated_at=NOW()
+       WHERE id=$${n + 1} AND project_id = (SELECT id FROM projects WHERE slug = $${n + 2}) RETURNING *`,
+      [...t.werte, req.params.id, req.params.slug]);
     if (!row) return res.status(404).json({ error: 'Kandidat nicht gefunden' });
     res.json(row);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[projekte] kandidat-aendern', err.message);
+    res.status(500).json({ error: 'Kandidat konnte nicht gespeichert werden' });
   }
 });
 
@@ -13263,72 +13955,146 @@ app.delete('/api/projects/:slug/candidates/:id', authMiddleware, requireProjektB
     await pool.query('DELETE FROM project_candidates WHERE id = $1 AND project_id = (SELECT id FROM projects WHERE slug = $2)', [req.params.id, req.params.slug]);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[projekte] kandidat-loeschen', err.message);
+    res.status(500).json({ error: 'Kandidat konnte nicht gelöscht werden' });
   }
 });
+
+// Zeitachse als Termin in Rosenweg Termine (P7): „als_termin“ legt einen Termin in
+// stweg_events an (projekt_slug und timeline_id verweisen zurueck), jede Aenderung am
+// Eintrag zieht ihn nach, Ausschalten oder Loeschen entfernt ihn.
+async function zeitachseTerminAbgleichen(projekt, eintrag, userId) {
+  if (eintrag.termin_id) {
+    if (!eintrag.als_termin) {
+      await pool.query('DELETE FROM stweg_events WHERE id = $1 AND timeline_id = $2', [eintrag.termin_id, eintrag.id]);
+      await pool.query('UPDATE project_timeline SET termin_id = NULL WHERE id = $1', [eintrag.id]);
+      return;
+    }
+    const t = projekteRechte.terminAusEintrag(projekt, eintrag);
+    const u = await pool.query(
+      `UPDATE stweg_events SET stweg=$2, title=$3, description=$4, start_date=$5, end_date=NULL, all_day=$6, location=$7, category=$8
+        WHERE id = $1 AND timeline_id = $9`,
+      [eintrag.termin_id, t.stweg, t.title, t.description, t.start_date, t.all_day, t.location, t.category, eintrag.id]);
+    if (u.rowCount > 0) return;
+    eintrag.termin_id = null; // Termin wurde in Rosenweg Termine geloescht: neu anlegen
+  }
+  if (!eintrag.als_termin) return;
+  const t = projekteRechte.terminAusEintrag(projekt, eintrag);
+  const { rows: [e] } = await pool.query(
+    `INSERT INTO stweg_events (stweg, title, description, start_date, all_day, location, category, created_by, projekt_slug, timeline_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+    [t.stweg, t.title, t.description, t.start_date, t.all_day, t.location, t.category, userId || null, projekt.slug, eintrag.id]);
+  await pool.query('UPDATE project_timeline SET termin_id = $1 WHERE id = $2', [e.id, eintrag.id]);
+  eintrag.termin_id = e.id;
+}
+const ZEITACHSE_FELDER = ['datum', 'titel', 'beschreibung', 'erledigt', 'uhrzeit', 'ort', 'als_termin'];
 
 // POST /api/projects/:slug/timeline - Add timeline entry
 app.post('/api/projects/:slug/timeline', authMiddleware, requireProjektBearbeiten, async (req, res) => {
   try {
-    const { rows: [project] } = await pool.query('SELECT id FROM projects WHERE slug = $1', [req.params.slug]);
+    const { rows: [project] } = await pool.query('SELECT id, slug, title, stweg FROM projects WHERE slug = $1', [req.params.slug]);
     if (!project) return res.status(404).json({ error: 'Projekt nicht gefunden' });
-    const { datum, titel, beschreibung, erledigt } = req.body;
+    const { datum, titel, beschreibung, erledigt, uhrzeit, ort, als_termin } = req.body;
+    if (!datum || !String(titel || '').trim()) return res.status(400).json({ error: 'Datum und Titel erforderlich' });
     const { rows: [row] } = await pool.query(
-      'INSERT INTO project_timeline (project_id, datum, titel, beschreibung, erledigt) VALUES ($1,$2,$3,$4,$5) RETURNING *',
-      [project.id, datum, titel, beschreibung, erledigt || false]);
+      'INSERT INTO project_timeline (project_id, datum, titel, beschreibung, erledigt, uhrzeit, ort, als_termin) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+      [project.id, datum, String(titel).trim(), beschreibung, erledigt || false, uhrzeit || null, ort || null, als_termin === true]);
+    await zeitachseTerminAbgleichen(project, row, req.user?.user_id || req.user?.id);
     res.json(row);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[projekte] zeitachse-neu', err.message);
+    res.status(500).json({ error: 'Eintrag konnte nicht gespeichert werden' });
   }
 });
 
-// PUT /api/projects/:slug/timeline/:id
+// PUT /api/projects/:slug/timeline/:id — Teil-Update (L4): „Abhaken“ aendert nur erledigt
 app.put('/api/projects/:slug/timeline/:id', authMiddleware, requireProjektBearbeiten, async (req, res) => {
   try {
-    const { datum, titel, beschreibung, erledigt } = req.body;
+    const t = projekteRechte.teilUpdate(req.body, ZEITACHSE_FELDER);
+    if (!t.sets.length) return res.status(400).json({ error: 'Keine Änderung angegeben' });
+    const n = t.werte.length;
     const { rows: [row] } = await pool.query(
-      'UPDATE project_timeline SET datum=$1, titel=$2, beschreibung=$3, erledigt=$4 WHERE id=$5 AND project_id = (SELECT id FROM projects WHERE slug = $6) RETURNING *',
-      [datum, titel, beschreibung, erledigt, req.params.id, req.params.slug]);
+      `UPDATE project_timeline SET ${t.sets.join(', ')} WHERE id=$${n + 1} AND project_id = (SELECT id FROM projects WHERE slug = $${n + 2}) RETURNING *`,
+      [...t.werte, req.params.id, req.params.slug]);
     if (!row) return res.status(404).json({ error: 'Eintrag nicht gefunden' });
+    const { rows: [project] } = await pool.query('SELECT id, slug, title, stweg FROM projects WHERE slug = $1', [req.params.slug]);
+    await zeitachseTerminAbgleichen(project, row, req.user?.user_id || req.user?.id);
     res.json(row);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[projekte] zeitachse-aendern', err.message);
+    res.status(500).json({ error: 'Eintrag konnte nicht gespeichert werden' });
   }
 });
 
-// DELETE /api/projects/:slug/timeline/:id
+// DELETE /api/projects/:slug/timeline/:id (der Termin in Rosenweg Termine verschwindet mit)
 app.delete('/api/projects/:slug/timeline/:id', authMiddleware, requireProjektBearbeiten, async (req, res) => {
   try {
-    await pool.query('DELETE FROM project_timeline WHERE id = $1 AND project_id = (SELECT id FROM projects WHERE slug = $2)', [req.params.id, req.params.slug]);
+    const id = parseInt(req.params.id, 10) || 0;
+    await pool.query('DELETE FROM stweg_events WHERE timeline_id = $1 AND projekt_slug = $2', [id, req.params.slug]);
+    await pool.query('DELETE FROM project_timeline WHERE id = $1 AND project_id = (SELECT id FROM projects WHERE slug = $2)', [id, req.params.slug]);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[projekte] zeitachse-loeschen', err.message);
+    res.status(500).json({ error: 'Eintrag konnte nicht gelöscht werden' });
   }
 });
 
-// POST /api/projects/:slug/comments - Eigentuemer (und T/P), nur bei Projekten, die sie lesen (F5)
-app.post('/api/projects/:slug/comments', authMiddleware, requireEigentuemer, requireProjektLesen, async (req, res) => {
+// POST /api/projects/:slug/comments — wer das Projekt lesen darf (P10: auch die
+// Verwaltung). Zurueck kommt nur der Name, nie die E-Mail (D4).
+app.post('/api/projects/:slug/comments', authMiddleware, requireProjekteLesen, requireProjektLesen, async (req, res) => {
   try {
-    const { rows: [project] } = await pool.query('SELECT id FROM projects WHERE slug = $1', [req.params.slug]);
-    if (!project) return res.status(404).json({ error: 'Projekt nicht gefunden' });
-    const { text } = req.body;
-    if (!text?.trim()) return res.status(400).json({ error: 'Text erforderlich' });
+    if (!projekteRechte.projektKommentieren(req.user?.groups || [], req.projektePerm, req.projekt.stweg)) {
+      return res.status(403).json({ error: 'Kein Zugriff auf dieses Projekt' });
+    }
+    const text = String(req.body?.text || '').trim();
+    if (!text) return res.status(400).json({ error: 'Text erforderlich' });
+    if (text.length > 4000) return res.status(400).json({ error: 'Der Kommentar ist zu lang (höchstens 4000 Zeichen)' });
     const { rows: [row] } = await pool.query(
       'INSERT INTO project_comments (project_id, user_name, user_email, text) VALUES ($1,$2,$3,$4) RETURNING *',
-      [project.id, req.user.name, req.user.email, text.trim()]);
-    res.json(projekteRechte.kommentarOhneEmail(row, req.user.email));
+      [req.projekt.id, req.user.name, req.user.email, text]);
+    res.json({ ...projekteRechte.kommentarOhneEmail(row, req.user.email), aenderbar: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[projekte] kommentar', err.message);
+    res.status(500).json({ error: 'Kommentar konnte nicht gespeichert werden' });
   }
 });
 
-// DELETE /api/projects/:slug/comments/:id - Ausschuss/Technik can delete
-app.delete('/api/projects/:slug/comments/:id', authMiddleware, requireProjektBearbeiten, async (req, res) => {
+// PUT /api/projects/:slug/comments/:id {text} — eigenen Kommentar ändern (15 Minuten, P10)
+app.put('/api/projects/:slug/comments/:id', authMiddleware, requireProjekteLesen, requireProjektLesen, async (req, res) => {
   try {
-    await pool.query('DELETE FROM project_comments WHERE id = $1 AND project_id = (SELECT id FROM projects WHERE slug = $2)', [req.params.id, req.params.slug]);
+    const text = String(req.body?.text || '').trim();
+    if (!text) return res.status(400).json({ error: 'Text erforderlich' });
+    if (text.length > 4000) return res.status(400).json({ error: 'Der Kommentar ist zu lang (höchstens 4000 Zeichen)' });
+    const { rows: [k] } = await pool.query('SELECT * FROM project_comments WHERE id = $1 AND project_id = $2', [parseInt(req.params.id, 10) || 0, req.projekt.id]);
+    if (!k) return res.status(404).json({ error: 'Kommentar nicht gefunden' });
+    if (!projekteRechte.kommentarEigenAenderbar(k, req.user?.email)) {
+      return res.status(403).json({ error: `Eigene Kommentare lassen sich ${projekteRechte.KOMMENTAR_FRIST_MIN} Minuten lang ändern` });
+    }
+    const { rows: [row] } = await pool.query('UPDATE project_comments SET text = $1, bearbeitet_am = NOW() WHERE id = $2 RETURNING *', [text, k.id]);
+    res.json({ ...projekteRechte.kommentarOhneEmail(row, req.user.email), aenderbar: true });
+  } catch (err) {
+    console.error('[projekte] kommentar-aendern', err.message);
+    res.status(500).json({ error: 'Kommentar konnte nicht geändert werden' });
+  }
+});
+
+// DELETE /api/projects/:slug/comments/:id — wer das Projekt bearbeitet (immer) oder
+// der Verfasser (15 Minuten, P10)
+app.delete('/api/projects/:slug/comments/:id', authMiddleware, requireProjekteLesen, requireProjektLesen, async (req, res) => {
+  try {
+    const groups = req.user?.groups || [];
+    const id = parseInt(req.params.id, 10) || 0;
+    const { rows: [k] } = await pool.query('SELECT * FROM project_comments WHERE id = $1 AND project_id = $2', [id, req.projekt.id]);
+    if (!k) return res.status(404).json({ error: 'Kommentar nicht gefunden' });
+    const bearbeiter = !req.anlage && projekteRechte.projektBearbeiten(groups, req.projektePerm, req.projekt.stweg);
+    if (!bearbeiter && !projekteRechte.kommentarEigenAenderbar(k, req.user?.email)) {
+      return res.status(403).json({ error: `Eigene Kommentare lassen sich ${projekteRechte.KOMMENTAR_FRIST_MIN} Minuten lang löschen` });
+    }
+    await pool.query('DELETE FROM project_comments WHERE id = $1', [k.id]);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[projekte] kommentar-loeschen', err.message);
+    res.status(500).json({ error: 'Kommentar konnte nicht gelöscht werden' });
   }
 });
 
@@ -13382,7 +14148,27 @@ app.delete('/api/projects/:slug/attachments/:id', authMiddleware, requireProjekt
 });
 
 // ─── Handwerker- / Lieferantenliste ────────────────────────────────
-async function loadHandwerkerEventZuweisungen(handwerkerIds) {
+// STWEG-Bindung (lib/handwerker-rechte.js, Entscheid Stefan 28.11.2026): die
+// Verwaltung liest/schreibt Verträge, Einsätze, Kosten und Notfall-Zuordnungen
+// nur ihrer STWEG, der Ausschuss liest sie; Einträge „alle STWEG“ (stweg NULL)
+// und Event-Typen ändern nur Technik/Präsident. Jede schreibende Route trägt
+// den Kartenvermerk (Karte wie Schlüssel: nur protokollieren).
+const hwSchreibend = [requirePermission('handwerker', 'write'), kartenAdmin.mitKarteProtokollieren];
+const hwSichtVon = (req) => hwRechteLib.handwerkerSicht(req.user?.groups || []);
+
+/** Firma laden und gegen die Sicht prüfen. -> Zeile | null (Antwort gesendet) */
+async function hwFirmaLesbar(req, res, id, db = pool) {
+  if (!Number.isFinite(id) || id < 1) { res.status(400).json({ error: 'Ungültige Handwerker-ID' }); return null; }
+  const r = await db.query('SELECT id, stweg, archiviert FROM handwerker WHERE id = $1', [id]);
+  if (!r.rows[0] || !hwRechteLib.hwLesen(hwSichtVon(req), r.rows[0].stweg)) {
+    res.status(404).json({ error: 'Handwerker nicht gefunden' });
+    return null;
+  }
+  return r.rows[0];
+}
+const HW_NUR_EIGENE = 'Nur Einträge der eigenen STWEG; Einträge für alle STWEG ändern Technik und Präsident';
+
+async function loadHandwerkerEventZuweisungen(handwerkerIds, sicht = null) {
   if (!Array.isArray(handwerkerIds) || handwerkerIds.length === 0) return {};
   const result = await pool.query(
     `SELECT z.*, t.name AS event_name, t.icon AS event_icon
@@ -13394,30 +14180,35 @@ async function loadHandwerkerEventZuweisungen(handwerkerIds) {
   );
   const map = {};
   for (const z of result.rows) {
+    if (sicht && !hwRechteLib.hwLesen(sicht, z.stweg)) continue;
     if (!map[z.handwerker_id]) map[z.handwerker_id] = [];
     map[z.handwerker_id].push(z);
   }
   return map;
 }
 
+// Zuordnungen einer Firma neu schreiben: zuweisungen ist die ganze Liste, die
+// danach gelten soll (bei Nicht-T/P vorher mit zuweisungenZusammenfuehren
+// um die unsichtbaren und festen Einträge ergänzt).
 async function saveHandwerkerEventZuweisungen(client, handwerkerId, zuweisungen) {
   if (!Array.isArray(zuweisungen)) return;
-  const trim = (v) => (v == null ? null : String(v).trim() || null);
   await client.query('DELETE FROM handwerker_event_zuweisungen WHERE handwerker_id = $1', [handwerkerId]);
-  for (const z of zuweisungen) {
-    const eventId = parseInt(z.event_typ_id, 10);
-    if (!Number.isFinite(eventId)) continue;
-    const prio = parseInt(z.prioritaet, 10);
-    const stweg = z.stweg == null || z.stweg === '' ? null : parseInt(z.stweg, 10);
+  for (const z of zuweisungen.map(hwRechteLib.zuweisungNormal).filter(Boolean)) {
     await client.query(
       `INSERT INTO handwerker_event_zuweisungen (event_typ_id, handwerker_id, prioritaet, stweg, hinweis)
        VALUES ($1, $2, $3, $4, $5)`,
-      [eventId, handwerkerId,
-       Number.isFinite(prio) && prio >= 1 ? prio : 1,
-       Number.isFinite(stweg) && stweg >= 1 && stweg <= 8 ? stweg : null,
-       trim(z.hinweis)]
+      [z.event_typ_id, handwerkerId, z.prioritaet, z.stweg, z.hinweis]
     );
   }
+}
+
+/** Eingehende Zuordnungen mit dem Bestand zusammenführen. -> Liste | { fehler } */
+async function hwZuweisungenFuer(client, req, handwerkerId, eingehende) {
+  const sicht = hwSichtVon(req);
+  const alt = sicht.alle ? [] : (await client.query(
+    'SELECT event_typ_id, prioritaet, stweg, hinweis FROM handwerker_event_zuweisungen WHERE handwerker_id = $1',
+    [handwerkerId])).rows;
+  return hwRechteLib.zuweisungenZusammenfuehren(sicht, alt, eingehende);
 }
 
 async function loadHandwerkerPersonen(handwerkerIds) {
@@ -13485,14 +14276,25 @@ async function saveHandwerkerPersonen(client, handwerkerId, personen) {
   }
 }
 
+// Firma mit Mitarbeitern, sichtbaren Zuordnungen und dem Recht, sie zu ändern
+async function hwFirmaAntwort(req, row) {
+  const sicht = hwSichtVon(req);
+  const personenMap = await loadHandwerkerPersonen([row.id]);
+  const zuwMap = await loadHandwerkerEventZuweisungen([row.id], sicht);
+  return { ...row, personen: personenMap[row.id] || [], event_zuweisungen: zuwMap[row.id] || [],
+    darf_aendern: hwRechteLib.hwStammAendern(sicht, row.stweg), darf_archivieren: hwRechteLib.hwFirmaArchivieren(sicht, row.stweg) };
+}
+
 app.get('/api/handwerker', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
+    const sicht = hwSichtVon(req);
     const includeArchived = req.query.include_archived === '1';
     const kategorie = (req.query.kategorie || '').trim();
     const where = [];
     const params = [];
     if (!includeArchived) where.push('archiviert = false');
     if (kategorie) { params.push(kategorie); where.push(`kategorie = $${params.length}`); }
+    where.push(hwRechteLib.hwSichtSql(sicht, 'stweg', params));
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const result = await pool.query(
       `SELECT * FROM handwerker ${whereSql} ORDER BY archiviert ASC, kategorie ASC, firma ASC`,
@@ -13500,12 +14302,14 @@ app.get('/api/handwerker', authMiddleware, requirePermission('handwerker', 'read
     );
     const ids = result.rows.map(r => r.id);
     const personenMap = await loadHandwerkerPersonen(ids);
-    const zuwMap = await loadHandwerkerEventZuweisungen(ids);
+    const zuwMap = await loadHandwerkerEventZuweisungen(ids, sicht);
     for (const r of result.rows) {
       r.personen = personenMap[r.id] || [];
       r.event_zuweisungen = zuwMap[r.id] || [];
+      r.darf_aendern = hwRechteLib.hwStammAendern(sicht, r.stweg);
+      r.darf_archivieren = hwRechteLib.hwFirmaArchivieren(sicht, r.stweg);
     }
-    res.json({ handwerker: result.rows });
+    res.json({ handwerker: result.rows, rechte: hwRechteLib.hwRechte(sicht) });
   } catch (err) {
     console.error('Handwerker list error:', err);
     res.status(500).json({ error: 'Fehler beim Laden der Handwerker' });
@@ -13514,8 +14318,11 @@ app.get('/api/handwerker', authMiddleware, requirePermission('handwerker', 'read
 
 app.get('/api/handwerker/kategorien', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
+    const params = [];
+    const sichtSql = hwRechteLib.hwSichtSql(hwSichtVon(req), 'stweg', params);
     const result = await pool.query(
-      `SELECT kategorie, COUNT(*)::int AS anzahl FROM handwerker WHERE archiviert = false GROUP BY kategorie ORDER BY kategorie`
+      `SELECT kategorie, COUNT(*)::int AS anzahl FROM handwerker WHERE archiviert = false AND ${sichtSql} GROUP BY kategorie ORDER BY kategorie`,
+      params
     );
     res.json({ kategorien: result.rows });
   } catch (err) {
@@ -13552,31 +14359,35 @@ function sanitizeHandwerker(b) {
   };
 }
 
-app.post('/api/handwerker', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.post('/api/handwerker', authMiddleware, ...hwSchreibend, async (req, res) => {
   const client = await pool.connect();
   try {
+    const sicht = hwSichtVon(req);
+    if (!hwRechteLib.hwFirmaAnlegen(sicht)) return res.status(403).json({ error: 'Firmen anlegen nur Verwaltung, Technik und Präsident' });
     const h = sanitizeHandwerker(req.body || {});
     if (!h.kategorie || !h.firma) return res.status(400).json({ error: 'Kategorie und Firma sind Pflichtfelder' });
+    const ziel = hwRechteLib.hwNeueFirmaStweg(sicht, req.body?.stweg);
+    if (ziel.fehler) return res.status(ziel.fehler.startsWith('Bitte') ? 400 : 403).json({ error: ziel.fehler });
     await client.query('BEGIN');
     const result = await client.query(
       `INSERT INTO handwerker (kategorie, firma, ansprechpartner, telefon, mobile, email, website,
-         adresse, plz, ort, notiz, bewertung, letzter_auftrag, empfohlen_von, leistungen)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+         adresse, plz, ort, notiz, bewertung, letzter_auftrag, empfohlen_von, leistungen, stweg)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        RETURNING *`,
       [h.kategorie, h.firma, h.ansprechpartner, h.telefon, h.mobile, h.email, h.website,
-       h.adresse, h.plz, h.ort, h.notiz, h.bewertung, h.letzter_auftrag, h.empfohlen_von, h.leistungen]
+       h.adresse, h.plz, h.ort, h.notiz, h.bewertung, h.letzter_auftrag, h.empfohlen_von, h.leistungen, ziel.stweg]
     );
     const created = result.rows[0];
     await saveHandwerkerPersonen(client, created.id, req.body && req.body.personen);
     if (req.body && Array.isArray(req.body.event_zuweisungen)) {
-      await saveHandwerkerEventZuweisungen(client, created.id, req.body.event_zuweisungen);
+      const z = hwRechteLib.zuweisungenZusammenfuehren(sicht, [], req.body.event_zuweisungen);
+      if (z.fehler) { await client.query('ROLLBACK'); return res.status(403).json({ error: z.fehler }); }
+      await saveHandwerkerEventZuweisungen(client, created.id, z.liste);
     }
     await client.query('COMMIT');
-    const personenMap = await loadHandwerkerPersonen([created.id]);
-    const zuwMap = await loadHandwerkerEventZuweisungen([created.id]);
-    created.personen = personenMap[created.id] || [];
-    created.event_zuweisungen = zuwMap[created.id] || [];
-    res.status(201).json(created);
+    await objProtokoll(req, 'handwerker', 'firma-angelegt', `Firma ${created.id}`,
+      [created.firma, created.stweg ? `STWEG ${created.stweg}` : 'gemeinsamer Stamm']);
+    res.status(201).json(await hwFirmaAntwort(req, created));
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('Handwerker create error:', err);
@@ -13586,14 +14397,26 @@ app.post('/api/handwerker', authMiddleware, requirePermission('handwerker', 'wri
   }
 });
 
-app.put('/api/handwerker/:id', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.put('/api/handwerker/:id', authMiddleware, ...hwSchreibend, async (req, res) => {
   const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id) || id < 1) return res.status(400).json({ error: 'Ungültige ID' });
+    const firma = await hwFirmaLesbar(req, res, id);
+    if (!firma) return;
+    // Stammdaten: Verwaltung auch beim gemeinsamen Stamm (protokolliert); fremde STWEG nie
+    const sicht = hwSichtVon(req);
+    if (!hwRechteLib.hwStammAendern(sicht, firma.stweg)) {
+      return res.status(403).json({ error: 'Diese Firma gehört zu einer anderen STWEG; ihre Stammdaten ändern deren Verwaltung, Technik und Präsident.' });
+    }
     const h = sanitizeHandwerker(req.body || {});
     if (!h.kategorie || !h.firma) return res.status(400).json({ error: 'Kategorie und Firma sind Pflichtfelder' });
     const archivedFlag = req.body && typeof req.body.archiviert === 'boolean' ? req.body.archiviert : null;
+    // Archivieren (bzw. zurückholen) einer Firma des gemeinsamen Stamms: nur T/P
+    if (archivedFlag !== null && archivedFlag !== !!firma.archiviert && !hwRechteLib.hwFirmaArchivieren(sicht, firma.stweg)) {
+      return res.status(403).json({ error: 'Firmen des gemeinsamen Stamms archivieren Technik und Präsident' });
+    }
+    const vorher = (await pool.query('SELECT * FROM handwerker WHERE id = $1', [id])).rows[0];
     await client.query('BEGIN');
     const result = await client.query(
       `UPDATE handwerker SET
@@ -13615,19 +14438,48 @@ app.put('/api/handwerker/:id', authMiddleware, requirePermission('handwerker', '
       await saveHandwerkerPersonen(client, id, req.body.personen);
     }
     if (req.body && Array.isArray(req.body.event_zuweisungen)) {
-      await saveHandwerkerEventZuweisungen(client, id, req.body.event_zuweisungen);
+      const z = await hwZuweisungenFuer(client, req, id, req.body.event_zuweisungen);
+      if (z.fehler) { await client.query('ROLLBACK'); return res.status(403).json({ error: z.fehler }); }
+      await saveHandwerkerEventZuweisungen(client, id, z.liste);
     }
     await client.query('COMMIT');
-    const updated = result.rows[0];
-    const personenMap = await loadHandwerkerPersonen([id]);
-    const zuwMap = await loadHandwerkerEventZuweisungen([id]);
-    updated.personen = personenMap[id] || [];
-    updated.event_zuweisungen = zuwMap[id] || [];
-    res.json(updated);
+    {
+      const felder = hwRechteLib.hwGeaenderteFelder(vorher, result.rows[0]);
+      if (Array.isArray(req.body?.personen)) felder.push(`Mitarbeiter (${req.body.personen.filter(p => p && p.name).length})`);
+      await objProtokoll(req, 'handwerker', 'firma-geaendert', `Firma ${id}`,
+        [result.rows[0].firma, result.rows[0].stweg ? `STWEG ${result.rows[0].stweg}` : 'gemeinsamer Stamm',
+         felder.length ? `Felder: ${felder.join(', ')}` : 'ohne Änderung']);
+    }
+    res.json(await hwFirmaAntwort(req, result.rows[0]));
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('Handwerker update error:', err);
     res.status(500).json({ error: 'Fehler beim Aktualisieren' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/handwerker/:id/zuweisungen — nur die Notfall-Zuordnungen (der eigenen
+// STWEG) einer Firma, auch einer Firma des gemeinsamen Stamms. Body: { event_zuweisungen }
+app.put('/api/handwerker/:id/zuweisungen', authMiddleware, ...hwSchreibend, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const id = parseInt(req.params.id, 10);
+    const firma = await hwFirmaLesbar(req, res, id);
+    if (!firma) return;
+    if (!Array.isArray(req.body?.event_zuweisungen)) return res.status(400).json({ error: 'event_zuweisungen (Liste) fehlt' });
+    await client.query('BEGIN');
+    const z = await hwZuweisungenFuer(client, req, id, req.body.event_zuweisungen);
+    if (z.fehler) { await client.query('ROLLBACK'); return res.status(403).json({ error: z.fehler }); }
+    await saveHandwerkerEventZuweisungen(client, id, z.liste);
+    await client.query('COMMIT');
+    const r = await pool.query('SELECT * FROM handwerker WHERE id = $1', [id]);
+    res.json(await hwFirmaAntwort(req, r.rows[0]));
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Handwerker zuweisungen error:', err);
+    res.status(500).json({ error: 'Fehler beim Speichern der Zuordnungen' });
   } finally {
     client.release();
   }
@@ -13698,24 +14550,28 @@ function sanitizeVertrag(b) {
 app.get(encodeURI('/api/handwerker/:id/verträge'), authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige Handwerker-ID' });
+    if (!(await hwFirmaLesbar(req, res, id))) return;
+    const params = [id];
+    const sichtSql = hwRechteLib.hwSichtSql(hwSichtVon(req), 'stweg', params);
     const result = await pool.query(
-      `SELECT * FROM handwerker_vertraege WHERE handwerker_id = $1 ORDER BY status ASC, naechster_termin NULLS LAST, titel`,
-      [id]
+      `SELECT * FROM handwerker_vertraege WHERE handwerker_id = $1 AND ${sichtSql} ORDER BY status ASC, naechster_termin NULLS LAST, titel`,
+      params
     );
-    res.json({ verträge: result.rows });
+    const sicht = hwSichtVon(req);
+    res.json({ verträge: result.rows.map(v => ({ ...v, darf_aendern: hwRechteLib.hwSchreiben(sicht, v.stweg) })) });
   } catch (err) {
     console.error('Verträge list error:', err);
     res.status(500).json({ error: 'Fehler beim Laden der Verträge' });
   }
 });
 
-app.post(encodeURI('/api/handwerker/:id/verträge'), authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.post(encodeURI('/api/handwerker/:id/verträge'), authMiddleware, ...hwSchreibend, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige Handwerker-ID' });
+    if (!(await hwFirmaLesbar(req, res, id))) return;
     const v = sanitizeVertrag(req.body || {});
     if (!v.titel) return res.status(400).json({ error: 'Titel ist Pflichtfeld' });
+    if (!hwRechteLib.hwSchreiben(hwSichtVon(req), v.stweg)) return res.status(403).json({ error: HW_NUR_EIGENE });
     const result = await pool.query(
       `INSERT INTO handwerker_vertraege
          (handwerker_id, titel, beschreibung, frequenz_einheit, frequenz_intervall, naechster_termin,
@@ -13735,13 +14591,20 @@ app.post(encodeURI('/api/handwerker/:id/verträge'), authMiddleware, requirePerm
   }
 });
 
-app.put(encodeURI('/api/handwerker/:id/verträge/:vid'), authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.put(encodeURI('/api/handwerker/:id/verträge/:vid'), authMiddleware, ...hwSchreibend, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const vid = parseInt(req.params.vid, 10);
     if (!Number.isFinite(id) || !Number.isFinite(vid)) return res.status(400).json({ error: 'Ungültige IDs' });
+    if (!(await hwFirmaLesbar(req, res, id))) return;
     const v = sanitizeVertrag(req.body || {});
     if (!v.titel) return res.status(400).json({ error: 'Titel ist Pflichtfeld' });
+    const sicht = hwSichtVon(req);
+    const alt = await pool.query('SELECT stweg FROM handwerker_vertraege WHERE id = $1 AND handwerker_id = $2', [vid, id]);
+    if (!alt.rows[0] || !hwRechteLib.hwLesen(sicht, alt.rows[0].stweg)) return res.status(404).json({ error: 'Vertrag nicht gefunden' });
+    if (!hwRechteLib.hwSchreiben(sicht, alt.rows[0].stweg) || !hwRechteLib.hwSchreiben(sicht, v.stweg)) {
+      return res.status(403).json({ error: HW_NUR_EIGENE });
+    }
     const result = await pool.query(
       `UPDATE handwerker_vertraege SET
          titel=$1, beschreibung=$2, frequenz_einheit=$3, frequenz_intervall=$4, naechster_termin=$5,
@@ -13760,11 +14623,16 @@ app.put(encodeURI('/api/handwerker/:id/verträge/:vid'), authMiddleware, require
   }
 });
 
-app.delete(encodeURI('/api/handwerker/:id/verträge/:vid'), authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.delete(encodeURI('/api/handwerker/:id/verträge/:vid'), authMiddleware, ...hwSchreibend, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const vid = parseInt(req.params.vid, 10);
     if (!Number.isFinite(id) || !Number.isFinite(vid)) return res.status(400).json({ error: 'Ungültige IDs' });
+    if (!(await hwFirmaLesbar(req, res, id))) return;
+    const sicht = hwSichtVon(req);
+    const alt = await pool.query('SELECT stweg FROM handwerker_vertraege WHERE id = $1 AND handwerker_id = $2', [vid, id]);
+    if (!alt.rows[0] || !hwRechteLib.hwLesen(sicht, alt.rows[0].stweg)) return res.status(404).json({ error: 'Vertrag nicht gefunden' });
+    if (!hwRechteLib.hwSchreiben(sicht, alt.rows[0].stweg)) return res.status(403).json({ error: HW_NUR_EIGENE });
     const result = await pool.query(
       'DELETE FROM handwerker_vertraege WHERE id = $1 AND handwerker_id = $2 RETURNING id',
       [vid, id]
@@ -13777,10 +14645,14 @@ app.delete(encodeURI('/api/handwerker/:id/verträge/:vid'), authMiddleware, requ
   }
 });
 
-// Anstehende Wartungen über alle Handwerker
+// Anstehende Wartungen über alle Handwerker (nur sichtbare STWEG und Firmen)
 app.get(encodeURI('/api/handwerker-verträge/anstehend'), authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
     const days = Math.min(365, Math.max(7, parseInt(req.query.days, 10) || 90));
+    const sicht = hwSichtVon(req);
+    const params = [String(days)];
+    const vSql = hwRechteLib.hwSichtSql(sicht, 'v.stweg', params);
+    const hSql = hwRechteLib.hwSichtSql(sicht, 'h.stweg', params);
     const result = await pool.query(
       `SELECT v.*, h.firma, h.kategorie
          FROM handwerker_vertraege v
@@ -13789,8 +14661,9 @@ app.get(encodeURI('/api/handwerker-verträge/anstehend'), authMiddleware, requir
           AND v.naechster_termin IS NOT NULL
           AND v.naechster_termin <= CURRENT_DATE + ($1 || ' days')::interval
           AND h.archiviert = false
+          AND ${vSql} AND ${hSql}
         ORDER BY v.naechster_termin ASC, h.firma ASC`,
-      [String(days)]
+      params
     );
     res.json({ verträge: result.rows, days });
   } catch (err) {
@@ -13802,12 +14675,15 @@ app.get(encodeURI('/api/handwerker-verträge/anstehend'), authMiddleware, requir
 app.get(encodeURI('/api/handwerker/:id/aufträge'), authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    if (!Number.isFinite(id) || id < 1) return res.status(400).json({ error: 'Ungültige Handwerker-ID' });
+    if (!(await hwFirmaLesbar(req, res, id))) return;
+    const sicht = hwSichtVon(req);
+    const params = [id];
+    const sichtSql = hwRechteLib.hwSichtSql(sicht, 'stweg', params);
     const result = await pool.query(
-      'SELECT * FROM handwerker_auftraege WHERE handwerker_id = $1 ORDER BY datum DESC, id DESC',
-      [id]
+      `SELECT * FROM handwerker_auftraege WHERE handwerker_id = $1 AND ${sichtSql} ORDER BY datum DESC, id DESC`,
+      params
     );
-    res.json({ aufträge: result.rows });
+    res.json({ aufträge: result.rows.map(a => ({ ...a, darf_aendern: hwRechteLib.hwSchreiben(sicht, a.stweg) })) });
   } catch (err) {
     console.error('Aufträge list error:', err);
     res.status(500).json({ error: 'Fehler beim Laden der Aufträge' });
@@ -13829,13 +14705,23 @@ function sanitizeAuftrag(b) {
   };
 }
 
-app.post(encodeURI('/api/handwerker/:id/aufträge'), authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+// Ein Einsatz darf nur auf einen sichtbaren Vertrag derselben Firma zeigen
+// (sonst verschiebt er den nächsten Termin eines fremden Vertrags).
+async function hwVertragPasst(client, req, handwerkerId, vertragId) {
+  if (!vertragId) return true;
+  const r = await client.query('SELECT stweg FROM handwerker_vertraege WHERE id = $1 AND handwerker_id = $2', [vertragId, handwerkerId]);
+  return !!r.rows[0] && hwRechteLib.hwLesen(hwSichtVon(req), r.rows[0].stweg);
+}
+
+app.post(encodeURI('/api/handwerker/:id/aufträge'), authMiddleware, ...hwSchreibend, async (req, res) => {
   const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
-    if (!Number.isFinite(id) || id < 1) return res.status(400).json({ error: 'Ungültige Handwerker-ID' });
+    if (!(await hwFirmaLesbar(req, res, id))) return;
     const a = sanitizeAuftrag(req.body || {});
     if (!a.datum || !a.beschreibung) return res.status(400).json({ error: 'Datum und Beschreibung sind Pflichtfelder' });
+    if (!hwRechteLib.hwSchreiben(hwSichtVon(req), a.stweg)) return res.status(403).json({ error: HW_NUR_EIGENE });
+    if (!(await hwVertragPasst(client, req, id, a.vertrag_id))) return res.status(400).json({ error: 'Vertrag gehört nicht zu dieser Firma' });
     await client.query('BEGIN');
     const result = await client.query(
       `INSERT INTO handwerker_auftraege (handwerker_id, datum, beschreibung, kosten, stweg, notiz, vertrag_id)
@@ -13856,17 +14742,24 @@ app.post(encodeURI('/api/handwerker/:id/aufträge'), authMiddleware, requirePerm
   }
 });
 
-app.put(encodeURI('/api/handwerker/:id/aufträge/:aid'), authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.put(encodeURI('/api/handwerker/:id/aufträge/:aid'), authMiddleware, ...hwSchreibend, async (req, res) => {
   const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
     const aid = parseInt(req.params.aid, 10);
     if (!Number.isFinite(id) || !Number.isFinite(aid)) return res.status(400).json({ error: 'Ungültige IDs' });
+    if (!(await hwFirmaLesbar(req, res, id))) return;
     const a = sanitizeAuftrag(req.body || {});
     if (!a.datum || !a.beschreibung) return res.status(400).json({ error: 'Datum und Beschreibung sind Pflichtfelder' });
-    await client.query('BEGIN');
+    const sicht = hwSichtVon(req);
     // alten vertrag_id ermitteln, damit wir den vorherigen Vertrag ggf. auch neu rechnen
-    const before = await client.query('SELECT vertrag_id FROM handwerker_auftraege WHERE id = $1 AND handwerker_id = $2', [aid, id]);
+    const before = await client.query('SELECT vertrag_id, stweg FROM handwerker_auftraege WHERE id = $1 AND handwerker_id = $2', [aid, id]);
+    if (!before.rows[0] || !hwRechteLib.hwLesen(sicht, before.rows[0].stweg)) return res.status(404).json({ error: 'Auftrag nicht gefunden' });
+    if (!hwRechteLib.hwSchreiben(sicht, before.rows[0].stweg) || !hwRechteLib.hwSchreiben(sicht, a.stweg)) {
+      return res.status(403).json({ error: HW_NUR_EIGENE });
+    }
+    if (!(await hwVertragPasst(client, req, id, a.vertrag_id))) return res.status(400).json({ error: 'Vertrag gehört nicht zu dieser Firma' });
+    await client.query('BEGIN');
     const result = await client.query(
       `UPDATE handwerker_auftraege SET datum=$1, beschreibung=$2, kosten=$3, stweg=$4, notiz=$5, vertrag_id=$6
        WHERE id=$7 AND handwerker_id=$8 RETURNING *`,
@@ -13891,14 +14784,18 @@ app.put(encodeURI('/api/handwerker/:id/aufträge/:aid'), authMiddleware, require
   }
 });
 
-app.delete(encodeURI('/api/handwerker/:id/aufträge/:aid'), authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.delete(encodeURI('/api/handwerker/:id/aufträge/:aid'), authMiddleware, ...hwSchreibend, async (req, res) => {
   const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
     const aid = parseInt(req.params.aid, 10);
     if (!Number.isFinite(id) || !Number.isFinite(aid)) return res.status(400).json({ error: 'Ungültige IDs' });
+    if (!(await hwFirmaLesbar(req, res, id))) return;
+    const sicht = hwSichtVon(req);
+    const before = await client.query('SELECT vertrag_id, stweg FROM handwerker_auftraege WHERE id = $1 AND handwerker_id = $2', [aid, id]);
+    if (!before.rows[0] || !hwRechteLib.hwLesen(sicht, before.rows[0].stweg)) return res.status(404).json({ error: 'Auftrag nicht gefunden' });
+    if (!hwRechteLib.hwSchreiben(sicht, before.rows[0].stweg)) return res.status(403).json({ error: HW_NUR_EIGENE });
     await client.query('BEGIN');
-    const before = await client.query('SELECT vertrag_id FROM handwerker_auftraege WHERE id = $1 AND handwerker_id = $2', [aid, id]);
     const result = await client.query(
       'DELETE FROM handwerker_auftraege WHERE id = $1 AND handwerker_id = $2 RETURNING id',
       [aid, id]
@@ -13921,7 +14818,13 @@ app.delete(encodeURI('/api/handwerker/:id/aufträge/:aid'), authMiddleware, requ
   }
 });
 
-// Event-Typen (Notfall-Kategorien) CRUD
+// Event-Typen (Notfall-Kategorien): lesen alle mit Recht; anlegen, ändern und
+// löschen (Kaskade auf alle Zuordnungen aller STWEG) nur Technik/Präsident.
+function requireHwEventTypen(req, res, next) {
+  if (hwRechteLib.hwEventTypen(hwSichtVon(req))) return next();
+  res.status(403).json({ error: 'Notfall-Arten gelten für alle STWEG; sie ändern Technik und Präsident' });
+}
+
 app.get('/api/handwerker-events', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM handwerker_event_typen ORDER BY sort_order, name');
@@ -13932,7 +14835,7 @@ app.get('/api/handwerker-events', authMiddleware, requirePermission('handwerker'
   }
 });
 
-app.post('/api/handwerker-events', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.post('/api/handwerker-events', authMiddleware, ...hwSchreibend, requireHwEventTypen, async (req, res) => {
   try {
     const trim = (v) => (v == null ? null : String(v).trim() || null);
     const name = trim(req.body?.name);
@@ -13951,7 +14854,7 @@ app.post('/api/handwerker-events', authMiddleware, requirePermission('handwerker
   }
 });
 
-app.put('/api/handwerker-events/:id', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.put('/api/handwerker-events/:id', authMiddleware, ...hwSchreibend, requireHwEventTypen, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige ID' });
@@ -13975,7 +14878,7 @@ app.put('/api/handwerker-events/:id', authMiddleware, requirePermission('handwer
   }
 });
 
-app.delete('/api/handwerker-events/:id', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.delete('/api/handwerker-events/:id', authMiddleware, ...hwSchreibend, requireHwEventTypen, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige ID' });
@@ -13988,27 +14891,26 @@ app.delete('/api/handwerker-events/:id', authMiddleware, requirePermission('hand
   }
 });
 
-// Notfall-Übersicht: alle Event-Typen mit zugeordneten Handwerkern (sortiert nach Priorität)
+// Notfall-Übersicht: alle Event-Typen mit zugeordneten Handwerkern (sortiert nach Priorität).
+// Nur Zuordnungen und Firmen, die das Konto sehen darf (eigene STWEG und „alle“);
+// ?stweg= engt zusätzlich ein.
 app.get('/api/handwerker-notfall', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
+    const sicht = hwSichtVon(req);
     const stwegFilter = req.query.stweg ? parseInt(req.query.stweg, 10) : null;
     const events = await pool.query('SELECT * FROM handwerker_event_typen ORDER BY sort_order, name');
+    const params = [];
+    const zSql = hwRechteLib.hwSichtSql(sicht, 'z.stweg', params);
+    const hSql = hwRechteLib.hwSichtSql(sicht, 'h.stweg', params);
     const zuws = await pool.query(`
       SELECT z.*, h.firma, h.kategorie, h.telefon AS h_telefon, h.mobile AS h_mobile, h.email AS h_email,
              h.archiviert AS h_archiviert
         FROM handwerker_event_zuweisungen z
         JOIN handwerker h ON h.id = z.handwerker_id
-       WHERE h.archiviert = false
-       ORDER BY z.event_typ_id, z.prioritaet, h.firma`);
-    const personen = await pool.query(`
-      SELECT p.* FROM handwerker_personen p
-        JOIN handwerker_event_zuweisungen z ON z.handwerker_id = p.handwerker_id
-       ORDER BY p.handwerker_id, p.sort_order, p.id`);
-    const personenByHandwerker = {};
-    for (const p of personen.rows) {
-      if (!personenByHandwerker[p.handwerker_id]) personenByHandwerker[p.handwerker_id] = [];
-      personenByHandwerker[p.handwerker_id].push(p);
-    }
+       WHERE h.archiviert = false AND ${zSql} AND ${hSql}
+       ORDER BY z.event_typ_id, z.prioritaet, h.firma`, params);
+    const ids = [...new Set(zuws.rows.map(z => z.handwerker_id))];
+    const personenByHandwerker = await loadHandwerkerPersonen(ids);
     const zuwsByEvent = {};
     for (const z of zuws.rows) {
       // STWEG-Filter: leere stweg = gilt für alle, sonst nur passend
@@ -14030,24 +14932,32 @@ app.get('/api/handwerker-notfall', authMiddleware, requirePermission('handwerker
   }
 });
 
-app.delete('/api/handwerker/:id', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+// Archivieren: wer die Firma ändern darf. Hart löschen (Kaskade auf Mitarbeiter,
+// Verträge, Einsätze und Zuordnungen aller STWEG): nur Technik und Präsident.
+app.delete('/api/handwerker/:id', authMiddleware, ...hwSchreibend, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id) || id < 1) return res.status(400).json({ error: 'Ungültige ID' });
+    const firma = await hwFirmaLesbar(req, res, id);
+    if (!firma) return;
+    const sicht = hwSichtVon(req);
     const hard = req.query.hard === '1';
     if (hard) {
-      const groups = req.user?.groups || [];
-      const isTechnik = groups.some(g => g.toLowerCase() === 'technik');
-      if (!isTechnik) return res.status(403).json({ error: 'Hartes Löschen nur für Technik-Gruppe' });
-      const result = await pool.query('DELETE FROM handwerker WHERE id = $1 RETURNING id', [id]);
+      if (!sicht.alle) return res.status(403).json({ error: 'Hartes Löschen nur für Technik und Präsident' });
+      const result = await pool.query('DELETE FROM handwerker WHERE id = $1 RETURNING id, firma', [id]);
       if (result.rows.length === 0) return res.status(404).json({ error: 'Eintrag nicht gefunden' });
+      await objProtokoll(req, 'handwerker', 'firma-geloescht', `Firma ${id}`, [result.rows[0].firma]);
       return res.json({ success: true, hard_deleted: true });
+    }
+    if (!hwRechteLib.hwFirmaArchivieren(sicht, firma.stweg)) {
+      return res.status(403).json({ error: 'Diese Firma gehört zum gemeinsamen Stamm oder einer anderen STWEG; archivieren Technik und Präsident' });
     }
     const result = await pool.query(
       'UPDATE handwerker SET archiviert = true, updated_at = NOW() WHERE id = $1 AND archiviert = false RETURNING id',
       [id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Eintrag nicht gefunden oder bereits archiviert' });
+    await objProtokoll(req, 'handwerker', 'firma-archiviert', `Firma ${id}`, [firma.stweg ? `STWEG ${firma.stweg}` : 'gemeinsamer Stamm']);
     res.json({ success: true, archived: true });
   } catch (err) {
     console.error('Handwerker delete error:', err);
@@ -14189,7 +15099,7 @@ async function findVerwaltungForStweg(stweg) {
 // freigegeben werden. Inhalt ist in der Queue editierbar.
 
 async function enqueueVerwaltungMail({
-  source_type, source_id, mailTo, mailCc, mailBcc, mailReplyTo, mailFrom, subject, bodyText, attachments, createdBy,
+  source_type, source_id, mailTo, mailCc, mailBcc, mailReplyTo, mailFrom, subject, bodyText, attachments, createdBy, createdById,
 }) {
   const toStr = Array.isArray(mailTo) ? mailTo.join(', ') : String(mailTo || '');
   const ccStr = Array.isArray(mailCc) ? mailCc.join(', ') : (mailCc ? String(mailCc) : null);
@@ -14204,10 +15114,12 @@ async function enqueueVerwaltungMail({
   }));
   const r = await pool.query(
     `INSERT INTO verwaltung_mail_queue
-       (source_type, source_id, mail_to, mail_cc, mail_bcc, mail_reply_to, mail_from, subject, body_text, attachments, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)
+       (source_type, source_id, mail_to, mail_cc, mail_bcc, mail_reply_to, mail_from, subject, body_text, attachments, created_by, created_by_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11,
+             COALESCE($12::int, (SELECT id FROM users WHERE LOWER(email) = LOWER($11::text) LIMIT 1)))
      RETURNING id`,
-    [source_type, source_id || null, toStr, ccStr, bccStr, mailReplyTo || null, mailFrom || null, subject, bodyText, JSON.stringify(attMeta), createdBy || null],
+    [source_type, source_id || null, toStr, ccStr, bccStr, mailReplyTo || null, mailFrom || null, subject, bodyText, JSON.stringify(attMeta), createdBy || null,
+     Number.isFinite(parseInt(createdById, 10)) ? parseInt(createdById, 10) : null],
   );
   const queueId = r.rows[0].id;
   // Real Attachments in separate Tabelle
@@ -14863,14 +15775,19 @@ app.get('/api/dashboard', authMiddleware, async (req, res) => {
       } catch {}
     }
 
-    // 4) Anstehende Handwerker-Verträge (alle die Berechtigung haben)
+    // 4) Anstehende Handwerker-Verträge (wer das Recht hat; nur eigene STWEG und „alle“)
     if (darf('handwerker')) try {
+      const hwSicht = hwRechteLib.handwerkerSicht(req.user?.groups || []);
+      const hwParams = [];
+      const vSql = hwRechteLib.hwSichtSql(hwSicht, 'v.stweg', hwParams);
+      const hSql = hwRechteLib.hwSichtSql(hwSicht, 'h.stweg', hwParams);
       const r = await pool.query(
         `SELECT v.id, v.titel, v.naechster_termin, v.stweg, h.firma
            FROM handwerker_vertraege v JOIN handwerker h ON h.id = v.handwerker_id
           WHERE v.status = 'aktiv' AND v.naechster_termin IS NOT NULL
             AND v.naechster_termin <= CURRENT_DATE + INTERVAL '30 days'
-          ORDER BY v.naechster_termin LIMIT 10`,
+            AND h.archiviert = false AND ${vSql} AND ${hSql}
+          ORDER BY v.naechster_termin LIMIT 10`, hwParams,
       );
       widgets.anstehende_vertraege = r.rows;
     } catch {}
@@ -15901,7 +16818,17 @@ app.get(encodeURI('/api/mail-empfänger'), authMiddleware, requirePermission('ma
     const params = [];
     let where = 'TRUE';
     if (kategorie) { params.push(kategorie); where += ` AND kategorie = $${params.length}`; }
-    if (Number.isFinite(stwegFilter)) { params.push(stwegFilter); where += ` AND (stweg = $${params.length} OR stweg IS NULL)`; }
+    // F6: Ausschuss und Verwaltung sehen nur Eintraege ihrer STWEG(s) und die
+    // STWEG-uebergreifenden (stweg NULL); Technik/Präsident alles.
+    const g = req.user?.groups || [];
+    if (!(isTechnik(g) || isPraesident(g))) {
+      const eigene = [...new Set([...getAusschussStwegs(g), ...verwaltungStwegs(g)])];
+      if (Number.isFinite(stwegFilter) && !eigene.includes(stwegFilter)) {
+        return res.status(403).json({ error: 'Keine Berechtigung für diese STWEG' });
+      }
+      params.push(Number.isFinite(stwegFilter) ? [stwegFilter] : eigene);
+      where += ` AND (stweg = ANY($${params.length}::int[]) OR stweg IS NULL)`;
+    } else if (Number.isFinite(stwegFilter)) { params.push(stwegFilter); where += ` AND (stweg = $${params.length} OR stweg IS NULL)`; }
     const r = await pool.query(
       `SELECT * FROM mail_empfaenger WHERE ${where} ORDER BY aktiv DESC, kategorie, stweg NULLS FIRST, name`,
       params,
@@ -15986,12 +16913,13 @@ function requireWohnungsverwaltungWrite(req, res, next) {
 }
 
 // H4: Pruefe ob User berechtigt ist, eine Person zu editieren.
-// Technik/Präsident: alle Personen. Ausschuss: nur Personen aus dem eigenen STWEG
-// (mind. eine wohnungen_kontakte-Zeile zu einer Wohnung im STWEG des Users).
+// Technik/Präsident: alle Personen. Ausschuss und Verwaltung (stwegN-verwaltung,
+// Entscheid Stefan 28.11.2026): nur Personen aus der eigenen STWEG (mind. eine
+// aktive wohnungen_kontakte-Zeile zu einer Wohnung dort; lib/personen-rechte.js).
 async function userCanEditPerson(user, personId) {
   const groups = user?.groups || [];
   if (isTechnik(groups) || isPraesident(groups)) return true;
-  const ausschussStwegs = [...getAusschussStwegs(groups)];
+  const ausschussStwegs = [...personenRechte.personenSchreibStwegs(groups)];
   if (ausschussStwegs.length === 0) return false;
   const r = await pool.query(
     `SELECT 1 FROM wohnungen_kontakte k
@@ -16004,14 +16932,14 @@ async function userCanEditPerson(user, personId) {
 }
 
 // Schutz gemeinsamer Personen (Runde 4): Eine Person, die ein eigenes aktives Konto hat
-// oder an Wohnungen einer STWEG haengt, in der der Anfragende NICHT Ausschuss ist, darf
-// ein Ausschuss nicht umbenennen, umadressieren oder zusammenfuehren - sonst laesst sich
+// oder an Wohnungen einer STWEG haengt, in der der Anfragende NICHT Ausschuss bzw.
+// Verwaltung ist, darf er nicht umbenennen, umadressieren oder zusammenfuehren - sonst laesst sich
 // per neuem Kontakt (findOrCreatePerson) + Personen-Bearbeitung die Identitaet eines
 // Bewohners einer fremden STWEG uebernehmen (Trigger personen_propagate_to_kontakte).
 async function personGeschuetztFuer(user, personId) {
   const groups = user?.groups || [];
   if (isTechnik(groups) || isPraesident(groups)) return false;
-  const eigene = [...getAusschussStwegs(groups)];
+  const eigene = [...personenRechte.personenSchreibStwegs(groups)];
   const r = await pool.query(
     `SELECT EXISTS (SELECT 1 FROM wohnungen_kontakte k JOIN wohnungen w ON w.id = k.wohnung_id
                      WHERE k.person_id = $1 AND k.archiviert_am IS NULL AND NOT (w.stweg = ANY($2::int[]))) AS fremd_stweg,
@@ -16087,7 +17015,10 @@ app.get('/api/personen', authMiddleware, requireWohnungsverwaltungRead, async (r
       params,
     );
     const sicht = await nummernSicht(req, pool);
-    res.json({ personen: r.rows.map(p => sicht(p, personFuerSicht(p))) });
+    const g = req.user?.groups || [];
+    // Geburtsdatum nur T/P, Notiz nur Ausschuss und T/P (lib/personen-rechte.js)
+    res.json({ personen: r.rows.map(p => personenRechte.personFuerLeser(g, sicht(p, personFuerSicht(p)))),
+      felder: personenRechte.personenFelder(g) });
   } catch (err) {
     console.error('Personen list error:', err);
     res.status(500).json({ error: 'Fehler beim Laden' });
@@ -16120,21 +17051,23 @@ app.get('/api/personen/:id', authMiddleware, requireWohnungsverwaltungRead, asyn
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const sicht = await nummernSicht(req, pool);
-    res.json(sicht(r.rows[0], personFuerSicht(r.rows[0])));
+    const g = req.user?.groups || [];
+    res.json({ ...personenRechte.personFuerLeser(g, sicht(r.rows[0], personFuerSicht(r.rows[0]))), felder: personenRechte.personenFelder(g) });
   } catch (err) {
     res.status(500).json({ error: fehlerFuerClient(err, 'Fehler beim Laden') });
   }
 });
 
 // PUT /api/personen/:id — Person aktualisieren (Trigger propagiert auf alle Kontakte)
-app.put('/api/personen/:id', authMiddleware, requireWohnungsverwaltungWrite, async (req, res) => {
+app.put('/api/personen/:id', authMiddleware, requireWohnungsverwaltungWrite, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
-    // H4: STWEG-Scope-Check: Ausschuss darf nur Personen aus eigenem STWEG editieren
+    // H4: STWEG-Scope-Check: Ausschuss/Verwaltung nur Personen aus der eigenen STWEG
     const allowed = await userCanEditPerson(req.user, id);
-    if (!allowed) return res.status(403).json({ error: 'Diese Person gehört nicht zu einem STWEG für den du Ausschuss-Berechtigung hast' });
-    let b = req.body || {};
+    if (!allowed) return res.status(403).json({ error: 'Diese Person gehört nicht zu einer STWEG, für die du als Ausschuss oder Verwaltung zuständig bist' });
+    // Felder, die das Konto nicht sieht (Geburtsdatum, Notiz), nicht ueberschreiben
+    let b = personenRechte.personBodyFiltern(req.user?.groups || [], req.body || {});
     // Verborgene Nummern (GET liefert sie leer) beim Speichern nicht ueberschreiben
     if (!(await darfNummernDerPerson(req, id))) b = nummernAusBodyEntfernen(b);
     const IDENT_FELDER = ['name', 'vorname', 'nachname', 'email', 'telefon', 'mobile', 'telefone', 'adresse'];
@@ -16168,12 +17101,16 @@ app.put('/api/personen/:id', authMiddleware, requireWohnungsverwaltungWrite, asy
     if (b.notiz !== undefined) push('notiz', b.notiz || null);
     if (b.review_needed !== undefined) push('review_needed', !!b.review_needed);
     if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
+    const vorher = (await pool.query('SELECT * FROM personen WHERE id = $1', [id])).rows[0];
     params.push(id);
     const r = await pool.query(
       `UPDATE personen SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`,
       params,
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const felder = personenRechte.geaenderteFelder(vorher, r.rows[0],
+      ['name', 'vorname', 'nachname', 'anrede', 'email', 'telefon', 'mobile', 'telefone', 'adresse', 'geburtsdatum', 'notiz', 'review_needed']);
+    await objProtokoll(req, 'personen', 'geaendert', `Person ${id}`, [r.rows[0].name, felder.length ? `Felder: ${felder.join(', ')}` : 'ohne Änderung']);
 
     // Verwaltung informieren wenn Email/Telefon/Adresse geaendert
     const relevantChanged = ['email', 'telefon', 'adresse'].some(f => b[f] !== undefined);
@@ -16191,7 +17128,7 @@ app.put('/api/personen/:id', authMiddleware, requireWohnungsverwaltungWrite, asy
         }
       } catch {}
     }
-    res.json(r.rows[0]);
+    res.json(personenRechte.personFuerLeser(req.user?.groups || [], r.rows[0]));
   } catch (err) {
     console.error('Personen update error:', err);
     res.status(500).json({ error: 'Fehler beim Aktualisieren' });
@@ -16199,9 +17136,9 @@ app.put('/api/personen/:id', authMiddleware, requireWohnungsverwaltungWrite, asy
 });
 
 // POST /api/personen — neue Person anlegen
-app.post('/api/personen', authMiddleware, requireWohnungsverwaltungWrite, async (req, res) => {
+app.post('/api/personen', authMiddleware, requireWohnungsverwaltungWrite, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
   try {
-    const b = req.body || {};
+    const b = personenRechte.personBodyFiltern(req.user?.groups || [], req.body || {});
     if (!b.name || !String(b.name).trim()) return res.status(400).json({ error: 'Name erforderlich' });
     const r = await pool.query(
       `INSERT INTO personen (name, vorname, nachname, anrede, email, telefon, mobile, adresse, geburtsdatum, notiz)
@@ -16209,7 +17146,8 @@ app.post('/api/personen', authMiddleware, requireWohnungsverwaltungWrite, async 
       [String(b.name).trim().slice(0,255), b.vorname || null, b.nachname || null, b.anrede || null,
        b.email || null, normalizePhone(b.telefon), normalizePhone(b.mobile), b.adresse || null, b.geburtsdatum || null, b.notiz || null],
     );
-    res.status(201).json(r.rows[0]);
+    await objProtokoll(req, 'personen', 'angelegt', `Person ${r.rows[0].id}`, [r.rows[0].name]);
+    res.status(201).json(personenRechte.personFuerLeser(req.user?.groups || [], r.rows[0]));
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
@@ -16328,15 +17266,20 @@ app.post('/api/personen/merge', authMiddleware, requireWohnungsverwaltungWrite, 
       params.push(keepId);
       await client.query(`UPDATE personen SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${params.length}`, params);
     }
-    // Alle Kontakte umhaengen
-    const reassigned = await client.query(
-      `UPDATE wohnungen_kontakte SET person_id = $1 WHERE person_id = $2`,
-      [keepId, mergeId],
-    );
+    // Alle Verweise umhaengen: Wohnungs-Kontakte, Vollmachten (Geber, Bevollmaechtigte),
+    // Reklamationen, WhatsApp, Rufgruppen-Mitglieder (lib/personen-rechte.js) -
+    // sonst setzt das Loeschen sie still auf NULL.
+    const umgehaengt = await personenRechte.verweiseUmhaengen(client, keepId, mergeId);
     // Merge-Person löschen
     await client.query('DELETE FROM personen WHERE id = $1', [mergeId]);
+    // Protokoll in derselben Transaktion: ohne Eintrag kein Zusammenfuehren
+    await adminProtokoll.eintragen(pool, client, req, {
+      bereich: 'personen', aktion: 'zusammengefuehrt', ziel: `Person ${keepId}`, alt: `Person ${mergeId}`, neu: `Person ${keepId}`,
+      detail: [k.rows[0].name, m.rows[0].name !== k.rows[0].name ? `aus: ${m.rows[0].name}` : null,
+        Object.entries(umgehaengt).filter(([, n]) => n > 0).map(([t, n]) => `${t} ${n}`).join(', ') || 'keine Verweise'].filter(Boolean).join(' · '),
+    });
     await client.query('COMMIT');
-    res.json({ success: true, reassigned_kontakte: reassigned.rowCount });
+    res.json({ success: true, reassigned_kontakte: umgehaengt['wohnungen_kontakte.person_id'] || 0, umgehaengt });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('Personen merge error:', err);
@@ -16431,6 +17374,7 @@ app.post('/api/mail-compose', authMiddleware, requirePermission('mail-compose', 
         bodyText: String(b.body_text).slice(0, 100000),
         attachments,
         createdBy: req.user.email,
+        createdById: req.user.id || req.user.user_id || null,
       });
       res.json({ ok: true, queued: true, queue_id: queueId, firma, requires_approval: true });
     } else {
@@ -16825,6 +17769,8 @@ const MAIL_TEMPLATE_DEFAULTS = [
   },
   // Waschküche: Sperrzeit hat Reservationen storniert (Text und Variablen in lib/wasch-regeln.js)
   waschRegeln.SPERR_VORLAGE,
+  // Vollmachten: bevollmächtigt, Miteigentümer, Verwaltung, Ablauf (Text und Variablen in lib/vollmacht-mail.js)
+  ...vollmachtMail.VORLAGEN,
 ];
 
 async function seedMailTemplates() {
@@ -18510,7 +19456,7 @@ app.get('/api/stweg-modules', async (req, res) => {
   try {
     const r = await pool.query('SELECT stweg, module FROM stweg_modules WHERE active = true');
     const map = {};
-    r.rows.forEach(x => { (map[x.stweg] = map[x.stweg] || []).push(x.module); });
+    r.rows.filter(x => stwegAppLib.MODULE.includes(x.module)).forEach(x => { (map[x.stweg] = map[x.stweg] || []).push(x.module); });
     res.json(map);
   } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
 });
@@ -18523,6 +19469,7 @@ app.post('/api/stweg-modules', authMiddleware, kartenAdmin.mitKarteProtokolliere
     const module = String(req.body?.module || '').trim();
     const active = !!req.body?.active;
     if (!Number.isFinite(stweg) || !module) return res.status(400).json({ error: 'stweg + module noetig' });
+    if (!stwegAppLib.MODULE.includes(module)) return res.status(400).json({ error: `Unbekanntes Modul: ${module}` });
     const groups = req.user?.groups || [];
     const admin = isTechnik(groups) || isPraesident(groups);
     if (!admin && !getAusschussStwegs(groups).has(stweg)) {
@@ -18541,92 +19488,13 @@ app.post('/api/stweg-modules', authMiddleware, kartenAdmin.mitKarteProtokolliere
 // Seite nutzt sie mehr (Nachfolger: /api/stweg-sections), und das POST hatte kein
 // Karten-Protokoll. Die Tabelle stweg_content bleibt unangetastet (keine Daten loeschen).
 
-// ─── STWEG-Seiten-Abschnitte (Modul "seiten-editor", WYSIWYG) ───────
-const STWEG_SECTIONS = ['willkommen', 'aktuelles', 'infos', 'termine'];
-const SANITIZE_OPTS = {
-  allowedTags: ['p', 'br', 'span', 'div', 'strong', 'b', 'em', 'i', 'u', 's', 'blockquote',
-    'ul', 'ol', 'li', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre', 'code', 'hr',
-    'img', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'colgroup', 'col', 'caption'],
-  allowedAttributes: {
-    a: ['href', 'target', 'rel'],
-    img: ['src', 'alt', 'width', 'height'],
-    td: ['colspan', 'rowspan'],
-    th: ['colspan', 'rowspan'],
-    '*': ['style'],
-  },
-  // class nur aus fester Liste: die Seite laedt Tailwind, frei waehlbare Klassen
-  // (fixed inset-0 z-50 ...) erlaubten ein seitenfuellendes Phishing-Overlay.
-  // Liste = was CKEditor 5 (stweg-seite-editor.html) selbst erzeugt.
-  allowedClasses: {
-    img: ['image', 'image_resized', 'image-style-*'],
-    table: ['table'],
-    span: ['text-tiny', 'text-small', 'text-big', 'text-huge', 'marker-*', 'pen-*'],
-  },
-  allowedStyles: {
-    '*': {
-      'text-align': [/^left$/, /^right$/, /^center$/, /^justify$/],
-      'color': [/^#(0x)?[0-9a-fA-F]{3,8}$/, /^rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)$/],
-      'background-color': [/^#(0x)?[0-9a-fA-F]{3,8}$/, /^rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)$/],
-      'width': [/^\d+(?:px|%)$/],
-      'height': [/^\d+(?:px|%)$/],
-    },
-  },
-  allowedSchemes: ['http', 'https', 'mailto', 'tel'],
-  allowedSchemesByTag: { img: ['http', 'https', 'data'] },
-  allowProtocolRelative: false,
-  transformTags: { a: sanitizeHtml.simpleTransform('a', { rel: 'noopener noreferrer' }) },
-};
-
-pool.query(`CREATE TABLE IF NOT EXISTS stweg_sections (
-  stweg      INTEGER NOT NULL,
-  section    TEXT NOT NULL,
-  html       TEXT NOT NULL DEFAULT '',
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_by TEXT,
-  PRIMARY KEY (stweg, section)
-)`).catch(e => console.error('[stweg-sections] table init:', e.message));
-
-// GET: alle Abschnitte einer STWEG (public, fuers Rendern + Editor-Laden).
-app.get('/api/stweg-sections/:stweg', async (req, res) => {
-  try {
-    const stweg = parseInt(req.params.stweg, 10);
-    const r = await pool.query('SELECT section, html, updated_at FROM stweg_sections WHERE stweg=$1', [stweg]);
-    const out = {};
-    // Auch beim Ausliefern bereinigen: aeltere Inhalte wurden mit lockereren Regeln gespeichert.
-    r.rows.forEach(x => { out[x.section] = { html: sanitizeHtml(x.html || '', SANITIZE_OPTS), updated_at: x.updated_at }; });
-    res.json(out);
-  } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
-});
-
-// GET: in welchen STWEGs darf das Konto Abschnitte speichern? Gleiche Regel wie
-// das POST unten (T/P alle, sonst der Ausschuss seiner STWEG(s)). Der Editor bietet
-// nur diese an (F9, Klaerung STWEG 28.11.2026) statt aus Gruppennamen zu raten.
-app.get('/api/stweg-sections-rechte', authMiddleware, (req, res) => {
-  const groups = req.user?.groups || [];
-  const admin = isTechnik(groups) || isPraesident(groups);
-  res.json({ stwegs: admin ? [1, 2, 3, 4, 5, 6, 7, 8] : [...getAusschussStwegs(groups)].sort((a, b) => a - b), oeffentlich: true });
-});
-
-// POST: einen Abschnitt speichern. Admin jede STWEG, Ausschuss eigene — Modul aktiv — HTML sanitisiert.
-app.post('/api/stweg-sections/:stweg/:section', authMiddleware, kartenAdmin.mitKarteProtokollieren, async (req, res) => {
-  try {
-    const stweg = parseInt(req.params.stweg, 10);
-    const section = String(req.params.section || '');
-    if (!Number.isFinite(stweg)) return res.status(400).json({ error: 'stweg ungueltig' });
-    if (!STWEG_SECTIONS.includes(section)) return res.status(400).json({ error: 'unbekannter Abschnitt' });
-    const groups = req.user?.groups || [];
-    const admin = isTechnik(groups) || isPraesident(groups);
-    if (!admin && !getAusschussStwegs(groups).has(stweg)) return res.status(403).json({ error: 'Nur die eigene STWEG' });
-    const m = await pool.query("SELECT 1 FROM stweg_modules WHERE stweg=$1 AND module='seiten-editor' AND active=true", [stweg]);
-    if (!m.rows.length) return res.status(403).json({ error: 'Modul Seiten-Editor nicht aktiv' });
-    const clean = sanitizeHtml(String(req.body?.html ?? ''), SANITIZE_OPTS);
-    await pool.query(
-      `INSERT INTO stweg_sections (stweg, section, html, updated_at, updated_by) VALUES ($1,$2,$3,NOW(),$4)
-         ON CONFLICT (stweg, section) DO UPDATE SET html=EXCLUDED.html, updated_at=NOW(), updated_by=EXCLUDED.updated_by`,
-      [stweg, section, clean, req.user?.email || null]);
-    res.json({ ok: true, html: clean });
-  } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
-});
+// ─── STWEG-Mitteilungen (Rosenweg STWEG) ────────────────────────────
+// Ersetzt die Abschnitte (stweg_sections, Modul "seiten-editor"): Mitteilungen als Liste
+// von Eintraegen in Markdown, siehe routes/stweg-app.js. Die alten Abschnitte werden beim
+// Start einmal uebernommen; die Tabelle stweg_sections bleibt unveraendert.
+const stwegApp = require('./routes/stweg-app');
+app.use('/api/stweg', stwegApp.router);
+app.use('/api/stweg-bilder', stwegApp.bilder);
 
 // Wer darf hinein: lib/zaehler-technik.js (Technik, Praesident, Verwaltung STWEG 3,
 // r9-eigentuemer) — dieselbe Regel liefert /api/auth/me als energie.technik.
@@ -18832,7 +19700,7 @@ async function mailsZurFreigabe(user, seit) {
     `SELECT q.id, q.source_type, q.source_id, q.mail_to, q.mail_cc, q.mail_reply_to,
             CASE WHEN q.mail_bcc IS NULL OR q.mail_bcc = '' THEN 0
                  ELSE array_length(string_to_array(q.mail_bcc, ','), 1) END AS bcc_count,
-            q.subject, q.created_by, q.created_at, q.edited_by, q.edited_at,
+            q.subject, q.created_by, q.created_by_id, q.created_at, q.edited_by, q.edited_by_id, q.edited_at,
             LEFT(COALESCE(q.body_text, ''), 280) AS vorschau,
             COALESCE((SELECT COUNT(*) FROM verwaltung_mail_attachments a WHERE a.queue_id = q.id),
                      jsonb_array_length(COALESCE(q.attachments, '[]'::jsonb))) AS attachment_count,
@@ -18847,6 +19715,7 @@ async function mailsZurFreigabe(user, seit) {
   const alle = [];
   for (const m of r.rows) {
     if (m.von_mir) continue;
+    if (vierAugen.selbstfreigabe(user, m)) continue; // F2: eigene Mails gibt eine andere Person frei
     const rule = await getApprovalRuleForQueueItem(m);
     if (!userHasAnyGroup(user, rule.required_groups)) continue;
     const { von_mir, ...rest } = m;
@@ -18988,6 +19857,7 @@ app.put('/api/verwaltung-mail-queue/:id', authMiddleware, ...mailQueueSchreibend
     }
     push('original_snapshot', JSON.stringify(snapshot));
     push('edited_by', req.user.email);
+    push('edited_by_id', req.user.id || req.user.user_id || null);
     push('edited_at', new Date());
     params.push(id);
     const r = await client.query(
@@ -19031,6 +19901,13 @@ app.post('/api/verwaltung-mail-queue/:id/freigeben', authMiddleware, kartenAdmin
     if (!userHasAnyGroup(req.user, rule.required_groups)) {
       await client.query('ROLLBACK');
       return res.status(403).json({ error: `Freigabe erfordert eine der Gruppen: ${rule.required_groups}` });
+    }
+    // F2: Ersteller bzw. letzter Bearbeiter gibt nicht selbst frei – auch nicht
+    // Technik/Präsident (Konto-ID, lib/vier-augen.js).
+    const selbst = vierAugen.selbstfreigabe(req.user, cur.rows[0]);
+    if (selbst) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: vierAugen.MELDUNG[selbst], vier_augen: selbst });
     }
     // Approval logen (UNIQUE constraint verhindert Doppel-Freigabe vom gleichen User)
     try {
@@ -22453,6 +23330,18 @@ app.get('/api/isp/noc/public/server', async (req, res) => {
   return nocServerHandler(req, res);
 });
 app.get('/api/isp/noc/server', authMiddleware, requireTechnikOrPraesident, nocServerHandler);
+
+// Runner-Waechter (pve2, scripts/rw-runner-waechter.sh): Bericht annehmen, NOC-Kachel
+// "Runner" (routes/nocrunner.js). POST nur mit X-Runner-Token von pve2.
+const nocRunner = require('./routes/nocrunner');
+app.post('/api/isp/noc/runner', nocRunner.annehmen);
+app.get('/api/isp/noc/public/runner', (req, res) => {
+  const zugang = checkNocToken(req, res);
+  if (!zugang) return;
+  req.nocOffen = zugang === 'offen';
+  return nocRunner.lesen(req, res);
+});
+app.get('/api/isp/noc/runner', authMiddleware, requireTechnikOrPraesident, nocRunner.lesen);
 
 // Android-Dauertest (CT 149, noc/android-dauertest): Läufe annehmen, NOC-Kachel, Meldungen
 // an die Technik (routes/android-dauertest.js). POST nur mit X-Dauertest-Token von CT 149.
@@ -26212,6 +27101,31 @@ app.get('/api/isp/maintenance/public', async (req, res) => {
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
+// Wartungen und Stoerungen, die MEIN Haus betreffen (App Rosenweg Internet, "Stoerung melden":
+// erst nachsehen, ob es schon bekannt ist). Haus = Wohnung/Hobbyraum der Person (wie /api/wifi);
+// Wartungen fuer alle oder fuer eines dieser Haeuser. Ohne Wohnung nur die fuer alle.
+app.get('/api/isp/stoerungen/meine', authMiddleware, async (req, res) => {
+  try {
+    const email = (req.user.email || '').toLowerCase();
+    const haeuser = new Set();
+    for (const o of await getUserVlanOptions(email)) {
+      if (o.kind !== 'wohnung' && o.kind !== 'hobbyraum') continue;
+      const h = ispZugang.hausAusVlan(o.vlan);
+      if (h) haeuser.add(h);
+    }
+    const r = await pool.query(
+      `SELECT id, title, description, severity, scope, status, start_at, end_at
+         FROM isp_maintenance
+        WHERE status IN ('planned','active')
+          AND (start_at IS NULL OR start_at < NOW() + interval '7 days')
+          AND (end_at IS NULL OR end_at > NOW() - interval '1 hour')
+        ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, start_at NULLS FIRST`,
+    );
+    const vlanZuHaus = Object.fromEntries(Object.entries(VPN_RW_TO_VLAN).map(([h, v]) => [v, parseInt(h, 10)]));
+    res.json({ haeuser: [...haeuser].sort((a, b) => a - b), wartungen: ispStoerung.wartungenFuerHaeuser(r.rows, [...haeuser], vlanZuHaus) });
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
+});
+
 app.post('/api/isp/maintenance', authMiddleware, async (req, res) => {
   try {
     if (!ispMaintCanWrite(req, res)) return res.status(403).json({ error: 'Nur Technik oder Präsident' });
@@ -27543,6 +28457,27 @@ app.post('/api/isp/mailbox-requests/:id/reset-password', authMiddleware, async (
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
+// Mailbox-Antrag loeschen: approved -> Mailbox in Mailcow loeschen, dann die Zeile.
+// Auch fuer die Konto-Loeschung (nachlaufMailbox): dort wirft ein Mailcow-Fehler, damit
+// der Nachlauf es wiederholt (die Zeile bleibt dann stehen).
+async function mailboxAnfrageLoeschen(mr, durch, { mailcowFehlerIgnorieren = false } = {}) {
+  if (mr.status === 'approved') {
+    try { await mailcowApi('POST', '/delete/mailbox', [`${mr.local_part}@${mr.domain}`]); }
+    catch (mcErr) {
+      if (!mailcowFehlerIgnorieren) throw mcErr;
+      console.warn('[mailbox-delete] Mailcow:', mcErr.message);
+    }
+  }
+  // Hard-delete: Zeile entfernen, damit der Local-Part wieder
+  // verfuegbar ist (UNIQUE-Constraint blockiert sonst Neu-Anlage).
+  // Audit-Trail laeuft über den WA-Notify-Eintrag.
+  await pool.query(`DELETE FROM mailbox_requests WHERE id=$1`, [mr.id]);
+  const ownerEmail = (mr.assigned_user_email || mr.antragsteller_email || '').toLowerCase();
+  notifyTechnikMailbox(
+    `🗑 *Mailbox geloescht*\n${mr.local_part}@${mr.domain}\nvon ${ownerEmail || '—'}\ndurch ${durch}`,
+  );
+}
+
 // DELETE: Mailbox löschen. Owner darf pending zuruecknehmen, Admin darf
 // alles. Approved -> Mailbox wird in Mailcow geloescht.
 app.delete('/api/isp/mailbox-requests/:id', authMiddleware, async (req, res) => {
@@ -27559,17 +28494,7 @@ app.delete('/api/isp/mailbox-requests/:id', authMiddleware, async (req, res) => 
     if (!admin && !(isOwner && mr.status === 'pending')) {
       return res.status(403).json({ error: 'Nur Admin (alle) bzw. Owner (nur pending)' });
     }
-    if (mr.status === 'approved') {
-      try { await mailcowApi('POST', '/delete/mailbox', [`${mr.local_part}@${mr.domain}`]); }
-      catch (mcErr) { console.warn('[mailbox-delete] Mailcow:', mcErr.message); }
-    }
-    // Hard-delete: Zeile entfernen, damit der Local-Part wieder
-    // verfuegbar ist (UNIQUE-Constraint blockiert sonst Neu-Anlage).
-    // Audit-Trail laeuft über den WA-Notify-Eintrag.
-    await pool.query(`DELETE FROM mailbox_requests WHERE id=$1`, [id]);
-    notifyTechnikMailbox(
-      `🗑 *Mailbox geloescht*\n${mr.local_part}@${mr.domain}\nvon ${ownerEmail || '—'}\ndurch ${req.user.email}`,
-    );
+    await mailboxAnfrageLoeschen(mr, req.user.email, { mailcowFehlerIgnorieren: true });
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
@@ -28784,7 +29709,167 @@ app.get('/api/vollmachten', authMiddleware, async (req, res) => {
   } catch (err) { console.error('[vollmachten] list:', err); res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
-// Neuigkeiten fuer die App (V5, V6): klein, ohne Mail und Push-Dienst. Die App
+// ─── Mails zu Vollmachten (lib/vollmacht-mail.js, Absender vollmachten@) ──
+// Eigene Adresse je Person: ein Schluessel fuer den Abmelde-Link, gespeichert
+// in vollmachten_mail_einstellung. Verwaltung (Firma) bekommt keinen Link.
+async function vmMailSchluessel(email) {
+  const e = String(email || '').trim().toLowerCase();
+  const r = await pool.query(
+    `INSERT INTO vollmachten_mail_einstellung (email, token) VALUES ($1, $2)
+     ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email RETURNING token`,
+    [e, crypto.randomBytes(24).toString('base64url')]);
+  return r.rows[0].token;
+}
+async function vmMailAbgemeldet(emails) {
+  const l = [...new Set((emails || []).map((x) => String(x || '').trim().toLowerCase()).filter(Boolean))];
+  if (!l.length) return new Set();
+  const r = await pool.query('SELECT email FROM vollmachten_mail_einstellung WHERE aus = true AND email = ANY($1::text[])', [l]);
+  return new Set(r.rows.map((x) => x.email));
+}
+// Eine Mail ueber die Vorlage (Editor) – Fehler stoppen die Vollmacht nie.
+async function vmMailSenden(trigger, ctx, to, betreff, text) {
+  try {
+    await sendTemplated(trigger, ctx, {
+      from: { name: 'Rosenweg Vollmachten', address: MAIL_FROM }, to, subject: betreff, text,
+    });
+  } catch (e) { console.warn('[vollmachten-mail]', trigger, to, e.message); }
+}
+// Vollmacht mit Gebern, Wohnung, Versammlung und E-Mail der bevollmaechtigten Person.
+async function vmMailZeile(id) {
+  const r = await pool.query(
+    `SELECT v.*, to_char(v.gueltig_ab, 'YYYY-MM-DD') AS gueltig_ab, to_char(v.gueltig_bis, 'YYYY-MM-DD') AS gueltig_bis,
+            to_char(v.ablauf_gemeldet_fuer, 'YYYY-MM-DD') AS ablauf_gemeldet_fuer,
+            (SELECT COALESCE(json_agg(json_build_object('name', vg.name, 'email', vg.email) ORDER BY vg.sort_order, vg.id), '[]'::json)
+               FROM vollmachten_vollmachtgeber vg WHERE vg.vollmacht_id = v.id) AS vollmachtgeber_liste,
+            w.bezeichnung AS wohnung_bezeichnung, e.title AS versammlung_titel,
+            COALESCE(NULLIF(v.bevollmaechtigter_email, ''),
+                     (SELECT p.email FROM personen p WHERE p.id = v.bevollmaechtigter_person_id),
+                     (SELECT vw.email FROM verwaltungen vw WHERE vw.id = v.bevollmaechtigter_verwaltung_id)) AS bev_email
+       FROM vollmachten v
+       LEFT JOIN wohnungen w ON w.id = v.wohnung_id
+       LEFT JOIN stweg_events e ON e.id = v.termin_id
+      WHERE v.id = $1`, [id]);
+  return r.rows[0] || null;
+}
+async function vmPersonenMail(trigger, v, empfaenger) {
+  for (const p of empfaenger) {
+    const token = await vmMailSchluessel(p.email);
+    const ctx = vollmachtMail.kontext(v, {
+      siteUrl: SITE_URL, empfaengerName: p.name, heute: new Date(),
+      abmeldenUrl: `${SITE_URL}/api/vollmachten/mail-abmelden?t=${token}`,
+    });
+    const m = vollmachtMail.VORLAGEN.find((x) => x.source_type === trigger);
+    await vmMailSenden(trigger, ctx, p.email, renderTemplate(m.subject_template, ctx), renderTemplate(m.body_template, ctx));
+  }
+}
+// Vollmacht ist aktiv geworden: je Vollmacht genau einmal (aktiv_mail_am).
+async function vmAktivMails(id) {
+  try {
+    const c = await pool.query(
+      `UPDATE vollmachten SET aktiv_mail_am = NOW() WHERE id = $1 AND status = 'aktiv' AND aktiv_mail_am IS NULL RETURNING id`, [id]);
+    if (!c.rows.length) return;
+    const v = await vmMailZeile(id);
+    if (!v) return;
+    let kontakte = [];
+    if (v.wohnung_id) {
+      kontakte = (await pool.query(
+        `SELECT email, name, rolle FROM wohnungen_kontakte WHERE wohnung_id = $1 AND archiviert_am IS NULL AND email IS NOT NULL AND email <> ''`,
+        [v.wohnung_id])).rows;
+    }
+    const adr = [v.bev_email, ...kontakte.map((k) => k.email)];
+    const aus = await vmMailAbgemeldet(adr);
+    const ziel = vollmachtMail.empfaengerAktiv(v, { kontakte, bevollmaechtigterEmail: v.bev_email, aus });
+    await vmPersonenMail('vollmacht-bevollmaechtigt', v, ziel.bevollmaechtigt);
+    await vmPersonenMail('vollmacht-miteigentuemer', v, ziel.miteigentuemer);
+    // Verwaltung der STWEG: Firma bzw. Ausschuss (findVerwaltungForStweg), ohne Abmelde-Link
+    const verw = await findVerwaltungForStweg(v.stweg);
+    if (verw && verw.mailTo.length) {
+      const ctx = vollmachtMail.kontext(v, { siteUrl: SITE_URL, heute: new Date() });
+      const m = vollmachtMail.VORLAGEN.find((x) => x.source_type === 'vollmacht-eingegangen');
+      await vmMailSenden('vollmacht-eingegangen', ctx, verw.mailTo.join(', '),
+        renderTemplate(m.subject_template, ctx), renderTemplate(m.body_template, ctx));
+    }
+  } catch (e) { console.warn('[vollmachten-mail] aktiv', id, e.message); }
+}
+// Taeglich: Vollmachten, die in ABLAUF_VORLAUF_TAGE Tagen enden (einmal je Ablaufdatum).
+let vmAblaufTag = null;
+async function vmAblaufMails() {
+  const heute = new Date().toISOString().slice(0, 10);
+  if (vmAblaufTag === heute) return;
+  vmAblaufTag = heute;
+  try {
+    const r = await pool.query(
+      `SELECT id, status, to_char(gueltig_bis, 'YYYY-MM-DD') AS gueltig_bis, to_char(ablauf_gemeldet_fuer, 'YYYY-MM-DD') AS ablauf_gemeldet_fuer
+         FROM vollmachten
+        WHERE status = 'aktiv' AND gueltig_bis IS NOT NULL
+          AND gueltig_bis BETWEEN CURRENT_DATE AND CURRENT_DATE + $1::int`, [vollmachtMail.ABLAUF_VORLAUF_TAGE]);
+    for (const k of vollmachtMail.ablaufFaellig(r.rows, heute)) {
+      const c = await pool.query(
+        `UPDATE vollmachten SET ablauf_gemeldet_fuer = gueltig_bis WHERE id = $1 AND status = 'aktiv'
+            AND ablauf_gemeldet_fuer IS DISTINCT FROM gueltig_bis RETURNING id`, [k.id]);
+      if (!c.rows.length) continue;
+      const v = await vmMailZeile(k.id);
+      const aus = await vmMailAbgemeldet([v.bev_email, v.vollmachtgeber_email, ...(v.vollmachtgeber_liste || []).map((g) => g.email)]);
+      await vmPersonenMail('vollmacht-ablauf', v, vollmachtMail.empfaengerAblauf(v, { bevollmaechtigterEmail: v.bev_email, aus }));
+    }
+  } catch (e) { console.warn('[vollmachten-mail] ablauf', e.message); }
+}
+setInterval(vmAblaufMails, 60 * 60 * 1000);
+setTimeout(vmAblaufMails, 150 * 1000);
+
+// Abmelden per Link aus der Mail: GET zeigt die Seite, erst POST schaltet um
+// (Mail-Scanner rufen Links ab – ein GET darf nichts aendern).
+function vmMailSeite(res, titel, text, knopf, t) {
+  res.set('Cache-Control', 'no-store').type('html').send(
+    `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`
+    + `<title>${escapeHtml(titel)}</title></head><body style="font-family:system-ui,sans-serif;max-width:32rem;margin:3rem auto;padding:0 1rem">`
+    + `<h1 style="font-size:1.3rem">${escapeHtml(titel)}</h1><p>${escapeHtml(text)}</p>`
+    + (knopf ? `<form method="post" action="/api/vollmachten/mail-abmelden?t=${encodeURIComponent(t)}">`
+      + `<button style="padding:.6rem 1.2rem;font-size:1rem">${escapeHtml(knopf)}</button></form>` : '')
+    + `<p><a href="/vollmachten.html">Zu den Vollmachten</a></p></body></html>`);
+}
+async function vmMailEinstellungLesen(t) {
+  if (typeof t !== 'string' || t.length < 16 || t.length > 100) return null;
+  return (await pool.query('SELECT email, aus FROM vollmachten_mail_einstellung WHERE token = $1', [t])).rows[0] || null;
+}
+app.get('/api/vollmachten/mail-abmelden', async (req, res) => {
+  try {
+    const t = String(req.query.t || '');
+    const e = await vmMailEinstellungLesen(t);
+    if (!e) return vmMailSeite(res.status(404), 'Link ungültig', 'Dieser Link gehört zu keiner Adresse.', null, t);
+    if (e.aus) return vmMailSeite(res, 'Vollmachten-Mails sind aus', `An ${e.email} gehen keine Mails zu Vollmachten mehr.`, 'Wieder einschalten', t);
+    vmMailSeite(res, 'Mails zu Vollmachten abstellen?', `Es gehen keine Mails mehr zu Vollmachten an ${e.email}. Die Vollmachten selbst bleiben unverändert.`, 'Abstellen', t);
+  } catch (err) { res.status(500).type('text').send('Fehler'); }
+});
+app.post('/api/vollmachten/mail-abmelden', async (req, res) => {
+  try {
+    const t = String(req.query.t || '');
+    const e = await vmMailEinstellungLesen(t);
+    if (!e) return vmMailSeite(res.status(404), 'Link ungültig', 'Dieser Link gehört zu keiner Adresse.', null, t);
+    await pool.query('UPDATE vollmachten_mail_einstellung SET aus = $2, updated_at = NOW() WHERE token = $1', [t, !e.aus]);
+    if (e.aus) return vmMailSeite(res, 'Vollmachten-Mails sind wieder an', `An ${e.email} gehen wieder Mails zu Vollmachten.`, 'Wieder abstellen', t);
+    vmMailSeite(res, 'Erledigt', `An ${e.email} gehen keine Mails zu Vollmachten mehr.`, 'Wieder einschalten', t);
+  } catch (err) { res.status(500).type('text').send('Fehler'); }
+});
+// Dasselbe fuer die eingeloggte Person (App, Seite Vollmachten).
+app.get('/api/vollmachten/mail-einstellung', authMiddleware, async (req, res) => {
+  try {
+    const aus = await vmMailAbgemeldet([req.user.email]);
+    res.json({ aus: aus.has(String(req.user.email || '').toLowerCase()) });
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
+});
+app.put('/api/vollmachten/mail-einstellung', authMiddleware, async (req, res) => {
+  try {
+    const email = String(req.user.email || '').trim().toLowerCase();
+    if (!email) return res.status(400).json({ error: 'Kein Konto mit E-Mail' });
+    const aus = !!(req.body && req.body.aus);
+    await vmMailSchluessel(email);
+    await pool.query('UPDATE vollmachten_mail_einstellung SET aus = $2, updated_at = NOW() WHERE email = $1', [email, aus]);
+    res.json({ aus });
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
+});
+
+// Neuigkeiten fuer die App (V5, V6): klein, ohne Push-Dienst (Mails: lib/vollmacht-mail.js). Die App
 // (Basis HintergrundAbfrage, etwa alle 15 Minuten) vergleicht die IDs mit den
 // bekannten und meldet lokal: „bitte unterschreiben“, „Vollmacht ist aktiv/
 // widerrufen“, Verwaltung „neue aktive Vollmacht“, Ablauf in 30 Tagen und die
@@ -29269,6 +30354,7 @@ app.post('/api/vollmachten/:id/sign-digital', authMiddleware, async (req, res) =
            digital_signed_at=NOW(), updated_at=NOW() WHERE id=$1`,
         [id],
       );
+      vmAktivMails(id);
     }
     const updated = await pool.query('SELECT * FROM vollmachten WHERE id = $1', [id]);
     res.json({
@@ -29307,6 +30393,7 @@ app.post('/api/vollmachten/:id/activate-paper', authMiddleware, async (req, res)
          updated_at=NOW() WHERE id=$1 RETURNING *`,
       [id],
     );
+    vmAktivMails(id);
     res.json(vollmachtRechte.vmOhneNachweis(r.rows[0], groups));
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
@@ -29409,6 +30496,7 @@ app.post('/api/vollmachten/:id/upload-signed', authMiddleware, async (req, res) 
     } else {
       await pool.query(`UPDATE vollmachten SET status = $1, updated_at = NOW() WHERE id = $2`, [newStatus, id]);
     }
+    if (newStatus === 'aktiv') vmAktivMails(id);
     res.json({ ok: true, papier_pdf_path: ganzPapier ? relPath : null, eigene_pdf: relPath, status: newStatus, size_bytes: req.body.length,
                signatures_remaining: Math.max(0, counts.rows[0].total - counts.rows[0].signed) });
   } catch (err) { console.error('[vollmachten] upload:', err); res.status(500).json({ error: fehlerFuerClient(err) }); }
@@ -30207,6 +31295,8 @@ async function initDB() {
         created_at TIMESTAMP DEFAULT NOW()
       );
     `);
+    // Konto-Loeschung vollstaendig: manuell zu pruefen, Nachlauf (lib/kontoloeschung.js)
+    await client.query(kontoLoeschung.SQL_TABELLEN);
 
     // Migrate existing flat columns to kontakte table (one-time)
     const migrationCheck = await client.query(
@@ -30265,6 +31355,21 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_handwerker_kategorie ON handwerker(kategorie);
       CREATE INDEX IF NOT EXISTS idx_handwerker_archiviert ON handwerker(archiviert);
       ALTER TABLE handwerker ADD COLUMN IF NOT EXISTS leistungen TEXT[];
+      -- STWEG der Firma (lib/handwerker-rechte.js, Entscheid Stefan 28.11.2026):
+      -- NULL = gemeinsamer Stamm (alle bestehenden Firmen, aendern nur Technik/
+      -- Praesident); eine Verwaltung legt Firmen fuer ihre STWEG an und pflegt sie.
+      ALTER TABLE handwerker ADD COLUMN IF NOT EXISTS stweg INTEGER;
+      CREATE INDEX IF NOT EXISTS idx_handwerker_stweg ON handwerker(stweg);
+      -- Grundbuch an die STWEG binden (lib/grundbuch-rechte.js, Entscheid Stefan
+      -- 28.11.2026): Spalte stweg je Anteil, NULL = noch nicht zugeordnet (Namen
+      -- dann nur Technik/Praesident). Zuordnen je Parzelle: PUT /api/grundbuch/
+      -- parzellen/:parzelle/stweg. Die Tabelle legt nicht initDB an (Import).
+      DO $$ BEGIN
+        IF to_regclass('public.grundbuch_anteile') IS NOT NULL THEN
+          ALTER TABLE grundbuch_anteile ADD COLUMN IF NOT EXISTS stweg INTEGER;
+          CREATE INDEX IF NOT EXISTS idx_grundbuch_anteile_stweg ON grundbuch_anteile(stweg);
+        END IF;
+      END $$;
       DO $$ BEGIN
         IF EXISTS (SELECT 1 FROM pg_proc WHERE proname='audit_trigger_fn')
            AND NOT EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_name='handwerker_audit') THEN
@@ -30409,6 +31514,16 @@ async function initDB() {
       -- D1 (28.11.2026): nur ausdruecklich markierte Anhaenge sind oeffentlich;
       -- bestehende bleiben privat (DEFAULT false), auch bei oeffentlichen Projekten.
       ALTER TABLE project_attachments ADD COLUMN IF NOT EXISTS oeffentlich BOOLEAN NOT NULL DEFAULT false;
+
+      -- Rosenweg Projekte (28.11.2026): Kommentar geaendert (P10); Zeitachse mit Uhrzeit,
+      -- Ort und optional als Termin in Rosenweg Termine (P7, stweg_events verweist zurueck)
+      ALTER TABLE IF EXISTS project_comments ADD COLUMN IF NOT EXISTS bearbeitet_am TIMESTAMP;
+      ALTER TABLE IF EXISTS project_timeline ADD COLUMN IF NOT EXISTS uhrzeit VARCHAR(5);
+      ALTER TABLE IF EXISTS project_timeline ADD COLUMN IF NOT EXISTS ort VARCHAR(255);
+      ALTER TABLE IF EXISTS project_timeline ADD COLUMN IF NOT EXISTS als_termin BOOLEAN NOT NULL DEFAULT false;
+      ALTER TABLE IF EXISTS project_timeline ADD COLUMN IF NOT EXISTS termin_id INTEGER;
+      ALTER TABLE stweg_events ADD COLUMN IF NOT EXISTS projekt_slug VARCHAR(100);
+      ALTER TABLE stweg_events ADD COLUMN IF NOT EXISTS timeline_id INTEGER;
     `);
 
     await client.query(`
@@ -30442,6 +31557,10 @@ async function initDB() {
         CONSTRAINT four_eyes CHECK (confirmed_by IS NULL OR confirmed_by != requested_by)
       );
     `);
+    // STWEG-Bindung, Konto-IDs der Antraege, Zugriffsprotokoll (Entscheide 28.11.2026)
+    await require('./routes/email-archive').schemaSicherstellen(client);
+    // Brief-Ablage: STWEG je Brief, Loeschantraege, Protokoll, Tageszaehler der Texterkennung
+    await require('./routes/briefe').schemaSicherstellen(client);
 
     // Connection log for FPÜV compliance (6 months retention)
     await client.query(`
@@ -31028,6 +32147,24 @@ async function initDB() {
       ALTER TABLE vollmachten_vollmachtgeber ADD COLUMN IF NOT EXISTS signed_bestaetigung TEXT;
       CREATE INDEX IF NOT EXISTS idx_vmvg_vollmacht ON vollmachten_vollmachtgeber(vollmacht_id);
       CREATE INDEX IF NOT EXISTS idx_vmvg_email ON vollmachten_vollmachtgeber(LOWER(email));
+      -- Mails zu Vollmachten (lib/vollmacht-mail.js): aktiv_mail_am = die Mails
+      -- „neu aktiv“ sind raus (einmal je Vollmacht), ablauf_gemeldet_fuer = das
+      -- Ablaufdatum, fuer das die Erinnerung ging. Beim ersten Anlegen gelten
+      -- bestehende aktive Vollmachten als gemeldet (sonst ginge eine Flut raus).
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'vollmachten' AND column_name = 'aktiv_mail_am') THEN
+          ALTER TABLE vollmachten ADD COLUMN aktiv_mail_am TIMESTAMPTZ;
+          UPDATE vollmachten SET aktiv_mail_am = NOW() WHERE status <> 'entwurf';
+        END IF;
+      END $$;
+      ALTER TABLE vollmachten ADD COLUMN IF NOT EXISTS ablauf_gemeldet_fuer DATE;
+      -- Abmelden von den Vollmachten-Mails: je Adresse ein geheimer Link-Schluessel
+      CREATE TABLE IF NOT EXISTS vollmachten_mail_einstellung (
+        email TEXT PRIMARY KEY,
+        token TEXT NOT NULL UNIQUE,
+        aus BOOLEAN NOT NULL DEFAULT false,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
 
       -- ───── ISP / Anschluss-Verwaltung ─────
       -- Pro Wohnung ein Anschluss-Datensatz (Status, Switch-Port, Bandbreite,
@@ -31696,6 +32833,31 @@ async function initDB() {
       -- Empfaenger bleiben untereinander verborgen. mail_to traegt eine sichtbare
       -- Adresse (z.B. ausschuss@), mail_bcc die eigentliche Kundenliste.
       ALTER TABLE verwaltung_mail_queue ADD COLUMN IF NOT EXISTS mail_bcc TEXT;
+      -- F2 Vier-Augen-Prinzip: Ersteller und letzter Bearbeiter als Konto-ID (users.id),
+      -- damit Freigeber != Ersteller sicher verglichen wird (lib/vier-augen.js).
+      ALTER TABLE verwaltung_mail_queue ADD COLUMN IF NOT EXISTS created_by_id INTEGER;
+      ALTER TABLE verwaltung_mail_queue ADD COLUMN IF NOT EXISTS edited_by_id INTEGER;
+      -- F1 (Entscheid Stefan 28.11.2026): an eigentuemer@ und eigentuemer-direkt@
+      -- schreiben nur Ausschuss und Verwaltung (dazu immer Technik/Präsident, siehe
+      -- lib/verteiler-gate.js). Einmalig; spaetere Aenderungen in der Verwaltung bleiben.
+      CREATE TABLE IF NOT EXISTS verteiler_migrationen (name VARCHAR(100) PRIMARY KEY, am TIMESTAMPTZ DEFAULT NOW());
+      WITH neu AS (
+        INSERT INTO verteiler_migrationen (name) VALUES ('2026-11-eigentuemer-absender')
+        ON CONFLICT (name) DO NOTHING RETURNING name
+      )
+      UPDATE email_verteiler SET allowed_sender_groups = '["ausschuss", "Verwaltung"]'::jsonb
+       WHERE EXISTS (SELECT 1 FROM neu)
+         AND (LOWER(email_address) LIKE 'eigentuemer@%' OR LOWER(email_address) LIKE 'eigentuemer-direkt@%');
+      -- L11: Idempotenz fuer POST /api/verteiler/send (Schluessel je Konto, 24 h).
+      CREATE TABLE IF NOT EXISTS verteiler_send_idempotenz (
+        konto VARCHAR(255) NOT NULL,
+        schluessel VARCHAR(128) NOT NULL,
+        fingerabdruck CHAR(64) NOT NULL,
+        status_code INTEGER,
+        antwort JSONB,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (konto, schluessel)
+      );
 
       -- M7: Separate Tabelle für Mail-Attachments. Inline-base64 in JSONB skaliert
       -- nicht (20 MB Anhang × 100 Mails = 2 GB Tabelle). Hier nur Metadaten +
@@ -32505,6 +33667,8 @@ initDB()
         .catch(e => console.error('[sicherungen] Schema:', e.message));
       // Android-Dauertest: Tabelle, und alle 15 min prüfen, ob CT 149 noch Läufe schickt
       androidDauertest.starten(activeIntervals);
+      // E-Mail-Archiv: nach 10 Jahren anonymisieren, Datei-Reste erneut entfernen (taeglich)
+      require('./routes/email-archive').aufbewahrungStarten(activeIntervals);
       // Mitgelieferte Dokumente (Beispielmappe) in die Ablage, siehe lib/ablage.js
       setTimeout(() => require('./lib/ablage').ablageAbgleichen(), 20 * 1000);
       // Cleanup expired sessions every hour

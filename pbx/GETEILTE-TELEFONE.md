@@ -109,6 +109,8 @@ Wichtig für die geplante Einrichtung per QR ohne Kabel.
 | Geräte-App darf „Nicht stören“ kurz ausschalten (Telefon suchen: klingelt auch bei Nicht stören) | `adb shell cmd notification allow_dnd ch.rosenweg4303.telefon` | dito; ohne: Suchanruf klingelt nur bei stumm/vibrieren, nicht bei „Nicht stören“ |
 | Rosenweg Launcher darf Widgets ohne Rückfrage einbinden (Uhr-Widget auf der Startseite, die sich nicht bearbeiten lässt) | `adb shell appwidget grantbind --package ch.rosenweg4303.home --user 0` | dito; ohne: Android fragt einmal nach |
 | Seitentaste lang = Ausschaltmenü statt KI-Assistent (Neustart auch im gesperrten Zustand: wer vergisst, sich abzumelden, wird durch den Neustart abgemeldet, die PIN ist weg) | `adb shell settings put global function_key_config_longpress_type 0` und `adb shell settings put global power_button_long_press 1` (Samsung prüft beide; 103 = digitaler Assistent), dazu `adb shell settings put secure lock_function_val 0` (Samsung „Netzwerk und Sicherheit sperren“ aus — sonst verlangt das Ausschaltmenü vor dem Neustart die PIN; getestet 24.11.2026) | dito; Notlösung ohne Menü: Leiser + Seitentaste ~7 s (erzwungener Neustart) |
+| XCover-Taste (nur Galaxy XCover): „Drücken“ = Taschenlampe, „Bei Bildschirmsperre verwenden“ = ein (Stefan 28.11.2026) | Nicht über `settings` setzbar. Das Skript öffnet die Seite (`adb shell am start -n 'com.android.settings/.Settings$XcoverTopKeySettingsActivity'`, sonst in den Einstellungen nach „XCover-Taste“ suchen). Dort von Hand einstellen und die Rückfrage im Skript bestätigen | offen: Knox prüfen |
+| Find My Mobile aus (Stefan 28.11.2026) | `com.samsung.android.fmm` steht in **Immer ausblenden** (`telefon_ausblenden`). Gerät blendet die System-App aus und deinstalliert nichts. Als Rückfall räumt der Benachrichtigungs-Wächter (ab Gerät 1.4-rosenweg.82) die fmm-Meldungen weg („Find My Mobile“, „SmartThings Find zulassen“). Ein Samsung-Konto ist auf den geteilten Telefonen nicht angemeldet; SmartThings (`com.samsung.android.oneconnect`) ist auf dem XCover nicht installiert | bleibt zentral |
 
 **Achtung — Ausblenden setzt diese Rechte zurück** (gefunden 24.11.2026): Android behandelt eine
 ausgeblendete App (`setApplicationHidden`) wie deinstalliert und vergisst dabei App-Ops
@@ -149,6 +151,7 @@ Technik sie auf /smartphones gesetzt hat. Erster Eintrag also: Zeile auf /smartp
 | Rosenweg Mein Telefon | `ch.rosenweg4303.meintelefon` | leer = alle, die sich anmelden dürfen | aktiv (1.0.1) |
 | Rosenweg Reparatur | `ch.rosenweg4303.reparatur` | leer = alle, die sich anmelden dürfen | aktiv (1.0.0) |
 | Rosenweg Zutritt | `ch.rosenweg4303.zutritt` | `technik,präsident,praesident` | aktiv (1.0.0) |
+| Rosenweg Projekte | `ch.rosenweg4303.projekte` | `technik,präsident,praesident` + je STWEG `stwegN-eigentuemer`, `stwegN-ausschuss`, `stwegN-verwaltung` (Mieter sehen keine Projekte) | noch keine Zeile; nach dem ersten Release auf /smartphones anlegen |
 | Rosenweg Waschküche | `ch.rosenweg4303.waschkueche` | `technik,präsident,praesident,r9-bewohner,r9-eigentuemer,stweg3-ausschuss` | aktiv (1.0.0) |
 | Rosenweg Wetter | `ch.rosenweg4303.wetter` | alle Bewohner (die Werte sind öffentlich) | noch keine Zeile; nach dem ersten Release auf /smartphones anlegen |
 
@@ -165,6 +168,11 @@ Technik sie auf /smartphones gesetzt hat. Erster Eintrag also: Zeile auf /smartp
   (`wasch_rooms`), ihre drei Gruppen hier dazunehmen. Die Hausverwaltung (`stwegN-verwaltung`)
   darf nur lesen und meldet sich an geteilten Telefonen nicht an. `portal_pfade` `/api/wasch/`;
   Räume, STWEG und das Recht „waschküche-admin“ prüft die Haupt-API selbst.
+- **Projekte:** Auf geteilten Telefonen lesen und kommentieren, nach der Kartenanmeldung (Entscheid P11,
+  28.11.2026): kein Hochladen, Anlegen, Bearbeiten oder Löschen. `portal_pfade` `/api/projects` (nur GET),
+  `/api/projects/` (alles darunter; die Haupt-API lehnt jede Änderung am Projekt bei einem Anlage-Token ab,
+  nur Kommentare der Person gehen) und lesend `/api/documents/` für die Vorschau. Welche Projekte die Person
+  sieht, prüft die Haupt-API je Projekt (eigene STWEG und Kooperation).
 - **Zutritt:** Seit dem ersten Release (1.0.0) aktiv; die APK kam von selbst in die vorbereitete Zeile.
 
 ## Wartung per USB
