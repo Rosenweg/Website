@@ -20,7 +20,7 @@ env:
 jobs:
   build-api:
     # eigene Runner (CT 140/145): nur push/workflow_dispatch, nie Fork-PRs
-    runs-on: [self-hosted, rosenweg]
+    runs-on: [self-hosted, Linux, rosenweg]
     permissions:
       contents: read
       packages: write
@@ -46,7 +46,7 @@ jobs:
 
   build-website:
     # eigene Runner (CT 140/145): nur push/workflow_dispatch, nie Fork-PRs
-    runs-on: [self-hosted, rosenweg]
+    runs-on: [self-hosted, Linux, rosenweg]
     permissions:
       contents: read
       packages: write
@@ -121,7 +121,7 @@ jobs:
 
   build-energy-collector:
     # eigene Runner (CT 140/145): nur push/workflow_dispatch, nie Fork-PRs
-    runs-on: [self-hosted, rosenweg]
+    runs-on: [self-hosted, Linux, rosenweg]
     permissions:
       contents: read
       packages: write
