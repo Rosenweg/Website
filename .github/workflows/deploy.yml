@@ -19,8 +19,9 @@ env:
 
 jobs:
   build-api:
-    # eigene Runner (CT 140/145): nur push/workflow_dispatch, nie Fork-PRs
-    runs-on: [self-hosted, Linux, rosenweg]
+    # GitHub-Runner: das API-Image darf nicht hinter den App-Builds auf den
+    # eigenen Runnern warten (Sicherheitsfixes muessen sofort raus)
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
