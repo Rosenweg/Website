@@ -132,6 +132,16 @@
       "fuer": "Für alle Bewohner und Eigentümer. Die Werte sind öffentlich (wie die Web-Seite wetter.html).",
       "technik": false,
       "_notiz": "Flutter, alle Plattformen (Welle 2, Pilot fuer die Basis-Bausteine Diagramme und MQTT). Web-Seiten wetter.html und pwa/wetter bleiben. Live ueber den MQTT-Broker (wetter-public), kein ntfy."
+    },
+    "energie": {
+      "name": "Rosenweg Energie",
+      "repo": "Rosenweg/rosenweg-energie",
+      "paket": "ch.rosenweg4303.energie",
+      "logo": "/img/apps/rosenweg-energie.png?v=20261128",
+      "reihenfolge": 85,
+      "text": "Strom live, Verbrauch, Kosten und die Solaranlage – für dein Haus am Rosenweg.",
+      "fuer": "Für alle Bewohner und Eigentümer mit Zähler; die Solaranlage auch ohne Anmeldung. Ausschuss und Verwaltung sehen die Zähler ihrer STWEG, die Technik verwaltet die Zähler.",
+      "_notiz": "Flutter, alle Plattformen. Bündelt Energie-Monitor, Mein Zähler, Solaranlage live, Zähler-Technik und Zählerverwaltung. Live über MQTT (Rückfall HTTP), Widget „Solar jetzt“ (Android, iOS). Rechnungen bleiben in Rosenweg ZEV. Web-Seiten bleiben vorerst."
     }
   },
   "katalog": {
