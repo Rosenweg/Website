@@ -150,7 +150,9 @@ hat dort keine Rechte, auch wenn er dort wohnt oder Eigentümer ist.
 | ZEV: Rechnungen zuordnen und umhängen (protokolliert); PDF unzugeordneter und Allgemeinzähler-Rechnungen | — | — | — | ✅ 🅢 | (R `wohnungsverwaltung` schreiben) 🅢 | ✅ auch ohne STWEG | ✅ |
 | Unterschriftenliste erzeugen / Rückläufe erfassen | — | — | — | ✅ 🅢 | (R) 🅢 | ✅ | ✅ |
 | Echtheitsprüfung Unterschriftenliste (30 / 10 Min.) | 👁 | 👁 | 👁 | 👁 | 👁 | 👁 | 👁 |
-| STWEG-Seiten (Module, Inhalte, Abschnitte) | 👁 | 👁 | 👁 | ✅ 🅢 | — | ✅ | ✅ |
+| STWEG-Seiten (Module, Abschnitte; öffentlich, der Editor zeigt „öffentlich sichtbar“) | 👁 | 👁 | 👁 | ✅ 🅢 | — | ✅ | ✅ |
+| Wohnungsliste der STWEG mit Belegung, Besonderheiten, Wertquote (`/api/stweg/:n/wohnungen`) | nur Anzahl | 👁 🅢 | 👁 🅢 | 👁 🅢 | 👁 🅢 | 👁 | 👁 |
+| Kontaktliste der STWEG (Name, Mail, Telefon; nur Kontakte ab `gueltig_ab`) | — | 👁 🅢 | 👁 🅢 | 👁 🅢 | 👁 🅢 | 👁 alle | 👁 alle |
 | STWEG-Termine lesen (`/api/stweg/:nr/events`, `/api/termine`, App Rosenweg Termine) | — | 👁 🅢 | 👁 🅢 | 👁 🅢 | 👁 🅢 | 👁 alle | 👁 alle |
 | STWEG-Termine anlegen, ändern, löschen (Recht `stweg-termine` schreiben, seit 28.11.2026 für alle Ausschüsse und Verwaltungen vorgegeben) | — | — | — | ✅ 🅢 (R) | ✅ 🅢 (R) | ✅ | ✅ |
 | Verwaltungen (Firmen, Plattform-Zugänge) | 👁 öffentlicher Teil | — | — | 👁 eigene STWEG + übergreifende, ✅ nur eigene STWEG | — | ✅ | ✅ |
@@ -158,7 +160,7 @@ hat dort keine Rechte, auch wenn er dort wohnt oder Eigentümer ist.
 | Grundbuch: Status und Anteile | — | 👁 ohne Namen/Adressen | 👁 ohne Namen | 👁 vollständig | 👁 ohne Namen | 👁 | 👁 |
 | Grundbuch: reservieren, erfassen, OCR (30 / Std.) | — | ✅ eigene Reservation | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Grundbuch: verifizieren, Auszugsbild | — | nur eigenes Bild | nur eigenes Bild | ✅ (jede STWEG) | — | ✅ | ✅ |
-| MEG-Einstellplätze | freie Plätze | 👁 ohne Fremddaten | 👁 ohne Fremddaten | ✅ nur MEG-Ausschuss | — | ✅ | ✅ |
+| MEG-Einstellplätze | freie Plätze | 👁 nur MEG-Mitglieder, ohne Fremddaten | 👁 nur MEG-Mitglieder, ohne Fremddaten | ✅ nur MEG-Ausschuss | ✅ nur MEG-Verwaltung | ✅ | ✅ |
 | Projekte lesen (inkl. Kandidaten, Kontakte, Notizen, Kommentare) | öffentliche Projekte (eingeschränkt, siehe unten) | — (auch keine Titel, keine Projekt-Umfragen) | 👁 🅢 + Kooperation | 👁 🅢 + Kooperation (auch ohne Eigentümergruppe) | (R `projekte` lesen) 👁 🅢 + Kooperation | 👁 alle | 👁 alle |
 | Projekte kommentieren (nur Name sichtbar, keine E-Mail) | — | — | ✅ 🅢 + Kooperation | als Eigentümer | — | ✅ | ✅ |
 | Auslagen eines Projekts: E-Mail der einreichenden Person | — | — | — (nur Name) | — (nur Name) | 👁 🅢 | 👁 | 👁 |

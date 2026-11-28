@@ -205,10 +205,24 @@
         const STWEG_NR = 3;
         function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
-        // Public endpoint: apartment data without personal info
-        fetch('/api/stweg/' + STWEG_NR + '/wohnungen')
+        // F1 (28.11.2026): ohne Anmeldung liefert die API nur die Anzahl; Belegung,
+        // Besonderheiten und Wertquote je Wohnung nur fuer Mitglieder der STWEG,
+        // ihre Verwaltung, Technik und Praesident. Darum mit Anmeldung fragen.
+        (AuthentikAuth.ready || Promise.resolve()).then(function () {
+            const token = AuthentikAuth.getToken();
+            const holen = (mit) => fetch('/api/stweg/' + STWEG_NR + '/wohnungen', mit ? { headers: { Authorization: 'Bearer ' + mit } } : {});
+            return holen(token).then(r => (r.status === 401 && token) ? holen(null) : r);
+        })
             .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
             .then(data => {
+                if (data.eingeschraenkt) {
+                    const a = data.anzahl || {};
+                    const andere = Object.entries(a.andere || {}).map(([t, n]) => n + ' ' + t).join(', ');
+                    document.getElementById('wohnungen-title').textContent = (a.wohnungen || 0) + ' Wohnungen' + (andere ? ' & ' + andere : '');
+                    document.getElementById('wohnungen-subtitle').textContent = '';
+                    document.getElementById('wohnungen-grid').innerHTML = '<div class="md:col-span-3 text-center text-gray-500 py-6">Details zu den Wohnungen sehen angemeldete Mitglieder der STWEG.</div>';
+                    return;
+                }
                 const wohnungen = data.wohnungen || [];
                 const units = wohnungen.filter(w => (w.typ || 'Wohnung') === 'Wohnung');
                 const others = wohnungen.filter(w => w.typ && w.typ !== 'Wohnung');

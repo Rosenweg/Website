@@ -205,8 +205,9 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `POST /api/kontakt` | Kontaktformular der Startseite: Mail an technik@ (Honigtopf, Drossel je IP und gesamt, Absender nur Reply-To; `lib/kontaktformular.js`) |
 | `GET /api/energy/{surplus,surplus-available,lametric,shelly,solar-live,tariffs,tariffs/current}` | Geräte und Anzeigen, ohne `consumers` ([`energie-api.md`](energie-api.md)) |
 | `GET /api/public/ausschuss`, `/api/public/technik`, `/api/verwaltungen/public` | öffentliche Kontakte |
-| `GET /api/stweg/:stweg/wohnungen`, `/api/stweg/:stweg/overview` | Wohnungsliste und Belegung **ohne** Namen |
-| `GET /api/stweg-modules`, `/api/stweg-content/:stweg`, `/api/stweg-sections/:stweg` | Inhalte der STWEG-Seiten |
+| `GET /api/stweg/:stweg/wohnungen` | ohne Anmeldung nur `anzahl` (`eingeschraenkt: true`); Belegung, Besonderheiten, Wertquote je Wohnung nur mit Anmeldung als Mitglied der STWEG, ihre Verwaltung, T/P (F1, 28.11.2026) |
+| `GET /api/stweg/:stweg/overview` | Zahlen zur STWEG (ohne Namen) |
+| `GET /api/stweg-modules`, `/api/stweg-sections/:stweg` | Inhalte der STWEG-Seiten (öffentlich; der Editor weist darauf hin). `/api/stweg-content` ist seit 28.11.2026 entfernt |
 | `GET /api/verteiler/by-stweg/:stweg` | Namen und Adressen der Verteiler einer STWEG |
 | `GET /api/calendar` | Termine (503, wenn `GOOGLE_CALENDAR_ICS_URL` fehlt) |
 | `GET /api/public/project/:slug`, `…/document/:path` | öffentlich geschaltete Projekte: Kandidaten nur `id, name, webseite, status`, nur als öffentlich markierte Anhänge (`oeffentlich`) |
@@ -270,10 +271,11 @@ Spalte **Wer**: `angemeldet` = jede gültige Anmeldung; `T/P` = Technik oder Pr�
 | `GET /api/stweg/:nr/kontakte`, `GET /api/kontakte/:stweg` | Gruppe dieser STWEG oder T/P; `PUT /api/kontakte` nur T/P |
 | `GET/POST/PUT/DELETE /api/verwaltungen…` | Ausschuss/T/P; Ausschuss liest eigene + STWEG-übergreifende, ändert nur eigene |
 | `GET /api/verwaltungen/kontakte` | angemeldet, gefiltert nach Sichtbarkeitsstufe und STWEG |
-| `POST /api/stweg-modules`, `/api/stweg-content/:stweg`, `/api/stweg-sections/:stweg/:section` | A🅢 oder T/P; Inhalte nur, wenn das Modul Seiten-Editor aktiv ist |
+| `POST /api/stweg-modules`, `/api/stweg-sections/:stweg/:section` | A🅢 oder T/P; Inhalte nur, wenn das Modul Seiten-Editor aktiv ist; `GET /api/stweg-sections-rechte` liefert die STWEGs, die das Konto speichern darf |
+| `GET /api/stweg/:nr/kontakte` | Mitglieder der STWEG (auch Mieter), ihre Verwaltung, T/P alle; nur Kontakte, die schon gelten (`gueltig_ab` leer oder erreicht) |
 | `GET /api/stweg/:stweg/events` | Gruppe dieser STWEG; `POST`, `PUT /:id`, `DELETE /:id`: T/P oder Recht `stweg-termine` schreiben + Ausschuss/Verwaltung dieser STWEG (`lib/termine.js`), Fehler am Feld `{error, feld}` |
 | `GET /api/termine?stweg=` | Rosenweg Termine: Termine der eigenen STWEG(s) in einer Liste (`stwegs` je Termin), `stwegs` mit `schreiben` und `kalender` (Nextcloud-Kalender aus `TERMINE_NEXTCLOUD_KALENDER`, sonst null); `stweg=3,5` oder `alle` (T/P alle, sonst nur sichtbare → 403) |
-| `GET/POST /api/meg/einstellplaetze` | lesen angemeldet (fremde Plätze ohne Personendaten), schreiben MEG-Ausschuss oder T/P |
+| `GET/POST /api/meg/einstellplaetze` | lesen nur MEG (Mitglieder, MEG-Ausschuss, MEG-Verwaltung, T/P; fremde Plätze ohne Personendaten), sonst 403; schreiben MEG-Ausschuss, MEG-Verwaltung oder T/P; `/rechte` liefert `verwalten`, `sehen` |
 | `/api/grundbuch/*` | angemeldet; Namen/Adressen nur Ausschuss/T/P oder wer erfasst hat; verifizieren Ausschuss/T/P; OCR 30 / Std. |
 | `/api/vollmachten*` | angemeldet: eigene; Ausschuss und Verwaltung sehen ihre STWEG nur mit Recht `vollmachten` (Ausschuss Vorgabe lesen); T/P alle; für andere erfassen T/P und Verwaltung mit `vollmachten` = schreiben; Admin-Upload für alle Geber nur T/P mit `?als=admin`. Erfassen/Signieren/Hochladen als Geber nur Eigentümer bzw. Wohnungs-Verwalter der Wohnung oder STWEG (ohne Objekt 403); Liste mit `darf_erteilen`, je Zeile `darf_widerrufen`, `darf_papier_aktivieren`, `darf_ki_pruefen`. `signed_ip`, `signed_user_agent`, `signed_authentik_sub` (und `digital_signed_*`) nur für T/P, auch auf dem PDF |
 | `POST /api/vollmachten/:id/sign-digital` | nur frisch angemeldet (Website/App, ≤ `STUFE_FRISCH_MIN` Min.), nie mit PAT, MCP (`X-Rosenweg-Kanal: mcp`), Karte oder Anlage-Token: sonst 403 `{reauth, fehler:'frisch'}` |

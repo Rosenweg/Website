@@ -49,8 +49,9 @@ const WERKZEUGE_VERWALTUNG = [
     beschreibung: 'Einstellplätze der Miteigentümergemeinschaft und welche frei sind.',
     eingabe: {},
     async lauf(api) {
-      const [alle, frei] = await Promise.all([api('GET', '/api/meg/einstellplaetze'), api('GET', '/api/meg/einstellplaetze/verfuegbar').catch(() => null)]);
-      return { plaetze: alle, verfuegbar: frei };
+      // Die Liste sehen nur MEG-Mitglieder, -Ausschuss, -Verwaltung, T/P (F7); sonst nur die freien
+      const [alle, frei] = await Promise.all([api('GET', '/api/meg/einstellplaetze').catch(e => (e.status === 403 ? null : Promise.reject(e))), api('GET', '/api/meg/einstellplaetze/verfuegbar').catch(() => null)]);
+      return alle === null ? { plaetze: null, hinweis: 'Die Platzliste sehen nur MEG-Mitglieder', verfuegbar: frei } : { plaetze: alle, verfuegbar: frei };
     },
   },
 

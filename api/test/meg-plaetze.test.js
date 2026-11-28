@@ -16,9 +16,11 @@ test('M1: verwalten dürfen MEG-Ausschuss, Technik, Präsident', () => {
   assert.equal(meg.darfMegPlaetzeVerwalten({ isAdmin: true, groups: [] }), true);
 });
 
-test('M1: andere Ausschüsse, Verwaltung und Bewohner nicht', () => {
+test('M1: andere Ausschüsse, fremde Verwaltung und Bewohner nicht; MEG-Verwaltung seit 28.11.2026 ja', () => {
   assert.equal(meg.darfMegPlaetzeVerwalten({ groups: ['stweg3-ausschuss'] }), false);
-  assert.equal(meg.darfMegPlaetzeVerwalten({ groups: ['meg-verwaltung'] }), false);
+  assert.equal(meg.darfMegPlaetzeVerwalten({ groups: ['meg-verwaltung'] }), true);
+  assert.equal(meg.darfMegPlaetzeVerwalten({ groups: ['stweg3-verwaltung'] }), false);
+  assert.equal(meg.darfMegPlaetzeVerwalten({ groups: ['meg-eigentuemer'] }), false);
   assert.equal(meg.darfMegPlaetzeVerwalten({ groups: ['stweg5-bewohner'] }), false);
   assert.equal(meg.darfMegPlaetzeVerwalten(null), false);
 });
@@ -72,4 +74,16 @@ test('M2: Route und Seite führen zusammen', () => {
   assert.match(route, /megPlatzAenderung\(req\.body\)/);
   assert.ok(!/zugeordnet_email=\$6, wohnung_id=\$7/.test(route), 'altes Überschreiben entfernt');
   assert.match(html, /if \(\(alt\[k\] \?\? null\) !== neu\[k\]\) body\[k\] = neu\[k\]/);
+});
+
+test('F7: Platzliste nur für MEG (Mitglieder, Ausschuss, Verwaltung, T/P)', () => {
+  for (const g of [['meg-eigentuemer'], ['meg-bewohner'], ['meg-ausschuss'], ['meg-verwaltung'], ['technik'], ['Präsident']]) {
+    assert.equal(meg.darfMegPlaetzeSehen({ groups: g }), true, g[0]);
+  }
+  for (const g of [['stweg3-ausschuss'], ['r9-eigentuemer'], ['stweg5-bewohner'], ['stweg3-verwaltung'], []]) {
+    assert.equal(meg.darfMegPlaetzeSehen({ groups: g }), false, g[0] || 'leer');
+  }
+  assert.equal(meg.darfMegPlaetzeSehen(null), false);
+  const i = route.indexOf("router.get('/einstellplaetze', authMiddleware");
+  assert.match(route.slice(i, i + 400), /if \(!darfMegPlaetzeSehen\(req\.user\)\) return res\.status\(403\)/);
 });

@@ -5,21 +5,21 @@
 const express = require('express');
 const { pool } = require('../lib/db');
 const { authMiddleware } = require('../middleware/auth');
-const { darfMegPlaetzeVerwalten, megPlatzAenderung, sortierePlaetze } = require('../lib/meg');
+const { darfMegPlaetzeVerwalten, darfMegPlaetzeSehen, megPlatzAenderung, sortierePlaetze } = require('../lib/meg');
 
 const router = express.Router();
 
-// MEG-Platzverwaltung: Technik/Praesident ODER MEG-Ausschuss (Ausschuss fuer
-// STWEG 8), Regel in lib/meg.js. Die Seite fragt /einstellplaetze/rechte und
+// MEG-Platzverwaltung: Technik/Praesident, MEG-Ausschuss (Ausschuss fuer
+// STWEG 8) oder MEG-Verwaltung, Regel in lib/meg.js. Die Seite fragt /einstellplaetze/rechte und
 // zeigt das Bearbeiten-Grid nur dann (M1).
 function megManageGate(req, res, next) {
   if (darfMegPlaetzeVerwalten(req.user)) return next();
-  return res.status(403).json({ error: 'Nur der MEG-Ausschuss, Technik oder Präsident dürfen Plätze ändern.' });
+  return res.status(403).json({ error: 'Nur der MEG-Ausschuss, die MEG-Verwaltung, Technik oder Präsident dürfen Plätze ändern.' });
 }
 
 // Was die Seite anbieten darf (M1). Eingeloggt; keine Daten, nur das Recht.
 router.get('/einstellplaetze/rechte', authMiddleware, (req, res) => {
-  res.json({ verwalten: darfMegPlaetzeVerwalten(req.user) });
+  res.json({ verwalten: darfMegPlaetzeVerwalten(req.user), sehen: darfMegPlaetzeSehen(req.user) });
 });
 
 // Public: nur die zu vermietenden Plaetze (fuer "Motorradplaetze noch frei").
@@ -33,11 +33,13 @@ router.get('/einstellplaetze/verfuegbar', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Fehler beim Laden' }); }
 });
 
-// Volle Liste — eingeloggt. Zuordnungen (Name, E-Mail, Wohnung, Notiz) sieht
-// nur, wer die Plaetze verwaltet; alle anderen nur Platz, Typ, Status und den
-// eigenen Platz. Vorher bekam jedes Konto jeder STWEG die ganze Tabelle.
+// Volle Liste — nur wer zur MEG gehoert (F7, 28.11.2026; sonst 403).
+// Zuordnungen (Name, E-Mail, Wohnung, Notiz) sieht nur, wer die Plaetze
+// verwaltet; die anderen MEG-Mitglieder nur Platz, Typ, Status und den eigenen
+// Platz. Vorher bekam jedes Konto jeder STWEG die ganze Tabelle.
 router.get('/einstellplaetze', authMiddleware, async (req, res) => {
   try {
+    if (!darfMegPlaetzeSehen(req.user)) return res.status(403).json({ error: 'Die Einstellplatz-Liste sehen nur MEG-Mitglieder, MEG-Ausschuss, MEG-Verwaltung, Technik und Präsident.' });
     const r = { rows: sortierePlaetze((await pool.query('SELECT * FROM meg_einstellplaetze')).rows) }; // M3
     if (darfMegPlaetzeVerwalten(req.user)) return res.json(r.rows);
     const me = String(req.user?.email || '').toLowerCase();
