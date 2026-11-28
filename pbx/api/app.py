@@ -2245,9 +2245,13 @@ def telefon_katalog():
         cfg = _cfg(conn)
         aus = [p.strip() for p in re.split(r"[,\s]+", cfg.get("telefon_ausblenden", "")) if p.strip()]
         unsichtbar = [p.strip() for p in re.split(r"[,\s]+", cfg.get("telefon_unsichtbar", "")) if p.strip()]
-        return jsonify({"apps": [_app_json(r) for r in rows], "ausblenden": aus, "unsichtbar": unsichtbar})
+        antwort = jsonify({"apps": [_app_json(r) for r in rows], "ausblenden": aus, "unsichtbar": unsichtbar})
     finally:
         conn.close()
+    # ETag + If-None-Match: das Telefon fragt alle 15 Minuten und bekommt bei unveraendertem
+    # Katalog nur 304 (spart Datenmenge, aendert sich etwas, ist es nach hoechstens 15 Minuten da)
+    antwort.add_etag()
+    return antwort.make_conditional(request)
 
 
 @app.get("/api/telefon/apk/<paket>")
@@ -3955,6 +3959,10 @@ def _personen_abgleich_schleife():
             sip_person_aufraeumen()
         except Exception as e:
             app.logger.warning("SIP-Zugaenge aufraeumen: %s", e)
+        try:
+            telefon_geraetelog_aufraeumen()
+        except Exception as e:
+            app.logger.warning("Telefon-Protokoll aufraeumen: %s", e)
         time.sleep(3600)
 
 
@@ -4745,6 +4753,134 @@ def telefon_wlan_debug(ext):
         app.logger.warning("Wartung wecken %s: %s", ext, type(e).__name__)
     app.logger.info("WLAN-Debugging %s: %s durch %s", ext, f"{minuten} min" if minuten else "aus", actor(user))
     return jsonify({"ok": True, "wlan_debug_bis": bis, "geweckt": geweckt})
+
+
+# ─── Installierter Stand und Protokoll der Geraete-App (28.11.2026) ───────────────────────────
+# telefon_apps_ist fuellte bisher nur der adb-Updater der Anlage. Ist adb nicht erreichbar (nicht
+# zugelassen, Telefon in anderem Netz), blieb die Tabelle fuer das Telefon leer und /smartphones
+# zeigte nichts. Darum meldet Rosenweg Geraet den Stand selbst.
+
+LOG_MAX_ZEILEN = 600            # je Sendung
+LOG_MAX_TEXT = 1500
+LOG_ALTER_TAGE = 14
+LOG_MAX_JE_TELEFON = 60000      # Sicherung gegen Fluten
+_LOG_STUFEN = set("VDIWEF")
+
+
+@app.post("/api/telefon/apps-ist")
+def telefon_apps_ist():
+    """Geraet meldet {apps: {paket: versionCode}} der installierten Rosenweg-Apps (inkl. sich selbst)."""
+    ext, deny = _geraet()
+    if deny:
+        return deny
+    b = request.get_json(silent=True)
+    apps = b.get("apps") if isinstance(b, dict) else None
+    if not isinstance(apps, dict) or not 0 < len(apps) <= STAND_MAX_APPS:
+        return jsonify({"error": "apps: {paket: versionCode} (1-60)"}), 400
+    zeilen = []
+    for paket, code in apps.items():
+        if not _APP_PAKET.fullmatch(str(paket)) or not str(paket).startswith("ch.rosenweg4303.") \
+                or not isinstance(code, int) or isinstance(code, bool) or not 0 <= code < 2**31:
+            return jsonify({"error": f"apps: ungueltig ({str(paket)[:60]})"}), 400
+        zeilen.append((ext, paket, code, int(time.time())))
+    conn = db.connect()
+    try:
+        conn.execute("DELETE FROM telefon_apps_ist WHERE ext = ?", (ext,))
+        conn.executemany("INSERT INTO telefon_apps_ist (ext, paket, version_code, geprueft) VALUES (?,?,?,?)", zeilen)
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify({"ok": True, "apps": len(zeilen)})
+
+
+def telefon_geraetelog_aufraeumen(conn=None):
+    """Zeilen aelter als 14 Tage weg (stuendlich im Personen-Lauf und bei jedem Empfang)."""
+    eigen = conn is None
+    conn = conn or db.connect()
+    try:
+        conn.execute("DELETE FROM telefon_geraetelog WHERE empfangen < ?", (int(time.time()) - LOG_ALTER_TAGE * 86400,))
+        conn.commit()
+    finally:
+        if eigen:
+            conn.close()
+
+
+@app.route("/api/telefon/<ext>/log", methods=["POST", "GET"])
+def telefon_geraetelog(ext):
+    """POST (Geraet, nur die eigene Nebenstelle): {zeilen: [{t (ms), stufe, tag, text}]}.
+    GET (Technik/Praesident): ?stufe=W (mindestens), ?tag=Teil, ?von=&bis= (Unix-s),
+    ?limit= (Standard 300, max 2000); neueste zuerst."""
+    if not re.fullmatch(r"[0-9]{2,8}", ext):
+        return jsonify({"error": "Nebenstelle ungueltig"}), 400
+    if request.method == "POST":
+        eigene, deny = _geraet()
+        if deny:
+            return deny
+        if eigene != ext:
+            return jsonify({"error": "Geraet nicht berechtigt"}), 403
+        b = request.get_json(silent=True)
+        zeilen = b.get("zeilen") if isinstance(b, dict) else None
+        if not isinstance(zeilen, list) or len(zeilen) > LOG_MAX_ZEILEN:
+            return jsonify({"error": f"zeilen: Liste bis {LOG_MAX_ZEILEN}"}), 400
+        jetzt = int(time.time())
+        rows = []
+        for z in zeilen:
+            if not isinstance(z, dict):
+                continue
+            t = z.get("t")
+            t = int(t) // 1000 if isinstance(t, (int, float)) and not isinstance(t, bool) else jetzt
+            t = min(max(t, jetzt - LOG_ALTER_TAGE * 86400), jetzt + 300)
+            stufe = str(z.get("stufe") or "I")[:1].upper()
+            rows.append((ext, t, stufe if stufe in _LOG_STUFEN else "I", re.sub(r"[^\w ./:+-]", "", str(z.get("tag") or ""))[:60],
+                         str(z.get("text") or "")[:LOG_MAX_TEXT], jetzt))
+        conn = db.connect()
+        try:
+            telefon_geraetelog_aufraeumen(conn)
+            conn.executemany("INSERT INTO telefon_geraetelog (ext, zeit, stufe, tag, text, empfangen) VALUES (?,?,?,?,?,?)", rows)
+            ueber = conn.execute("SELECT COUNT(*) FROM telefon_geraetelog WHERE ext = ?", (ext,)).fetchone()[0] - LOG_MAX_JE_TELEFON
+            if ueber > 0:
+                conn.execute("DELETE FROM telefon_geraetelog WHERE id IN (SELECT id FROM telefon_geraetelog WHERE ext = ? "
+                             "ORDER BY id LIMIT ?)", (ext, ueber))
+            conn.commit()
+        finally:
+            conn.close()
+        return jsonify({"ok": True, "zeilen": len(rows)})
+    user, deny = require_admin()
+    if deny:
+        return deny
+    reihenfolge = "VDIWEF"
+    stufe = str(request.args.get("stufe") or "")[:1].upper()
+    where, args = ["ext = ?"], [ext]
+    if stufe in _LOG_STUFEN:
+        where.append("instr(?, stufe) > 0")
+        args.append(reihenfolge[reihenfolge.index(stufe):])
+    tag = str(request.args.get("tag") or "")[:60]
+    if tag:
+        where.append("instr(lower(tag), lower(?)) > 0")
+        args.append(tag)
+    for name, op in (("von", ">="), ("bis", "<=")):
+        v = request.args.get(name)
+        if v:
+            try:
+                args.append(int(v))
+            except ValueError:
+                return jsonify({"error": f"{name}: Unix-Sekunden"}), 400
+            where.append(f"zeit {op} ?")
+    try:
+        limit = max(1, min(int(request.args.get("limit") or 300), 2000))
+    except ValueError:
+        return jsonify({"error": "limit: Zahl"}), 400
+    conn = db.connect()
+    try:
+        rows = conn.execute("SELECT zeit, stufe, tag, text FROM telefon_geraetelog WHERE " + " AND ".join(where)
+                            + " ORDER BY zeit DESC, id DESC LIMIT ?", args + [limit]).fetchall()
+        tage = [r[0] for r in conn.execute("SELECT DISTINCT date(zeit, 'unixepoch') FROM telefon_geraetelog WHERE ext = ? "
+                                           "ORDER BY 1 DESC", (ext,))]
+    finally:
+        conn.close()
+    return jsonify({"ext": ext, "tage": tage,
+                    "zeilen": [{"zeit": r["zeit"], "stufe": r["stufe"], "tag": r["tag"], "text": r["text"]} for r in rows]})
+
 
 
 @app.post("/api/telefon/adb")
