@@ -206,15 +206,32 @@ def iso(t):
     return calendar.timegm(time.strptime(t, "%Y-%m-%dT%H:%M:%SZ")) if t else None
 
 mac_laeuft = [0]
+lauf_zaehler = {}
 
 def jobs_lesen(tok, laeufe, dauern):
     """laeufe: [(repo, lauf)] -> (laufend {runner_name: info}, wartend [info])"""
     laufend, wartend = {}, []
     mac_laeuft[0] = 0
+    lauf_zaehler.clear()
     jetzt = time.time()
     for repo, lauf in laeufe:
         d = api("/repos/%s/%s/actions/runs/%d/jobs?filter=latest&per_page=100" % (ORG, repo, lauf["id"]), tok, etag=True)
         pr = (lauf.get("pull_requests") or [{}])[0].get("number")
+        # offene Laeufe der ganzen Organisation fuers NOC: je Lauf Jobs nach Ort
+        z = {"repo": repo, "workflow": lauf.get("name", ""), "branch": lauf.get("head_branch", ""), "pr": pr,
+             "status": lauf.get("status", ""), "url": lauf.get("html_url", ""),
+             "alter_s": int(jetzt - iso(lauf["created_at"])) if lauf.get("created_at") else None,
+             "eigen": 0, "github": 0, "mac": 0, "wartend": 0, "fertig": 0, "gesamt": 0}
+        for j in d["jobs"]:
+            z["gesamt"] += 1
+            lab = j.get("labels", [])
+            if j["status"] == "completed": z["fertig"] += 1
+            elif j["status"] == "in_progress":
+                if "self-hosted" in lab: z["eigen"] += 1
+                elif any("macos" in l for l in lab): z["mac"] += 1
+                else: z["github"] += 1
+            elif j["status"] in ("queued", "waiting", "pending"): z["wartend"] += 1
+        lauf_zaehler[lauf["id"]] = z
         for j in d["jobs"]:
             schluessel = "%s/%s/%s" % (repo, lauf.get("name", ""), re.sub(r"\(.*\)", "", j["name"]).strip())
             if j["status"] == "completed" and j.get("conclusion") == "success" and j.get("started_at") and j.get("completed_at"):
@@ -372,6 +389,7 @@ try:
 
     laeufe = laeufe_lesen(tok, repos)
     laufend, wartend_liste = jobs_lesen(tok, laeufe, dauern)
+    offen = sorted(lauf_zaehler.values(), key=lambda z: -(z["alter_s"] or 0))[:60]
     wartend = len(wartend_liste)
     stau = {"wartend": wartend, "lange": sum(1 for w in wartend_liste if (w.get("wartezeit_s") or 0) > int(E["STAU_S"])),
             "aeltester_s": max([w.get("wartezeit_s") or 0 for w in wartend_liste], default=0)}
@@ -491,7 +509,7 @@ try:
                                   "vm": vm})
         bericht_senden({"runner": eintraege, "cts": ctinfo, "wartend": wartend, "warteschlange": wartend_liste[:10],
                         "trocken": TROCKEN, "letzter_schaltvorgang": letzter, "api_aufrufe": dict(calls),
-                        "release": release, "stau": stau})
+                        "release": release, "stau": stau, "offen": offen})
     log("API-Aufrufe in diesem Lauf: %d (davon 304: %d)" % (calls["gesamt"], calls["304"]))
 except Exception as e:
     log("FEHLER: %s" % e, err=True)

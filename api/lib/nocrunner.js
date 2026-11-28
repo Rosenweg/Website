@@ -78,9 +78,16 @@ function eingabePruefen(body) {
   } : null;
   const st = body.stau && typeof body.stau === 'object' ? body.stau : null;
   const stau = st ? { wartend: zahlOder(st.wartend) || 0, lange: zahlOder(st.lange) || 0, aeltester_s: zahlOder(st.aeltester_s) } : null;
+  // alle offenen Actions-Laeufe der Organisation (eigene Runner, GitHub, macOS, wartend)
+  const offen = (Array.isArray(body.offen) ? body.offen : []).slice(0, 60).map((o) => ({
+    repo: text(o && o.repo, 80), workflow: text(o && o.workflow, 100), branch: text(o && o.branch, 100),
+    pr: Number.isInteger(o && o.pr) ? o.pr : null, status: text(o && o.status, 20), url: url(o && o.url),
+    alter_s: zahlOder(o && o.alter_s), eigen: zahl(o && o.eigen) || 0, github: zahl(o && o.github) || 0,
+    mac: zahl(o && o.mac) || 0, wartend: zahl(o && o.wartend) || 0, fertig: zahl(o && o.fertig) || 0, gesamt: zahl(o && o.gesamt) || 0,
+  }));
   const sch = body.letzter_schaltvorgang;
   return { bericht: {
-    runner, cts, warteschlange, release, stau,
+    runner, cts, warteschlange, release, stau, offen,
     wartend: zahl(body.wartend),
     trocken: !!body.trocken,
     fehler: body.fehler ? text(body.fehler, 300) : null,
@@ -117,6 +124,7 @@ function zusammenfassung(bericht, empfangen, jetzt = Date.now()) {
     wartend: bericht.wartend,
     cts: bericht.cts,
     warteschlange: bericht.warteschlange,
+    offen: bericht.offen || [],
     release: bericht.release,
     stau: bericht.stau ? { ...bericht.stau, grenze_jobs: STAU_JOBS, grenze_min: STAU_S / 60, grenze_einzel_min: STAU_EINZEL_S / 60, aktiv: istStau(bericht.stau) } : null,
     letzter_schaltvorgang: bericht.letzter_schaltvorgang,
@@ -148,7 +156,7 @@ function stauEntscheiden(zustand, stau, jetzt = Date.now()) {
 function oeffentlich(z) {
   const job = (j) => (j ? { prozent: j.prozent, rest_s: j.rest_s, laufzeit_s: j.laufzeit_s } : null);
   return { ...z, warnungen: z.warnungen.map(() => 'Warnung'), runner: z.runner.map((r) => ({ ...r, job: job(r.job) })),
-    warteschlange: [], release: z.release ? { ...z.release, laeuft: [], wartend: [], uebersprungen: [], letzte: null } : null, letzter_schaltvorgang: z.letzter_schaltvorgang ? { zeit: z.letzter_schaltvorgang.zeit, text: '' } : null };
+    warteschlange: [], offen: (z.offen || []).map((o) => ({ status: o.status, alter_s: o.alter_s, eigen: o.eigen, github: o.github, mac: o.mac, wartend: o.wartend, fertig: o.fertig, gesamt: o.gesamt })), release: z.release ? { ...z.release, laeuft: [], wartend: [], uebersprungen: [], letzte: null } : null, letzter_schaltvorgang: z.letzter_schaltvorgang ? { zeit: z.letzter_schaltvorgang.zeit, text: '' } : null };
 }
 
 module.exports = { oeffentlich, stauEntscheiden, STAU_JOBS, STAU_S, STAU_EINZEL_S, eingabePruefen, zusammenfassung, STILL_MS };
