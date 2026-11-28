@@ -54,6 +54,12 @@ test('apps-register.json ist gueltig und kennt die bisherigen Apps', () => {
   assert.equal(daten.apps.wetter.repo, 'Rosenweg/rosenweg-wetter');
   assert.ok(!daten.apps.wetter.technik);
   assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.wetter.logo.split('?')[0])));
+  // Rosenweg Energie (Flutter, 28.11.2026)
+  assert.equal(daten.apps.energie.paket, 'ch.rosenweg4303.energie');
+  assert.equal(daten.apps.energie.repo, 'Rosenweg/rosenweg-energie');
+  assert.ok(!daten.apps.energie.technik);
+  assert.equal(daten.apps.energie.logo, '/img/apps/rosenweg-energie.png?v=20261128');
+  assert.ok(fs.existsSync(path.join(WURZEL, daten.apps.energie.logo.split('?')[0])));
 });
 
 test('pruefen findet Fehler', () => {
