@@ -5,6 +5,7 @@ const cors = require('cors');
 const mqtt = require('mqtt');
 const crypto = require('crypto');
 const { createMeterTargetValidator, resolveAll, httpHost } = require('./meter-target');
+const logik = require('./energie-logik');
 
 // ─── Configuration ──────────────────────────────────────────────────
 // METERS env var is only used for initial DB seeding (first start)
@@ -97,10 +98,7 @@ function mqttPublishReading(meter, data, ts) {
   // meter.id "r9-2og3" -> Topic energy/r9/2og3 (Hierarchie energy/<haus>/<bereich>).
   // Dieses Schema traegt die ACL: energy=alle, energy/r9=nur Rosenweg-9-Gruppen,
   // energy/r9/2og3=nur die Wohnungs-Gruppe. Bereich = Rest nach dem ersten "-".
-  const idParts = String(meter.id).split('-');
-  const haus = idParts.shift();
-  const bereich = idParts.length ? idParts.join('-') : haus;
-  const base = `${MQTT_PREFIX}/${haus}/${bereich}`;
+  const base = logik.mqttThema(meter.id, MQTT_PREFIX); // eine Regel, auch fuer /heute und /anlagen
   // Voll-JSON unter dem Basistopic + JEDES vorhandene Mess-Feld als eigenes
   // retained Subtopic (energy/<haus>/<bereich>/<feld>). Nicht alle Zaehler liefern
   // alle Felder (Shelly EM hat keine Spannung/Strom) -> nur vorhandene publiziert.
@@ -402,6 +400,35 @@ async function initDB() {
          ('Solartarif', 0.10, 'Eigenverbrauch Solarstrom', '2025-01-01')`
       );
     }
+
+    // Tarife je Haus (L3): group_id NULL = gilt fuer alle (wie bisher), art =
+    // bezug | solar | ruecklieferung. Altbestand: Art aus dem Namen ableiten
+    // (logik.tarifArtAusName, gleiche Regel wie beim Anlegen ohne Art).
+    await client.query(`
+      ALTER TABLE tariffs ADD COLUMN IF NOT EXISTS group_id TEXT NULL;
+      ALTER TABLE tariffs ADD COLUMN IF NOT EXISTS art TEXT;
+    `);
+    const ohneArt = await client.query('SELECT id, name FROM tariffs WHERE art IS NULL');
+    for (const t of ohneArt.rows) {
+      const art = logik.tarifArtAusName(t.name);
+      if (art) await client.query('UPDATE tariffs SET art = $2 WHERE id = $1 AND art IS NULL', [t.id, art]);
+    }
+
+    // Warndienst (L5): Zustand je Zaehler und Art, damit /alerts nur noch liest
+    // und Ereignisse (an/aus) genau einmal auf MQTT gehen.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS meter_alerts (
+        meter_id   VARCHAR(100) NOT NULL,
+        art        TEXT NOT NULL,
+        seit       TIMESTAMPTZ,
+        aktiv      BOOLEAN NOT NULL DEFAULT false,
+        wert_w     DOUBLE PRECISION,
+        schnitt_w  DOUBLE PRECISION,
+        pruef_seit TIMESTAMPTZ,
+        geaendert  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (meter_id, art)
+      );
+    `);
 
     console.log('Database initialized');
   } finally {
@@ -1027,6 +1054,9 @@ function publishSolarDerived() {
 // am 2026-06-16 verifiziert), Fallback SmartFox wenn r9-haupt stale.
 // Konvention grid_w: >0 = Bezug, <0 = Einspeisung/Lieferung.
 app.get('/api/energy/solar-live', (req, res) => {
+  // L7: ?anlage=<id> (ohne = r9). Live rechnet der Collector heute nur fuer r9.
+  const anlage = req.query.anlage == null || req.query.anlage === '' ? 'r9' : String(req.query.anlage).toLowerCase();
+  if (!logik.LIVE_ANLAGEN.has(anlage)) return res.status(404).json({ error: 'Unbekannte Anlage' });
   const FRESH_MS = 120000;
   const now = Date.now();
   const freshTs = (ts) => ts && (now - new Date(ts).getTime() < FRESH_MS);
@@ -1068,6 +1098,7 @@ app.get('/api/energy/solar-live', (req, res) => {
   const wohnungen = { power_w: Math.max(0, aptW - ueberW), power_raw_w: aptW, online_count: aptOn, total_count: APARTMENT_METERS.length };
 
   res.json({
+    anlage,
     ts: new Date().toISOString(),
     production_w, production_source,
     grid_w, grid_source,
@@ -1310,7 +1341,14 @@ app.get('/api/energy/today/:meterId', async (req, res) => {
     const result = await pool.query(todayQuery, [meterId, dayStart.toISOString(), dayEnd.toISOString()]);
     const rows = result.rows[0] ? [result.rows[0]] : [];
     await subtractChildrenAgg(meterId, rows, todayQuery, dayStart.toISOString(), dayEnd.toISOString(), null);
-    res.json(rows[0] || {});
+    // L8: Solar-/Netzanteil des Wohnungszaehlers aus dem Solaranteil der Gruppe
+    // (ohne die Netz-/Produktionszaehler selbst herauszugeben)
+    const tag = rows[0] || {};
+    try {
+      const h = (await heuteFuer([meterId], dayStart, dayEnd))[meterId];
+      if (h) Object.assign(tag, logik.solarAufteilen(tag.consumption_kwh, h.solar_anteil), { solar_anteil: h.solar_anteil, group_id: h.group_id });
+    } catch (e) { console.error('[today] solaranteil:', e.message); }
+    res.json(tag);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1477,10 +1515,13 @@ app.get('/api/energy/tariffs/current', async (req, res) => {
 app.post('/api/energy/tariffs', adminAuth, async (req, res) => {
   const { name, price_per_kwh, description, valid_from, valid_to } = req.body;
   if (!name || price_per_kwh == null) return res.status(400).json({ error: 'name, price_per_kwh required' });
+  // L3: group_id (leer = alle Haeuser) und art (leer = aus dem Namen)
+  const f = logik.tarifFelder(req.body);
+  if (f.fehler) return res.status(400).json({ error: f.fehler });
   try {
     const result = await pool.query(
-      'INSERT INTO tariffs (name, price_per_kwh, description, valid_from, valid_to) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-      [name, price_per_kwh, description || '', valid_from || null, valid_to || null]
+      'INSERT INTO tariffs (name, price_per_kwh, description, valid_from, valid_to, group_id, art) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+      [name, price_per_kwh, description || '', valid_from || null, valid_to || null, f.group_id, f.art]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -1490,12 +1531,21 @@ app.post('/api/energy/tariffs', adminAuth, async (req, res) => {
 
 app.put('/api/energy/tariffs/:id', adminAuth, async (req, res) => {
   const { name, price_per_kwh, description, valid_from, valid_to, active } = req.body;
+  // L3: group_id/art nur aendern, wenn mitgeschickt (alte Masken schicken sie nicht)
+  const body = req.body || {};
+  const hatGruppe = Object.prototype.hasOwnProperty.call(body, 'group_id');
+  const hatArt = Object.prototype.hasOwnProperty.call(body, 'art');
+  const f = logik.tarifFelder({ ...body, name: hatArt ? body.name : null });
+  if (f.fehler) return res.status(400).json({ error: f.fehler });
   try {
     const result = await pool.query(
       `UPDATE tariffs SET name=COALESCE($2,name), price_per_kwh=COALESCE($3,price_per_kwh),
-       description=COALESCE($4,description), valid_from=$5, valid_to=$6, active=COALESCE($7,active)
+       description=COALESCE($4,description), valid_from=$5, valid_to=$6, active=COALESCE($7,active),
+       group_id=CASE WHEN $8::boolean THEN $9::text ELSE group_id END,
+       art=CASE WHEN $10::boolean THEN COALESCE($11::text, art) ELSE art END
        WHERE id=$1 RETURNING *`,
-      [req.params.id, name, price_per_kwh, description, valid_from || null, valid_to || null, active]
+      [req.params.id, name, price_per_kwh, description, valid_from || null, valid_to || null, active,
+        hatGruppe, f.group_id, hatArt, f.art]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     res.json(result.rows[0]);
@@ -1963,8 +2013,11 @@ app.get('/api/energy/projection/:meterId', async (req, res) => {
 
     // Get current tariffs
     const tariffs = await pool.query("SELECT * FROM tariffs WHERE active = true AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)");
-    const netzTarif = tariffs.rows.find(t => t.name === 'Netztarif');
-    const solarTarif = tariffs.rows.find(t => t.name === 'Solartarif');
+    // Nach Art (L3) statt nach Namen; die Portal-API rechnet die Kosten mit dem
+    // Tarif des Hauses (inkl. ElCom) ohnehin neu (routes/energie-lesen.js).
+    const artVon = (t) => t.art || logik.tarifArtAusName(t.name);
+    const netzTarif = tariffs.rows.find(t => artVon(t) === 'bezug' && !t.group_id);
+    const solarTarif = tariffs.rows.find(t => artVon(t) === 'solar' && !t.group_id);
     const netzPrice = netzTarif ? parseFloat(netzTarif.price_per_kwh) : 0;
     const solarPrice = solarTarif ? parseFloat(solarTarif.price_per_kwh) : 0;
 
@@ -2019,42 +2072,231 @@ app.get('/api/energy/projection/:meterId', async (req, res) => {
   }
 });
 
-// ─── Alerts endpoint ────────────────────────────────────────────────
-app.get('/api/energy/alerts', async (req, res) => {
+// ─── Warndienst (L5) ────────────────────────────────────────────────
+// Jede Minute: offline (> 10 min keine Daten) und hoch (Verbraucher > 3x Ø der
+// Stundenmittel der letzten 7 Tage aus readings_hourly; erst nach 5 min
+// durchgehend, Ende nach 10 min darunter). Zustand in meter_alerts, Ereignisse
+// retained auf energy/alerts/<zaehler>. /alerts liest nur noch den Zustand.
+const warnZustand = new Map(); // `${meter_id}|${art}` -> { meter_id, art, aktiv, seit, pruef_seit, wert_w, schnitt_w, geaendert }
+const warnNamen = new Map();   // meter_id -> name (fuer /alerts)
+let warnGeladen = false, warnLaeuft = false;
+let warnSchnitte = { bis: 0, werte: new Map() };
+
+async function warnSchnitteHolen() {
+  if (warnSchnitte.bis > Date.now()) return warnSchnitte.werte;
+  const r = await pool.query(
+    `SELECT meter_id, AVG(avg_power_w) AS schnitt FROM readings_hourly
+      WHERE hour >= NOW() - interval '7 days' GROUP BY meter_id`);
+  warnSchnitte = { bis: Date.now() + 15 * 60 * 1000, werte: new Map(r.rows.map(z => [z.meter_id, Number(z.schnitt) || 0])) };
+  return warnSchnitte.werte;
+}
+
+function warnVeroeffentlichen(meterId) {
+  if (!mqttClient || !mqttClient.connected) return;
+  const n = logik.warnNachricht(['offline', 'hoch'].map(a => warnZustand.get(`${meterId}|${a}`)));
+  if (!n) return;
+  try { mqttClient.publish(`${MQTT_PREFIX}/alerts/${meterId}`, JSON.stringify(n), { retain: true }); }
+  catch (e) { console.error('[warnung] publish:', e.message); }
+}
+
+async function warnLauf() {
+  if (warnLaeuft) return;
+  warnLaeuft = true;
   try {
-    // Check all active meters for issues
-    const alerts = [];
-    const meters = await pool.query('SELECT * FROM meters WHERE active = true');
-
-    for (const meter of meters.rows) {
-      // Check if meter has recent readings (last 10 minutes)
-      const latest = await pool.query(
-        'SELECT ts, power_w FROM readings WHERE meter_id = $1 ORDER BY ts DESC LIMIT 1',
-        [meter.id]
-      );
-      if (latest.rows.length === 0 || (Date.now() - new Date(latest.rows[0].ts).getTime() > 10 * 60 * 1000)) {
-        alerts.push({ type: 'offline', severity: 'warning', meter_id: meter.id, meter_name: meter.name, message: `Keine Daten seit >10 Min.` });
+    if (!warnGeladen) {
+      const r = await pool.query('SELECT * FROM meter_alerts');
+      for (const z of r.rows) warnZustand.set(`${z.meter_id}|${z.art}`, z);
+      warnGeladen = true;
+    }
+    const meters = await getActiveMeters();
+    const schnitte = await warnSchnitteHolen();
+    const jetzt = new Date();
+    const aktivIds = new Set(meters.map(m => m.id));
+    for (const m of meters) {
+      warnNamen.set(m.id, m.name);
+      // Letzter Messwert aus dem Speicher; nach einem Neustart aus der DB (Index meter_id, ts)
+      let letzter = latestReadings.get(m.id) || null;
+      if (!letzter) {
+        const r = await pool.query('SELECT ts, power_w FROM readings WHERE meter_id = $1 ORDER BY ts DESC LIMIT 1', [m.id]);
+        letzter = r.rows[0] || null;
       }
-
-      // Check for unusually high consumption (> 2x daily average)
-      if (meter.category === 'consumer' && latest.rows.length > 0) {
-        const avgResult = await pool.query(
-          `SELECT AVG(avg_power) AS avg_power FROM (
-            SELECT AVG(power_w) AS avg_power FROM readings
-            WHERE meter_id = $1 AND ts >= NOW() - interval '7 days'
-            GROUP BY date_trunc('hour', ts)
-          ) sub`,
-          [meter.id]
-        );
-        const avgPower = parseFloat(avgResult.rows[0]?.avg_power || 0);
-        const currentPower = Math.abs(latest.rows[0].power_w);
-        if (avgPower > 0 && currentPower > avgPower * 3) {
-          alerts.push({ type: 'high_consumption', severity: 'info', meter_id: meter.id, meter_name: meter.name,
-            message: `Aktuell ${Math.round(currentPower)} W (Durchschnitt: ${Math.round(avgPower)} W)` });
+      const b = logik.warnBedingungen({ meter: m, letzter, schnittW: schnitte.get(m.id), jetzt });
+      for (const art of m.category === 'consumer' ? ['offline', 'hoch'] : ['offline']) {
+        const key = `${m.id}|${art}`;
+        const alt = warnZustand.get(key) || null;
+        if (!alt && !b[art]) continue; // nie gewarnt, alles gut: keine Zeile
+        const { zustand, ereignis } = logik.warnSchritt(alt, b[art], jetzt, logik.WARN_REGELN[art],
+          { wert_w: b.wert_w, schnitt_w: art === 'hoch' ? b.schnitt_w : null, seit: art === 'offline' ? (letzter?.ts || null) : null });
+        const gleich = alt && ['aktiv', 'wert_w', 'schnitt_w'].every(k => (alt[k] ?? null) === (zustand[k] ?? null))
+          && ['seit', 'pruef_seit'].every(k => String(alt[k] ? new Date(alt[k]).getTime() : null) === String(zustand[k] ? new Date(zustand[k]).getTime() : null));
+        if (gleich) continue;
+        const neu = { meter_id: m.id, art, ...zustand, geaendert: jetzt };
+        warnZustand.set(key, neu);
+        await pool.query(
+          `INSERT INTO meter_alerts (meter_id, art, seit, aktiv, wert_w, schnitt_w, pruef_seit, geaendert)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+           ON CONFLICT (meter_id, art) DO UPDATE SET seit=EXCLUDED.seit, aktiv=EXCLUDED.aktiv, wert_w=EXCLUDED.wert_w,
+             schnitt_w=EXCLUDED.schnitt_w, pruef_seit=EXCLUDED.pruef_seit, geaendert=EXCLUDED.geaendert`,
+          [m.id, art, neu.seit, neu.aktiv, neu.wert_w, neu.schnitt_w, neu.pruef_seit, jetzt]);
+        if (ereignis) {
+          console.log(`[warnung] ${m.id} ${art} ${ereignis}`);
+          warnVeroeffentlichen(m.id);
         }
       }
     }
-    res.json(alerts);
+    // Zaehler, die nicht mehr aktiv sind: Zustand entfernen (und Warnung beenden)
+    for (const [key, z] of warnZustand) {
+      if (aktivIds.has(z.meter_id)) continue;
+      warnZustand.delete(key);
+      await pool.query('DELETE FROM meter_alerts WHERE meter_id = $1 AND art = $2', [z.meter_id, z.art]);
+      if (z.aktiv && mqttClient && mqttClient.connected) {
+        mqttClient.publish(`${MQTT_PREFIX}/alerts/${z.meter_id}`, JSON.stringify({ art: z.art, aktiv: false, seit: jetzt.toISOString(), wert_w: null, schnitt_w: null }), { retain: true });
+      }
+    }
+  } catch (e) {
+    console.error('[warnung] Lauf:', e.message);
+  } finally {
+    warnLaeuft = false;
+  }
+}
+
+// Aktive Warnungen (Monitor-Seite, Portal /api/energy/warnungen). Gleiche Form
+// wie frueher (type/severity/message) plus art/seit/wert_w/schnitt_w.
+app.get('/api/energy/alerts', (req, res) => {
+  const alerts = [];
+  for (const z of warnZustand.values()) {
+    if (!z.aktiv) continue;
+    const name = warnNamen.get(z.meter_id) || z.meter_id;
+    const basis = { meter_id: z.meter_id, meter_name: name, art: z.art, seit: z.seit ? new Date(z.seit).toISOString() : null, wert_w: z.wert_w ?? null, schnitt_w: z.schnitt_w ?? null };
+    if (z.art === 'offline') alerts.push({ type: 'offline', severity: 'warning', message: 'Keine Daten seit >10 Min.', ...basis });
+    else alerts.push({ type: 'high_consumption', severity: 'info', message: `Aktuell ${Math.round(z.wert_w || 0)} W (Durchschnitt: ${Math.round(z.schnitt_w || 0)} W)`, ...basis });
+  }
+  res.json(alerts);
+});
+
+// ─── Anlagen (L7) ───────────────────────────────────────────────────
+// Gruppen mit Produktionszaehler bzw. SmartFox; r9 als Rueckfall. Intern: die
+// Portal-API ergaenzt STWEG und "eigen" und gibt die Liste offen heraus.
+app.get('/api/energy/anlagen', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT id, group_id, category, type, active FROM meters WHERE active = true');
+    res.json(logik.anlagenAusZaehlern(r.rows, MQTT_PREFIX));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Tageswerte mehrerer Zaehler (L10/L8) ───────────────────────────
+// Zaehlerstand-Differenzen seit Tagesbeginn, alle Zaehler in EINER Abfrage.
+async function tagesDeltas(ids, von, bis) {
+  if (!ids.length) return new Map();
+  const r = await pool.query(
+    `SELECT meter_id,
+       MAX(energy_import_kwh) - MIN(energy_import_kwh) AS imp,
+       MAX(energy_export_kwh) - MIN(energy_export_kwh) AS exp
+     FROM readings WHERE meter_id = ANY($1::text[]) AND ts >= $2 AND ts < $3
+     GROUP BY meter_id`, [ids, von.toISOString(), bis.toISOString()]);
+  const zahl = (v) => (v == null ? null : Number(v));
+  return new Map(r.rows.map(z => [z.meter_id, { imp: zahl(z.imp), exp: zahl(z.exp) }]));
+}
+
+// Solaranteil je Gruppe am Tag (Netz- und Produktionszaehler der Gruppe, wie Dashboard).
+// Gruppe ohne Netz+Produktion fehlt in der Karte; ohne Messwerte am Tag: null.
+async function gruppenAnteile(gids, von, bis, meters) {
+  const paare = new Map();
+  for (const gid of gids) {
+    const grid = meters.find(m => m.group_id === gid && m.category === 'grid');
+    const prod = meters.find(m => m.group_id === gid && m.category === 'production');
+    if (grid && prod) paare.set(gid, { grid: grid.id, prod: prod.id });
+  }
+  const d = await tagesDeltas([...paare.values()].flatMap(x => [x.grid, x.prod]), von, bis);
+  const out = new Map();
+  for (const [gid, x] of paare) {
+    const g = d.get(x.grid), p = d.get(x.prod);
+    out.set(gid, g && p ? logik.solarAnteil({ production_kwh: p.exp, export_kwh: g.exp, import_kwh: g.imp }) : null);
+  }
+  return out;
+}
+
+async function heuteFuer(ids, von, bis) {
+  const meters = (await pool.query('SELECT id, group_id, category FROM meters WHERE active = true')).rows;
+  const byId = new Map(meters.map(m => [m.id, m]));
+  const gewollt = ids.filter(id => byId.has(id));
+  const alle = new Set(gewollt);
+  for (const id of gewollt) for (const k of childrenMap[id] || []) alle.add(k);
+  const deltas = await tagesDeltas([...alle], von, bis);
+  const anteile = await gruppenAnteile([...new Set(gewollt.map(id => byId.get(id).group_id).filter(Boolean))], von, bis, meters);
+  const out = {};
+  for (const id of gewollt) {
+    const m = byId.get(id);
+    out[id] = logik.heuteEintrag(m, deltas, childrenMap[id] || [], anteile.has(m.group_id) ? anteile.get(m.group_id) : null, MQTT_PREFIX);
+  }
+  return out;
+}
+
+// GET /api/energy/heute?ids=a,b&date=YYYY-MM-DD (intern, Portal-API /uebersicht)
+app.get('/api/energy/heute', async (req, res) => {
+  const ids = String(req.query.ids || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (ids.length > 300 || !ids.every(id => /^[A-Za-z0-9._-]{1,64}$/.test(id))) return res.status(400).json({ error: 'ids ungueltig' });
+  const von = req.query.date ? new Date(req.query.date + 'T00:00:00') : new Date();
+  if (isNaN(von.getTime())) return res.status(400).json({ error: 'date ungueltig' });
+  if (!req.query.date) von.setHours(0, 0, 0, 0);
+  const bis = new Date(von); bis.setDate(bis.getDate() + 1);
+  try {
+    res.json(await heuteFuer(ids, von, bis));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Zeitreihe (L9) ─────────────────────────────────────────────────
+// GET /api/energy/reihe/:meterId?von&bis&raster=auto|1m|5m|15m|1h|1d&wert=leistung|verbrauch
+// Rohdaten (<= 30 Tage zurueck, Raster < 1h), readings_hourly (1h) oder Tage (1d).
+// leistung = Ø W je Raster, verbrauch = kWh je Raster (Produktionszaehler: erzeugte kWh).
+async function reiheHolen(meterId, r, wert, von, bis, produktion) {
+  const kwhSpalte = produktion ? 'energy_export_kwh' : 'energy_import_kwh';
+  const hSpalte = produktion ? 'export_kwh' : 'consumption_kwh';
+  if (r.quelle === 'roh') {
+    const S = parseInt(r.sekunden, 10); // aus logik.RASTER_S, fest
+    const q = await pool.query(
+      `SELECT to_timestamp(floor(extract(epoch from ts) / ${S}) * ${S}) AS t,
+              AVG(power_w) AS w, MIN(${kwhSpalte}) AS min_kwh, MAX(${kwhSpalte}) AS max_kwh
+         FROM readings WHERE meter_id = $1 AND ts >= $2 AND ts < $3
+        GROUP BY 1 ORDER BY 1`, [meterId, von.toISOString(), bis.toISOString()]);
+    if (wert === 'verbrauch') return logik.verbrauchAusStaenden(q.rows);
+    return q.rows.map(z => ({ t: z.t, v: z.w == null ? null : Number(z.w) }));
+  }
+  const q = r.quelle === 'stunde'
+    ? await pool.query(
+      `SELECT hour AS t, avg_power_w AS w, ${hSpalte} AS kwh FROM readings_hourly
+        WHERE meter_id = $1 AND hour >= date_trunc('hour', $2::timestamp) AND hour < $3 ORDER BY hour`,
+      [meterId, von.toISOString(), bis.toISOString()])
+    : await pool.query(
+      `SELECT date_trunc('day', hour) AS t, AVG(avg_power_w) AS w, SUM(${hSpalte}) AS kwh FROM readings_hourly
+        WHERE meter_id = $1 AND hour >= date_trunc('day', $2::timestamp) AND hour < $3 GROUP BY 1 ORDER BY 1`,
+      [meterId, von.toISOString(), bis.toISOString()]);
+  return q.rows.map(z => ({ t: z.t, v: (wert === 'verbrauch' ? z.kwh : z.w) == null ? null : Number(wert === 'verbrauch' ? z.kwh : z.w) }));
+}
+
+app.get('/api/energy/reihe/:meterId', async (req, res) => {
+  const { meterId } = req.params;
+  const wert = req.query.wert == null || req.query.wert === '' ? 'leistung' : String(req.query.wert);
+  if (!['leistung', 'verbrauch'].includes(wert)) return res.status(400).json({ error: 'wert: leistung | verbrauch' });
+  const bis = req.query.bis ? new Date(req.query.bis) : new Date();
+  const von = req.query.von ? new Date(req.query.von) : new Date(bis.getTime() - 24 * 3600 * 1000);
+  const r = logik.rasterWaehlen({ von, bis, raster: req.query.raster ? String(req.query.raster) : 'auto' });
+  if (r.fehler) return res.status(400).json({ error: r.fehler });
+  try {
+    const m = (await pool.query('SELECT category FROM meters WHERE id = $1', [meterId])).rows[0];
+    if (!m) return res.status(404).json({ error: 'Zaehler unbekannt' });
+    const prod = m.category === 'production';
+    let punkte = await reiheHolen(meterId, r, wert, von, bis, prod);
+    const kinder = childrenMap[meterId] || [];
+    if (kinder.length) punkte = logik.kinderAbziehen(punkte, await Promise.all(kinder.map(k => reiheHolen(k, r, wert, von, bis, prod))));
+    res.json({
+      zaehler: meterId, raster: r.raster, wert, einheit: wert === 'verbrauch' ? 'kWh' : 'W',
+      von: von.toISOString(), bis: bis.toISOString(), punkte: logik.punkteRunden(punkte, wert),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2120,6 +2362,10 @@ async function start() {
   // Restarts nie -> Rohtabelle wuchs unbegrenzt; Startlauf stellt Retention zuverlaessig her)
   setInterval(cleanupOldData, 24 * 60 * 60 * 1000);
   setTimeout(cleanupOldData, 120 * 1000);
+
+  // Warndienst jede Minute (erster Lauf nach 90 s, wenn die Zaehler gepollt sind)
+  setInterval(warnLauf, 60 * 1000);
+  setTimeout(warnLauf, 90 * 1000);
 
   // Aufgeloeste Solar-Werte alle 5s retained nach MQTT (energy/r9/solar/*)
   setInterval(publishSolarDerived, 5000);

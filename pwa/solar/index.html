@@ -222,6 +222,22 @@
         // veraltete-Daten-Erkennung: ts aelter als 90s → Hinweis.
         const STALE_MS = 90 * 1000;
 
+        // Preise aus der Tariftabelle (/api/energy/tarif?haus=r9: solar = interner
+        // Solarpreis, ruecklieferung = Vergütung des Netzbetreibers). Rückfall, wenn der
+        // Abruf scheitert oder der Tarif fehlt: die bisherigen festen Werte.
+        let RP_INTERN = 0.20, RP_RUECKLIEFER = 0.082;
+        async function tarifLaden() {
+            try {
+                const r = await fetch('/api/energy/tarif?haus=r9', { cache: 'no-store' });
+                if (!r.ok) return;
+                const p = ((await r.json()) || {}).chf_kwh || {};
+                if (Number.isFinite(p.solar) && p.solar > 0) RP_INTERN = p.solar;
+                if (Number.isFinite(p.ruecklieferung) && p.ruecklieferung > 0) RP_RUECKLIEFER = p.ruecklieferung;
+            } catch (_) { /* Rückfall bleibt */ }
+        }
+        tarifLaden();
+        setInterval(tarifLaden, 30 * 60 * 1000);
+
         async function load() {
             try {
                 const r = await fetch('/api/energy/solar-live', { cache: 'no-store' });
@@ -245,8 +261,7 @@
                     ? wohnungen.online_count + '/' + wohnungen.total_count + ' online' : '');
                 setAll('.l-boiler', boiler.label || 'Boiler');
                 // Tageswerte (geeichte Zähler): Eigenverbrauch (selbst genutzt = Produktion −
-                // Einspeisung) à 20 Rp. intern, Einspeisung à 8.2 Rp. (AEW-Rücklieferung).
-                const RP_INTERN = 0.20, RP_RUECKLIEFER = 0.082;
+                // Einspeisung) zum Solarpreis, Einspeisung zur Rücklieferung (tarifLaden oben).
                 const _prodKwh = (today.production_wh || 0) / 1000;
                 const _feedKwh = (today.feed_in_wh || 0) / 1000;
                 const _evKwh = Math.max(0, _prodKwh - _feedKwh);

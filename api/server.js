@@ -16,6 +16,7 @@ const druckApi = require('./lib/druckapi'); // Druck-API CT 111 und Gotenberg (D
 // STWEG-Gruppen-Mapping + pure Klassifizierer -> lib/groups.js
 const { STWEG_GROUPS, parseStweg, getUserStwegs, stwegFolderName, folderStwegNr, isTechnik, isPraesident, getAusschussStwegs, isAusschussForAny, canSeeVerwaltungKontakte,
   VERWALTUNG_GROUPS, istVerwaltungUebergang, verwaltungStwegs, isVerwaltungFor, isVerwaltungForAny, verwaltetAlleStwegs, istVerwaltungsGruppenName, getStwegsMitVerwaltung } = require('./lib/groups');
+const { zaehlerTechnikZugang } = require('./lib/zaehler-technik');
 const { nummernKanal, darfEchteNummernSehen, istTechnikOderPraesident, interneNummerFinden, nummernAusgeben, nummernAusBodyEntfernen, interneNummernLaden, interneNummernCacheLeeren, interneNummernPruefen, nummernSicht } = require('./lib/nummernsicht');
 const { zevAliasAddress, zevGotoTargets, zevDarfRechnungSehen, zevStwegFuerEmpfaenger, zevAliasAusFormular, zevAktuellerBewohner, zevWechselMelden } = require('./lib/zev');
 const reklMelder = require('./lib/reklamation-melder');
@@ -1133,6 +1134,16 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
     permissions['energie-monitor'] = 'read';
   }
 
+  // Rechte fuer die Energie-App (L4): dieselben Pruefungen wie die Routen
+  // (routes/energie-lesen.js energieRechte). Abgeleitete Schluessel, nicht in der
+  // Rechteverwaltung: energie-stweg (STWEG-Sicht greift: Ausschuss/Verwaltung mit
+  // vergebenem energie-monitor, NICHT das automatische oben), zaehler-technik
+  // (requireZaehlerTechnik liesse durch).
+  let energie = { stweg_sicht: [], technik: null, verwalten: null, anlagen_eigen: [] };
+  try { energie = await energieLesen.energieRechte(req); } catch (e) { console.error('[auth/me] energie:', e.message); }
+  if (energie.stweg_sicht.length && !permissions['energie-stweg']) permissions['energie-stweg'] = 'read';
+  if (energie.technik && !permissions['zaehler-technik']) permissions['zaehler-technik'] = 'read';
+
   // WhatsApp-Opt-In aus personen-Tabelle (via email lookup)
   let whatsappOptIn = false;
   try {
@@ -1161,6 +1172,7 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
       groups: groups,
       meters: meters,
       permissions: permissions,
+      energie,
       whatsapp_opt_in: whatsappOptIn,
     },
     // Wie ist diese Anfrage angemeldet (lib/stufen.js)? Nur Auskunft, sperrt nichts.
@@ -16836,8 +16848,10 @@ app.get('/api/energie/meine-zaehler', authMiddleware, async (req, res) => {
 });
 
 // Energie lesen (D-1): Anmeldung + nur zugeordnete Zaehler; nginx schickt hierher alles
-// ausser den bewusst offenen Geraete-/Anzeige-Routen.
-app.use('/api/energy', require('./routes/energie-lesen'));
+// ausser den bewusst offenen Geraete-/Anzeige-Routen. Die Sichtregeln daraus nutzen
+// auch die MQTT-ACL (aclcheck), /api/auth/me (energie) und /api/zaehler-technik.
+const energieLesen = require('./routes/energie-lesen');
+app.use('/api/energy', energieLesen);
 
 // ─── MQTT-Auth (mosquitto-go-auth HTTP-Backend) ─────────────────────
 // Zweistufig: technische Write-User (collector) laufen ueber den files-Backend
@@ -16991,15 +17005,45 @@ app.post('/api/mqtt/token', authMiddleware, async (req, res) => {
     const username = 'rwweb-' + crypto.randomBytes(12).toString('hex');
     const token = 'rwmqtt_' + crypto.randomBytes(24).toString('hex');
     const hash = crypto.createHash('sha256').update(token).digest('hex');
+    // L6: Karten-/Anlage-Sitzung (geteiltes Telefon, Karte/QR/Handy; lib/stufen.js
+    // Stufe "karte") -> kurzer Token, damit der Zugang die Sitzung nicht lange ueberlebt.
+    const laufzeitS = mqttTokenLaufzeit(req);
     await pool.query(
       `INSERT INTO mqtt_tokens (token_hash, username, email, groups_json, is_technik, expires_at)
-         VALUES ($1, $2, $3, $4, $5, NOW() + interval '12 hours')`,
-      [hash, username, email, JSON.stringify(groups), isTech]
+         VALUES ($1, $2, $3, $4, $5, NOW() + make_interval(secs => $6))`,
+      [hash, username, email, JSON.stringify(groups), isTech, laufzeitS]
     );
     pool.query(`DELETE FROM mqtt_tokens WHERE expires_at < NOW()`).catch(() => {});
-    res.json({ username, password: token, is_technik: isTech, prefix: 'energy' });
+    res.json({ username, password: token, is_technik: isTech, prefix: 'energy', expires_in: laufzeitS });
   } catch (err) {
     console.error('[mqtt] token error:', err.message);
+    res.status(500).json({ error: 'Token-Fehler' });
+  }
+});
+
+// Laufzeit eines MQTT-Tokens: 12 h, mit Karten-/Anlage-Anmeldung 30 min.
+const MQTT_TOKEN_LAUFZEIT_S = 12 * 3600;
+const MQTT_TOKEN_LAUFZEIT_KARTE_S = 30 * 60;
+function mqttTokenLaufzeit(req) {
+  return (req.auth?.stufe === 'karte' || req.anlage || req.appKarte) ? MQTT_TOKEN_LAUFZEIT_KARTE_S : MQTT_TOKEN_LAUFZEIT_S;
+}
+
+// L6: Abmelden widerruft den MQTT-Zugang. Mit {token} (Body) bzw. Header
+// X-MQTT-Token nur diesen, sonst alle Tokens der Person. Nur eigene Zeilen
+// (E-Mail aus der Sitzung). Bestehende Verbindungen trennt der Broker erst beim
+// naechsten Verbinden bzw. ACL-Check (go-auth puffert bis 60 s).
+app.delete('/api/mqtt/token', authMiddleware, async (req, res) => {
+  try {
+    const email = String(req.user?.email || '').toLowerCase();
+    if (!email) return res.status(400).json({ error: 'Konto ohne E-Mail' });
+    const einzeln = (typeof req.body?.token === 'string' && req.body.token) || req.get('x-mqtt-token') || '';
+    const r = einzeln
+      ? await pool.query('DELETE FROM mqtt_tokens WHERE token_hash = $1 AND LOWER(email) = $2',
+        [crypto.createHash('sha256').update(String(einzeln)).digest('hex'), email])
+      : await pool.query('DELETE FROM mqtt_tokens WHERE LOWER(email) = $1', [email]);
+    res.json({ ok: true, widerrufen: r.rowCount || 0 });
+  } catch (err) {
+    console.error('[mqtt] token widerrufen:', err.message);
     res.status(500).json({ error: 'Token-Fehler' });
   }
 });
@@ -17214,15 +17258,13 @@ app.post('/api/mqtt/aclcheck', mqttBrokerGuard, async (req, res) => {
       if (!mqttTopicMatch(rule.topic_filter, topic)) continue;
       if (write ? rule.can_write : rule.can_read) return res.status(200).end();
     }
-    // 2. energy/-Zaehler: Menschen nur LESEN (ueber meter_groups/meter_users).
+    // 2. energy/: Menschen nur LESEN, mit derselben Sicht wie per HTTP (L1/L2):
+    // eigene + Gemeinschafts- + STWEG-Zaehler (Ausschuss/Verwaltung mit
+    // energie-monitor), energy/<anlage>/solar/* fuer alle, energy/alerts/<zaehler>.
+    // Regel und 60-s-Puffer: routes/energie-lesen.js mqttEnergieErlaubt.
     if (write) return res.status(403).end();                    // Schreiben nur per Topic-Regel oder Service-User
-    if (topic === 'energy/collector/status') return res.status(200).end();
-    const m = /^energy\/([^/]+)\/([^/]+)/.exec(String(topic || ''));
-    if (!m) return res.status(403).end();
-    const meterId = `${m[1]}-${m[2]}`;
-    let meters;
-    try { meters = await collectorZaehlerFuer(u.email, groups); } catch { return res.status(403).end(); }
-    const allowed = meters.some(x => x.id === meterId);
+    let allowed = false;
+    try { allowed = await energieLesen.mqttEnergieErlaubt({ email: u.email, groups }, topic); } catch { allowed = false; }
     return res.status(allowed ? 200 : 403).end();
   } catch (err) { console.error('[mqtt] aclcheck:', err.message); return res.status(500).end(); }
 });
@@ -18357,30 +18399,17 @@ app.post('/api/stweg-sections/:stweg/:section', authMiddleware, kartenAdmin.mitK
   } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
 });
 
+// Wer darf hinein: lib/zaehler-technik.js (Technik, Praesident, Verwaltung STWEG 3,
+// r9-eigentuemer) — dieselbe Regel liefert /api/auth/me als energie.technik.
 function requireZaehlerTechnik(req, res, next) {
-  const groups = req.user?.groups || [];
-  const gl = groups.map(g => String(g).toLowerCase());
-  // Praesident wie ueberall gleich Technik (zaehlerTechnikVoll gibt ihm volle Sicht,
-  // bisher kam er aber gar nicht bis dorthin).
-  const ok = isTechnik(groups) || isPraesident(groups)
-    // Zaehler-Technik = Haus Rosenweg 9 (STWEG 3): dessen Verwaltung (Übergang: „Verwaltung“)
-    || isVerwaltungFor(groups, 3)
-    // Eigentuemergruppe von STWEG 3 heisst r9-eigentuemer (lib/groups.js STWEG_GROUPS;
-    // Befund W19: vorher stweg3-eigentuemer -> Eigentuemer RW 9 abgewiesen).
-    || gl.includes(STWEG_GROUPS[3].eigentuemer.toLowerCase());
-  if (ok) return next();
+  if (zaehlerTechnikZugang(req.user?.groups || [])) return next();
   return res.status(403).json({ error: 'Nur für Technik, Präsident, Verwaltung oder Rosenweg-9-Eigentümer' });
 }
 
 // Volle Technik-Sicht (IP/Port/Seriennummer, Live-Werte aller Wohnungen): Technik/
-// Praesident oder Recht energie-config:read (wie api/routes/energie-lesen.js).
-// requirePermission ist Middleware -> mit Ersatz-Antwort als Ja/Nein-Abfrage.
+// Praesident oder Recht energie-config:read — eine Regel mit routes/energie-lesen.js.
 function zaehlerTechnikVoll(req) {
-  if (req.user?.isAdmin || isPraesident(req.user?.groups || [])) return Promise.resolve(true);
-  return new Promise((resolve) => {
-    const ersatz = { status() { return ersatz; }, json() { resolve(false); return ersatz; } };
-    requirePermission('energie-config', 'read')(req, ersatz, () => resolve(true));
-  });
+  return energieLesen.vollerZugriff(req);
 }
 
 app.get('/api/zaehler-technik', authMiddleware, requireZaehlerTechnik, async (req, res) => {

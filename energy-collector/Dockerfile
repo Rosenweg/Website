@@ -3,7 +3,7 @@ FROM node:22-alpine
 WORKDIR /app
 COPY package.json ./
 RUN npm install --production
-COPY collector.js meter-target.js ./
+COPY collector.js meter-target.js energie-logik.js ./
 
 EXPOSE 3001
 

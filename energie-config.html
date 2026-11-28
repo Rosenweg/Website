@@ -148,6 +148,19 @@
                         <input id="t-desc" type="text" class="w-full border-gray-300 rounded-md shadow-sm text-sm" placeholder="z.B. Standardtarif Netzbezug">
                     </div>
                     <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Art</label>
+                        <select id="t-art" class="w-full border-gray-300 rounded-md shadow-sm text-sm">
+                            <option value="">aus dem Namen ableiten</option>
+                            <option value="bezug">Bezug (Netzstrom)</option>
+                            <option value="solar">Solar (Eigenverbrauch)</option>
+                            <option value="ruecklieferung">Rücklieferung (Einspeisung)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Gilt für Haus (leer = alle ZEV-Häuser)</label>
+                        <input id="t-group" type="text" class="w-full border-gray-300 rounded-md shadow-sm text-sm" placeholder="z.B. r9">
+                    </div>
+                    <div>
                         <label class="block text-xs font-medium text-gray-500 mb-1">Gültig ab</label>
                         <input id="t-valid-from" type="date" class="w-full border-gray-300 rounded-md shadow-sm text-sm">
                     </div>
@@ -414,6 +427,8 @@
             document.getElementById('t-desc').value = tariff.description || '';
             document.getElementById('t-valid-from').value = tariff.valid_from ? tariff.valid_from.substring(0, 10) : '';
             document.getElementById('t-valid-to').value = tariff.valid_to ? tariff.valid_to.substring(0, 10) : '';
+            document.getElementById('t-art').value = tariff.art || '';
+            document.getElementById('t-group').value = tariff.group_id || '';
         } else {
             document.getElementById('t-id').value = '';
             document.getElementById('t-name').value = '';
@@ -421,6 +436,8 @@
             document.getElementById('t-desc').value = '';
             document.getElementById('t-valid-from').value = '';
             document.getElementById('t-valid-to').value = '';
+            document.getElementById('t-art').value = '';
+            document.getElementById('t-group').value = '';
         }
     }
 
@@ -436,6 +453,8 @@
             description: document.getElementById('t-desc').value.trim(),
             valid_from: document.getElementById('t-valid-from').value || null,
             valid_to: document.getElementById('t-valid-to').value || null,
+            art: document.getElementById('t-art').value || null,
+            group_id: document.getElementById('t-group').value.trim().toLowerCase() || null,
         };
         if (!data.name || isNaN(data.price_per_kwh)) return alert('Name und Preis sind Pflichtfelder');
 
@@ -453,6 +472,7 @@
         loadTariffs();
     }
 
+    const TARIF_ART = { bezug: 'Bezug', solar: 'Solar', ruecklieferung: 'Rücklieferung' };
     async function loadTariffs() {
         const res = await AuthentikAuth.apiFetch(`${API}/tariffs`);
         const tariffs = await res.json();
@@ -481,7 +501,7 @@
                         ${!t.active ? '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">Deaktiviert</span>' : ''}
                     </div>
                     <p class="text-sm text-gray-500 mt-1">CHF ${parseFloat(t.price_per_kwh).toFixed(4)} / kWh ${t.description ? '– ' + esc(t.description) : ''}</p>
-                    <p class="text-xs text-gray-400 mt-0.5">${dateLabel}</p>
+                    <p class="text-xs text-gray-400 mt-0.5">${dateLabel} · ${esc(TARIF_ART[t.art] || 'Art unbekannt')} · ${t.group_id ? 'Haus ' + esc(t.group_id) : 'alle ZEV-Häuser'}</p>
                 </div>
                 <div class="flex items-center gap-2">
                     <button data-aktion="edit-tariff" data-i="${i}" class="px-3 py-1 text-xs rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200">Bearbeiten</button>

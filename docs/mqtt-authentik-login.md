@@ -10,7 +10,7 @@ Sicherheitsregeln: [sicherheit.md](sicherheit.md).
 
 | Art | Benutzername | Passwort | Lebensdauer | wofür |
 |---|---|---|---|---|
-| Web-Token | `rwweb-<zufällig>` | `rwmqtt_<zufällig>` aus `POST /api/mqtt/token` | 12 Stunden | Weboberflächen (`mqtt.html`, Energie-Seiten) |
+| Web-Token | `rwweb-<zufällig>` | `rwmqtt_<zufällig>` aus `POST /api/mqtt/token` | 12 Stunden (Karten-/Anlage-Anmeldung 30 min; `DELETE /api/mqtt/token` widerruft) | Weboberflächen (`mqtt.html`, Energie-Seiten) |
 | Service-User | frei, z. B. `collector`, `display-public` | Hash in `mqtt_service_users` | dauerhaft | technische Dienste ohne Personenbezug (`topic_filter`, `can_write`) |
 | Authentik-App-Passwort | Authentik-Benutzername (oder E-Mail) | App-Passwort-Token | bis zum Widerruf | Geräte und Programme einer Person |
 
