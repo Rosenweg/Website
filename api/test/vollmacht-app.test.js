@@ -114,6 +114,9 @@ test('L2: Technik/Präsident dürfen löschen und laden hoch; Verwaltung nur eig
 
 test('L2/L1: Liste und Einzelabfrage nutzen dieselben Zeilen mit Rechten', () => {
   const z = route('async function vmZeilen(');
+  // Gueltigkeit als reines Datum (kein Zeitzonen-Versatz im Client)
+  assert.match(z, /to_char\(v\.gueltig_ab, 'YYYY-MM-DD'\) AS gueltig_ab_iso/);
+  assert.match(z, /to_char\(v\.gueltig_bis, 'YYYY-MM-DD'\) AS gueltig_bis_iso/);
   assert.match(z, /Object\.assign\(row, vollmachtApp\.zeilenRechte\(ctx, row\)\)/);
   assert.match(route("app.get('/api/vollmachten', authMiddleware"), /vmZeilen\(ctx\)/);
   const eins = route("app.get('/api/vollmachten/:id(\\\\d+)'");
@@ -174,6 +177,7 @@ test('V3: POST und PUT prüfen Versammlung und Weisung; Spalten angelegt', () =>
   const l = route("app.get('/api/vollmachten/lookup/versammlungen'");
   assert.match(l, /category = 'versammlung'/);
   assert.match(l, /status\(403\)/);
+  assert.match(l, /vmSichtErlaubt\(vollmachtRechte\.vmSicht\(ctx\.groups, ctx\.perm\), stweg\)/); // Ausschuss/Verwaltung mit Sicht
 });
 
 // ─── V4 ──────────────────────────────────────────────────────────────────

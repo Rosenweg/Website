@@ -28420,6 +28420,7 @@ async function vmZeilen(ctx, { id = null } = {}) {
   if (id !== null) { params.push(id); where = `(${where}) AND v.id = $${params.length}`; }
   const r = await pool.query(
     `SELECT v.*, w.bezeichnung AS wohnung_bezeichnung, vw.firma_name AS verwaltung_firma, vw.stweg AS verwaltung_stweg,
+            to_char(v.gueltig_ab, 'YYYY-MM-DD') AS gueltig_ab_iso, to_char(v.gueltig_bis, 'YYYY-MM-DD') AS gueltig_bis_iso,
             te.title AS termin_titel, te.start_date AS termin_start, te.location AS termin_ort,
             (SELECT COALESCE(json_agg(vg.* ORDER BY vg.sort_order, vg.id), '[]'::json)
                FROM vollmachten_vollmachtgeber vg WHERE vg.vollmacht_id = v.id) AS vollmachtgeber_liste,
@@ -28524,8 +28525,10 @@ app.get('/api/vollmachten/lookup/versammlungen', authMiddleware, async (req, res
     const stweg = parseInt(req.query.stweg, 10);
     if (!stweg || stweg < 1 || stweg > 8) return res.status(400).json({ error: 'Bitte die STWEG angeben' });
     const ctx = await vmKontext(req);
+    // Eigentuemer der STWEG (zum Erteilen) sowie wer die Vollmachten der STWEG sieht oder verwaltet
     const darf = vollmachtRechte.vmGeberErlaubt({ stweg }, ctx.kontakte, ctx.groups).ok
-      || vollmachtRechte.vmDarfVerwalten(ctx.groups, ctx.perm, stweg);
+      || vollmachtRechte.vmDarfVerwalten(ctx.groups, ctx.perm, stweg)
+      || vollmachtRechte.vmSichtErlaubt(vollmachtRechte.vmSicht(ctx.groups, ctx.perm), stweg);
     if (!darf) return res.status(403).json({ error: 'Für diese STWEG sind keine Versammlungen sichtbar' });
     const r = await pool.query(
       `SELECT id, stweg, title, start_date, location FROM stweg_events
