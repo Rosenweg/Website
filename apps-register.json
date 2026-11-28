@@ -234,6 +234,16 @@
       "text": "Dein Anschluss und das Rosenweg-Netz: Störungen im Haus, WLAN mit QR-Code (Haus und Gast), WireGuard-VPN mit Schlüssel auf dem Gerät, Speedtest ins Haus, Mailboxen.",
       "fuer": "Für Bewohner mit Wohnung im Rosenweg, ab dem Einzug (Mieter, Mitbewohner, selbst bewohnende Eigentümer). Auf den geteilten Telefonen nur Übersicht und Gast-WLAN.",
       "_notiz": "Flutter, alle Plattformen. Immer rot, keine Verwaltung (die bleibt in der ISP-Verwaltung, Welle 4). Der WireGuard-Schlüssel entsteht auf dem Gerät, die API bekommt nur public_key (Entscheid Stefan 28.11.2026). Web-Seiten isp.html, isp-mein-zugang.html und wlan.html bleiben."
+    },
+    "personen": {
+      "name": "Rosenweg Personen",
+      "repo": "Rosenweg/rosenweg-personen",
+      "paket": "ch.rosenweg4303.personen",
+      "logo": "/img/apps/rosenweg-personen.png?v=20261128",
+      "reihenfolge": 130,
+      "text": "Personen deiner STWEG pflegen: Kontaktdaten ändern, Dubletten mit Vorschau zusammenführen, Konto-Löschungen begleiten sowie Bewohner und Gruppen verwalten.",
+      "fuer": "Für Ausschuss und Verwaltung ihrer STWEG sowie Technik und Präsident. „Sofort löschen“ nur Technik und Präsident, mit frischer Anmeldung mit dem Konto. Nicht für Bewohner.",
+      "_notiz": "Immer blau, kein Wechsel nach Gruppe. Nicht auf den Stationen, nicht im Katalog der geteilten Telefone (Personendaten, nichts offline)."
     }
   },
   "katalog": {
