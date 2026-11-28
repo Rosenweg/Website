@@ -765,14 +765,15 @@ function canWriteDocPath(filePath, groups, ctx = {}) {
 // Darf das Konto irgendwo in der Ablage schreiben? (Entscheid E2 28.11.2026:
 // Farbe der App „Rosenweg Unterlagen“ blau nur dann.) Gleiche Regel wie
 // canWriteDocPath: Technik/Praesident ueberall, Ausschuss in allgemein und
-// seiner STWEG, Verwaltung nur in Projektordnern mit „projekte“ = schreiben.
+// seiner STWEG. Die Verwaltung bleibt in Unterlagen rot (Entscheid Stefan
+// 28.11.2026): ihr Schreibrecht in Projektordnern ueber „projekte“ zaehlt hier
+// nicht (projektePermWert bleibt fuer den Aufruf in /api/auth/me).
 // /api/auth/me liefert daraus den abgeleiteten Schluessel dokumente: 'write'
 // (sonst fehlt er; Lesen haengt am Pfad, nicht an einem Seitenrecht – L6).
 function docSchreibtIrgendwo(groups, projektePermWert) {
   const g = groups || [];
   if (isTechnik(g) || isPraesident(g)) return true;
-  if (g.some(x => String(x).toLowerCase().endsWith('-ausschuss'))) return true;
-  return isVerwaltungForAny(g) && projektePermWert === 'write';
+  return g.some(x => String(x).toLowerCase().endsWith('-ausschuss'));
 }
 
 // getAusschussStwegs, isAusschussForAny -> lib/groups.js

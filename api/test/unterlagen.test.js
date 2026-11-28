@@ -272,7 +272,8 @@ test('auth/me: dokumente = write nur, wer irgendwo schreibt (E2, L6)', () => {
   assert.equal(schreibt(['Technik'], undefined), true);
   assert.equal(schreibt(['stweg3-ausschuss'], undefined), true);
   assert.equal(schreibt(['stweg3-verwaltung'], 'read'), false);
-  assert.equal(schreibt(['stweg3-verwaltung'], 'write'), true);
+  // Verwaltung in Unterlagen rot, auch mit projekte = schreiben (Entscheid Stefan 28.11.2026)
+  assert.equal(schreibt(['stweg3-verwaltung'], 'write'), false);
   assert.equal(schreibt(['r9-eigentuemer', 'r9-bewohner'], 'write'), false);
   assert.equal(schreibt(['r9-bewohner'], undefined), false);
 });
