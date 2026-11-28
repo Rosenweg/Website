@@ -19,7 +19,8 @@ env:
 
 jobs:
   build-api:
-    runs-on: ubuntu-latest
+    # eigene Runner (CT 140/145): nur push/workflow_dispatch, nie Fork-PRs
+    runs-on: [self-hosted, Linux, rosenweg]
     permissions:
       contents: read
       packages: write
@@ -44,7 +45,8 @@ jobs:
             ${{ env.API_IMAGE }}:${{ github.sha }}
 
   build-website:
-    runs-on: ubuntu-latest
+    # eigene Runner (CT 140/145): nur push/workflow_dispatch, nie Fork-PRs
+    runs-on: [self-hosted, Linux, rosenweg]
     permissions:
       contents: read
       packages: write
@@ -118,7 +120,8 @@ jobs:
             ${{ env.STWEG_IMAGE }}:${{ github.sha }}
 
   build-energy-collector:
-    runs-on: ubuntu-latest
+    # eigene Runner (CT 140/145): nur push/workflow_dispatch, nie Fork-PRs
+    runs-on: [self-hosted, Linux, rosenweg]
     permissions:
       contents: read
       packages: write
