@@ -137,6 +137,13 @@ class KartenUmzugTest(unittest.TestCase):
         self.assertFalse(pbx._portal_erlaubt(regeln, z, "PUT", "/api/permissions"))
         self.assertFalse(pbx._portal_erlaubt(regeln, "ch.rosenweg4303.salz", "POST", "/api/karten/info"))
 
+    def test_wetter_darf_nur_verlauf_lesen(self):
+        regeln = pbx.PORTAL_PFADE_STANDARD
+        w = "ch.rosenweg4303.wetter"
+        self.assertTrue(pbx._portal_erlaubt(regeln, w, "GET", "/api/wetter/r9/history?h=24"))
+        self.assertFalse(pbx._portal_erlaubt(regeln, w, "POST", "/api/wetter/r9/ingest"))
+        self.assertFalse(pbx._portal_erlaubt(regeln, w, "GET", "/api/wasch/rooms"))
+
     def test_waschkueche_darf_nur_wasch(self):
         regeln = pbx.PORTAL_PFADE_STANDARD
         w = "ch.rosenweg4303.waschkueche"

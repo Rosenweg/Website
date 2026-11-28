@@ -4142,6 +4142,9 @@ PORTAL_PFADE_STANDARD = {
     # /api/tv/extern*, Entscheid Stefan 28.11.2026)
     "ch.rosenweg4303.tv": ["GET /api/tv/channels", "GET /api/tv/jetzt", "GET /api/tv/epg",
                            "GET /api/tv/stream-url/"],
+    # Rosenweg Wetter: nur der oeffentliche Verlauf der Wetterstation (live kommt per MQTT
+    # mit dem oeffentlichen Lese-Benutzer, nicht ueber das Portal)
+    "ch.rosenweg4303.wetter": ["GET /api/wetter/"],
 }
 _PORTAL_PFAD = re.compile(r"/api/[A-Za-z0-9._~!$&'()*+,;=:@%/-]{1,1000}(\?[A-Za-z0-9._~!$&'()*+,;=:@%/?-]{0,1000})?")
 _PORTAL_KODIERT_VERBOTEN = re.compile(r"%(2e|2f|5c|00)", re.I)
