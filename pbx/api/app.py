@@ -4215,10 +4215,13 @@ PORTAL_PFADE_STANDARD = {
                                     "GET /api/apps/sitzungen", "DELETE /api/apps/sitzungen/",
                                     "POST /api/apps/qr-ausweis", "GET /api/apps/qr-ausweis/"],
     # Rosenweg Profil: eigene Angaben lesen, Profil-Angaben und Profilbild aendern (Entscheid Stefan
-    # 28.11.2026, Karte wie Schluessel; die Haupt-API protokolliert jede Aenderung, lib/sperrliste.js).
-    # Passwort, SSH-Schluessel, API-Tokens, E-Mail-Aliase und Zusatznummern bleiben draussen.
+    # 28.11.2026, Karte wie Schluessel; die Haupt-API protokolliert Profil und Bild, lib/sperrliste.js).
+    # Dazu wie mit der Karte auf dem eigenen Handy: weitere Nummern, E-Mail-Aliase (die Haupt-API
+    # lehnt Adressen anderer Personen ab), WhatsApp, Desktop-Stil. Passwort, SSH-Schluessel und
+    # API-Tokens bleiben draussen (Konto-Uebernahme).
     "ch.rosenweg4303.profil": ["GET /api/me/wohnungen", "GET /api/energie/meine-zaehler", "GET /api/me/person-data",
-                               "GET /api/me/einstellungen", "PUT /api/auth/profile", "PUT /api/auth/avatar"],
+                               "GET,PUT /api/me/einstellungen", "PUT /api/me/phones", "PUT /api/me/emails",
+                               "PUT /api/me/whatsapp-optin", "PUT /api/auth/profile", "PUT /api/auth/avatar"],
     # Rosenweg Vollmachten: lesen, erteilen, digital signieren (Entscheid Stefan 28.11.2026): signiert
     # wird nur mit einer frischen Bestaetigung (Karte erneut vorlegen oder Anmelde-QR aus dem Konto,
     # POST /api/vollmachten/<id>/sign-bestaetigung; api/lib/signaturbestaetigung.js). Die Haupt-API

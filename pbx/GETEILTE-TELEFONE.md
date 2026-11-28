@@ -177,8 +177,8 @@ Technik sie auf /smartphones gesetzt hat. Erster Eintrag also: Zeile auf /smartp
 - **Karte wie Schlüssel (28.11.2026, `docs/sicherheit.md` 4.11):** `portal_pfade` neu für
   **Mein Telefon** `POST /api/apps/qr-ausweis` und `GET /api/apps/qr-ausweis/` (App-QR für das eigene
   Handy, protokolliert, Mail beim Einlösen); **Profil** die eigenen Angaben lesen sowie
-  `PUT /api/auth/profile` und `PUT /api/auth/avatar` (kein Passwort, keine SSH-Schlüssel, Tokens,
-  E-Mail-Aliase, Zusatznummern); **Vollmachten** `/api/vollmachten` und alles darunter — digital
+  `PUT /api/auth/profile`, `PUT /api/auth/avatar`, weitere Nummern, E-Mail-Aliase, WhatsApp und
+  Desktop-Stil (kein Passwort, keine SSH-Schlüssel, keine Tokens); **Vollmachten** `/api/vollmachten` und alles darunter — digital
   signiert wird nur nach erneuter Karte oder einem Anmelde-QR aus dem Rosenweg-Konto
   (`POST /api/vollmachten/<id>/sign-bestaetigung`, gilt 2 Minuten, nur diese Vollmacht).
 

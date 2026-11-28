@@ -30,10 +30,11 @@ class SchluesselPortal(unittest.TestCase):
 
     def test_profil_angaben_und_bild(self):
         for m, p in [("PUT", "/api/auth/profile"), ("PUT", "/api/auth/avatar"), ("GET", "/api/me/wohnungen"),
-                     ("GET", "/api/me/person-data"), ("GET", "/api/auth/me")]:
+                     ("GET", "/api/me/person-data"), ("GET", "/api/auth/me"), ("PUT", "/api/me/phones"),
+                     ("PUT", "/api/me/emails"), ("PUT", "/api/me/whatsapp-optin")]:
             self.assertTrue(pbx._portal_erlaubt(R, PROFIL, m, p), (m, p))
         for m, p in [("POST", "/api/change-password"), ("POST", "/api/me/tokens"), ("GET", "/api/me/tokens"),
-                     ("POST", "/api/ssh/me/schluessel"), ("PUT", "/api/me/emails"), ("POST", "/api/auth/profile"),
+                     ("POST", "/api/ssh/me/schluessel"), ("GET", "/api/ssh/me"), ("POST", "/api/auth/profile"),
                      ("PUT", "/api/auth/profile/x")]:
             self.assertFalse(pbx._portal_erlaubt(R, PROFIL, m, p), (m, p))
 

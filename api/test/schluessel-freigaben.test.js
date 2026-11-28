@@ -244,6 +244,6 @@ test('Portal-Pfade der geteilten Telefone (PBX)', () => {
   assert.match(py, /"ch\.rosenweg4303\.meintelefon": \[[^\]]*"POST \/api\/apps\/qr-ausweis", "GET \/api\/apps\/qr-ausweis\/"\]/);
   const profil = py.match(/"ch\.rosenweg4303\.profil": \[([^\]]*)\]/)[1];
   assert.match(profil, /"PUT \/api\/auth\/profile", "PUT \/api\/auth\/avatar"/);
-  assert.doesNotMatch(profil, /change-password|me\/tokens|ssh|me\/emails/);
+  assert.doesNotMatch(profil, /change-password|me\/tokens|ssh|passkeys|mqtt/);
   assert.match(py, /"ch\.rosenweg4303\.vollmachten": \["GET \/api\/vollmachten", "GET,POST,PUT,DELETE \/api\/vollmachten\/"/);
 });
