@@ -13,21 +13,26 @@ Eigentümer-Unterlagen sehen nur Eigentümer, Ausschuss und Verwaltung der STWEG
 sowie Technik und Präsident. Mieter und andere reine Bewohner sehen nur
 `stwegN/bewohner/` (Hausordnung, Schilder, Hinweise).
 
-Je STWEG drei Einbindungen am **selben** Einbindungspunkt `/stwegN` (bzw. `/meg`):
+Je STWEG drei Einbindungen:
 
-| Einbindung | Ordner | Gruppen | Priorität |
+| Einbindungspunkt | Ordner | Gruppen | Rechte |
 |---|---|---|---|
-| beschreibbar | `stwegN` | Ausschuss der STWEG, `technik`, `Präsident` | 150 |
-| nur lesen | `stwegN` | Eigentümer der STWEG, `stwegN-verwaltung`, `verwaltung` (Übergang) | 100 |
-| nur lesen | `stwegN/bewohner` | Bewohner der STWEG | 50 |
+| `/stwegN` | `stwegN` | Ausschuss der STWEG, `technik`, `Präsident` | beschreibbar |
+| `/stwegN` | `stwegN` | Eigentümer der STWEG, `stwegN-verwaltung`, `verwaltung` (Übergang) | nur lesen |
+| `/stwegN-bewohner` | `stwegN/bewohner` | Bewohner der STWEG | nur lesen |
 
-STWEG 3 = `r9-*`, STWEG 6 = `r1-*`, MEG = `meg-*`. Gehört jemand mehreren
-Gruppen an, gilt die Einbindung mit der höchsten Priorität
-(`UserGlobalStoragesService::getUniqueStorages`). Ein Mieter sieht unter
-`/stweg5` also nur den Inhalt von `bewohner/`, ein Eigentümer (auch wer selbst
-bewohnt) den ganzen Ordner, der Ausschuss den ganzen Ordner beschreibbar. Bis
-28.11.2026 hatten alle Einbindungen Priorität 100; bei Gleichstand gewann die
-zuletzt gelesene, das konnte dem Ausschuss die Nur-lesen-Einbindung geben.
+STWEG 3 = `r9-*`, STWEG 6 = `r1-*`, MEG = `meg-*`. Ein Mieter sieht nur
+`/stwegN-bewohner`. Ein Eigentümer, der selbst bewohnt, sieht beides; in
+`/stwegN` liegt `bewohner/` ohnehin auch.
+
+**Warum ein eigener Einbindungspunkt:** Nextcloud 33 beachtet die Priorität
+beim Einbinden nicht. `ConfigAdapter::getMountsForUser` nimmt
+`getAllStoragesForUser`, nicht `getUniqueStorages`. Bei gleichem Punkt gewinnt
+eine beliebige Einbindung: Im Test am 28.11.2026 sah ein Eigentümer, der auch
+Bewohner ist, unter `/stweg5` nur noch `bewohner/`. Dasselbe gilt für die
+beiden Einbindungen auf `/stwegN` (beschreibbar und nur lesen). Wer im
+Ausschuss und zugleich Eigentümer ist, bekommt vielleicht nur die
+Nur-lesen-Einbindung. Das war schon vorher so und ist offen.
 
 `allgemein` und die Einbindungen ohne STWEG-Bezug fasst das Skript nicht an.
 
@@ -62,15 +67,26 @@ die Bewohner-Einbindung der MEG an. Wer nicht warten will, startet
 Sicherheit: Eine Einbindung ohne Gruppen und Konten gilt für **alle**. Das
 Skript legt neue Einbindungen deshalb per `files_external:import` gleich mit
 ihren Gruppen an, fügt bei bestehenden zuerst hinzu und entfernt danach und
-bricht ab, bevor eine Einbindung ihre letzte Gruppe verlieren würde. Die
-Priorität kann `occ` nicht setzen; das Skript schreibt sie direkt in
-`oc_external_mounts.priority`.
+bricht ab, bevor eine Einbindung ihre letzte Gruppe verlieren würde. 
 
 ## Sicherungen
 
 - `/root/einbindungen-vor-bewohner-2026-11-28.json` (`files_external:export`)
 - `/root/einbindungen-prioritaet-vor-bewohner-2026-11-28.txt` (Prioritäten)
 
-Rückweg: Einbindungen 30–36 löschen (`files_external:delete`), bei 5, 7, 9, 11,
-13, 15, 17 und 19 die Gruppen nach der Sicherung setzen, Prioritäten nach der
-Textdatei zurückschreiben, Timer abschalten.
+Rückweg: die Einbindungen `/stwegN-bewohner` (38–44) löschen
+(`files_external:delete`), bei 5, 7, 9, 11, 13, 15, 17 und 19 die Gruppen nach
+der Sicherung setzen, Timer abschalten.
+
+## Prüfung 28.11.2026
+
+Mit den temporären Konten `nctest-mieter` (`stweg5-bewohner`) und `nctest-eig`
+(`stweg5-eigentuemer` + `stweg5-bewohner`) per WebDAV mit App-Passwort geprüft.
+Danach wurden beide Konten samt Tokens gelöscht.
+
+| | Mieter | Eigentümer |
+|---|---|---|
+| `/stweg5-bewohner` Hausordnung | 200 | 200 |
+| `/stweg5` Vertrag, `99-kontaktdaten` | 404 | 200 / 207 |
+| `/stweg3` | 404 | 404 |
+| Schreiben | 403/404 | 403 |

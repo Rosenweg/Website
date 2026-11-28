@@ -10,16 +10,18 @@ Soll abweicht.
 Soll je STWEG (gleiche Regel wie fileserver-lxc/ordnerrechte/tabelle.txt und
 api/lib/dok-stweg-sicht.js, Entscheid Stefan 28.11.2026):
 
-  /stwegN  rw  <- Ausschuss der STWEG, technik, Präsident           Prioritaet 150
-  /stwegN  ro  <- Eigentuemer der STWEG, Verwaltung der STWEG,
-                  verwaltung (Uebergang)                              Prioritaet 100
-  /stwegN  ro  -> nur stwegN/bewohner <- Bewohner der STWEG           Prioritaet  50
+  /stwegN           rw  <- Ausschuss der STWEG, technik, Präsident
+  /stwegN           ro  <- Eigentuemer der STWEG, Verwaltung der STWEG,
+                           verwaltung (Uebergang)
+  /stwegN-bewohner  ro  -> nur stwegN/bewohner <- Bewohner der STWEG
 
-Alle drei haengen am selben Einbindungspunkt; wer mehreren Gruppen angehoert,
-bekommt die Einbindung mit der hoechsten Prioritaet (Nextcloud
-UserGlobalStoragesService::getUniqueStorages). Ein Mieter sieht unter /stwegN
-also nur den Inhalt von bewohner/, ein Eigentuemer den ganzen Ordner, der
-Ausschuss den ganzen Ordner beschreibbar.
+Ein Mieter sieht also nur /stwegN-bewohner, ein Eigentuemer, der selbst
+bewohnt, sieht beides. Die Bewohner-Einbindung braucht einen EIGENEN
+Einbindungspunkt: Nextcloud 33 beachtet die Prioritaet beim Einbinden nicht
+(ConfigAdapter nimmt getAllStoragesForUser, nicht getUniqueStorages). Bei
+gleichem Punkt gewinnt eine beliebige Einbindung, im Test am 28.11.2026 die
+Bewohner-Einbindung, und ein selbst bewohnender Eigentuemer saehe nur noch
+bewohner/.
 
 Gruppen, die es in der Nextcloud (noch) nicht gibt, werden uebersprungen. Die
 Nextcloud legt eine Gruppe aus Authentik (user_oidc) erst an, wenn sich ein
@@ -51,7 +53,6 @@ STWEGS = {
     'stweg7': ('stweg7', 'stweg7-ausschuss', 'stweg7-verwaltung'),
     'meg': ('meg', 'meg-ausschuss', 'meg-verwaltung'),
 }
-PRIO = {'rw': 150, 'ro': 100, 'bewohner': 50}
 
 TROCKEN = '--trocken' in sys.argv[1:]
 
@@ -70,26 +71,9 @@ def tun(beschreibung, *args):
         occ(*args)
 
 
-def prioritaeten():
-    db = occ('config:system:get', 'dbname').strip()
-    r = subprocess.run(['sudo', '-u', 'postgres', 'psql', '-At', db, '-c',
-                        'SELECT mount_id, priority FROM oc_external_mounts'],
-                       capture_output=True, text=True, check=True)
-    return db, {int(a): int(b) for a, b in (z.split('|') for z in r.stdout.split())}
-
-
-def prioritaet_setzen(db, mid, prio):
-    print(('  [trocken] ' if TROCKEN else '  ') + f'[{mid}] Prioritaet {prio}')
-    if not TROCKEN:
-        subprocess.run(['sudo', '-u', 'postgres', 'psql', '-At', db, '-c',
-                        f'UPDATE oc_external_mounts SET priority = {int(prio)} WHERE mount_id = {int(mid)}'],
-                       capture_output=True, text=True, check=True)
-
-
 def main():
     gruppen = set(occ('group:list', json_out=True).keys())
     einb = occ('files_external:list', json_out=True)
-    db, prio = prioritaeten()
     fehlend = set()
 
     def vorhanden(liste):
@@ -106,12 +90,12 @@ def main():
     for ordner, (pre, ausschuss, verw) in STWEGS.items():
         punkt = '/' + ordner
         soll = [
-            ('rw', f'{BASIS}/{ordner}', False, vorhanden([ausschuss] + ADMIN)),
-            ('ro', f'{BASIS}/{ordner}', True, vorhanden([f'{pre}-eigentuemer', verw, UEBERGANG_VERWALTUNG])),
-            ('bewohner', f'{BASIS}/{ordner}/bewohner', True, vorhanden([f'{pre}-bewohner'])),
+            ('rw', punkt, f'{BASIS}/{ordner}', False, vorhanden([ausschuss] + ADMIN)),
+            ('ro', punkt, f'{BASIS}/{ordner}', True, vorhanden([f'{pre}-eigentuemer', verw, UEBERGANG_VERWALTUNG])),
+            ('bewohner', punkt + '-bewohner', f'{BASIS}/{ordner}/bewohner', True, vorhanden([f'{pre}-bewohner'])),
         ]
         print(f'{punkt}')
-        for art, datadir, ro, gr in soll:
+        for art, punkt, datadir, ro, gr in soll:
             m = finde(punkt, datadir, ro)
             if m is None:
                 if not gr:
@@ -139,7 +123,6 @@ def main():
                     raise RuntimeError(f'import {datadir}: Einbindung danach nicht gefunden')
                 mid = m['mount_id']
                 print(f'  [{mid}] angelegt {art} {datadir} <- {",".join(gr)}')
-                prioritaet_setzen(db, mid, PRIO[art])
                 continue
             mid = m['mount_id']
             ist = list(m.get('applicable_groups') or [])
@@ -156,8 +139,6 @@ def main():
             opt = m.get('options', {})
             if str(opt.get('filesystem_check_changes')) != '1':
                 tun(f'[{mid}] filesystem_check_changes=1', 'files_external:option', str(mid), 'filesystem_check_changes', '1')
-            if prio.get(mid) != PRIO[art]:
-                prioritaet_setzen(db, mid, PRIO[art])
     if fehlend:
         print('In der Nextcloud (noch) nicht vorhanden, uebersprungen: ' + ', '.join(sorted(fehlend)))
 
