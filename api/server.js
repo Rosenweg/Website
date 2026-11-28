@@ -12092,11 +12092,10 @@ app.get('/api/documents-ordner', authMiddleware, async (req, res) => {
     const alles = darf.technik && req.query.alles === '1';
     const verz = await docVerzeichnis.holen();
     const inhalt = unterlagen.ordnerInhalt(verz, pfad, darf, { alles });
-    if (pfad && !inhalt.ordner.length && !inhalt.dateien.length && !verz.ordner.has(pfad)) {
+    // Leer und (nicht vorhanden oder nicht lesbar): immer 404, damit sich
+    // fremde Ordnernamen nicht erraten lassen
+    if (pfad && !inhalt.ordner.length && !inhalt.dateien.length && (!verz.ordner.has(pfad) || !darf.lesen(`${pfad}/x`))) {
       return res.status(404).json({ error: 'Ordner nicht gefunden' });
-    }
-    if (pfad && !inhalt.ordner.length && !inhalt.dateien.length && !darf.lesen(`${pfad}/x`)) {
-      return res.status(403).json({ error: 'Kein Zugriff auf diesen Ordner' });
     }
     let ids = new Map();
     try { ids = await unterlagen.kennungenFuer(pool, inhalt.dateien.map(d => d.pfad)); } catch (e) { console.warn('[DOCS] Kennungen:', e.message); }
